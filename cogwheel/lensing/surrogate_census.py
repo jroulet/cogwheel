@@ -24,7 +24,7 @@ The surrogate is a purely additive speed layer that must never answer where
 the engine would refuse and must stay accurate where it does answer.  This
 tool measures both properties without ever trusting the surrogate's own
 labels: the fall-through causes are attributed by calling the surrogate's OWN
-guard predicates (`surrogate._tube_serves` / `surrogate._farfield_serves`,
+guard predicates (`surrogate._tube_serves` / `surrogate._exterior_polar_serves`,
 one source of truth), and the held-out envelope error uses a fresh
 `ChangRefsdalChannels.evaluate` oracle (FINDINGS F002 -- never the surrogate's
 own reconstruction).
@@ -252,7 +252,7 @@ def classify_fallthrough(
        falls to ``out-of-box``.
     5. ``refusal-ball`` -- some FAR-FIELD chart would serve but for its
        engine-refusal exclusion ball (detected by relaxing ``refused_points``
-       to empty and re-calling `surrogate._farfield_serves`).
+       to empty and re-calling `surrogate._exterior_polar_serves`).
     6. ``out-of-box``   -- outside every chart's certified box otherwise.
 
     Parameters
@@ -296,17 +296,17 @@ def classify_fallthrough(
                                        eta, theta, image_count):
                 return 'cusp-window'
 
-    # refusal-ball: a far-field chart blocked ONLY by its exclusion ball.
-    # The far-field containment/exclusion test is in the chart's far-field-
-    # smooth ``(s, d)`` axes (Build 1e-farfield WP2); `_farfield_serves` maps
-    # the eigenframe source to those axes at the query's OWN gamma through the
-    # chart's stored ``arc_map``, so pass the eigenframe source straight in.
+    # refusal-ball: an exterior-polar chart blocked ONLY by its exclusion ball.
+    # The exterior-polar containment/exclusion test is in the chart's
+    # caustic-fixed ``(rho, theta_c)`` axes; `_exterior_polar_serves` maps
+    # the eigenframe source to those axes at the query's OWN gamma, so pass
+    # the eigenframe source straight in.
     for chart in surrogate.charts:
-        if isinstance(chart, _surrogate.FarFieldChart):
+        if isinstance(chart, _surrogate.ExteriorPolarChart):
             relaxed = dataclasses.replace(chart, refused_points=_EMPTY_REFUSED)
-            if _surrogate._farfield_serves(relaxed, gamma, log_w_min,
-                                           log_w_max, eta, image_count,
-                                           y1_eig, y2_eig):
+            if _surrogate._exterior_polar_serves(relaxed, gamma, log_w_min,
+                                                 log_w_max, eta, image_count,
+                                                 y1_eig, y2_eig):
                 return 'refusal-ball'
 
     return 'out-of-box'
@@ -572,7 +572,7 @@ def heldout_envelope_eps(
     on the sample's own ``w`` grid.  The reference and its normalization mirror
     the label the SERVING chart is trained on (Build 8g-b):
 
-    - a `FarFieldChart` is referenced against the far-field label
+    - an `ExteriorPolarChart` is referenced against the far-field label
       ``E_ff = F - sum_a H_a e^{1j w tau_a}``
       (`farfield_envelope_from_partition`), F-normalized by
       ``max|exact_total|`` (``max|E_ff| ~ 1e-4`` is too tiny a denominator);
@@ -623,7 +623,7 @@ def heldout_envelope_eps(
         # F-normalized by ``max|exact_total|``; a tube chart keeps the
         # caustic-region ``partition.envelope`` reference and ``max|E|``
         # normalization (byte-identical to HEAD).
-        if isinstance(surrogate.charts[chart_index], _surrogate.FarFieldChart):
+        if isinstance(surrogate.charts[chart_index], _surrogate.ExteriorPolarChart):
             env_eng = farfield_envelope_from_partition(partition)
             denom_base = float(np.max(np.abs(partition.exact_total)))
         else:

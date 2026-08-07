@@ -74,7 +74,7 @@ oracle is the invariance property itself.
 SURROGATE-SIDE SPECS (WP1 + WP2)
 --------------------------------
 Three further classes drive real trained tiles through the production
-surrogate (`FarFieldChart`, `LensAmplificationSurrogate`):
+surrogate (`ExteriorPolarChart`, `LensAmplificationSurrogate`):
 
 * `StraddlingTileTrainabilityTestCase` (Spec 1).  A far-field tile whose
   box straddles the astroid diagonal is fit under BOTH labels on an
@@ -145,7 +145,7 @@ from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 from cogwheel.lensing.surrogate import (
-    LensAmplificationSurrogate, FarFieldChart, TubeChart,
+    LensAmplificationSurrogate, ExteriorPolarChart, TubeChart,
     _FARFIELD_ENVELOPE_DEFINITION, _KNOWN_FARFIELD_DEFINITIONS,
     _FARFIELD_AXIS_SCHEMA)
 from cogwheel.lensing import surrogate as surrogate_module
@@ -199,7 +199,7 @@ DIAGONAL_EXTERIOR = (1.3, 1.3)
 # Build 8g-b / WP1+WP2 surrogate-side specs (trainability, serving mirror,
 # definition-tag loader refusal).  The three classes below train real
 # far-field tiles from the engine and drive them through the production
-# surrogate machinery (`FarFieldChart`, `LensAmplificationSurrogate`).
+# surrogate machinery (`ExteriorPolarChart`, `LensAmplificationSurrogate`).
 # --------------------------------------------------------------------------
 
 #: Engine refusals to skip while sampling a training grid or held-out set.
@@ -267,77 +267,43 @@ def _held_out_samples(center: tuple[float, float], count: int,
             for _ in range(count)]
 
 
-def _box_to_farfield_smooth(y1_range: tuple[float, float],
-                            y2_range: tuple[float, float], n_s: int, n_d: int,
-                            arc_gamma_nodes: np.ndarray,
-                            hull_gamma_samples: tuple[float, ...]
-                            ) -> tuple[np.ndarray, np.ndarray,
-                                       '_FarFieldArcMap']:
-    """``(s_grid, d_grid, arc_map)`` for a rectangular eigenframe box.
+def _box_to_exterior_polar(y1_range: tuple[float, float],
+                           y2_range: tuple[float, float], n_rho: int,
+                           n_theta_c: int,
+                           hull_gamma_samples: tuple[float, ...]
+                           ) -> tuple[np.ndarray, np.ndarray]:
+    """``(rho_grid, theta_c_grid)`` for a rectangular eigenframe box.
 
-    Engine-free mirror of `surrogate_training._farfield_box_to_smooth` for a
-    positive-parity astroid tile (Build 1e-farfield): every corner of the
-    ``hull_gamma_samples x y1_range x y2_range`` box is mapped to its nearest
-    caustic foot (`geometry.nearest_caustic_point`); the gamma-resolved
-    arc-length map (``branch = +1``) is built on ``arc_gamma_nodes`` -- the
-    chart's OWN gamma grid -- over the enclosing ``[min theta*, max theta*]``
-    arc; then every corner is pushed through the SAME serve map
-    (`_to_farfield_smooth`) to bound the ``(s, d)`` box.  Train and serve
-    share ONE arc-length map, so the coordinate is internally consistent: a
-    held-out query inside the box maps (via the identical serve map) into the
-    trained ``(s, d)`` bounds, and the only failure mode of an imperfect
-    bounding box is over-refusal (coverage loss), never a wrong served value.
-
-    ``arc_gamma_nodes`` (the chart's gamma grid) fixes the arc-length map's
-    gamma rows so a node's ``(gamma, s, d)`` inverts at its OWN gamma; the
-    hull is sampled at ``hull_gamma_samples`` (the band or a single mid-gamma)
-    to bound the box in ``(s, d)`` -- the direct analogue of the old
-    per-corner ``(rho, theta_c)`` hull.
+    Engine-free mirror for a positive-parity astroid tile: every corner of the
+    ``hull_gamma_samples x y1_range x y2_range`` box is mapped directly to
+    caustic-fixed polar coordinates ``(rho, theta_c)`` via
+    `_to_caustic_fixed`; the ``(rho, theta_c)`` hull is taken over all
+    corners and the two grids are uniform ``linspace`` arrays spanning it.
+    No arc-length map is needed -- the polar coordinate is cusp-safe by
+    construction.
     """
-    geometry = surrogate_module.geometry
-    thetas: list[float] = []
-    corners: list[tuple[float, float, float]] = []
+    rho_vals: list[float] = []
+    theta_c_vals: list[float] = []
     for gamma in hull_gamma_samples:
         for y1 in y1_range:
             for y2 in y2_range:
-                nearest = geometry.nearest_caustic_point(
-                    float(gamma), 0.0, np.array([float(y1), float(y2)]),
-                    kappa=0.0)
-                thetas.append(float(nearest.theta))
-                corners.append((float(gamma), float(y1), float(y2)))
-    reference = thetas[0]
-    unwrapped = [theta + 2.0 * np.pi * round((reference - theta)
-                                             / (2.0 * np.pi))
-                 for theta in thetas]
-    arc_theta_lo, arc_theta_hi = float(min(unwrapped)), float(max(unwrapped))
-    if not arc_theta_hi - arc_theta_lo > 1e-9:
+                rho, theta_c = surrogate_module._to_caustic_fixed(
+                    float(gamma), float(y1), float(y2))
+                rho_vals.append(rho)
+                theta_c_vals.append(theta_c)
+    theta_c_min, theta_c_max = float(min(theta_c_vals)), float(
+        max(theta_c_vals))
+    if not (rho_vals and theta_c_max - theta_c_min > 1e-9):
         raise surrogate_module.CarrierDiscontinuityError(
             'Far-field tile subtends a degenerate caustic arc '
-            f'(span {arc_theta_hi - arc_theta_lo:.3g}); refuse it rather '
-            'than fitting a zero-width (s, d) chart.')
-    arc_map = surrogate_module._caustic_arclength_map(
-        np.asarray(arc_gamma_nodes, dtype=float),
-        arc_theta_lo, arc_theta_hi, branch=1)
-    s_vals: list[float] = []
-    d_vals: list[float] = []
-    for gamma, y1, y2 in corners:
-        try:
-            s, d = surrogate_module._to_farfield_smooth(
-                gamma, y1, y2, arc_map, 1)
-        except (ValueError, surrogate_module.geometry.LensDomainError):
-            # A corner with an ambiguous / off-arc foot does not constrain
-            # the box; serve refuses it identically (coordinate consistency).
-            continue
-        s_vals.append(s)
-        d_vals.append(d)
-    return (np.linspace(min(s_vals), max(s_vals), n_s),
-            np.linspace(min(d_vals), max(d_vals), n_d),
-            arc_map)
-
+            f'(theta_c span {theta_c_max - theta_c_min:.3g}); refuse it '
+            'rather than fitting a zero-width exterior-polar chart.')
+    return (np.linspace(min(rho_vals), max(rho_vals), n_rho),
+            np.linspace(theta_c_min, theta_c_max, n_theta_c))
 
 @functools.lru_cache(maxsize=None)
-def _train_tile(center: tuple[float, float], label: str) -> FarFieldChart:
-    """Fit a `FarFieldChart` to a fixed engine grid under ``label``.
+def _train_tile(center: tuple[float, float], label: str) -> ExteriorPolarChart:
+    """Fit an `ExteriorPolarChart` to a fixed engine grid under ``label``.
 
     ``label='new'`` fits the redefined far-field remainder
     ``farfield_envelope_from_partition`` (what the production trainer uses);
@@ -346,16 +312,16 @@ def _train_tile(center: tuple[float, float], label: str) -> FarFieldChart:
     difference is the label being interpolated.  Points the engine refuses
     (or that return a non-finite envelope) are recorded as refused.
 
-    The chart's spatial axes are the far-field-smooth ``(s, d)`` coordinate
-    (Build 1e-farfield): the physical box is UNCHANGED (``center +/- TILE_HALF``
+    The chart's spatial axes are the caustic-fixed polar ``(rho, theta_c)``
+    coordinate: the physical box is UNCHANGED (``center +/- TILE_HALF``
     in eigenframe ``(y1, y2)``), only the coordinate the label is fitted
-    over changes -- see `_box_to_farfield_smooth`.
+    over changes -- see `_box_to_exterior_polar`.
     """
     gamma_grid = np.linspace(*TILE_GAMMA_BAND, TILE_N_GAMMA)
-    s_grid, d_grid, arc_map = _box_to_farfield_smooth(
+    rho_grid, theta_c_grid = _box_to_exterior_polar(
         (center[0] - TILE_HALF, center[0] + TILE_HALF),
         (center[1] - TILE_HALF, center[1] + TILE_HALF),
-        TILE_N_Y1, TILE_N_Y2, gamma_grid,
+        TILE_N_Y1, TILE_N_Y2,
         tuple(np.linspace(*TILE_GAMMA_BAND, 5)))
     log_w_grid = np.linspace(np.log(TILE_W_RANGE[0]), np.log(TILE_W_RANGE[1]),
                              TILE_N_W)
@@ -365,10 +331,10 @@ def _train_tile(center: tuple[float, float], label: str) -> FarFieldChart:
     envelope_imag = np.zeros(shape)
     refused: list[tuple[float, float, float]] = []
     for ig, gamma in enumerate(gamma_grid):
-        for i1, s in enumerate(s_grid):
-            for i2, d in enumerate(d_grid):
-                y1, y2 = surrogate_module._from_farfield_smooth(
-                    float(gamma), float(s), float(d), arc_map, 1)
+        for i1, rho in enumerate(rho_grid):
+            for i2, theta_c in enumerate(theta_c_grid):
+                y1, y2 = surrogate_module._from_caustic_fixed(
+                    float(gamma), float(rho), float(theta_c))
                 engine = ChangRefsdalChannels(w_grid)
                 engine.reset()
                 try:
@@ -376,24 +342,23 @@ def _train_tile(center: tuple[float, float], label: str) -> FarFieldChart:
                         gamma=float(gamma), y=(float(y1), float(y2)),
                         beta=0.0, kappa=0.0)
                 except _ENGINE_REFUSALS:
-                    refused.append((float(gamma), float(s), float(d)))
+                    refused.append((float(gamma), float(rho), float(theta_c)))
                     continue
                 envelope = (farfield_envelope_from_partition(partition)
                             if label == 'new'
                             else np.asarray(partition.envelope))
                 if not np.all(np.isfinite(envelope)):
-                    refused.append((float(gamma), float(s), float(d)))
+                    refused.append((float(gamma), float(rho), float(theta_c)))
                     continue
                 envelope_real[:, ig, i1, i2] = envelope.real
                 envelope_imag[:, ig, i1, i2] = envelope.imag
     refused_points = (np.array(refused) if refused
                       else np.empty((0, 3), dtype=float))
-    return FarFieldChart.from_values(
-        gamma_grid=gamma_grid, s_grid=s_grid, d_grid=d_grid,
+    return ExteriorPolarChart.from_values(
+        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=envelope_real,
-        envelope_imag=envelope_imag, arc_map=arc_map, image_count=2, parity=1,
+        envelope_imag=envelope_imag, image_count=2, parity=1,
         refused_points=refused_points)
-
 
 @functools.lru_cache(maxsize=None)
 def _held_out_eps_list(center: tuple[float, float], label: str
@@ -903,21 +868,17 @@ class StraddlingTileTrainabilityTestCase(FarfieldEnvelopeTestCase):
 
 class DegenerateCuspTileRefusalTestCase(FarfieldEnvelopeTestCase):
     """A cusp-projected physical box must not create a zero-width chart."""
-
     def test_cusp_projected_tile_refuses_before_training(self):
-        gamma_grid = np.linspace(*TILE_GAMMA_BAND, TILE_N_GAMMA)
         center = DEGENERATE_CUSP_TILE_CENTER
         with self.assertRaisesRegex(
                 surrogate_module.CarrierDiscontinuityError,
                 'degenerate caustic arc'):
-            _box_to_farfield_smooth(
+            _box_to_exterior_polar(
                 (center[0] - TILE_HALF, center[0] + TILE_HALF),
                 (center[1] - TILE_HALF, center[1] + TILE_HALF),
-                TILE_N_Y1, TILE_N_Y2, gamma_grid,
+                TILE_N_Y1, TILE_N_Y2,
                 tuple(np.linspace(*TILE_GAMMA_BAND, 5)))
         self.comparisons += 1
-
-
 #: ENGINE-BACKED TIER (opt-in).  Classes marked `_TRAIN_TIER_SKIP` build REAL
 #: surrogate charts -- they call `train` / `_build_farfield_chart`, running
 #: hundreds of Schwinger/operator evaluations, and take MINUTES.  Training and
@@ -1046,7 +1007,7 @@ def _synthetic_tube_chart() -> TubeChart:
         eta_floor=0.04, eta_max=0.25)
 
 
-def _legacy_single_box_arrays(chart: FarFieldChart, tag: str | None
+def _legacy_single_box_arrays(chart: ExteriorPolarChart, tag: str | None
                               ) -> dict:
     """Flat arrays mimicking an 8a legacy single-box artifact (no charts).
 
@@ -1055,32 +1016,28 @@ def _legacy_single_box_arrays(chart: FarFieldChart, tag: str | None
     the legacy path.  ``tag=None`` omits ``envelope_definition`` (a genuine
     pre-tag artifact); a string writes it.
 
-    ALWAYS writes a valid ``axis_schema`` (Build 1e-farfield): `chart` (from
-    `_train_tile`) carries the far-field-smooth ``(s, d)`` axes; the current
-    legacy loader validates only the ``envelope_definition`` and
+    ALWAYS writes a valid ``axis_schema``: `chart` (from
+    `_train_tile`) carries the caustic-fixed polar ``(rho, theta_c)`` axes;
+    the current legacy loader validates only the ``envelope_definition`` and
     ``axis_schema`` meta before hard-refusing, so this fixture is a genuine
     legacy artifact ONLY along the ``envelope_definition`` axis this test
     class targets, not the axis schema (a separate hard-refuse
     `_validate_farfield_axis_schema` would otherwise trip regardless of
     ``tag``, making every case here refuse for the wrong reason).
     """
-    knot_log_w, knot_gamma, knot_s, knot_d = chart.knots
+    knot_log_w, knot_gamma, knot_rho, knot_theta_c = chart.knots
     arrays = {
-        'gamma_grid': chart.gamma_grid, 's_grid': chart.s_grid,
-        'd_grid': chart.d_grid, 'log_w_grid': chart.log_w_grid,
+        'gamma_grid': chart.gamma_grid, 'rho_grid': chart.rho_grid,
+        'theta_c_grid': chart.theta_c_grid, 'log_w_grid': chart.log_w_grid,
         'real_coeffs': chart.real_coeffs, 'imag_coeffs': chart.imag_coeffs,
         'knot_log_w': knot_log_w, 'knot_gamma': knot_gamma,
-        'knot_s': knot_s, 'knot_d': knot_d,
+        'knot_rho': knot_rho, 'knot_theta_c': knot_theta_c,
         'refused_points': chart.refused_points,
         'axis_schema': np.array(_FARFIELD_AXIS_SCHEMA),
         'provenance': np.array(json.dumps({}))}
     if tag is not None:
         arrays['envelope_definition'] = np.array(tag)
     return arrays
-
-
-@_TRAIN_TIER_SKIP
-class DefinitionTagLoaderRefusalTestCase(FarfieldEnvelopeTestCase):
     """Spec 3 (F010): the loader hard-refuses an absent/unknown tag.
 
     A far-field chart trained before the Build 8g-b redefinition encodes
@@ -1187,7 +1144,7 @@ class DefinitionTagLoaderRefusalTestCase(FarfieldEnvelopeTestCase):
         surrogate = LensAmplificationSurrogate.load(path)
         self.comparisons += 1
         self.assertEqual(len(surrogate.charts), 1)
-        self.assertIsInstance(surrogate.charts[0], FarFieldChart)
+        self.assertIsInstance(surrogate.charts[0], ExteriorPolarChart)
 
     def test_tube_only_artifact_is_unaffected(self):
         """A tube-only artifact (never tagged) loads without refusal."""
@@ -1379,32 +1336,22 @@ def _exterior_samples(center: tuple[float, float], half: float, count: int,
 
 @functools.lru_cache(maxsize=None)
 def _train_exterior_chart(center: tuple[float, float], half: float,
-                          n_y: int, n_w: int) -> FarFieldChart:
-    """Fit a `FarFieldChart` to the NEW far-field label on an exterior tile.
+                          n_y: int, n_w: int) -> ExteriorPolarChart:
+    """Fit an `ExteriorPolarChart` to the NEW far-field label on an exterior tile.
 
     A parameterized companion to `_train_tile`: the source box is
     ``center +/- half`` with ``n_y x n_y`` nodes and ``n_w`` log-``w`` nodes,
     the shear axis is the fixed 4-node `TILE_GAMMA_BAND`.  Always fits the
     production label `farfield_envelope_from_partition`.  Spatial axes are
-    far-field-smooth ``(s, d)`` (Build 1e-farfield) via `_box_to_farfield_smooth`
+    caustic-fixed polar ``(rho, theta_c)`` via `_box_to_exterior_polar`
     -- the SAME convention `_train_tile` uses.
     """
-    # Unlike `_train_tile` (a narrow, off-origin box where a per-gamma hull
-    # is needed so randomly-gamma'd held-out queries stay contained), this
-    # tile can be centred near the origin with a wide half (`OVERSIZED_TILE_*`),
-    # spanning a wide angular sweep whose per-gamma hull would badly dilate
-    # the trained (s, d) box (measured: dilated hull held-out eps
-    # ~3.8e-2 for the oversized tile vs ~2.6e-3 at a single band-midpoint
-    # reach).  Use the FIXED band-midpoint hull here for a materially
-    # tighter box; `_chart_eps`/`_exterior_eps` already skip any held-out
-    # sample that ends up not served, so the narrower containment this
-    # trades away costs no assertion.
     gamma_grid = np.linspace(*TILE_GAMMA_BAND, EXTERIOR_N_GAMMA)
     gamma_mid = 0.5 * sum(TILE_GAMMA_BAND)
-    s_grid, d_grid, arc_map = _box_to_farfield_smooth(
+    rho_grid, theta_c_grid = _box_to_exterior_polar(
         (center[0] - half, center[0] + half),
         (center[1] - half, center[1] + half), n_y, n_y,
-        gamma_grid, (gamma_mid,))
+        (gamma_mid,))
     log_w_grid = np.linspace(np.log(TILE_W_RANGE[0]), np.log(TILE_W_RANGE[1]),
                              n_w)
     w_grid = np.exp(log_w_grid)
@@ -1413,10 +1360,10 @@ def _train_exterior_chart(center: tuple[float, float], half: float,
     envelope_imag = np.zeros(shape)
     refused: list[tuple[float, float, float]] = []
     for ig, gamma in enumerate(gamma_grid):
-        for i1, s in enumerate(s_grid):
-            for i2, d in enumerate(d_grid):
-                y1, y2 = surrogate_module._from_farfield_smooth(
-                    float(gamma), float(s), float(d), arc_map, 1)
+        for i1, rho in enumerate(rho_grid):
+            for i2, theta_c in enumerate(theta_c_grid):
+                y1, y2 = surrogate_module._from_caustic_fixed(
+                    float(gamma), float(rho), float(theta_c))
                 engine = ChangRefsdalChannels(w_grid)
                 engine.reset()
                 try:
@@ -1424,24 +1371,24 @@ def _train_exterior_chart(center: tuple[float, float], half: float,
                         gamma=float(gamma), y=(float(y1), float(y2)),
                         beta=0.0, kappa=0.0)
                 except _ENGINE_REFUSALS:
-                    refused.append((float(gamma), float(s), float(d)))
+                    refused.append((float(gamma), float(rho), float(theta_c)))
                     continue
                 envelope = farfield_envelope_from_partition(partition)
                 if not np.all(np.isfinite(envelope)):
-                    refused.append((float(gamma), float(s), float(d)))
+                    refused.append((float(gamma), float(rho), float(theta_c)))
                     continue
                 envelope_real[:, ig, i1, i2] = envelope.real
                 envelope_imag[:, ig, i1, i2] = envelope.imag
     refused_points = (np.array(refused) if refused
                       else np.empty((0, 3), dtype=float))
-    return FarFieldChart.from_values(
-        gamma_grid=gamma_grid, s_grid=s_grid, d_grid=d_grid,
+    return ExteriorPolarChart.from_values(
+        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=envelope_real,
-        envelope_imag=envelope_imag, arc_map=arc_map, image_count=2, parity=1,
+        envelope_imag=envelope_imag, image_count=2, parity=1,
         refused_points=refused_points)
 
 
-def _chart_eps(chart: FarFieldChart, center: tuple[float, float], half: float,
+def _chart_eps(chart: ExteriorPolarChart, center: tuple[float, float], half: float,
                *, normalization: str, seed: int = 1, count: int = 30
                ) -> float:
     """Max held-out far-field eps of ``chart`` over an exterior tile.
@@ -2033,52 +1980,47 @@ class FarfieldCarrierContinuityGuardTestCase(FarfieldEnvelopeTestCase):
             'the production carrier bound is no longer 1.0 x peak |E|')
 
 
-def _synthetic_farfield_chart() -> FarFieldChart:
+def _synthetic_farfield_chart() -> ExteriorPolarChart:
     """A cheap far-field chart (no engine) for load-refusal contract tests.
 
-    Four-node far-field-smooth ``(s, d)`` axes and a smooth unit-magnitude
-    value tensor -- enough for the cubic tensor-spline fit; the
-    reconstruction is never served, only loaded, so the numbers need not be
-    physical (the ``(s, d)`` axes and the astroid ``arc_map`` need only be
-    well-formed for the fit and the round-trip serialization).
+    Four-node caustic-fixed polar ``(rho, theta_c)`` axes and a smooth
+    unit-magnitude value tensor -- enough for the cubic tensor-spline fit;
+    the reconstruction is never served, only loaded, so the numbers need
+    not be physical (the ``(rho, theta_c)`` axes need only be well-formed
+    for the fit and the round-trip serialization).
     """
     gamma_grid = np.linspace(0.02, 0.06, 4)
-    s_grid = np.linspace(0.5, 3.0, 4)
-    d_grid = np.linspace(1.0, 4.0, 4)
+    rho_grid = np.linspace(0.5, 3.0, 4)
+    theta_c_grid = np.linspace(0.2, 1.2, 4)
     log_w_grid = np.linspace(np.log(5.0), np.log(60.0), 5)
-    arc_map = surrogate_module._caustic_arclength_map(
-        gamma_grid, 0.2, 1.2, branch=1)
-    shape = (log_w_grid.size, gamma_grid.size, s_grid.size, d_grid.size)
+    shape = (log_w_grid.size, gamma_grid.size, rho_grid.size,
+             theta_c_grid.size)
     values = np.ones(shape)
-    return FarFieldChart.from_values(
-        gamma_grid=gamma_grid, s_grid=s_grid, d_grid=d_grid,
+    return ExteriorPolarChart.from_values(
+        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=values,
-        envelope_imag=0.1 * values, arc_map=arc_map, image_count=2, parity=1)
+        envelope_imag=0.1 * values, image_count=2, parity=1)
 
 
-def _servable_synthetic_farfield_chart() -> FarFieldChart:
+def _servable_synthetic_farfield_chart() -> ExteriorPolarChart:
     """A synthetic chart whose current-coordinate query is physically valid."""
     gamma_grid = np.linspace(0.02, 0.06, 4)
-    arc_map = surrogate_module._caustic_arclength_map(
-        gamma_grid, 0.2, 1.2, branch=1)
-    s_grid = np.linspace(0.01, 0.04, 4)
-    # The chart arc is deliberately local.  Larger normal offsets can move
-    # the geometric nearest foot to the adjacent cusp instead, so keep this
-    # synthetic selection control in the same local coordinate patch.
-    d_grid = np.linspace(1.e-3, 4.e-3, 4)
+    rho_grid = np.linspace(0.6, 0.9, 4)
+    theta_c_grid = np.linspace(0.2, 0.5, 4)
     log_w_grid = np.linspace(np.log(5.0), np.log(60.0), 5)
-    shape = (log_w_grid.size, gamma_grid.size, s_grid.size, d_grid.size)
+    shape = (log_w_grid.size, gamma_grid.size, rho_grid.size,
+             theta_c_grid.size)
     values = np.ones(shape)
-    return FarFieldChart.from_values(
-        gamma_grid=gamma_grid, s_grid=s_grid, d_grid=d_grid,
+    return ExteriorPolarChart.from_values(
+        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=values,
-        envelope_imag=0.1 * values, arc_map=arc_map, image_count=2, parity=1)
+        envelope_imag=0.1 * values, image_count=2, parity=1)
 
 
 class MacroSaddleFarFieldFallthroughTestCase(FarfieldEnvelopeTestCase):
     """Manual and loaded macro-saddle far-field records defer to exact.
 
-    The ``(s, d)`` far-field coordinate is positive-parity-only.  A stale
+    The caustic-fixed polar coordinate is positive-parity-only.  A stale
     artifact may still deserialize for inspection, but it must never serve a
     plausible envelope: it falls through to the exact engine.  The positive
     control below proves that the same otherwise-valid record would serve if
@@ -2089,9 +2031,8 @@ class MacroSaddleFarFieldFallthroughTestCase(FarfieldEnvelopeTestCase):
         positive = _servable_synthetic_farfield_chart()
         macro = dataclasses.replace(positive, parity=-1)
         gamma = float(positive.gamma_grid[1])
-        y1, y2 = surrogate_module._from_farfield_smooth(
-            gamma, float(positive.s_grid[1]), float(positive.d_grid[1]),
-            positive.arc_map, positive.arc_map.branch)
+        y1, y2 = surrogate_module._from_caustic_fixed(
+            gamma, float(positive.rho_grid[1]), float(positive.theta_c_grid[1]))
         w = np.exp(positive.log_w_grid[1:3])
         query = dict(gamma=gamma, y1=float(y1), y2=float(y2), beta=0.0,
                      eta=0.2, theta=0.0, image_count=2)
@@ -2127,8 +2068,7 @@ class StaleFarfieldAxisSchemaRefusalTestCase(FarfieldEnvelopeTestCase):
     """D3: a chart stamped with the OLD axis schema hard-refuses at load.
 
     Positive-parity far-field charts are queried in gamma-resolved
-    far-field-smooth ``(s, d)`` coordinates and require
-    ``'farfield_arclength_s_perp_d_framewinv'``. The OLD
+    caustic-fixed polar ``(rho, theta_c)`` coordinates and require
     ``'caustic_radial_offset_rho_theta'`` tag describes retired,
     frame-dependent caustic-fixed coordinates, so a chart carrying it could
     be reconstructed in the wrong convention and return a finite-but-WRONG
@@ -2194,7 +2134,7 @@ class StaleFarfieldAxisSchemaRefusalTestCase(FarfieldEnvelopeTestCase):
         loaded = LensAmplificationSurrogate.load(base)
         self.comparisons += 1
         self.assertEqual(len(loaded.charts), 1)
-        self.assertIsInstance(loaded.charts[0], FarFieldChart)
+        self.assertIsInstance(loaded.charts[0], ExteriorPolarChart)
 
     def test_old_schema_is_not_in_the_known_set(self):
         """The OLD tag is genuinely retired; the current tag is known."""

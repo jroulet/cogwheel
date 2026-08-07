@@ -68,7 +68,7 @@ Three Architect specifications are certified here:
    the Professor R3 addition proving the tag actually routes something.
    (c) A chart whose tag is unknown / absent is hard-refused by
    `surrogate._validate_farfield_definition` at LOAD, BEFORE any numeric
-   assembly runs (proven by spying `FarFieldChart._assemble`: zero calls on
+   assembly runs (proven by spying `ExteriorPolarChart._assemble`: zero calls on
    the bad-tag path).
 
 6. **Fixed ``[w_floor, w_trust]`` w-window containment replaces mass
@@ -319,7 +319,7 @@ SACRC_GAMMAS: tuple[float, float, float] = (0.40, 0.65, 0.90)
 
 #: Retired caustic-fixed cusp tile, retained only to pin the named refusal.
 #: Its physical box maps across an astroid cusp, so it cannot define a
-#: single-valued far-field-smooth arc-length chart.
+#: single-valued polar exterior chart.
 SACRC_RHO_C: float = 0.25
 
 #: The SACR-C interior wave band (Architect: ``w in [0.05, 20]``).
@@ -331,13 +331,11 @@ SACRC_HALF_RHO: float = 0.03
 SACRC_HALF_THETA: float = 0.15
 
 #: Cusp-free positive-parity astroid arc and its interior ``(s, d)`` patch.
-#: Negative ``d`` keeps every node inside the caustic; this is the valid
-#: FarFieldChart fixture for the SACR-C value and contrast assertions.
-SACRC_ARC_THETA_LO: float = 0.2
-SACRC_ARC_THETA_HI: float = 1.2
-SACRC_S_RANGE: tuple[float, float] = (0.01, 0.04)
-SACRC_D_RANGE: tuple[float, float] = (-0.02, -0.005)
-
+#: Cusp-free positive-parity astroid arc and its interior polar patch.
+#: ``rho < 1`` keeps every node inside the caustic; this is the valid
+#: ExteriorPolarChart fixture for the SACR-C value and contrast assertions.
+SACRC_RHO_RANGE: tuple[float, float] = (0.5, 0.95)
+SACRC_THETA_C_RANGE: tuple[float, float] = (0.2, 1.2)
 #: Minimum cubic-capable current-coordinate grid. Deterministic:
 #: `from_engine` performs no RNG.
 SACRC_N_GAMMA: int = 4
@@ -471,27 +469,24 @@ def _ghost_separation(source: np.ndarray, matrix: np.ndarray) -> float:
     return min(
         float(np.sqrt(np.sum(np.abs(x_a - x_c) ** 2))) for x_a in real_images)
 
-
 def _make_farfield_chart(envelope_definition: str, n: int = 4
-                         ) -> 'surrogate.FarFieldChart':
-    """A tiny valid `FarFieldChart` carrying ``envelope_definition``.
+                         ) -> 'surrogate.ExteriorPolarChart':
+    """A tiny valid `ExteriorPolarChart` carrying ``envelope_definition``.
 
     The interpolated values are placeholders -- these charts exist only to
     exercise the npz tag round-trip and the load-time tag validation, not the
     reconstruction accuracy (which is covered on real partitions elsewhere).
     """
     gamma_grid = np.linspace(0.35, 0.55, n)
-    s_grid = np.linspace(0.5, 3.0, n)
-    d_grid = np.linspace(1.0, 4.0, n)
+    rho_grid = np.linspace(0.5, 3.0, n)
+    theta_c_grid = np.linspace(1.0, 4.0, n)
     log_w_grid = np.log(np.geomspace(3.0, 40.0, n))
-    arc_map = surrogate._caustic_arclength_map(gamma_grid, 0.2, 1.2, branch=1)
     values = np.ones((n, n, n, n), dtype=float)
-    return surrogate.FarFieldChart.from_values(
-        gamma_grid=gamma_grid, s_grid=s_grid, d_grid=d_grid,
+    return surrogate.ExteriorPolarChart.from_values(
+        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=values, envelope_imag=0.2 * values,
-        arc_map=arc_map, image_count=2, parity=1,
+        image_count=2, parity=1,
         envelope_definition=envelope_definition)
-
 
 def _lobe_local(lobe: 'st._SaddleLobeAdmission',
                 physical: np.ndarray) -> tuple[float, float]:
@@ -547,32 +542,28 @@ def _straddles_ray(center: tuple[float, float], half: tuple[float, float],
 
 
 @functools.lru_cache(maxsize=None)
-def _interior_chart(gamma: float, definition: str) -> 'surrogate.FarFieldChart':
-    """A cusp-free current-coordinate interior chart at ``gamma``.
+def _interior_chart(gamma: float, definition: str) -> 'surrogate.ExteriorPolarChart':
+    """A cusp-free polar interior chart at ``gamma``.
 
-    Trains one `from_engine` chart on one cusp-free astroid arc with negative
-    perpendicular distance for either the interior SACR-C envelope label or
+    Trains one `from_engine` chart on one cusp-free astroid arc with
+    ``rho < 1`` for either the interior SACR-C envelope label or
     the far-field kernel-sum label. Cached because each build costs several
     seconds of engine time and every gamma is probed by more than one test.
     """
     band = (gamma - SACRC_BAND_HALF, gamma + SACRC_BAND_HALF)
     surro = surrogate.LensAmplificationSurrogate.from_engine(
-        gamma_range=band, s_range=SACRC_S_RANGE, d_range=SACRC_D_RANGE,
-        arc_theta_lo=SACRC_ARC_THETA_LO, arc_theta_hi=SACRC_ARC_THETA_HI,
-        arc_branch=1,
-        w_range=SACRC_W_RANGE, n_gamma=SACRC_N_GAMMA, n_s=SACRC_N_RHO,
-        n_d=SACRC_N_THETA, w_nodes_per_decade=SACRC_WNPD,
+        gamma_range=band, rho_range=SACRC_RHO_RANGE,
+        theta_c_range=SACRC_THETA_C_RANGE,
+        w_range=SACRC_W_RANGE, n_gamma=SACRC_N_GAMMA, n_rho=SACRC_N_RHO,
+        n_theta_c=SACRC_N_THETA, w_nodes_per_decade=SACRC_WNPD,
         definition=definition)
-    return surro.charts[0]
-
-
-def _interior_heldout_eps(chart: 'surrogate.FarFieldChart', gamma: float,
+def _interior_heldout_eps(chart: 'surrogate.ExteriorPolarChart', gamma: float,
                           interior: bool) -> tuple[float, int]:
     """Held-out interpolation error of an interior chart, in label currency.
 
-    Draws `SACRC_HELDOUT` held-out current ``(s, d)`` points inside the chart
-    (fixed seed), maps them to physical sources through the chart's own arc
-    map, evaluates the chart's tensor spline DIRECTLY
+    Draws `SACRC_HELDOUT` held-out polar ``(rho, theta_c)`` points inside
+    the chart (fixed seed), maps them to physical sources via
+    `_from_caustic_fixed`, evaluates the chart's tensor spline DIRECTLY
     (`surrogate._evaluate_chart`, bypassing the serve-domain guards so the
     label's CONDITIONING is isolated from admission), and compares to the
     engine's exact label at each point.  SACR-C is normalised by ``max|E|``
@@ -588,10 +579,10 @@ def _interior_heldout_eps(chart: 'surrogate.FarFieldChart', gamma: float,
     image_count = 0
     for _ in range(SACRC_HELDOUT):
         g = float(rng.uniform(gamma - SACRC_BAND_HALF, gamma + SACRC_BAND_HALF))
-        s = float(rng.uniform(chart.s_grid[0], chart.s_grid[-1]))
-        d = float(rng.uniform(chart.d_grid[0], chart.d_grid[-1]))
-        y1, y2 = surrogate._from_farfield_smooth(
-            g, s, d, chart.arc_map, chart.arc_map.branch)
+        rho = float(rng.uniform(chart.rho_grid[0], chart.rho_grid[-1]))
+        theta_c = float(rng.uniform(chart.theta_c_grid[0],
+                                    chart.theta_c_grid[-1]))
+        y1, y2 = surrogate._from_caustic_fixed(g, rho, theta_c)
         try:
             part = ch.ChangRefsdalChannels(w).evaluate(
                 gamma=g, y=(y1, y2), beta=0.0, kappa=0.0)
@@ -613,26 +604,25 @@ def _interior_heldout_eps(chart: 'surrogate.FarFieldChart', gamma: float,
     return (max(errs) if errs else float('nan')), image_count
 
 @functools.lru_cache(maxsize=None)
-def _interior_chart_wnpd(gamma: float, wnpd: int) -> 'surrogate.FarFieldChart':
+def _interior_chart_wnpd(gamma: float, wnpd: int) -> 'surrogate.ExteriorPolarChart':
     """Interior SACR-C chart at ``gamma`` with specified w-density.
 
-    Same geometry as `_interior_chart` (same arc endpoints, same spatial
-    ranges) but parameterized on ``w_nodes_per_decade``.  Used by the WP1
-    WNPD accuracy/falsification tests to prove the w-density lever is
-    load-bearing (WNPD=12 passes the 0.05 bar; WNPD=6 fails at gamma=0.65).
+    Same geometry as `_interior_chart` (same polar ranges) but parameterized
+    on ``w_nodes_per_decade``.  Used by the WP1 WNPD accuracy/falsification
+    tests to prove the w-density lever is load-bearing (WNPD=12 passes the
+    0.05 bar; WNPD=6 fails at gamma=0.65).
     """
     band = (gamma - SACRC_BAND_HALF, gamma + SACRC_BAND_HALF)
     surro = surrogate.LensAmplificationSurrogate.from_engine(
-        gamma_range=band, s_range=SACRC_S_RANGE, d_range=SACRC_D_RANGE,
-        arc_theta_lo=SACRC_ARC_THETA_LO, arc_theta_hi=SACRC_ARC_THETA_HI,
-        arc_branch=1,
-        w_range=SACRC_W_RANGE, n_gamma=SACRC_N_GAMMA, n_s=SACRC_N_RHO,
-        n_d=SACRC_N_THETA, w_nodes_per_decade=wnpd,
+        gamma_range=band, rho_range=SACRC_RHO_RANGE,
+        theta_c_range=SACRC_THETA_C_RANGE,
+        w_range=SACRC_W_RANGE, n_gamma=SACRC_N_GAMMA, n_rho=SACRC_N_RHO,
+        n_theta_c=SACRC_N_THETA, w_nodes_per_decade=wnpd,
         definition=ch.INTERIOR_SACR_C)
     return surro.charts[0]
 
 
-def _wnpd_heldout_eps(chart: 'surrogate.FarFieldChart',
+def _wnpd_heldout_eps(chart: 'surrogate.ExteriorPolarChart',
                       gamma: float) -> float:
     """Held-out interpolation error for the WNPD accuracy test.
 
@@ -641,8 +631,8 @@ def _wnpd_heldout_eps(chart: 'surrogate.FarFieldChart',
     to the chart's tensor-spline emulation.  Returns the max relative error
     (max over held-out of max|emulated - exact| / max|exact|).
 
-    Points whose nearest caustic foot falls outside the chart arc (a
-    ``LensDomainError`` from ``_to_farfield_smooth``) are skipped — this is
+    Points whose caustic-fixed coordinate falls outside the chart (a
+    ``LensDomainError`` from ``_to_caustic_fixed``) are skipped — this is
     expected for off-band gamma draws at gamma=0.40 where the astroid foot
     wraps to an angle outside [0.2, 1.2].
     """
@@ -653,10 +643,10 @@ def _wnpd_heldout_eps(chart: 'surrogate.FarFieldChart',
     for _ in range(WNPD_HELDOUT):
         g = float(rng.uniform(gamma - SACRC_BAND_HALF,
                               gamma + SACRC_BAND_HALF))
-        s = float(rng.uniform(chart.s_grid[0], chart.s_grid[-1]))
-        d = float(rng.uniform(chart.d_grid[0], chart.d_grid[-1]))
-        y1, y2 = surrogate._from_farfield_smooth(
-            g, s, d, chart.arc_map, chart.arc_map.branch)
+        rho = float(rng.uniform(chart.rho_grid[0], chart.rho_grid[-1]))
+        theta_c = float(rng.uniform(chart.theta_c_grid[0],
+                                    chart.theta_c_grid[-1]))
+        y1, y2 = surrogate._from_caustic_fixed(g, rho, theta_c)
         try:
             part = ch.ChangRefsdalChannels(w).evaluate(
                 gamma=g, y=(y1, y2), beta=0.0, kappa=0.0)
@@ -675,31 +665,27 @@ def _wnpd_heldout_eps(chart: 'surrogate.FarFieldChart',
         errs.append(float(np.max(np.abs(emul - env)) / den))
     return max(errs) if errs else float('nan')
 
-
-
 def _engine_critical_sources(gamma: float) -> tuple[np.ndarray, float]:
     """Independent engine ``critical_source`` grid over the interior tile.
 
     Re-derives the parked critical carrier position at each node of the
-    cusp-free current-coordinate interior tile by calling the ENGINE
+    cusp-free polar interior tile by calling the ENGINE
     (`ChangRefsdalChannels.evaluate(...).critical_source`) -- NOT the
     surrogate's `_assert_carrier_continuity`.  Returned as an
-    ``(n_gamma, n_s, n_d, 2)`` array plus the local caustic reach, so a
-    test can check basin continuity with an oracle fully independent of the
-    guard under test.
+    ``(n_gamma, n_rho, n_theta_c, 2)`` array plus the local caustic reach,
+    so a test can check basin continuity with an oracle fully independent
+    of the guard under test.
     """
     gs = np.linspace(gamma - SACRC_BAND_HALF, gamma + SACRC_BAND_HALF,
                      SACRC_N_GAMMA)
-    ss = np.linspace(*SACRC_S_RANGE, SACRC_N_RHO)
-    ds = np.linspace(*SACRC_D_RANGE, SACRC_N_THETA)
-    arc_map = surrogate._caustic_arclength_map(
-        gs, SACRC_ARC_THETA_LO, SACRC_ARC_THETA_HI, branch=1)
+    rhos = np.linspace(*SACRC_RHO_RANGE, SACRC_N_RHO)
+    theta_cs = np.linspace(*SACRC_THETA_C_RANGE, SACRC_N_THETA)
     w = np.exp(surrogate._log_w_grid(SACRC_W_RANGE, SACRC_WNPD))
-    grid = np.full((gs.size, ss.size, ds.size, 2), np.nan)
+    grid = np.full((gs.size, rhos.size, theta_cs.size, 2), np.nan)
     for i, g in enumerate(gs):
-        for j, s in enumerate(ss):
-            for k, d in enumerate(ds):
-                y1, y2 = surrogate._from_farfield_smooth(g, s, d, arc_map, 1)
+        for j, rho in enumerate(rhos):
+            for k, theta_c in enumerate(theta_cs):
+                y1, y2 = surrogate._from_caustic_fixed(g, rho, theta_c)
                 try:
                     part = ch.ChangRefsdalChannels(w).evaluate(
                         gamma=g, y=(y1, y2), beta=0.0, kappa=0.0)
@@ -707,8 +693,6 @@ def _engine_critical_sources(gamma: float) -> tuple[np.ndarray, float]:
                     continue
                 grid[i, j, k] = np.asarray(part.critical_source, dtype=float)
     return grid, float(surrogate._caustic_reach(gamma))
-
-
 def _max_adjacent_carrier_jump(grid: np.ndarray) -> float:
     """Largest adjacent-node ``critical_source`` hop along any spatial axis."""
     worst = 0.0
@@ -1471,7 +1455,7 @@ class TagContractTestCase(ExteriorWindowsTestCase):
 
     def test_unknown_and_absent_tag_refused_before_numerics(self):
         # (c) A chart whose tag is unknown or absent is hard-refused at LOAD,
-        # BEFORE FarFieldChart._assemble runs.  Proven by spying _assemble:
+        # BEFORE ExteriorPolarChart._assemble runs.  Proven by spying _assemble:
         # zero calls on the bad-tag paths, one call on the good-tag control
         # (so the zero-count is the validation gate, not a dead path).
         chart = _make_farfield_chart(ch.FARFIELD_KERNEL_SUM)
@@ -1490,7 +1474,7 @@ class TagContractTestCase(ExteriorWindowsTestCase):
             lambda m: m.__setitem__('envelope_definition', 'bogus_v1'))
         absent = with_tag(lambda m: m.pop('envelope_definition'))
 
-        with mock.patch.object(surrogate.FarFieldChart, '_assemble') as spy:
+        with mock.patch.object(surrogate.ExteriorPolarChart, '_assemble') as spy:
             with self.assertRaises(ValueError):
                 surrogate._chart_from_npz(unknown, 0)
             self.assertEqual(spy.call_count, 0)   # refused before assembly
@@ -2224,7 +2208,7 @@ class WholeInteriorSacrcTestCase(ExteriorWindowsTestCase):
 
     Professor R4 guardrails, asserted here as much as the accuracy:
       * a cusp-spanning physical tile REFUSES before fitting because a
-        FarFieldChart requires a single-valued, cusp-free arc-length map;
+        ExteriorPolarChart requires a single-valued, cusp-free arc-length map;
         the SACR-C value coverage instead uses a valid cusp-free interior
         patch, where the bounded label serves a finite envelope.
       * ``tau_c`` path-continuity within a tile -- the parked critical carrier
@@ -2290,23 +2274,24 @@ class WholeInteriorSacrcTestCase(ExteriorWindowsTestCase):
         self._plot_contrast(contrasts)
 
     def test_cusp_spanning_interior_tile_refuses_before_training(self) -> None:
-        """The retired cusp tile cannot form one monotone arc-length chart."""
+        """A polar tile that spans an astroid cusp cannot be a single chart."""
         for gamma in (0.40, 0.65):
             with self.subTest(gamma=gamma):
                 band = (gamma - SACRC_BAND_HALF, gamma + SACRC_BAND_HALF)
-                arc_lo, arc_hi, branch, s_range, d_range = (
-                    st._farfield_box_to_smooth(
-                        gamma_band=band, box_center=(SACRC_RHO_C, 0.0),
-                        half=(SACRC_HALF_RHO, SACRC_HALF_THETA)))
+                rho_range = (SACRC_RHO_C - SACRC_HALF_RHO,
+                             SACRC_RHO_C + SACRC_HALF_RHO)
+                theta_c_range = (-SACRC_HALF_THETA, SACRC_HALF_THETA)
                 with self.assertRaisesRegex(geometry.LensDomainError, 'cusp'):
                     surrogate.LensAmplificationSurrogate.from_engine(
-                        gamma_range=band, s_range=s_range, d_range=d_range,
-                        arc_theta_lo=arc_lo, arc_theta_hi=arc_hi,
-                        arc_branch=branch, w_range=SACRC_W_RANGE,
-                        n_gamma=SACRC_N_GAMMA, n_s=SACRC_N_RHO,
-                        n_d=SACRC_N_THETA, w_nodes_per_decade=SACRC_WNPD,
+                        gamma_range=band, rho_range=rho_range,
+                        theta_c_range=theta_c_range,
+                        w_range=SACRC_W_RANGE,
+                        n_gamma=SACRC_N_GAMMA, n_rho=SACRC_N_RHO,
+                        n_theta_c=SACRC_N_THETA,
+                        w_nodes_per_decade=SACRC_WNPD,
                         definition=ch.INTERIOR_SACR_C)
                 self.record_comparison()
+
 
     def test_cusp_free_interior_tile_builds_finite_sacrc_envelope(self) -> None:
         """The valid interior fixture preserves non-vacuous SACR-C coverage."""
@@ -2315,9 +2300,9 @@ class WholeInteriorSacrcTestCase(ExteriorWindowsTestCase):
                 chart = _interior_chart(gamma, ch.INTERIOR_SACR_C)
                 self.assertEqual(chart.envelope_definition, ch.INTERIOR_SACR_C)
                 w = np.geomspace(*SACRC_W_RANGE, 8)
-                y1, y2 = surrogate._from_farfield_smooth(
-                    gamma, float(chart.s_grid[2]), float(chart.d_grid[2]),
-                    chart.arc_map, chart.arc_map.branch)
+                y1, y2 = surrogate._from_caustic_fixed(
+                    gamma, float(chart.rho_grid[2]),
+                    float(chart.theta_c_grid[2]))
                 env = surrogate._evaluate_chart(
                     chart, gamma=gamma, eta=0.1, theta=0.0,
                     log_w_query=np.log(w), y1_eig=y1, y2_eig=y2)

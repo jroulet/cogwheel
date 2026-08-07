@@ -14,10 +14,10 @@ B-splines with not-a-knot boundary conditions.
 
 A GLOBAL surrogate is a flat collection of two kinds of chart (Build 8c):
 
-- `FarFieldChart` -- a raw-eigenframe-coordinate chart over
-  ``(log w, gamma, y1_eig, y2_eig)``, one per image-count region, valid
-  away from the caustic.  This is exactly the single-box interpolant the
-  8a surrogate shipped; a global surrogate carries several of them.
+- `ExteriorPolarChart` -- a caustic-fixed polar-coordinate chart over
+  ``(log w, gamma, rho, theta_c)``, one per image-count region, valid
+  away from the caustic.  The polar coordinate is self-contained,
+  single-valued, and cusp-safe.
 - `TubeChart` -- a near-caustic chart in the caustic-adapted coordinates
   ``(gamma, u = sqrt(eta), theta, log w)``, where ``eta`` is the
   source-plane distance to the caustic and ``theta`` its arc position
@@ -81,7 +81,7 @@ JSON-encoded ``chart{i}_meta`` (kind, image count, parity, exclusion
 data) -- alongside a single JSON-encoded ``provenance`` scalar and the
 chart count.  There is NO bespoke manifest file.  `save`/`load`
 round-trip the interpolant bit-for-bit.  An 8a single-box ``.npz`` (no
-``n_charts`` key) loads as a one-chart `FarFieldChart` for backward
+``n_charts`` key) loads as a one-chart `ExteriorPolarChart` for backward
 compatibility.
 """
 
@@ -140,12 +140,11 @@ _ASTROID_CUSP_ANGLES: tuple[float, ...] = (0.0, np.pi / 2, -np.pi / 2, np.pi)
 # doubled, keeping the augmented axis strictly increasing.
 _CUSP_NODE_DEDUP_TOL = 1e-9
 
-# --- Far-field smooth interpolation coordinate (Build 1e-farfield WP1) ------
-# These constants back the additive caustic arc-length primitives
-# (`_caustic_arclength_map`, `_to_farfield_smooth`, `_from_farfield_smooth`
-# and their rejection guards).  The primitives are UNREFERENCED by existing
-# serve/train/containment code; WP2 wires them in as the sole far-field
-# coordinate.  Nothing here changes existing behaviour.
+# --- Far-field smooth interpolation coordinate (retained for tube/training) --
+# The ``(s, d)`` coordinate is RETAINED for the TUBE chart (unchanged).
+# The EXTERIOR serve path uses ExteriorPolarChart in polar
+# ``(rho, theta_c)`` coordinates via `_to_caustic_fixed` / `_from_caustic_fixed`
+# -- single-valued, cusp-safe, and self-contained.
 
 # Samples per gamma row in the caustic arc-length map; matches the shipped
 # 1e-tube precedent (`surrogate_training._TUBE_ARC_MAP_SIZE = 2001`), whose
@@ -278,6 +277,17 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
 # hard-refuses any frame-dependent-label artifact rather than serving a
 # finite-but-wrong reconstruction.
 _FARFIELD_AXIS_SCHEMA = 'farfield_arclength_s_perp_d_framewinv'
+
+# Axis-schema tag persisted in each EXTERIOR POLAR chart's npz meta.
+# An exterior polar chart stores spatial axes ``(rho, theta_c)`` where
+# ``rho`` is the piecewise caustic-fixed radial coordinate and ``theta_c``
+# the caustic-fixed polar angle -- a self-contained, single-valued coordinate
+# that respects both reflection symmetries.  The polar coordinate is
+# cusp-safe by construction (tile edges are ON cusp rays, so no tile ever
+# straddles one).  A chart trained on the retired far-field-smooth ``(s, d)``
+# axis would be queried at the wrong coordinate; the loader hard-refuses.
+_EXTERIOR_POLAR_AXIS_SCHEMA = 'exterior_polar_rho_theta_c'
+_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA})
 _KNOWN_FARFIELD_AXIS_SCHEMAS = frozenset({_FARFIELD_AXIS_SCHEMA})
 
 # Axis-schema tag persisted in each macro-saddle LOBE-INTERIOR chart's npz
@@ -2191,8 +2201,208 @@ def _assert_farfield_carrier_continuity(env_grid: np.ndarray,
                 'is spline-representable.')
 
 
+def _assert_exterior_polar_carrier_continuity(env_grid: np.ndarray,
+                                               w_max: float,
+                                               gamma_grid: np.ndarray,
+                                               shape: tuple[int, int, int]
+                                               ) -> None:
+    """Assert the frame-invariant exterior-polar label is spline-representable.
+
+    This is a cheap GROSS-ALIASING SCREEN for the EXTERIOR envelope,
+    identical in logic to `_assert_farfield_carrier_continuity` but applied
+    on exterior-polar chart nodes.  Its job is to catch a tile whose label
+    jumps so violently between adjacent nodes that fitting it would alias,
+    and reject it for subdivision rather than serve a phase-aliased envelope.
+
+    The measured quantity is the complex increment ``|E_lead - E_trail|``
+    between adjacent nodes on the top-of-band slice, normalized by the peak
+    ``|E_tilde|`` over the WHOLE grid.
+
+    Parameters
+    ----------
+    env_grid : np.ndarray
+        Complex exterior-polar label per node, shape ``(n_w, n_gamma,
+        n_rho, n_theta_c)``.  Refused/unfilled nodes are exactly zero.
+    w_max : float
+        Top-of-band dimensionless frequency.
+    gamma_grid : np.ndarray
+        The ``n_gamma`` gamma axis.
+    shape : tuple[int, int, int]
+        The ``(n_gamma, n_rho, n_theta_c)`` spatial node-grid shape.
+    """
+    n_gamma, _n_rho, _n_theta_c = shape
+    if gamma_grid.shape[0] != n_gamma:
+        raise ValueError(
+            f'gamma_grid length {gamma_grid.shape[0]} does not match '
+            f'shape[0] = {n_gamma}.')
+    grid = np.asarray(env_grid)
+    all_magnitude = np.abs(grid)
+    finite = np.isfinite(all_magnitude)
+    scale = float(np.max(all_magnitude[finite], initial=0.0))
+    if scale <= 0.0:
+        return
+    top = grid[-1]
+    magnitude = np.abs(top)
+    for axis in range(3):
+        n_axis = shape[axis]
+        if n_axis < 2:
+            continue
+        lead = np.take(top, range(1, n_axis), axis=axis)
+        trail = np.take(top, range(0, n_axis - 1), axis=axis)
+        mag_lead = np.take(magnitude, range(1, n_axis), axis=axis)
+        mag_trail = np.take(magnitude, range(0, n_axis - 1), axis=axis)
+        both = ((mag_lead > 0.0) & (mag_trail > 0.0)
+                & np.isfinite(mag_lead) & np.isfinite(mag_trail))
+        step = np.abs(lead - trail) / scale
+        bad = both & (step >= _FARFIELD_CARRIER_STEP_MAX)
+        if np.any(bad):
+            worst = int(np.argmax(np.where(bad, step, -np.inf)))
+            rel = float(np.minimum(mag_lead, mag_trail).flat[worst] / scale)
+            raise CarrierDiscontinuityError(
+                'Frame-invariant exterior-polar label jumps by more than '
+                f'the bound {_FARFIELD_CARRIER_STEP_MAX:.3g} x peak |E| '
+                f'along axis {axis} at w_max = {float(w_max):.3g} (max '
+                f'step {float(step.flat[worst]):.3g} x peak, at relative '
+                f'amplitude {rel:.3g}); subdivide the tile so the '
+                'demodulated envelope is spline-representable.')
+
 # ---- Charts -----------------------------------------------------------
 
+
+
+@dataclass(frozen=True, eq=False)
+class ExteriorPolarChart:
+    """Caustic-fixed polar envelope chart, valid away from a caustic.
+
+    Interpolates ``E(w)`` over ``(log w, gamma, rho, theta_c)`` for one
+    image-count region, where the two spatial axes are the caustic-fixed
+    polar coordinates ``(rho, theta_c)`` -- self-contained, single-valued,
+    and respecting both reflection symmetries.  ``rho`` is the piecewise
+    caustic-fixed radial coordinate and ``theta_c`` the caustic-fixed
+    polar angle ``atan2(y2_eig, y1_eig)``.  The polar coordinate is
+    cusp-safe by construction -- tile edges are ON cusp rays so no tile
+    ever straddles one; there is no arc-length map and no foot-tie guard.
+
+    Attributes
+    ----------
+    gamma_grid, rho_grid, theta_c_grid, log_w_grid : np.ndarray
+        1-D strictly increasing training axes.  ``rho_grid`` and
+        ``theta_c_grid`` are uniform ``linspace`` grids, so their mean
+        spacing equals their grid spacing and the exclusion-ball metric
+        is meaningful by construction.
+    real_coeffs, imag_coeffs : np.ndarray
+        Cubic B-spline coefficient tensors,
+        axes ``(log w, gamma, rho, theta_c)``.
+    knots : tuple of np.ndarray
+        Knot vectors ``(t_logw, t_gamma, t_rho, t_theta_c)``.
+    image_count : int or None
+        Real-image count of the chart's region (``None`` for a legacy
+        single-box chart whose region label was not recorded; then the
+        image-count guard is skipped).
+    parity : int or None
+        Macro-image parity ``+1`` (``gamma < 1``) or ``-1``
+        (``gamma > 1``); ``None`` if unrecorded.
+    eta_overlap_min : float
+        Minimum caustic distance the chart serves at.
+    refused_points : np.ndarray
+        Shape ``(n, 3)`` caustic-fixed ``(gamma, rho, theta_c)`` training
+        points the engine refused; the exclusion-ball gate rejects queries
+        within one grid spacing of any of them.
+    param_spacing : np.ndarray
+        Shape ``(3,)`` mean spacing of ``(gamma, rho, theta_c)`` for the
+        exclusion-ball normalization.
+    envelope_definition : str
+        Tag naming the label the chart's envelope encodes (Build 8g-b).
+        Persisted in the npz meta and checked on load; the serving side
+        dispatches the reconstruction on it.
+    """
+
+    gamma_grid: np.ndarray
+    rho_grid: np.ndarray
+    theta_c_grid: np.ndarray
+    log_w_grid: np.ndarray
+    real_coeffs: np.ndarray
+    imag_coeffs: np.ndarray
+    knots: tuple
+    image_count: int | None
+    parity: int | None
+    eta_overlap_min: float
+    refused_points: np.ndarray
+    param_spacing: np.ndarray
+    envelope_definition: str
+
+    @classmethod
+    def from_values(cls, *, gamma_grid: np.ndarray, rho_grid: np.ndarray,
+                    theta_c_grid: np.ndarray, log_w_grid: np.ndarray,
+                    envelope_real: np.ndarray, envelope_imag: np.ndarray,
+                    image_count: int | None, parity: int | None,
+                    eta_overlap_min: float = _DEFAULT_CAUSTIC_FLOOR,
+                    refused_points: np.ndarray | None = None,
+                    envelope_definition: str = _FARFIELD_ENVELOPE_DEFINITION
+                    ) -> 'ExteriorPolarChart':
+        """Build an exterior-polar chart by fitting splines to a value tensor.
+
+        Parameters
+        ----------
+        gamma_grid, rho_grid, theta_c_grid, log_w_grid : np.ndarray
+            1-D strictly increasing training axes (the two spatial axes
+            are the caustic-fixed ``rho`` and ``theta_c``).
+        envelope_real, envelope_imag : np.ndarray
+            Shape ``(n_w, n_gamma, n_rho, n_theta_c)`` real/imag envelope
+            values.
+        image_count, parity : int or None
+            Region labels (``None`` if unrecorded).
+        eta_overlap_min : float, optional
+            Minimum caustic distance served (default the caustic floor).
+        refused_points : np.ndarray, optional
+            Refused caustic-fixed ``(gamma, rho, theta_c)`` training points.
+        envelope_definition : str, optional
+            Tag naming the label the chart's envelope encodes.
+        """
+        gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
+        rho_grid = _validate_axis(rho_grid, 'rho_grid')
+        theta_c_grid = _validate_axis(theta_c_grid, 'theta_c_grid')
+        log_w_grid = _validate_axis(log_w_grid, 'log_w_grid')
+        expected = (log_w_grid.size, gamma_grid.size, rho_grid.size,
+                    theta_c_grid.size)
+        _check_value_shape(envelope_real, envelope_imag, expected)
+        real_c, imag_c, knots = _fit_tensor_spline(
+            (log_w_grid, gamma_grid, rho_grid, theta_c_grid),
+            envelope_real, envelope_imag)
+        return cls._assemble(
+            gamma_grid, rho_grid, theta_c_grid, log_w_grid, real_c, imag_c,
+            knots, image_count, parity, eta_overlap_min, refused_points,
+            envelope_definition=envelope_definition)
+
+    @classmethod
+    def _assemble(cls, gamma_grid, rho_grid, theta_c_grid, log_w_grid,
+                  real_coeffs, imag_coeffs, knots, image_count, parity,
+                  eta_overlap_min, refused_points,
+                  envelope_definition=_FARFIELD_ENVELOPE_DEFINITION
+                  ) -> 'ExteriorPolarChart':
+        """Assemble a chart from prebuilt coefficient tensors and knots."""
+        gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
+        rho_grid = _validate_axis(rho_grid, 'rho_grid')
+        theta_c_grid = _validate_axis(theta_c_grid, 'theta_c_grid')
+        log_w_grid = _validate_axis(log_w_grid, 'log_w_grid')
+        param_spacing = np.array([
+            float(np.mean(np.diff(gamma_grid))),
+            float(np.mean(np.diff(rho_grid))),
+            float(np.mean(np.diff(theta_c_grid)))])
+        return cls(
+            gamma_grid=gamma_grid,
+            rho_grid=rho_grid,
+            theta_c_grid=theta_c_grid,
+            log_w_grid=log_w_grid,
+            real_coeffs=np.ascontiguousarray(real_coeffs, dtype=float),
+            imag_coeffs=np.ascontiguousarray(imag_coeffs, dtype=float),
+            knots=tuple(np.ascontiguousarray(t, dtype=float) for t in knots),
+            image_count=None if image_count is None else int(image_count),
+            parity=None if parity is None else int(parity),
+            eta_overlap_min=float(eta_overlap_min),
+            refused_points=_normalize_refused(refused_points),
+            param_spacing=param_spacing,
+            envelope_definition=str(envelope_definition))
 
 @dataclass(frozen=True, eq=False)
 class FarFieldChart:
@@ -2940,14 +3150,14 @@ def _check_value_shape(value_real: np.ndarray, value_imag: np.ndarray,
 
 
 def _in_exclusion_ball(
-        chart: 'FarFieldChart | LobeInteriorChart | InteriorWedgeChart',
+        chart: 'ExteriorPolarChart | LobeInteriorChart | InteriorWedgeChart',
         gamma: float, p1: float, p2: float) -> bool:
     """Whether the chart's spatial ``(gamma, p1, p2)`` is within a refusal
     ball.
 
     ``refused_points`` and ``param_spacing`` are both in the chart's own
     spatial coordinate -- far-field-smooth ``(gamma, s, d)`` for a
-    `FarFieldChart` (Build 1e-farfield WP2), lobe-local ``(gamma,
+    `ExteriorPolarChart` (caustic-fixed ``(rho, theta_c)``), lobe-local ``(gamma,
     rho_lobe, theta_local)`` for a `LobeInteriorChart`, or wedge-fixed
     ``(gamma, r, theta_wedge)`` for an `InteriorWedgeChart` -- so the test
     is coordinate-agnostic: ``(p1, p2)`` are the chart's own two spatial
@@ -3077,6 +3287,44 @@ def _farfield_serves(chart: FarFieldChart, gamma: float, log_w_min: float,
     if chart.image_count is not None and image_count != chart.image_count:
         return False
     # (7) far-field priority: only away from the caustic.
+    if eta <= chart.eta_overlap_min:
+        return False
+    return True
+
+def _exterior_polar_serves(chart: 'ExteriorPolarChart', gamma: float,
+                           log_w_min: float, log_w_max: float, eta: float,
+                           image_count: int,
+                           y1_eig: float, y2_eig: float) -> bool:
+    """Whether an exterior-polar chart serves this candidate.
+
+    The chart's spatial axes are caustic-fixed ``(rho, theta_c)`` --
+    self-contained and single-valued.  A non-finite eigenframe source
+    declines cleanly so select_chart's optional-source convention is
+    preserved.
+    """
+    if not np.isfinite(y1_eig) or not np.isfinite(y2_eig):
+        return False
+    # (1a) gamma / log-w box containment first.
+    if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
+        return False
+    if not _log_w_band_serveable(chart, log_w_min, log_w_max):
+        return False
+    # (1b) map the source to the chart's caustic-fixed (rho, theta_c)
+    # at the query's own gamma; decline on any refusal.
+    try:
+        rho, theta_c = _to_caustic_fixed(gamma, y1_eig, y2_eig)
+    except LensDomainError:
+        return False
+    if not (chart.rho_grid[0] <= rho <= chart.rho_grid[-1]
+            and chart.theta_c_grid[0] <= theta_c <= chart.theta_c_grid[-1]):
+        return False
+    # (3) engine-refusal exclusion ball, measured in (gamma, rho, theta_c).
+    if _in_exclusion_ball(chart, gamma, rho, theta_c):
+        return False
+    # (5) image-count guard.
+    if chart.image_count is not None and image_count != chart.image_count:
+        return False
+    # (7) exterior-polar priority: only away from the caustic.
     if eta <= chart.eta_overlap_min:
         return False
     return True
@@ -3256,23 +3504,22 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
     caller uses the exact engine.
 
     Order: (2) gamma guard band near ``gamma = 1`` -> fall through; then
-    TUBE charts have priority over FAR-FIELD charts, FAR-FIELD over
+    TUBE charts have priority over EXTERIOR-POLAR charts, EXTERIOR-POLAR over
     LOBE-INTERIOR charts, and LOBE-INTERIOR over WEDGE-INTERIOR charts
     (step 7).  Box containment is mutually exclusive across the kinds
-    -- a positive-parity far-field box and a macro-saddle lobe box never
+    -- a positive-parity exterior-polar box and a macro-saddle lobe box never
     overlap in ``gamma`` -- so the scan order is deterministic, not
     arbitrating overlap.  Per chart: (1) certified-box containment on
     ``(gamma, log w)`` and the chart-specific source coordinates; (3)
     engine-refusal exclusion balls; (5) image-count match; (6) cusp
     exclusion / ``eta`` floor; (7) tube when ``eta in [eta_floor,
-    eta_max]``, else far-field when ``eta > eta_overlap_min``, else a lobe
+    eta_max]``, else exterior-polar when ``eta > eta_overlap_min``, else a lobe
     chart when the source falls in that lobe, else a wedge chart for
     interior sources.
 
     Parameters
     ----------
-    charts : sequence of TubeChart, FarFieldChart, LobeInteriorChart or
-        InteriorWedgeChart
+    charts : sequence of TubeChart, ExteriorPolarChart, LobeInteriorChart or\n        InteriorWedgeChart
         The surrogate's charts.
     gamma : float
         External shear magnitude.
@@ -3286,17 +3533,17 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
     image_count : int
         Real-image count ``int(partition.real_mask.sum())``.
     y1_eig, y2_eig : float, optional
-        Eigenframe source position.  Threaded to the far-field guard
-        `_farfield_serves` (mapped to far-field-smooth ``(s, d)`` at the
-        query's own gamma, Build 1e-farfield WP2) and to the lobe-interior
+        Eigenframe source position.  Threaded to the exterior-polar guard
+        `_exterior_polar_serves` (mapped to caustic-fixed ``(rho, theta_c)`` at the
+        query's own gamma) and to the lobe-interior
         guard `_lobe_serves` and wedge guard `_wedge_serves`.  Defaults
         are non-finite: a caller that does not thread the source declines
-        every far-field, lobe, and wedge chart cleanly (only the tube
+        every exterior-polar, lobe, and wedge chart cleanly (only the tube
         dispatch is exercised).
 
     Returns
     -------
-    TubeChart, FarFieldChart, LobeInteriorChart, InteriorWedgeChart or None
+    TubeChart, ExteriorPolarChart, LobeInteriorChart, InteriorWedgeChart or None
         The selected chart, or ``None`` to fall through to the engine.
     """
     # (2) gamma guard band around the det-A = 0 parity boundary.
@@ -3308,7 +3555,7 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
                 chart, gamma, log_w_min, log_w_max, eta, theta, image_count):
             return chart
     for chart in charts:
-        if isinstance(chart, FarFieldChart) and _farfield_serves(
+        if isinstance(chart, ExteriorPolarChart) and _exterior_polar_serves(
                 chart, gamma, log_w_min, log_w_max, eta, image_count,
                 y1_eig, y2_eig):
             return chart
@@ -3333,22 +3580,22 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
 
     A tube chart contracts on ``(sqrt(eta), s)`` where ``s`` is the query
     theta mapped into the chart frame and then to arc length via the
-    chart's stored ``theta_to_s`` map; a FAR-FIELD chart contracts on its
-    far-field-smooth spatial axes ``(s, d)`` computed from the eigenframe
-    source at the query's OWN gamma via `_to_farfield_smooth` on the chart's
-    stored ``arc_map`` (Build 1e-farfield WP2); a lobe-interior chart
-    contracts on the LOBE-LOCAL ``(rho_lobe, v2)`` where ``v2`` is either
-    the raw ``theta_local`` (when ``theta_to_s is None``) or the wedge-edge
-    ``s`` coordinate mapped from ``theta_local`` via the chart's stored
-    ``theta_to_s`` map (same pattern as tube charts); a wedge-interior chart
-    contracts on ``(r, v2)`` where ``v2`` is either the raw ``theta_wedge``
-    or an s-coordinate mapped from ``theta_wedge`` via the chart's stored
-    ``theta_to_s`` map.  ``y1_eig`` / ``y2_eig`` are the eigenframe source,
-    required for a `FarFieldChart`, `LobeInteriorChart`, or
-    `InteriorWedgeChart` and ignored for a tube chart.
+    chart's stored ``theta_to_s`` map; an EXTERIOR-POLAR chart contracts on
+    its caustic-fixed spatial axes ``(rho, theta_c)`` computed from the
+    eigenframe source at the query's OWN gamma via `_to_caustic_fixed`; a
+    lobe-interior chart contracts on the LOBE-LOCAL ``(rho_lobe, v2)``
+    where ``v2`` is either the raw ``theta_local`` (when ``theta_to_s is
+    None``) or the wedge-edge ``s`` coordinate mapped from ``theta_local``
+    via the chart's stored ``theta_to_s`` map (same pattern as tube
+    charts); a wedge-interior chart contracts on ``(r, v2)`` where ``v2``
+    is either the raw ``theta_wedge`` or an s-coordinate mapped from
+    ``theta_wedge`` via the chart's stored ``theta_to_s`` map.
+    ``y1_eig`` / ``y2_eig`` are the eigenframe source, required for an
+    `ExteriorPolarChart`, `LobeInteriorChart`, or `InteriorWedgeChart`
+    and ignored for a tube chart.
 
-    A caller reaches this only after `select_chart` picked ``chart``; for a
-    far-field chart that means `_to_farfield_smooth` already succeeded on
+    A caller reaches this only after `select_chart` picked ``chart``; for an
+    exterior-polar chart that means `_to_caustic_fixed` already succeeded on
     this deterministic input, so the recomputation here does not raise.
     """
     if isinstance(chart, TubeChart):
@@ -3386,10 +3633,13 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
                                  chart.theta_to_u[1]))
         else:
             v2 = theta_wedge
+    elif isinstance(chart, ExteriorPolarChart):
+        # Exterior-polar chart: caustic-fixed (rho, theta_c) at the
+        # query's own gamma.
+        v1, v2 = _to_caustic_fixed(gamma, y1_eig, y2_eig)
     else:
-        # Far-field chart: far-field-smooth (s, d) at the query's own gamma.
-        v1, v2 = _to_farfield_smooth(gamma, y1_eig, y2_eig, chart.arc_map,
-                                     chart.arc_map.branch)
+        raise TypeError(
+            f'Unknown chart type: {type(chart).__name__}.')
     # Low-w flat extrapolation: clamp the query band to the chart's w
     # range before passing to the spline.  The low end is the intentional
     # extrapolation: the envelope is smooth and nearly constant below the
@@ -3408,20 +3658,22 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
 class LensAmplificationSurrogate:
     """Global multi-chart tensor-cubic-spline emulator of ``E(w)``.
 
-    Holds a flat list of `FarFieldChart` and `TubeChart` objects plus a
+    Holds a flat list of `ExteriorPolarChart`, `TubeChart`,
+    `LobeInteriorChart` and `InteriorWedgeChart` objects plus a
     provenance dict.  Serve the full guard stack with `serve` (the query
     the likelihood uses, fed the geometry partition's ``eta``, ``theta``
     and image count); the legacy single-box `envelope` / `in_domain`
-    (raw-eigenframe far-field lookup only) are preserved for the 8a API.
+    (exterior-polar lookup only) are preserved for the 8a API.
 
-    Construct via `from_engine` (single-box far-field training) or `load`
+    Construct via `from_engine` (single-box exterior-polar training) or `load`
     (deserialize a saved artifact).  For direct multi-chart construction
-    build charts with `FarFieldChart.from_values` / `TubeChart.from_values`
-    and pass the list here.
+    build charts with `ExteriorPolarChart.from_values`,
+    `TubeChart.from_values` etc. and pass the list here.
 
     Parameters
     ----------
-    charts : sequence of TubeChart or FarFieldChart
+    charts : sequence of ExteriorPolarChart, TubeChart,
+        LobeInteriorChart or InteriorWedgeChart
         The surrogate's charts (at least one).
     provenance : dict
         Training metadata (grid spec, engine version, training hash,
@@ -3431,8 +3683,9 @@ class LensAmplificationSurrogate:
     Raises
     ------
     ValueError
-        If ``charts`` is empty or holds an object that is neither a
-        `FarFieldChart` nor a `TubeChart`.
+        If ``charts`` is empty or holds an object that is neither an
+        `ExteriorPolarChart`, `TubeChart`, `LobeInteriorChart` nor an
+        `InteriorWedgeChart`.
     """
 
     def __init__(self, charts, provenance: dict) -> None:
@@ -3440,11 +3693,11 @@ class LensAmplificationSurrogate:
         if not charts:
             raise ValueError('A surrogate needs at least one chart.')
         for chart in charts:
-            if not isinstance(chart, (FarFieldChart, TubeChart,
+            if not isinstance(chart, (ExteriorPolarChart, TubeChart,
                                       LobeInteriorChart,
                                       InteriorWedgeChart)):
                 raise ValueError(
-                    'charts must be FarFieldChart, TubeChart, '
+                    'charts must be ExteriorPolarChart, TubeChart, '
                     'LobeInteriorChart or InteriorWedgeChart instances; '
                     f'got {type(chart).__name__}.')
         self.charts = charts
@@ -3466,38 +3719,36 @@ class LensAmplificationSurrogate:
         return self.charts[0].log_w_grid
 
     @property
-    def s_grid(self) -> np.ndarray:
-        """Caustic arc-length ``s`` axis of the first (far-field) chart (8a
+    def rho_grid(self) -> np.ndarray:
+        """Caustic-fixed ``rho`` axis of the first (exterior-polar) chart (8a
         shim)."""
-        return self.charts[0].s_grid
+        return self.charts[0].rho_grid
 
     @property
-    def d_grid(self) -> np.ndarray:
-        """Signed perpendicular-distance ``d`` axis of the first (far-field)
+    def theta_c_grid(self) -> np.ndarray:
+        """Caustic-fixed ``theta_c`` axis of the first (exterior-polar)
         chart (8a shim)."""
-        return self.charts[0].d_grid
+        return self.charts[0].theta_c_grid
 
     @property
     def refused_points(self) -> np.ndarray:
-        """Refused training points of the first (far-field) chart (8a shim)."""
+        """Refused training points of the first (exterior-polar) chart (8a shim)."""
         return self.charts[0].refused_points
 
     # ---- Construction from the exact engine ---------------------------
 
     @classmethod
     def from_engine(cls, *, gamma_range: tuple[float, float],
-                    s_range: tuple[float, float],
-                    d_range: tuple[float, float],
+                    rho_range: tuple[float, float],
+                    theta_c_range: tuple[float, float],
                     w_range: tuple[float, float],
-                    arc_theta_lo: float, arc_theta_hi: float,
-                    arc_branch: int,
                     n_gamma: int = _DEFAULT_PARAM_NODES,
-                    n_s: int = _DEFAULT_PARAM_NODES,
-                    n_d: int = _DEFAULT_PARAM_NODES,
+                    n_rho: int = _DEFAULT_PARAM_NODES,
+                    n_theta_c: int = _DEFAULT_PARAM_NODES,
                     w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE,
                     definition: str = _FARFIELD_ENVELOPE_DEFINITION
                     ) -> 'LensAmplificationSurrogate':
-        """Train a single-box far-field surrogate on a dense engine grid.
+        """Train a single-box exterior-polar surrogate on a dense engine grid.
 
         Evaluates `ChangRefsdalChannels.evaluate` at ``beta = 0``,
         ``kappa = 0`` on the full dense ``w`` grid for every parameter
@@ -3509,76 +3760,44 @@ class LensAmplificationSurrogate:
         caustic-region envelope needs flip lobes on the astroid diagonals
         and leave a resolved image un-subtracted (Build 8g-b).
 
-        Interior charts (Build S2-3).  When ``definition`` is the interior
-        SACR-C tag (`_INTERIOR_ENVELOPE_DEFINITION`), the node value is
-        instead the caustic-region ``partition.envelope`` -- the full
-        ``tau_c``-demodulated SACR-C envelope ``E`` with the switch ON.  The
-        coordinate is unchanged (far-field-smooth ``(s, d)``); only the
-        ENVELOPE LABEL differs, and the tag is stamped on the chart so the
-        serve mirror dispatches the SACR-C reconstruction
-        (`channels.reconstruct_from_envelope`).  Interior node builds also
-        collect the parked carrier ``critical_source`` and assert basin
-        continuity across the tile (`_assert_carrier_continuity`).
-
-        Far-field-smooth grid (Build 1e-farfield WP2). The two spatial axes
-        are the caustic ARC LENGTH ``s`` (tangential) and the SIGNED
-        perpendicular distance ``d`` (radial, ``+`` outside / ``-`` inside);
-        the transform is the gamma-resolved arc-length map
-        (`_caustic_arclength_map`) over the arc ``[arc_theta_lo,
-        arc_theta_hi]`` on branch ``arc_branch``.  Each grid node
-        ``(gamma, s, d)`` is mapped to a physical eigenframe source via
-        `_from_farfield_smooth` at that node's OWN gamma BEFORE the engine
-        call.  ``s`` is smooth across the C2 curvature kinks of the raw
-        ``theta_c`` angle, so no cusp-node union is needed.  A parameter
-        point that refuses at any ``w`` node (or returns a non-finite
-        envelope, or whose reconstructed source lies on the medial axis) is
-        recorded refused (in ``(gamma, s, d)`` coordinates) and left as
-        zeros in the value arrays.
-
-        Cusp/tie rejection (WP1 guards).  The arc is rejected outright
-        (`LensDomainError` propagated to the caller) if it spans a caustic
-        cusp at any gamma node (`_reject_if_cusp_spanning`), so the
-        arc-length map inverts a strictly monotone column.  A per-node
-        near-tied-foot (medial-axis) guard (`_reject_if_near_tied_foot`)
-        rejects an individual node whose reconstructed source has an
-        ambiguous foot.
+        Caustic-fixed polar grid. The two spatial axes are the piecewise
+        caustic-fixed radial coordinate ``rho`` and the caustic-fixed
+        polar angle ``theta_c`` -- self-contained and single-valued.  Each
+        grid node ``(gamma, rho, theta_c)`` is mapped to a physical
+        eigenframe source via `_from_caustic_fixed` at that node's OWN
+        gamma BEFORE the engine call.  There is no arc-length map and no
+        cusp-spanning rejection (the polar coordinate is cusp-safe by
+        construction).  A parameter point that refuses at any ``w`` node
+        (or returns a non-finite envelope) is recorded refused (in
+        ``(gamma, rho, theta_c)`` coordinates) and left as zeros in the
+        value arrays.
 
         Domain contract (exterior-only): the far-field label subtracts the
         resolved geometric-optics images with the switch forced on for
         every real channel, so it is small and smooth ONLY where the box
-        lies wholly in the caustic EXTERIOR.  Near-caustic domains belong to
-        TUBE charts; production tiling enforces the exterior contract, which
-        this method does NOT itself guard -- callers must supply an exterior
-        arc.
+        lies wholly in the caustic EXTERIOR.  Near-caustic domains belong
+        to TUBE charts; production tiling enforces the exterior contract,
+        which this method does NOT itself guard -- callers must supply an
+        exterior tile.
 
         Parameters
         ----------
         gamma_range : tuple[float, float]
             External-shear axis bounds ``(low, high)``.
-        s_range, d_range : tuple[float, float]
-            Far-field-smooth spatial axis bounds ``(low, high)``: ``s`` is
-            caustic arc length (dimensionless source-plane ``y`` units) and
-            ``d`` the signed perpendicular distance (``+`` outside the
-            caustic, ``-`` inside).
+        rho_range, theta_c_range : tuple[float, float]
+            Caustic-fixed spatial axis bounds ``(low, high)``: ``rho`` is
+            the piecewise caustic-fixed radial coordinate and ``theta_c``
+            the caustic-fixed polar angle in radians.
         w_range : tuple[float, float]
             Dimensionless-frequency bounds ``(w_min, w_max)``, both
             strictly positive.
-        arc_theta_lo, arc_theta_hi : float
-            Eigenframe caustic polar-angle endpoints of the arc (radians),
-            ``arc_theta_lo < arc_theta_hi``, defining the arc-length map.
-        arc_branch : int
-            Square-root branch ``+-1`` of the arc (``+1`` positive-parity
-            astroid; ``+-1`` a macro-saddle deltoid edge).
-        n_gamma, n_s, n_d : int, optional
+        n_gamma, n_rho, n_theta_c : int, optional
             Nodes per parameter axis (default 7; Professor Q2 sizing).
         w_nodes_per_decade : int, optional
             Density of the dense log-w training axis (default 15).
         definition : str, optional
             Envelope-definition tag the chart is trained on (default the
-            far-field kernel-sum label).  Pass the interior SACR-C tag
-            (`_INTERIOR_ENVELOPE_DEFINITION`) to build a whole-interior
-            chart on the caustic-region ``partition.envelope`` (Build
-            S2-3).
+            far-field kernel-sum label).
 
         Returns
         -------
@@ -3589,124 +3808,72 @@ class LensAmplificationSurrogate:
         ------
         ValueError
             If ``definition`` is not a known envelope-definition tag.
-        LensDomainError
-            If the arc spans a caustic cusp (or a macro-saddle wedge edge)
-            at any gamma node (`_reject_if_cusp_spanning`); the caller must
-            subdivide the tile.
         CarrierDiscontinuityError
-            For an interior chart whose tile straddles a critical-basin
-            flip, or for an exterior chart whose frame-invariant far-field
-            label winds faster than the Nyquist ``pi/2`` per node gap
-            (`_assert_farfield_carrier_continuity`); the tile must be
-            subdivided.
+            For a chart whose frame-invariant exterior-polar label
+            winds faster than the Nyquist equivalent per node gap
+            (`_assert_exterior_polar_carrier_continuity`); the tile must
+            be subdivided.
         """
         definition = _validate_farfield_definition(definition, 'chart build')
-        interior = definition in _KNOWN_INTERIOR_DEFINITIONS
-        arc_branch = int(arc_branch)
-        arc_theta_lo = float(arc_theta_lo)
-        arc_theta_hi = float(arc_theta_hi)
         log_w_grid = _log_w_grid(w_range, w_nodes_per_decade)
         gamma_grid = _log_reach_gamma_axis(gamma_range, n_gamma, 'gamma')
-        s_grid = _uniform_axis(s_range, n_s, 's')
-        d_grid = _uniform_axis(d_range, n_d, 'd')
-        # Cusp/wedge-edge rejection: the arc-length coordinate is only
-        # single-valued on a cusp-free arc.  Reject the whole arc (propagate
-        # LensDomainError to the tiler) if any gamma node's arc spans a
-        # caustic cusp -- s is smooth across the C2 kinks the raw theta_c
-        # angle produced, so there is NO cusp-node union to add here.
-        for gamma in gamma_grid:
-            _reject_if_cusp_spanning(float(gamma), arc_theta_lo,
-                                     arc_theta_hi, arc_branch)
-        arc_map = _caustic_arclength_map(gamma_grid, arc_theta_lo,
-                                         arc_theta_hi, arc_branch)
+        rho_grid = _uniform_axis(rho_range, n_rho, 'rho')
+        theta_c_grid = _uniform_axis(theta_c_range, n_theta_c, 'theta_c')
         w_grid = np.exp(log_w_grid)
 
-        shape = (log_w_grid.size, gamma_grid.size, s_grid.size, d_grid.size)
+        shape = (log_w_grid.size, gamma_grid.size, rho_grid.size,
+                 theta_c_grid.size)
         envelope_real = np.zeros(shape, dtype=float)
         envelope_imag = np.zeros(shape, dtype=float)
         refused: list[tuple[float, float, float]] = []
-        # Parked-carrier ``critical_source`` per node (interior only), for
-        # the basin-continuity guard; NaN marks a refused/unfilled node.
-        carrier = np.full((gamma_grid.size, s_grid.size,
-                           d_grid.size, 2), np.nan, dtype=float)
 
         for i_g, gamma in enumerate(gamma_grid):
-            for i_s, s in enumerate(s_grid):
-                for i_d, d in enumerate(d_grid):
-                    # Fresh tracker per point -> deterministic initial
-                    # labeling; the envelope is well-defined per point and
-                    # independent of label continuation.
+            for i_r, rho in enumerate(rho_grid):
+                for i_t, theta_c in enumerate(theta_c_grid):
                     channels = ChangRefsdalChannels(w_grid)
                     try:
-                        # Far-field-smooth node -> physical eigenframe
-                        # source at the node's OWN gamma.  The medial-axis
-                        # guard rejects a node whose foot is ambiguous; the
-                        # inverse map / engine may refuse at the parity wall
-                        # -- either records the node refused (the documented
-                        # `from_engine` contract) instead of crashing.
-                        y1_eig, y2_eig = _from_farfield_smooth(
-                            float(gamma), float(s), float(d), arc_map,
-                            arc_branch)
-                        _reject_if_near_tied_foot(
-                            float(gamma), float(y1_eig), float(y2_eig))
+                        y1_eig, y2_eig = _from_caustic_fixed(
+                            float(gamma), float(rho), float(theta_c))
                         partition = channels.evaluate(
                             gamma=float(gamma),
                             y=(y1_eig, y2_eig),
                             beta=0.0, kappa=0.0)
                     except _REFUSAL_ERRORS:
-                        refused.append((float(gamma), float(s), float(d)))
+                        refused.append(
+                            (float(gamma), float(rho), float(theta_c)))
                         continue
-                    # Interior tiles store the SACR-C ``tau_c``-demodulated
-                    # envelope (switch ON, near-merged images switched in);
-                    # exterior tiles store the far-field kernel-sum label.
-                    env = (partition.envelope if interior
-                           else farfield_envelope_from_partition(
-                               partition, definition))
+                    env = farfield_envelope_from_partition(
+                        partition, definition)
                     if not np.all(np.isfinite(env)):
-                        # Conservative: a non-finite envelope is treated as
-                        # a refusal rather than served as a value (F005).
-                        refused.append((float(gamma), float(s), float(d)))
+                        refused.append(
+                            (float(gamma), float(rho), float(theta_c)))
                         continue
-                    envelope_real[:, i_g, i_s, i_d] = env.real
-                    envelope_imag[:, i_g, i_s, i_d] = env.imag
-                    carrier[i_g, i_s, i_d] = partition.critical_source
+                    envelope_real[:, i_g, i_r, i_t] = env.real
+                    envelope_imag[:, i_g, i_r, i_t] = env.imag
 
-        if interior:
-            # Interpolator hygiene: the tau_c-demodulated envelope is smooth
-            # only within one nearest-caustic basin.  Reject a tile that
-            # straddles a medial ridge (basin flip) for subdivision.
-            _assert_carrier_continuity(
-                carrier, gamma_grid,
-                (gamma_grid.size, s_grid.size, d_grid.size))
-        else:
-            # Interpolator hygiene, exterior twin: the stored far-field label
-            # is the frame-invariant demodulated ``E_tilde``.  Reject for
-            # subdivision a tile whose label JUMPS by more than the chart's
-            # peak magnitude across one node gap -- gross aliasing a cubic
-            # spline cannot represent.  Measured as a re/im increment, not a
-            # phase step, so amplitude nulls (where ``arg`` swings but the
-            # splined fields stay smooth) are not false-positived into
-            # ladder-served gaps (F022).
-            _assert_farfield_carrier_continuity(
-                envelope_real + 1j * envelope_imag, float(w_grid[-1]),
-                gamma_grid,
-                (gamma_grid.size, s_grid.size, d_grid.size))
+        # Interpolator hygiene, exterior branch: the stored far-field label
+        # is the frame-invariant demodulated ``E_tilde``.  Reject for
+        # subdivision a tile whose label JUMPS by more than the chart's
+        # peak magnitude across one node gap.
+        _assert_exterior_polar_carrier_continuity(
+            envelope_real + 1j * envelope_imag, float(w_grid[-1]),
+            gamma_grid,
+            (gamma_grid.size, rho_grid.size, theta_c_grid.size))
 
         refused_points = (np.array(refused, dtype=float) if refused
                           else np.empty((0, 3), dtype=float))
         image_count, parity = cls._box_region_labels(
-            gamma_grid, s_grid, d_grid, arc_map, arc_branch)
-        chart = FarFieldChart.from_values(
-            gamma_grid=gamma_grid, s_grid=s_grid,
-            d_grid=d_grid, log_w_grid=log_w_grid,
+            gamma_grid, rho_grid, theta_c_grid)
+        chart = ExteriorPolarChart.from_values(
+            gamma_grid=gamma_grid, rho_grid=rho_grid,
+            theta_c_grid=theta_c_grid, log_w_grid=log_w_grid,
             envelope_real=envelope_real, envelope_imag=envelope_imag,
-            arc_map=arc_map,
             image_count=image_count, parity=parity,
             eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
             refused_points=refused_points,
             envelope_definition=definition)
         provenance = cls._build_provenance(
-            gamma_range, s_range, d_range, w_range, shape,
+            gamma_range, rho_range, theta_c_range, w_range, shape,
             envelope_real, envelope_imag)
         return cls([chart], provenance)
 
@@ -4105,18 +4272,19 @@ class LensAmplificationSurrogate:
         return cls([chart], provenance)
 
     @staticmethod
-    def _box_region_labels(gamma_grid: np.ndarray, s_grid: np.ndarray,
-                           d_grid: np.ndarray, arc_map: _FarFieldArcMap,
-                           branch: int) -> tuple[int | None, int | None]:
+    def _box_region_labels(gamma_grid: np.ndarray, rho_grid: np.ndarray,
+                           theta_c_grid: np.ndarray
+                           ) -> tuple[int | None, int | None]:
         """Real-image count and parity of the box's single region.
 
         The box lies inside one image-count region, so the region label is
         read once from a cheap ``w``-independent
         `ChangRefsdalChannels.geometry_partition` at the box centre.  The
-        centre is a far-field-smooth ``(s, d)`` node, mapped to a physical
-        eigenframe source at the central ``gamma`` (`_from_farfield_smooth`)
-        before the geometry call.  Parity is deterministic in ``gamma``
-        (``+1`` for ``gamma < 1``, ``-1`` for ``gamma > 1``).
+        centre is a caustic-fixed ``(rho, theta_c)`` node, mapped to a
+        physical eigenframe source at the central ``gamma``
+        (`_from_caustic_fixed`) before the geometry call.  Parity is
+        deterministic in ``gamma`` (``+1`` for ``gamma < 1``,
+        ``-1`` for ``gamma > 1``).
 
         Returns ``(None, None)`` when the box-centre map refuses -- e.g. a box
         whose centre ``gamma`` is exactly ``1.0`` hits the ``_caustic_reach``
@@ -4124,11 +4292,10 @@ class LensAmplificationSurrogate:
         (handled conservatively downstream) instead of crashing construction.
         """
         gamma_c = 0.5 * float(gamma_grid[0] + gamma_grid[-1])
-        s_c = 0.5 * float(s_grid[0] + s_grid[-1])
-        d_c = 0.5 * float(d_grid[0] + d_grid[-1])
+        rho_c = 0.5 * float(rho_grid[0] + rho_grid[-1])
+        theta_c_c = 0.5 * float(theta_c_grid[0] + theta_c_grid[-1])
         try:
-            y1_c, y2_c = _from_farfield_smooth(gamma_c, s_c, d_c, arc_map,
-                                               int(branch))
+            y1_c, y2_c = _from_caustic_fixed(gamma_c, rho_c, theta_c_c)
             geom = ChangRefsdalChannels(
                 np.array([1.0, 2.0])).geometry_partition(
                     gamma=gamma_c, y=(y1_c, y2_c), beta=0.0, kappa=0.0)
@@ -4139,36 +4306,36 @@ class LensAmplificationSurrogate:
 
     @staticmethod
     def _build_provenance(gamma_range: tuple[float, float],
-                          s_range: tuple[float, float],
-                          d_range: tuple[float, float],
+                          rho_range: tuple[float, float],
+                          theta_c_range: tuple[float, float],
                           w_range: tuple[float, float],
                           shape: tuple[int, int, int, int],
                           envelope_real: np.ndarray,
                           envelope_imag: np.ndarray) -> dict:
         """Build the minimal provenance dict, including a short train hash.
 
-        The spatial ranges are the far-field-smooth ``(s, d)`` axis bounds
-        (arc length ``s`` and signed perpendicular distance ``d``; Build
-        1e-farfield WP2); the ``axis_schema`` tag records the coordinate
-        convention so a stale caustic-fixed / raw-eigenframe artifact is
-        distinguishable at load.
+        The spatial ranges are the caustic-fixed ``(rho, theta_c)`` axis
+        bounds; the ``axis_schema`` tag records the coordinate convention
+        so a stale far-field-smooth artifact is distinguishable at load.
         """
         hasher = hashlib.sha1()
         hasher.update(np.ascontiguousarray(envelope_real).tobytes())
         hasher.update(np.ascontiguousarray(envelope_imag).tobytes())
-        n_w, n_gamma, n_s, n_d = shape
+        n_w, n_gamma, n_rho, n_theta_c = shape
         return {
             'gamma_range': [float(gamma_range[0]), float(gamma_range[1])],
-            's_range': [float(s_range[0]), float(s_range[1])],
-            'd_range': [float(d_range[0]), float(d_range[1])],
-            'axis_schema': _FARFIELD_AXIS_SCHEMA,
+            'rho_range': [float(rho_range[0]), float(rho_range[1])],
+            'theta_c_range': [float(theta_c_range[0]),
+                              float(theta_c_range[1])],
+            'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA,
             'w_range': [float(w_range[0]), float(w_range[1])],
             'resolution': {'n_w': int(n_w), 'n_gamma': int(n_gamma),
-                           'n_s': int(n_s), 'n_d': int(n_d)},
+                           'n_rho': int(n_rho),
+                           'n_theta_c': int(n_theta_c)},
             'beta': 0.0,
             'kappa': 0.0,
             'chart_count': 1,
-            'chart_types': ['farfield'],
+            'chart_types': ['exterior_polar'],
             'training_hash': hasher.hexdigest()[:12]}
 
     @staticmethod
@@ -4326,7 +4493,7 @@ class LensAmplificationSurrogate:
             the caller must fall back to the exact engine.
         definition : str or None
             The served chart's envelope-definition tag when a
-            `FarFieldChart`, `LobeInteriorChart`, or `InteriorWedgeChart`
+            `ExteriorPolarChart`, `LobeInteriorChart`, or `InteriorWedgeChart`
             is served (the serving-side reconstruction dispatches on it --
             a lobe/wedge chart's INTERIOR_SACR_C label reconstructs by the
             interior mirror in the query geometry's ``tau_c`` frame,
@@ -4341,12 +4508,10 @@ class LensAmplificationSurrogate:
 
         log_w = np.log(w_flat)
         y1_eig, y2_eig = _rotate_to_eigenframe(y1, y2, beta)
-        # The far-field chart query coordinate is the far-field-smooth
-        # (s, d) (Build 1e-farfield WP2); it is chart-specific (it depends
-        # on each chart's arc_map) so it is computed per chart INSIDE
+        # The exterior-polar chart query coordinate is the caustic-fixed
+        # (rho, theta_c); it is computed per chart INSIDE
         # select_chart / _evaluate_chart from the eigenframe source, not
-        # once here.  A source whose smooth coordinate is ambiguous makes
-        # the far-field charts decline and the caller uses the exact engine.
+        # once here.
         chart = select_chart(
             self.charts, gamma=gamma, log_w_min=float(log_w.min()),
             log_w_max=float(log_w.max()), eta=eta, theta=theta,
@@ -4358,7 +4523,8 @@ class LensAmplificationSurrogate:
             chart, gamma=gamma, eta=eta, theta=theta, log_w_query=log_w,
             y1_eig=y1_eig, y2_eig=y2_eig)
         definition = (chart.envelope_definition
-                      if isinstance(chart, (FarFieldChart, LobeInteriorChart,
+                      if isinstance(chart, (ExteriorPolarChart,
+                                            LobeInteriorChart,
                                             InteriorWedgeChart))
                       else None)
         return env_flat.reshape(w.shape), True, definition
@@ -4367,16 +4533,16 @@ class LensAmplificationSurrogate:
 
     def in_domain(self, gamma: float, y1: float, y2: float,
                   beta: float) -> bool:
-        """Whether a far-field chart serves ``(gamma, y1, y2, beta)`` in the
-        caustic arc-length coordinate ``(s, d)`` (the 8a domain gate).
+        """Whether an exterior-polar chart serves ``(gamma, y1, y2, beta)``
+        (the 8a domain gate).
 
         Rotates the source into the shear eigenframe and tests, over the
-        far-field charts, whether some chart's gamma / arc-length ``s`` /
-        perpendicular-distance ``d`` box contains the eigenframe point and
-        the point clears that chart's exclusion balls -- the exact 8a
-        single-box gate, generalized to the far-field charts of a global
-        surrogate.  It does NOT consult ``eta`` / image count (use `serve`
-        for the full guard stack).
+        exterior-polar charts, whether some chart's gamma / rho / theta_c
+        box contains the eigenframe point and the point clears that
+        chart's exclusion balls -- the exact 8a single-box gate,
+        generalized to the exterior-polar charts of a global surrogate.
+        It does NOT consult ``eta`` / image count (use `serve` for the full
+        guard stack).
 
         Parameters
         ----------
@@ -4390,55 +4556,50 @@ class LensAmplificationSurrogate:
         Returns
         -------
         bool
-            ``True`` if some far-field chart contains the eigenframe point.
+            ``True`` if some exterior-polar chart contains the eigenframe
+            point.
         """
         y1_eig, y2_eig = _rotate_to_eigenframe(y1, y2, beta)
-        return self._farfield_raw_chart(gamma, y1_eig, y2_eig) is not None
+        return self._exterior_polar_raw_chart(gamma, y1_eig, y2_eig) is not None
 
-    def _farfield_raw_chart(self, gamma: float, y1_eig: float,
-                            y2_eig: float):
-        """First far-field chart whose box contains the eigenframe source.
+    def _exterior_polar_raw_chart(self, gamma: float, y1_eig: float,
+                                   y2_eig: float):
+        """First exterior-polar chart whose box contains the eigenframe source.
 
-        The far-field charts are gridded over the far-field-smooth source
-        coordinate ``(s, d)`` (Build 1e-farfield WP2), so each chart maps the
-        eigenframe source to its own ``(s, d)`` through its stored
-        ``arc_map`` (declining on any smooth-map refusal) and tests
-        containment on ``s_grid`` / ``d_grid`` plus the exclusion balls.
+        The exterior-polar charts are gridded over the caustic-fixed
+        ``(rho, theta_c)`` coordinate, so each chart maps the eigenframe
+        source to its own ``(rho, theta_c)`` and tests containment on
+        ``rho_grid`` / ``theta_c_grid`` plus the exclusion balls.
         """
         for chart in self.charts:
-            if not isinstance(chart, FarFieldChart):
-                continue
-            # Macro-saddle far-field charts are exact-engine-only, including
-            # stale manual/loaded records that carry otherwise valid arrays.
-            if chart.parity != 1:
+            if not isinstance(chart, ExteriorPolarChart):
                 continue
             if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
                 continue
             try:
-                s, d = _to_farfield_smooth(gamma, y1_eig, y2_eig,
-                                           chart.arc_map, chart.arc_map.branch)
+                rho, theta_c = _to_caustic_fixed(gamma, y1_eig, y2_eig)
             except LensDomainError:
                 continue
-            if not (chart.s_grid[0] <= s <= chart.s_grid[-1]
-                    and chart.d_grid[0] <= d <= chart.d_grid[-1]):
+            if not (chart.rho_grid[0] <= rho <= chart.rho_grid[-1]
+                    and (chart.theta_c_grid[0] <= theta_c
+                         <= chart.theta_c_grid[-1])):
                 continue
-            if _in_exclusion_ball(chart, gamma, s, d):
+            if _in_exclusion_ball(chart, gamma, rho, theta_c):
                 continue
             return chart
         return None
 
     def envelope(self, w_array: np.ndarray, gamma: float, y1: float,
                  y2: float, beta: float) -> tuple[np.ndarray, bool]:
-        """Legacy 8a far-field envelope query (arc-length ``(s, d)`` lookup).
+        """Legacy 8a exterior-polar envelope query (partial guard stack).
 
         Preserves the 8a call signature: rotates ``(y1, y2)`` into the
-        eigenframe, selects the first far-field chart whose gamma /
-        arc-length ``s`` / perpendicular-distance ``d`` box contains the
-        point (exclusion balls honoured), and evaluates its splines over
-        ``w``.  Returns ``served=False`` (zeros) when no far-field chart
-        contains the point or any ``w`` is outside that chart's band.  Does
-        NOT run the tube/eta guard stack -- use `serve` for the full global
-        query.
+        eigenframe, selects the first exterior-polar chart whose gamma /
+        rho / theta_c box contains the point (exclusion balls honoured),
+        and evaluates its splines over ``w``.  Returns ``served=False``
+        (zeros) when no chart contains the point or any ``w`` is outside
+        that chart's band.  Does NOT run the tube/eta guard stack -- use
+        `serve` for the full global query.
 
         Parameters
         ----------
@@ -4456,11 +4617,11 @@ class LensAmplificationSurrogate:
         E_array : np.ndarray
             Complex emulated envelope shaped like ``w_array``.
         served : bool
-            ``True`` if a far-field chart emulated the envelope.
+            ``True`` if a chart emulated the envelope.
         """
         w = np.asarray(w_array, dtype=float)
         y1_eig, y2_eig = _rotate_to_eigenframe(y1, y2, beta)
-        chart = self._farfield_raw_chart(gamma, y1_eig, y2_eig)
+        chart = self._exterior_polar_raw_chart(gamma, y1_eig, y2_eig)
         if chart is None:
             return np.zeros(w.shape, dtype=complex), False
 
@@ -4555,27 +4716,23 @@ class LensAmplificationSurrogate:
 
         A pre-multichart single-box artifact stores raw-eigenframe /
         caustic-fixed spatial axes and the OLD far-field envelope label; it
-        cannot be reconstructed under the far-field-smooth ``(s, d)`` serve
-        mirror (Build 1e-farfield WP2) and is refused loudly rather than
-        served at the wrong coordinate.  The definition and axis-schema
-        validators below both hard-refuse an absent/unknown tag, so control
-        never reaches the trailing guard; it is kept as a defensive backstop.
+        cannot be reconstructed under the exterior-polar ``(rho, theta_c)``
+        serve mirror and is refused loudly rather than served at the wrong
+        coordinate.  The definition and axis-schema validators below both
+        hard-refuse an absent/unknown tag, so control never reaches the
+        trailing guard; it is kept as a defensive backstop.
         """
-        # A legacy single-box artifact predates the far-field
-        # envelope-definition tag (Build 8g-b) and the far-field-smooth axis
-        # schema (Build 1e-farfield WP2): both validators hard-refuse an
-        # absent/unknown tag, so a legacy artifact fails loudly here.
         tag = (str(data['envelope_definition'])
                if 'envelope_definition' in data.files else None)
         _validate_farfield_definition(tag, 'legacy single-box artifact')
         axis_tag = (str(data['axis_schema'])
                     if 'axis_schema' in data.files else None)
-        _validate_farfield_axis_schema(
+        _validate_exterior_polar_axis_schema(
             axis_tag, 'legacy single-box artifact')
         raise ValueError(
             'Legacy single-box artifact carries no per-chart schema and '
-            'cannot be reconstructed as a far-field-smooth (s, d) chart; '
-            'retrain the surrogate (Build 1e-farfield WP2).')
+            'cannot be reconstructed as an exterior-polar (rho, theta_c) '
+            'chart; retrain the surrogate.')
 
 
 # ---- Per-chart (de)serialization helpers ------------------------------
@@ -4676,6 +4833,18 @@ def _validate_farfield_axis_schema(tag, artifact_label: str) -> str:
     return _validate_axis_schema(
         tag, _KNOWN_FARFIELD_AXIS_SCHEMAS, f'Far-field {artifact_label}')
 
+def _validate_exterior_polar_axis_schema(tag, artifact_label: str) -> str:
+    """Hard-refuse an exterior-polar chart with an absent or unknown axis schema.
+
+    Thin wrapper over `_validate_axis_schema` binding the exterior-polar
+    known set.  Exterior-polar charts require the self-contained caustic-fixed
+    ``(rho, theta_c)`` coordinate and must not serve under the retired
+    far-field-smooth ``(s, d)`` convention.
+    """
+    return _validate_axis_schema(
+        tag, _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS,
+        f'Exterior-polar {artifact_label}')
+
 
 def _validate_lobe_axis_schema(tag, artifact_label: str) -> str:
     """Hard-refuse a lobe-interior chart with an absent or unknown schema.
@@ -4745,27 +4914,18 @@ def _chart_to_npz(chart, index: int) -> dict:
         if chart.theta_to_u is not None:
             arrays[prefix + 'theta_to_u'] = chart.theta_to_u
     else:
-        # Far-field exterior branch (Build 1e-farfield WP2): the spatial axes
-        # are the far-field-smooth arc length ``s`` and signed perpendicular
-        # distance ``d``, and the gamma-resolved arc-length map that defines
-        # the ``theta <-> s`` transform is persisted alongside them (the axes
-        # are meaningless without it).  The arc's branch and angular endpoints
-        # ride in meta; the 2-D table (gamma_nodes, theta_fine, s_table) rides
-        # in arrays.
-        meta = {'kind': 'farfield', 'image_count': chart.image_count,
+        # Exterior-polar branch: the spatial axes are the caustic-fixed
+        # ``(rho, theta_c)`` -- self-contained, single-valued coordinates
+        # with no arc-length map needed.  The axis-schema tag hard-refuses
+        # a stale far-field-smooth artifact at load.
+        meta = {'kind': 'exterior_polar', 'image_count': chart.image_count,
                 'parity': chart.parity,
                 'eta_overlap_min': chart.eta_overlap_min,
                 'envelope_definition': chart.envelope_definition,
-                'axis_schema': _FARFIELD_AXIS_SCHEMA,
-                'arc_branch': int(chart.arc_map.branch),
-                'arc_theta_lo': float(chart.arc_map.theta_lo),
-                'arc_theta_hi': float(chart.arc_map.theta_hi)}
-        axes = (chart.log_w_grid, chart.gamma_grid, chart.s_grid,
-                chart.d_grid)
-        arrays = {prefix + 'refused': chart.refused_points,
-                  prefix + 'arc_gamma_nodes': chart.arc_map.gamma_nodes,
-                  prefix + 'arc_theta_fine': chart.arc_map.theta_fine,
-                  prefix + 'arc_s_table': chart.arc_map.s_table}
+                'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA}
+        axes = (chart.log_w_grid, chart.gamma_grid, chart.rho_grid,
+                chart.theta_c_grid)
+        arrays = {prefix + 'refused': chart.refused_points}
     arrays[prefix + 'meta'] = np.array(json.dumps(meta))
     arrays[prefix + 're_coeffs'] = chart.real_coeffs
     arrays[prefix + 'im_coeffs'] = chart.imag_coeffs
@@ -4857,28 +5017,13 @@ def _chart_from_npz(data, index: int):
             theta_to_u=theta_to_u)
     definition = _validate_farfield_definition(
         meta.get('envelope_definition'), f'chart {index}')
-    _validate_farfield_axis_schema(
+    _validate_exterior_polar_axis_schema(
         meta.get('axis_schema'), f'chart {index}')
-    # Rebuild the gamma-resolved arc-length map from the persisted table and
-    # arc metadata; a far-field chart is meaningless without it, so a missing
-    # key raises loudly here (no legacy caustic-fixed branch -- Build
-    # 1e-farfield WP2).
-    arc_map = _FarFieldArcMap(
-        gamma_nodes=np.ascontiguousarray(data[prefix + 'arc_gamma_nodes'],
-                                         dtype=float),
-        theta_fine=np.ascontiguousarray(data[prefix + 'arc_theta_fine'],
-                                        dtype=float),
-        s_table=np.ascontiguousarray(data[prefix + 'arc_s_table'],
-                                     dtype=float),
-        branch=int(meta['arc_branch']),
-        theta_lo=float(meta['arc_theta_lo']),
-        theta_hi=float(meta['arc_theta_hi']))
-    return FarFieldChart._assemble(
-        gamma_grid=gamma_grid, s_grid=p1_grid, d_grid=p2_grid,
+    return ExteriorPolarChart._assemble(
+        gamma_grid=gamma_grid, rho_grid=p1_grid, theta_c_grid=p2_grid,
         log_w_grid=log_w_grid, real_coeffs=real_coeffs,
         imag_coeffs=imag_coeffs, knots=knots,
         image_count=meta['image_count'], parity=meta['parity'],
         eta_overlap_min=meta['eta_overlap_min'],
         refused_points=data[prefix + 'refused'],
-        arc_map=arc_map,
         envelope_definition=definition)

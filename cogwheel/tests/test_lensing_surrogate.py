@@ -405,31 +405,37 @@ def _train(box: tuple, n_param: int) -> LensAmplificationSurrogate:
     if gamma_range[0] >= 1.0:
         raise ValueError('macro-saddle far field is exact-engine-only')
     gamma_grid = np.linspace(*gamma_range, n_param)
-    # A Cartesian ``s x d`` box cannot cover the former broad physical box:
-    # its inverse contains sources whose *nearest* foot moves to another
-    # astroid edge.  This local, cusp-free patch is an actual one-foot basin
-    # and retains a physical off-grid accuracy witness at theta=pi-.25.
-    arc_map = surrogate_module._caustic_arclength_map(
-        gamma_grid, np.pi - 0.5, np.pi, 1)
-    s_grid = np.linspace(0.16, 0.21, n_param)
-    d_grid = np.linspace(0.08, 0.20, n_param)
+    # Compute the caustic-fixed (rho, theta_c) bounds of the eigenframe
+    # source box at the band-centre gamma.
+    gamma_c = 0.5 * float(gamma_grid[0] + gamma_grid[-1])
+    corners_y1 = [float(_y1_range[0]), float(_y1_range[0]),
+                  float(_y1_range[1]), float(_y1_range[1])]
+    corners_y2 = [float(_y2_range[0]), float(_y2_range[1]),
+                  float(_y2_range[0]), float(_y2_range[1])]
+    rhos, theta_cs = [], []
+    for y1, y2 in zip(corners_y1, corners_y2):
+        rho, theta_c = surrogate_module._to_caustic_fixed(gamma_c, y1, y2)
+        rhos.append(rho)
+        theta_cs.append(theta_c)
+    rho_range = (float(np.min(rhos)), float(np.max(rhos)))
+    theta_c_range = (float(np.min(theta_cs)), float(np.max(theta_cs)))
     return LensAmplificationSurrogate.from_engine(
-        gamma_range=gamma_range, s_range=(float(s_grid[0]), float(s_grid[-1])),
-        d_range=(float(d_grid[0]), float(d_grid[-1])), w_range=TRAIN_W_RANGE,
-        arc_theta_lo=arc_map.theta_lo, arc_theta_hi=arc_map.theta_hi,
-        arc_branch=arc_map.branch, n_gamma=n_param, n_s=n_param, n_d=n_param,
+        gamma_range=gamma_range, rho_range=rho_range,
+        theta_c_range=theta_c_range, w_range=TRAIN_W_RANGE,
+        n_gamma=n_param, n_rho=n_param, n_theta_c=n_param,
         w_nodes_per_decade=TRAIN_W_NODES_PER_DECADE)
 
 
 @functools.lru_cache(maxsize=1)
 def _refusal_surrogate() -> LensAmplificationSurrogate:
-    """Positive far-field chart with one current-coordinate refusal seam."""
+    """Positive exterior-polar chart with one current-coordinate refusal seam."""
     base = _pos_surrogate_ship()
     chart = base.charts[0]
-    gamma, y1, y2 = 0.40, 0.6487776068977906, 0.10853019998303631
-    s, d = surrogate_module._to_farfield_smooth(
-        gamma, y1, y2, chart.arc_map, chart.arc_map.branch)
-    refused = np.array([[gamma, s, d]], dtype=float)
+    gamma, rho, theta_c = (float(chart.gamma_grid[2]),
+                           float(chart.rho_grid[2]),
+                           float(chart.theta_c_grid[2]))
+    y1, y2 = surrogate_module._from_caustic_fixed(gamma, rho, theta_c)
+    refused = np.array([[gamma, rho, theta_c]], dtype=float)
     refusal_chart = dataclasses.replace(chart, refused_points=refused)
     return LensAmplificationSurrogate(
         [refusal_chart], dict(base.provenance, training_hash='refusal-seam'))
@@ -488,10 +494,8 @@ def _lens_candidate(gamma, y1, y2, beta=0.0, kappa=0.0,
 def _positive_lens_configs() -> tuple[tuple[str, dict, bool], ...]:
     """Physical positive chart-node probes for likelihood value checks.
 
-    The far-field port's stored axes are ``(gamma, s, d)``, not the retired
-    raw source rectangle.  Rebuild each physical probe through the chart's
-    current gamma-resolved inverse so it is a genuine served query rather
-    than a stale ``(rho, theta_c)`` fixture that silently falls through.
+    Rebuild each physical probe through the chart's current gamma-resolved
+    inverse so it is a genuine served query rather than a stale fixture.
     """
     chart = _pos_surrogate_ship().charts[0]
     probes = (
@@ -500,11 +504,11 @@ def _positive_lens_configs() -> tuple[tuple[str, dict, bool], ...]:
         ('box-edge', 4, 4, 4, False),
     )
     configs = []
-    for label, i_gamma, i_s, i_d, nat_tier in probes:
+    for label, i_gamma, i_rho, i_thetac, nat_tier in probes:
         gamma = float(chart.gamma_grid[i_gamma])
-        y1, y2 = surrogate_module._from_farfield_smooth(
-            gamma, float(chart.s_grid[i_s]), float(chart.d_grid[i_d]),
-            chart.arc_map, chart.arc_map.branch)
+        y1, y2 = surrogate_module._from_caustic_fixed(
+            gamma, float(chart.rho_grid[i_rho]),
+            float(chart.theta_c_grid[i_thetac]))
         configs.append(
             (label, dict(gamma=gamma, y1=float(y1), y2=float(y2)), nat_tier))
     return tuple(configs)
@@ -552,7 +556,7 @@ def _reconstruct_via_surrogate(sur: LensAmplificationSurrogate,
     that `serve` returns EXACTLY as the production likelihood does
     (`LensedRelativeBinningLikelihood._surrogate_coefficients`, Build 8g-b):
 
-    - A `FarFieldChart` carries the far-field label
+    - An `ExteriorPolarChart` carries the far-field label
       ``E_ff = F - sum_{a real} H_a e^{1j w tau_a}``; its exact inverse forces
       the switch to 1 on every real channel with NO ``tau_c`` carrier
       (``critical_delay = 0``), so the kernel sum telescopes back to ``F``.
@@ -637,12 +641,12 @@ class BetaEliminationTestCase(SurrogateTestCase):
         # reduction), so the query's rotation lands back on this point.
         # An interior chart node isolates beta rotation from interpolation
         # accuracy.  Its physical source is rebuilt from the current
-        # gamma-resolved far-field map, never from retired raw axes.
+        # gamma-resolved caustic-fixed map, never from retired raw axes.
         chart = self.sur.charts[0]
-        gamma, s, d = chart.gamma_grid[2], chart.s_grid[2], chart.d_grid[2]
-        y1, y2 = surrogate_module._from_farfield_smooth(
-            float(gamma), float(s), float(d), chart.arc_map,
-            chart.arc_map.branch)
+        gamma, rho, theta_c = (chart.gamma_grid[2], chart.rho_grid[2],
+                                chart.theta_c_grid[2])
+        y1, y2 = surrogate_module._from_caustic_fixed(
+            float(gamma), float(rho), float(theta_c))
         self.eig = (float(gamma), float(y1), float(y2))
 
     def _source_at_beta(self, beta: float) -> tuple[float, float]:
@@ -900,28 +904,29 @@ class DomainGateTestCase(SurrogateTestCase):
         self.assertGreater(self.chart.refused_points.shape[0], 0,
                            'fixture must record at least one refusal')
 
-    def _source(self, *, d: float | None = None) -> tuple[float, float, float]:
-        gamma, s, refused_d = self.chart.refused_points[0]
-        y1, y2 = surrogate_module._from_farfield_smooth(
-            float(gamma), float(s), float(refused_d if d is None else d),
-            self.chart.arc_map, self.chart.arc_map.branch)
+    def _source(self, *, theta_c: float | None = None) -> tuple[float, float, float]:
+        gamma, rho, refused_thetac = self.chart.refused_points[0]
+        y1, y2 = surrogate_module._from_caustic_fixed(
+            float(gamma), float(rho),
+            float(refused_thetac if theta_c is None else theta_c))
         return float(gamma), float(y1), float(y2)
 
     def test_from_engine_records_named_refusals(self):
         """The test seam stores its physical engine-refusal witness."""
         refused_gammas = np.unique(self.chart.refused_points[:, 0])
         self.n_checks += 1
-        np.testing.assert_allclose(refused_gammas, [0.4], atol=0.0,
-                                   err_msg='refusal uses its stored gamma')
+        np.testing.assert_allclose(
+            refused_gammas, [self.chart.gamma_grid[2]], atol=0.0,
+            err_msg='refusal uses its stored gamma')
 
     def test_query_near_refused_point_declines(self):
         """A query within one grid spacing of a refused point -> served
         False (the exclusion ball), and the refused point itself -> False.
 
         The seam records the same physical witness in the chart's current
-        ``(gamma, s, d)`` coordinates.  Mapping it back through the stored
-        arc map makes the exclusion-ball premise independent of retired
-        origin-centred ``(rho, theta_c)`` coordinates.
+        ``(gamma, rho, theta_c)`` coordinates.  Mapping it back through the
+        stored caustic-fixed map makes the exclusion-ball premise
+        independent of retired raw source coordinates.
         """
         gamma, y1, y2 = self._source()
         self.n_checks += 1
@@ -930,7 +935,7 @@ class DomainGateTestCase(SurrogateTestCase):
 
     def test_query_outside_box_declines(self):
         """Axis-aligned outside the trained box -> served False."""
-        gamma, y1, y2 = self._source(d=0.15)
+        gamma, y1, y2 = self._source(theta_c=0.08)
         cases = {
             'gamma above box': (self.chart.gamma_grid[-1] + 0.05, y1, y2),
             'gamma below box': (self.chart.gamma_grid[0] - 0.05, y1, y2),
@@ -944,7 +949,7 @@ class DomainGateTestCase(SurrogateTestCase):
     def test_certified_interior_serves(self):
         """A point well inside the box, far from the refused column -> True
         with a finite envelope."""
-        gamma, y1, y2 = self._source(d=0.15)
+        gamma, y1, y2 = self._source(theta_c=0.08)
         self.n_checks += 1
         self.assertTrue(self.sur.in_domain(gamma, y1, y2, 0.0),
                         'declined a certified-interior query')
@@ -963,7 +968,7 @@ class DomainGateTestCase(SurrogateTestCase):
         never emulates a value the engine refused.  RED under mutation:
         patching the exclusion-ball helper (`surrogate._in_exclusion_ball`,
         the module global both ``envelope`` and ``in_domain`` resolve
-        through `_farfield_raw_chart`) to claim NO point is ever in a
+        through `_exterior_polar_raw_chart`) to claim NO point is ever in a
         refusal ball makes ``envelope`` serve a (fabricated) value -- and
         ``in_domain`` claim domain -- at that same point, so the
         ``served=False`` invariant the green test relies on FLIPS,
@@ -976,23 +981,23 @@ class DomainGateTestCase(SurrogateTestCase):
         UNCONDITIONALLY regardless of the exclusion ball -- mutating the
         ball there would prove nothing.  Instead this probes a valid,
         non-singular gamma just inside the exclusion ball around the
-        refused ``(gamma, s, d)`` node (the same construction
+        refused ``(gamma, rho, theta_c)`` node (the same construction
         `test_query_near_refused_point_declines` uses at
         ``offset_frac=0.3``), which isolates the exclusion-ball guard
         specifically.
 
         NOTE (8a -> multi-chart re-target): the 8a suite mutated
         ``in_domain`` directly because 8a's ``envelope`` consulted it; the
-        multi-chart ``envelope`` instead consults `_farfield_raw_chart`,
+        multi-chart ``envelope`` instead consults `_exterior_polar_raw_chart`,
         whose load-bearing guard IS the exclusion ball named in this
         docstring.  Mutating that exact guard preserves the original
         intent (and now flips BOTH ``envelope`` and ``in_domain`` red).
         """
-        gamma_r, s_r, d_r = self.chart.refused_points[0]
+        gamma_r, rho_r, theta_c_r = self.chart.refused_points[0]
         spacing = self.chart.param_spacing
         gamma_q = gamma_r + 0.3 * spacing[0]
-        y1_q, y2_q = surrogate_module._from_farfield_smooth(
-            gamma_q, s_r, d_r, self.chart.arc_map, self.chart.arc_map.branch)
+        y1_q, y2_q = surrogate_module._from_caustic_fixed(
+            gamma_q, rho_r, theta_c_r)
         w = np.array([1.0, 2.0, 4.0])
 
         _env, served = self.sur.envelope(w, gamma_q, y1_q, y2_q, 0.0)
@@ -1023,28 +1028,28 @@ class DomainGateTestCase(SurrogateTestCase):
             'ball is not the load-bearing domain guard (F010 has no teeth)')
 
     def _plot_served_slice(self):
-        """Plot the current far-field (gamma, d) gate at fixed arc length."""
+        """Plot the current exterior-polar (gamma, theta_c) gate at fixed rho."""
         OUTPUT_DIR.mkdir(exist_ok=True)
         chart = self.chart
         gammas = np.linspace(chart.gamma_grid[0] - 0.05,
                              chart.gamma_grid[-1] + 0.05, 60)
-        d_values = np.linspace(chart.d_grid[0] - 0.03, chart.d_grid[-1] + 0.03,
-                               60)
-        s_mid = 0.5 * (chart.s_grid[0] + chart.s_grid[-1])
-        served = np.zeros((d_values.size, gammas.size), dtype=float)
-        for i_d, d in enumerate(d_values):
+        thetac_values = np.linspace(chart.theta_c_grid[0] - 0.003,
+                                    chart.theta_c_grid[-1] + 0.003, 60)
+        rho_mid = 0.5 * (chart.rho_grid[0] + chart.rho_grid[-1])
+        served = np.zeros((thetac_values.size, gammas.size), dtype=float)
+        for i_tc, theta_c in enumerate(thetac_values):
             for i_g, gamma in enumerate(gammas):
                 try:
-                    y1, y2 = surrogate_module._from_farfield_smooth(
-                        gamma, s_mid, d, chart.arc_map, chart.arc_map.branch)
+                    y1, y2 = surrogate_module._from_caustic_fixed(
+                        gamma, rho_mid, theta_c)
                 except surrogate_module.LensDomainError:
                     continue
-                served[i_d, i_g] = self.sur.in_domain(gamma, y1, y2, 0.0)
+                served[i_tc, i_g] = self.sur.in_domain(gamma, y1, y2, 0.0)
         fig, ax = plt.subplots()
-        ax.pcolormesh(gammas, d_values, served, shading='auto', cmap='Greens')
+        ax.pcolormesh(gammas, thetac_values, served, shading='auto', cmap='Greens')
         ax.scatter(chart.refused_points[:, 0], chart.refused_points[:, 2],
                    c='red', s=8, label='refused nodes')
-        ax.set(xlabel='gamma', ylabel='signed caustic distance d',
+        ax.set(xlabel='gamma', ylabel='theta_c',
                title='served (green) vs exact-engine fallback slice')
         ax.legend()
         fig.savefig(OUTPUT_DIR / 'surrogate_domain_gate_slice.png', dpi=90)
@@ -1064,19 +1069,20 @@ class SerializationTestCase(SurrogateTestCase):
         self.sur = _refusal_surrogate()  # has a nonempty refused set
         self.w_grid = np.exp(self.sur.log_w_grid)
         # Served physical probes reconstructed from the chart's current
-        # far-field (s, d) coordinates.
+        # caustic-fixed (rho, theta_c) coordinates.
         chart = self.sur.charts[0]
         self.probes = []
-        for gamma, s, d in ((0.35, 0.18, 0.14), (0.40, 0.19, 0.16),
-                            (0.45, 0.20, 0.12)):
-            y1, y2 = surrogate_module._from_farfield_smooth(
-                gamma, s, d, chart.arc_map, chart.arc_map.branch)
+        for i_g, i_rho, i_tc in ((1, 1, 1), (2, 2, 2), (3, 3, 3)):
+            gamma = float(chart.gamma_grid[i_g])
+            y1, y2 = surrogate_module._from_caustic_fixed(
+                gamma, float(chart.rho_grid[i_rho]),
+                float(chart.theta_c_grid[i_tc]))
             self.probes.append((gamma, float(y1), float(y2)))
 
     def _assert_equivalent(self, other: LensAmplificationSurrogate,
                            tag: str) -> None:
         chart_a, chart_b = self.sur.charts[0], other.charts[0]
-        for grid_name in ('log_w_grid', 'gamma_grid', 's_grid', 'd_grid'):
+        for grid_name in ('log_w_grid', 'gamma_grid', 'rho_grid', 'theta_c_grid'):
             self.n_checks += 1
             np.testing.assert_array_equal(
                 getattr(chart_a, grid_name), getattr(chart_b, grid_name),
@@ -1085,12 +1091,6 @@ class SerializationTestCase(SurrogateTestCase):
         np.testing.assert_array_equal(
             chart_a.refused_points, chart_b.refused_points,
             err_msg=f'{tag}: refused-point set changed')
-        for map_name in ('gamma_nodes', 'theta_fine', 's_table'):
-            self.n_checks += 1
-            np.testing.assert_array_equal(
-                getattr(chart_a.arc_map, map_name),
-                getattr(chart_b.arc_map, map_name),
-                err_msg=f'{tag}: arc map {map_name} changed')
         self.n_checks += 1
         self.assertEqual(self.sur.provenance['training_hash'],
                          other.provenance['training_hash'],
@@ -1966,43 +1966,33 @@ def _smooth_envelope_tensor(gamma_grid: np.ndarray, p1_grid: np.ndarray,
     return real, imag
 
 
-def _farfield_smooth_axes(
+def _exterior_polar_axes(
         gamma_nodes: np.ndarray, y1_range: tuple[float, float],
-        y2_range: tuple[float, float], branch: int, n_s: int, n_d: int,
+        y2_range: tuple[float, float], n_rho: int, n_theta_c: int,
         refusal: tuple[float, float, float] | None = None
-        ) -> tuple[np.ndarray, np.ndarray, surrogate_module._FarFieldArcMap,
-                   np.ndarray | None]:
-    """Map a physical eigenframe box to the current far-field ``(s, d)`` API.
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Map a physical eigenframe box to caustic-fixed ``(rho, theta_c)``.
 
     The synthetic chart and the serve path use the same gamma-resolved
-    arc-length map, so chart containment still covers the physical box that
-    supplied the retired fixture.  An optional physical refusal is mapped by
-    that same seam before it is stored in the chart's exclusion coordinates.
+    caustic-fixed map ``_to_caustic_fixed``.  An optional physical refusal
+    is mapped by that same seam before it is stored in the chart's exclusion
+    coordinates.
     """
-    geometry = surrogate_module.geometry
     corners = [(float(gamma), float(y1), float(y2))
                for gamma in gamma_nodes
                for y1 in y1_range for y2 in y2_range]
-    theta_values = [float(geometry.nearest_caustic_point(
-        gamma, 0.0, np.array([y1, y2]), kappa=0.0).theta)
-        for gamma, y1, y2 in corners]
-    reference = theta_values[0]
-    unwrapped = [theta + 2.0 * np.pi * round(
-        (reference - theta) / (2.0 * np.pi)) for theta in theta_values]
-    arc_map = surrogate_module._caustic_arclength_map(
-        gamma_nodes, min(unwrapped), max(unwrapped), branch)
-    smooth_values = [surrogate_module._to_farfield_smooth(
-        gamma, y1, y2, arc_map, branch) for gamma, y1, y2 in corners]
-    s_grid = np.linspace(min(s for s, _d in smooth_values),
-                         max(s for s, _d in smooth_values), n_s)
-    d_grid = np.linspace(min(d for _s, d in smooth_values),
-                         max(d for _s, d in smooth_values), n_d)
+    caustic_values = [surrogate_module._to_caustic_fixed(gamma, y1, y2)
+                      for gamma, y1, y2 in corners]
+    rho_grid = np.linspace(min(r for r, _tc in caustic_values),
+                           max(r for r, _tc in caustic_values), n_rho)
+    theta_c_grid = np.linspace(min(tc for _r, tc in caustic_values),
+                               max(tc for _r, tc in caustic_values),
+                               n_theta_c)
     if refusal is None:
-        return s_grid, d_grid, arc_map, None
+        return rho_grid, theta_c_grid, None
     gamma, y1, y2 = refusal
-    s, d = surrogate_module._to_farfield_smooth(
-        gamma, y1, y2, arc_map, branch)
-    return s_grid, d_grid, arc_map, np.array([[gamma, s, d]])
+    rho, theta_c = surrogate_module._to_caustic_fixed(gamma, y1, y2)
+    return rho_grid, theta_c_grid, np.array([[gamma, rho, theta_c]])
 
 
 @functools.lru_cache(maxsize=1)
@@ -2010,7 +2000,7 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
     """A 4-chart multi-chart surrogate built WITHOUT engine calls.
 
     Charts (in list order -- the order `select_chart` scans): positive
-    ``TubeChart``, positive ``FarFieldChart``, saddle ``TubeChart``.  The two
+    ``TubeChart``, positive ``ExteriorPolarChart``, saddle ``TubeChart``.  The two
     parities occupy DISJOINT gamma bands
     (``[0.2, 0.5]`` vs ``[1.1, 1.4]``) so no query is ever ambiguous across
     parity; within a parity the tube/far-field OVERLAP band is the only
@@ -2018,9 +2008,9 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
     a NEGATIVE wedge ``theta in [-0.39, -0.09]`` so a ``[0, 2*pi)`` caustic
     angle must route through the `_theta_into_frame` unwrap to select it.
 
-    The far-field charts use the current arc-length/perpendicular-distance
-    ``(s, d)`` coordinates.  Each grid is the image of the retired physical
-    eigenframe box under the same gamma-resolved map that serving uses.
+    The exterior-polar charts use caustic-fixed ``(rho, theta_c)``
+    coordinates.  Each grid is the image of the physical eigenframe box
+    under the same gamma-resolved map ``_to_caustic_fixed`` that serving uses.
     """
     log_w = MC_LOG_W_GRID
     u_grid = np.linspace(np.sqrt(MC_ETA_FLOOR), np.sqrt(MC_ETA_MAX), 4)
@@ -2035,14 +2025,15 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
         log_w_grid=log_w, envelope_real=real, envelope_imag=imag,
         image_count=2, parity=1, eta_floor=MC_ETA_FLOOR, eta_max=MC_ETA_MAX,
         cusp_windows=[(0.2, 0.1)])
-    pos_s, pos_d, pos_arc_map, _pos_refused = _farfield_smooth_axes(
-        pos_gamma, (0.5, 0.85), (0.2, 0.45), 1, 4, 4)
-    real, imag = _smooth_envelope_tensor(pos_gamma, pos_s, pos_d, log_w, 0.5)
-    pos_ff = surrogate_module.FarFieldChart.from_values(
-        gamma_grid=pos_gamma, s_grid=pos_s, d_grid=pos_d,
+    pos_rho, pos_thetac, _pos_refused = _exterior_polar_axes(
+        pos_gamma, (0.5, 0.85), (0.2, 0.45), 4, 4)
+    real, imag = _smooth_envelope_tensor(pos_gamma, pos_rho, pos_thetac,
+                                         log_w, 0.5)
+    pos_ff = surrogate_module.ExteriorPolarChart.from_values(
+        gamma_grid=pos_gamma, rho_grid=pos_rho, theta_c_grid=pos_thetac,
         log_w_grid=log_w,
         envelope_real=real, envelope_imag=imag, image_count=2, parity=1,
-        eta_overlap_min=MC_ETA_OVERLAP_MIN, arc_map=pos_arc_map)
+        eta_overlap_min=MC_ETA_OVERLAP_MIN)
 
     # Saddle parity (deltoid, image_count = 4); NEGATIVE-wedge tube arc.
     sad_gamma = np.linspace(1.1, 1.4, 4)
@@ -2054,9 +2045,10 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
         log_w_grid=log_w, envelope_real=real, envelope_imag=imag,
         image_count=4, parity=-1, eta_floor=MC_ETA_FLOOR, eta_max=MC_ETA_MAX,
         cusp_windows=[(-0.39, 0.05)])
-    # DATA_CONTRACTS: macro-saddle far field has no safe global ``(s, d)``
-    # exterior coordinate across its disconnected deltoids.  It must fall
-    # through to the exact engine; only the near-caustic saddle tube exists.
+    # DATA_CONTRACTS: macro-saddle far field has no safe global caustic-fixed
+    # ``(rho, theta_c)`` exterior coordinate across its disconnected deltoids.
+    # It must fall through to the exact engine; only the near-caustic saddle
+    # tube exists.
 
     # Provenance carries ONLY JSON-native containers (lists, not tuples) so a
     # json.dumps/loads round trip is value-equal.
@@ -2068,7 +2060,7 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
         'training_hash': 'fixturehash01234567',
         'prior_box': {'gamma': [0.2, 1.4], 'w': [0.5, 20.0]},
         'chart_count': 3,
-        'chart_types': ['tube', 'farfield', 'tube'],
+        'chart_types': ['tube', 'exterior_polar', 'tube'],
         'dropped_gamma_slivers': [[0.99, 1.01]]}
     return LensAmplificationSurrogate(
         [pos_tube, pos_ff, sad_tube], provenance)
@@ -2211,7 +2203,7 @@ class ChartSelectionTestCase(SurrogateTestCase):
         tube_serves = surrogate_module._tube_serves(
             pos_tube, kwargs['gamma'], float(log_w.min()), float(log_w.max()),
             kwargs['eta'], kwargs['theta'], kwargs['image_count'])
-        ff_serves = surrogate_module._farfield_serves(
+        ff_serves = surrogate_module._exterior_polar_serves(
             pos_ff, kwargs['gamma'], float(log_w.min()), float(log_w.max()),
             kwargs['eta'], kwargs['image_count'], y1_eig, y2_eig)
         self.n_checks += 1
@@ -2276,7 +2268,7 @@ class SerializationMultiChartTestCase(SurrogateTestCase):
     (``max|delta| == 0``); every chart's grids, knots and real/imag
     coefficients survive exactly; all exclusion data survives (``eta_floor``,
     ``eta_max``, ``cusp_windows`` for tubes; ``eta_overlap_min`` and the
-    refusal balls for far-field charts); the ``dropped_gamma_slivers``
+    refusal balls for exterior-polar charts); the ``dropped_gamma_slivers``
     provenance and the full JSON provenance scalar survive; and NO separate
     manifest/sidecar file is produced.
     """
@@ -2967,113 +2959,6 @@ class ArcLengthSelfFalsificationTestCase(SurrogateTestCase):
             err, ARC_ROUND_TRIP_TOL,
             f'a corrupted map row round-tripped to {err:.2e} <= '
             f'{ARC_ROUND_TRIP_TOL:.0e} -- the bound would be vacuous')
-
-
-class FarFieldArcMapValidationTestCase(SurrogateTestCase):
-    """Far-field charts reject arc maps that change their interpolation lattice."""
-
-    @staticmethod
-    def _gamma_grid() -> np.ndarray:
-        return np.linspace(0.30, 0.50, 4)
-
-    def _valid_arc_map(self) -> surrogate_module._FarFieldArcMap:
-        gamma_grid = self._gamma_grid()
-        theta_fine = np.linspace(0.2, 0.8, 6)
-        s_table = np.vstack([
-            (theta_fine - theta_fine[0]) * (1.0 + gamma)
-            for gamma in gamma_grid])
-        return surrogate_module._FarFieldArcMap(
-            gamma_nodes=gamma_grid, theta_fine=theta_fine, s_table=s_table,
-            branch=1, theta_lo=theta_fine[0], theta_hi=theta_fine[-1])
-
-    def _build_chart(self, arc_map: surrogate_module._FarFieldArcMap
-                     ) -> surrogate_module.FarFieldChart:
-        gamma_grid = self._gamma_grid()
-        log_w_grid = np.linspace(-2.0, -0.5, 4)
-        s_grid = np.linspace(0.0, 1.5, 4)
-        d_grid = np.linspace(0.1, 0.4, 4)
-        log_w, gamma, s, d = np.meshgrid(
-            log_w_grid, gamma_grid, s_grid, d_grid, indexing='ij')
-        return surrogate_module.FarFieldChart.from_values(
-            gamma_grid=gamma_grid, s_grid=s_grid, d_grid=d_grid,
-            log_w_grid=log_w_grid,
-            envelope_real=log_w + gamma + s + d,
-            envelope_imag=log_w - gamma + s - d,
-            arc_map=arc_map, image_count=2, parity=1)
-
-    def test_construction_accepts_contract_conforming_map(self):
-        chart = self._build_chart(self._valid_arc_map())
-
-        np.testing.assert_array_equal(chart.arc_map.gamma_nodes,
-                                      chart.gamma_grid)
-        self.assertEqual(chart.arc_map.branch, 1)
-        self.n_checks += 2
-
-    def test_construction_rejects_mismatched_or_malformed_maps(self):
-        valid = self._valid_arc_map()
-        gamma_nodes = valid.gamma_nodes
-        theta_fine = valid.theta_fine
-        s_table = valid.s_table
-        bad_shape = s_table[:, :-1]
-        nonfinite = s_table.copy()
-        nonfinite[1, 2] = np.nan
-        nonzero_start = s_table.copy()
-        nonzero_start[:, 0] = 1e-3
-        nonmonotone = s_table.copy()
-        nonmonotone[:, 3] = nonmonotone[:, 2]
-        cases = (
-            ('mismatched gamma nodes',
-             surrogate_module._FarFieldArcMap(
-                 gamma_nodes + 0.01, theta_fine, s_table, 1,
-                 valid.theta_lo, valid.theta_hi)),
-            ('non-one-dimensional theta axis',
-             surrogate_module._FarFieldArcMap(
-                 gamma_nodes, theta_fine[None, :], s_table, 1,
-                 valid.theta_lo, valid.theta_hi)),
-            ('wrong table shape',
-             surrogate_module._FarFieldArcMap(
-                 gamma_nodes, theta_fine, bad_shape, 1,
-                 valid.theta_lo, valid.theta_hi)),
-            ('nonfinite table',
-             surrogate_module._FarFieldArcMap(
-                 gamma_nodes, theta_fine, nonfinite, 1,
-                 valid.theta_lo, valid.theta_hi)),
-            ('nonzero arc origin',
-             surrogate_module._FarFieldArcMap(
-                 gamma_nodes, theta_fine, nonzero_start, 1,
-                 valid.theta_lo, valid.theta_hi)),
-            ('nonmonotone arc row',
-             surrogate_module._FarFieldArcMap(
-                 gamma_nodes, theta_fine, nonmonotone, 1,
-                 valid.theta_lo, valid.theta_hi)),
-            ('invalid branch',
-             surrogate_module._FarFieldArcMap(
-                 gamma_nodes, theta_fine, s_table, 0,
-                 valid.theta_lo, valid.theta_hi)),
-            ('incoherent endpoints',
-             surrogate_module._FarFieldArcMap(
-                 gamma_nodes, theta_fine, s_table, 1,
-                 valid.theta_lo + 0.01, valid.theta_hi)),
-        )
-
-        for label, arc_map in cases:
-            with self.subTest(label=label):
-                with self.assertRaises(ValueError):
-                    self._build_chart(arc_map)
-                self.n_checks += 1
-
-    def test_persisted_load_rejects_mismatched_arc_gamma_nodes(self):
-        arrays = surrogate_module._chart_to_npz(
-            self._build_chart(self._valid_arc_map()), 0)
-        arrays['chart0_arc_gamma_nodes'] = (
-            arrays['chart0_arc_gamma_nodes'] + 0.01)
-
-        with self.assertRaisesRegex(ValueError,
-                                    'arc_map.gamma_nodes must equal gamma_grid'):
-            surrogate_module._chart_from_npz(arrays, 0)
-        self.n_checks += 1
-
-
 class CoordinateChangeAccuracyTestCase(SurrogateTestCase):
     """The theta->arc-length coordinate change does NOT move a served number
     beyond fit error (fast, no engine).
@@ -3611,9 +3496,10 @@ class Wp1ServedValuesUnchangedTestCase(SurrogateTestCase):
         """Positive charts remain independent of the saddle reach helper."""
         sur = _pos_surrogate_ship()
         chart = sur.charts[0]
-        gamma, s, d = chart.gamma_grid[2], chart.s_grid[2], chart.d_grid[2]
-        y1, y2 = surrogate_module._from_farfield_smooth(
-            float(gamma), float(s), float(d), chart.arc_map, chart.arc_map.branch)
+        gamma, rho, theta_c = (chart.gamma_grid[2], chart.rho_grid[2],
+                               chart.theta_c_grid[2])
+        y1, y2 = surrogate_module._from_caustic_fixed(
+            float(gamma), float(rho), float(theta_c))
 
         def _poison(*_args, **_kwargs):
             raise AssertionError('positive far-field serve must not call caustic_geometry')

@@ -184,7 +184,7 @@ import numpy as np
 from cogwheel.lensing import prior as lens_prior
 from cogwheel.lensing.waveform import dimensionless_frequency
 from cogwheel.lensing import surrogate as surrogate_module
-from cogwheel.lensing.surrogate import FarFieldChart, select_chart
+from cogwheel.lensing.surrogate import ExteriorPolarChart, select_chart
 from cogwheel.lensing.surrogate import LensAmplificationSurrogate
 from cogwheel.lensing import surrogate_training as training
 from cogwheel.lensing.chang_refsdal import geometry
@@ -619,28 +619,15 @@ def _serve_fixture() -> dict:
     exact_engine_gaps = []
     for tile in tiles:
         (rho_c, theta_c), (half_rho, half_theta), _i, _j = tile
-        try:
-            arc_theta_lo, arc_theta_hi, branch, s_range, d_range = \
-                training._farfield_box_to_smooth(
-                    gamma_band=_SERVE_GAMMA_BAND,
-                    box_center=(rho_c, theta_c),
-                    half=(half_rho, half_theta))
-        except surrogate_module.CarrierDiscontinuityError as exc:
-            # The current far-field chart is one cusp-free caustic arc.  A
-            # caustic-fixed tile that cannot define one therefore becomes a
-            # deliberate exact-engine gap, exactly as production records it.
-            exact_engine_gaps.append({'tile': tile, 'reason': str(exc)})
-            continue
-        arc_map = surrogate_module._caustic_arclength_map(
-            gamma_grid, arc_theta_lo, arc_theta_hi, branch)
         envelope = np.ones((4, 4, 4, 4))
-        charts.append(FarFieldChart.from_values(
+        charts.append(ExteriorPolarChart.from_values(
             gamma_grid=gamma_grid,
-            s_grid=np.linspace(*s_range, 4),
-            d_grid=np.linspace(*d_range, 4),
+            rho_grid=np.linspace(rho_c - half_rho, rho_c + half_rho, 4),
+            theta_c_grid=np.linspace(theta_c - half_theta,
+                                     theta_c + half_theta, 4),
             log_w_grid=log_w_grid, envelope_real=envelope,
             envelope_imag=envelope, image_count=2, parity=1,
-            eta_overlap_min=0.05, arc_map=arc_map))
+            eta_overlap_min=0.05))
         charted_tiles.append(tile)
     return {'charts': charts, 'candidate_tiles': tiles,
             'charted_tiles': charted_tiles,
@@ -1879,19 +1866,17 @@ class SelfFalsificationTestCase(_CountingTestCase):
         gamma = 0.35
         hole_source = surrogate_module._from_caustic_fixed(
             gamma, 0.5 * fixture['exclusion_rho'], 0.6)
-        arc_map = surrogate_module._caustic_arclength_map(
-            gamma_grid, 0.2, 1.2, branch=1)
-        hole_s, hole_d = surrogate_module._to_farfield_smooth(
-            gamma, *hole_source, arc_map, branch=1)
-        # A far-field chart whose smooth-coordinate box covers a source in
-        # the un-tiled interior hole.
-        bad_chart = FarFieldChart.from_values(
+        hole_rho, hole_tc = surrogate_module._to_caustic_fixed(
+            gamma, *hole_source)
+        # An exterior-polar chart whose polar-coordinate box covers a source
+        # in the un-tiled interior hole.
+        bad_chart = ExteriorPolarChart.from_values(
             gamma_grid=gamma_grid,
-            s_grid=np.linspace(hole_s - 0.2, hole_s + 0.2, 4),
-            d_grid=np.linspace(hole_d - 0.2, hole_d + 0.2, 4),
+            rho_grid=np.linspace(hole_rho - 0.2, hole_rho + 0.2, 4),
+            theta_c_grid=np.linspace(hole_tc - 0.2, hole_tc + 0.2, 4),
             log_w_grid=log_w_grid, envelope_real=envelope,
             envelope_imag=envelope, image_count=2, parity=1,
-            eta_overlap_min=0.05, arc_map=arc_map)
+            eta_overlap_min=0.05)
         mid_log_w = float(0.5 * (log_w_grid[0] + log_w_grid[-1]))
         served = select_chart(
             [bad_chart], gamma=gamma, log_w_min=mid_log_w,

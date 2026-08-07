@@ -92,7 +92,7 @@ import numpy as np
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal.geometry import r_caustic
 from cogwheel.lensing.surrogate import (
-    FarFieldChart,
+    ExteriorPolarChart,
     InteriorWedgeChart,
     LensAmplificationSurrogate,
     LobeInteriorChart,
@@ -504,8 +504,8 @@ class FieldExposureTestCase(_WedgeDDTestCase):
       stored field).
     * ``TubeChart`` and ``LobeInteriorChart`` STILL expose ``theta_to_s`` and
       NOT ``theta_to_u``.
-    * ``FarFieldChart`` charts its angular axis as arc length via ``s_grid`` +
-      ``arc_map`` (it has neither ``theta_to_s`` nor ``theta_to_u``).
+    * ``ExteriorPolarChart`` charts its spatial axes via ``rho_grid`` +
+      ``theta_c_grid`` (it has neither ``s_grid`` nor ``arc_map``).
     """
 
     @staticmethod
@@ -536,12 +536,14 @@ class FieldExposureTestCase(_WedgeDDTestCase):
         self.assertIn('theta_to_s', names)
         self.assertNotIn('theta_to_u', names)
 
-    def test_farfield_uses_arclength_grid_not_wedge_u(self):
-        """Far-field charts arc length via s_grid + arc_map, not theta_to_u."""
-        names = self._fields(FarFieldChart)
+    def test_exterior_polar_uses_caustic_fixed_axes(self):
+        """Exterior-polar charts use rho_grid + theta_c_grid, not s_grid/arc_map/theta_to_u."""
+        names = self._fields(ExteriorPolarChart)
         self._tick()
-        self.assertIn('s_grid', names)
-        self.assertIn('arc_map', names)
+        self.assertIn('rho_grid', names)
+        self.assertIn('theta_c_grid', names)
+        self.assertNotIn('s_grid', names)
+        self.assertNotIn('arc_map', names)
         self.assertNotIn('theta_to_u', names)
 
 

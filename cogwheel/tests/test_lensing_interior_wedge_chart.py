@@ -31,10 +31,9 @@ import numpy as np
 from scipy.integrate import cumulative_trapezoid
 from scipy.interpolate import make_interp_spline
 
-from cogwheel.lensing import surrogate_training
+from cogwheel.lensing import surrogate, surrogate_training
 from cogwheel.lensing.surrogate import (
     CarrierDiscontinuityError,
-    FarFieldChart,
     InteriorWedgeChart,
     LensAmplificationSurrogate,
     _KNOWN_WEDGE_AXIS_SCHEMAS,
@@ -2482,7 +2481,7 @@ class WedgeTrainingPathProducesWedgeChartsTestCase(unittest.TestCase):
         for chart in self.surrogate.charts:
             with self.subTest(chart_type=type(chart).__name__):
                 self.assertIsInstance(chart, InteriorWedgeChart)
-                self.assertNotIsInstance(chart, FarFieldChart)
+                self.assertNotIsInstance(chart, surrogate.FarFieldChart)
 
 
 class WedgeTilesSelfFalsificationTestCase(unittest.TestCase):

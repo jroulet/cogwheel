@@ -1,6 +1,6 @@
 # Architect Short-Term Observations
 
-(empty — last consolidated by Dreamer on 2026-08-07)
+2026-08-07 exterior_polar_rechart: 3-WP build. WP-1 (surrogate.py): new ExteriorPolarChart class in (rho, theta_c), rewrite from_engine, delete FarFieldChart + all (s,d) machinery. WP-2 (surrogate_training.py): rewire _build_farfield_chart, delete bridge, cusp carve-out, saddle exterior enablement, axis-edge check. WP-3: test + census migration. Simplifier: drop backward compat, single class not dual. Professor: polar is correct, chart saddle exterior with KERNEL_SUM, stamp FARFIELD_KERNEL_SUM (not MINUS_GHOST), cusp carve-out in y-units.
 
 2026-08-07 fix_tree_gate_hang: 2-WP housekeeping build. The 4 originally-diagnosed offenders are already fixed (mass-capped or tier-gated). Two remaining issues: (1) agents.py missing COGWHEEL_TRAIN_TIER="" in build env → train-tier tests un-skip if env leaks; (2) pytest-timeout not installed → conftest's 900s timeout a no-op. WP1 installs pytest-timeout + pins the env var. WP2 adds _f_schwinger_mpmath sentinel guard to conftest.py. No domain changes, no new tests.
 

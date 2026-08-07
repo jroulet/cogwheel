@@ -87,7 +87,7 @@ from cogwheel.lensing.chang_refsdal.channels import (
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, dimensionless_frequency)
 from cogwheel.lensing.surrogate import (
-    FarFieldChart, TubeChart, LensAmplificationSurrogate,
+    ExteriorPolarChart, TubeChart, LensAmplificationSurrogate,
     _rotate_to_eigenframe, select_chart, _evaluate_chart,
     _GAMMA_GUARD_BAND, _DEFAULT_CAUSTIC_FLOOR)
 
@@ -145,60 +145,36 @@ def _smooth_tensor(gamma_grid, p1_grid, p2_grid, log_w_grid, phase):
     return real, imag
 
 
-def _farfield_smooth_axes(gamma_nodes, y1_range, y2_range, branch, n_s, n_d,
-                          refusal=None):
-    """``(s_grid, d_grid, arc_map[, refused])`` for a physical eigenframe box.
+def _exterior_polar_axes(gamma_nodes, y1_range, y2_range, branch, n_rho,
+                         n_theta_c, refusal=None):
+    """``(rho_grid, theta_c_grid[, refused])`` for a physical eigenframe box.
 
     Engine-free mirror of `surrogate_training._farfield_box_to_smooth` for a
     box given directly in the eigenframe ``(y1, y2)`` on a KNOWN square-root
-    ``branch`` (Build 1e-farfield port): every corner of the
-    ``gamma_nodes x y1_range x y2_range`` box is mapped to its nearest caustic
-    foot (`geometry.nearest_caustic_point`); the gamma-resolved arc-length map
-    (`_caustic_arclength_map`) is built on ``gamma_nodes`` -- the chart's OWN
-    gamma grid -- over the enclosing ``[min theta*, max theta*]`` arc; then
-    every corner is pushed through the SAME serve map (`_to_farfield_smooth`)
-    to bound the ``(s, d)`` box, so train and serve share one arc-length map
-    and the coordinate is internally consistent.  An optional physical refusal
-    ``(gamma, y1, y2)`` is mapped through the identical map to its
-    far-field-smooth ``(gamma, s, d)`` image, so a physical query at that
-    refusal still lands in the chart's exclusion ball -- the faithful (s, d)
-    analogue of the old caustic-fixed refused point.
+    ``branch``: every corner of the ``gamma_nodes x y1_range x y2_range`` box
+    is pushed through ``_to_caustic_fixed`` to bound the ``(rho, theta_c)``
+    box.  An optional physical refusal ``(gamma, y1, y2)`` is mapped through
+    the identical map to its caustic-fixed ``(gamma, rho, theta_c)`` image, so
+    a physical query at that refusal still lands in the chart's exclusion ball.
     """
-    geometry = surrogate_module.geometry
-    thetas = []
-    corners = []
+    rho_vals = []
+    theta_c_vals = []
     for gamma in gamma_nodes:
         for y1 in y1_range:
             for y2 in y2_range:
-                nearest = geometry.nearest_caustic_point(
-                    float(gamma), 0.0, np.array([float(y1), float(y2)]),
-                    kappa=0.0)
-                thetas.append(float(nearest.theta))
-                corners.append((float(gamma), float(y1), float(y2)))
-    reference = thetas[0]
-    unwrapped = [t + 2.0 * np.pi * round((reference - t) / (2.0 * np.pi))
-                 for t in thetas]
-    arc_lo, arc_hi = float(min(unwrapped)), float(max(unwrapped))
-    arc_map = surrogate_module._caustic_arclength_map(
-        np.asarray(gamma_nodes, dtype=float), arc_lo, arc_hi, branch)
-    s_vals = []
-    d_vals = []
-    for gamma, y1, y2 in corners:
-        try:
-            s, d = surrogate_module._to_farfield_smooth(
-                gamma, y1, y2, arc_map, branch)
-        except (ValueError, geometry.LensDomainError):
-            continue
-        s_vals.append(s)
-        d_vals.append(d)
-    s_grid = np.linspace(min(s_vals), max(s_vals), n_s)
-    d_grid = np.linspace(min(d_vals), max(d_vals), n_d)
+                rho, theta_c = surrogate_module._to_caustic_fixed(
+                    gamma, y1, y2)
+                rho_vals.append(rho)
+                theta_c_vals.append(theta_c)
+    rho_grid = np.linspace(min(rho_vals), max(rho_vals), n_rho)
+    theta_c_grid = np.linspace(min(theta_c_vals), max(theta_c_vals), n_theta_c)
     if refusal is None:
-        return s_grid, d_grid, arc_map
+        return rho_grid, theta_c_grid
     r_gamma, r_y1, r_y2 = refusal
-    r_s, r_d = surrogate_module._to_farfield_smooth(
-        float(r_gamma), float(r_y1), float(r_y2), arc_map, branch)
-    return s_grid, d_grid, arc_map, np.array([[float(r_gamma), r_s, r_d]])
+    r_rho, r_theta_c = surrogate_module._to_caustic_fixed(
+        float(r_gamma), float(r_y1), float(r_y2))
+    return rho_grid, theta_c_grid, np.array(
+        [[float(r_gamma), r_rho, r_theta_c]])
 
 
 #: Synthetic-fixture log-w band (every query draws frequencies inside it).
@@ -231,20 +207,20 @@ def _synthetic_surrogate():
         log_w_grid=SYN_LOG_W, envelope_real=real, envelope_imag=imag,
         image_count=2, parity=1, eta_floor=0.02, eta_max=0.05,
         cusp_windows=[(0.2, 0.1)])
-    # Far-field-smooth (s, d) axes (Build 1e-farfield): the (s, d) image of the
+    # Exterior-polar (rho, theta_c) axes: the (rho, theta_c) image of the
     # original physical box (y1 in [0.5, 0.85], y2 in [0.2, 0.45]) over gamma in
     # [0.3, 0.5] on the positive-parity astroid (branch = +1).  The refused
-    # point is the (s, d) image of the SAME physical refusal (gamma=0.4,
-    # y1=0.67, y2=0.32) so a physical query there still lands in the exclusion
-    # ball -- the faithful (s, d) analogue of the old caustic-fixed refusal.
-    pos_s, pos_d, pos_arc_map, pos_refused = _farfield_smooth_axes(
+    # point is the (rho, theta_c) image of the SAME physical refusal
+    # (gamma=0.4, y1=0.67, y2=0.32) so a physical query there still lands in
+    # the exclusion ball.
+    pos_rho, pos_theta_c, pos_refused = _exterior_polar_axes(
         pos_gamma, (0.5, 0.85), (0.2, 0.45), 1, 4, 4,
         refusal=(0.4, 0.67, 0.32))
-    real, imag = _smooth_tensor(pos_gamma, pos_s, pos_d, SYN_LOG_W, 0.5)
-    pos_ff = FarFieldChart.from_values(
-        gamma_grid=pos_gamma, s_grid=pos_s, d_grid=pos_d,
+    real, imag = _smooth_tensor(pos_gamma, pos_rho, pos_theta_c, SYN_LOG_W, 0.5)
+    pos_ff = ExteriorPolarChart.from_values(
+        gamma_grid=pos_gamma, rho_grid=pos_rho, theta_c_grid=pos_theta_c,
         log_w_grid=SYN_LOG_W, envelope_real=real, envelope_imag=imag,
-        arc_map=pos_arc_map, image_count=2, parity=1,
+        image_count=2, parity=1,
         eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR, refused_points=pos_refused)
     sad_gamma = np.linspace(1.1, 1.4, 4)
     sad_theta = np.linspace(-0.39, -0.09, 4)
@@ -254,20 +230,19 @@ def _synthetic_surrogate():
         log_w_grid=SYN_LOG_W, envelope_real=real, envelope_imag=imag,
         image_count=4, parity=-1, eta_floor=0.02, eta_max=0.05,
         cusp_windows=[(-0.39, 0.05)])
-    # Far-field-smooth (s, d) image of the physical saddle box (y1 in
+    # Exterior-polar (rho, theta_c) image of the physical saddle box (y1 in
     # [0.2, 0.5], y2 in [0.1, 0.3]) over gamma in [1.1, 1.4] on the macro-
-    # saddle deltoid edge (branch = -1).  The refused point is the (s, d)
-    # image of the SAME physical refusal (gamma=1.35, y1=0.25, y2=0.15) so a
-    # physical query there still lands in the exclusion ball -- the faithful
-    # (s, d) analogue of the old caustic-fixed refusal.
-    sad_s, sad_d, sad_arc_map, sad_refused = _farfield_smooth_axes(
+    # saddle deltoid edge (branch = -1).  The refused point is the (rho,
+    # theta_c) image of the SAME physical refusal (gamma=1.35, y1=0.25,
+    # y2=0.15) so a physical query there still lands in the exclusion ball.
+    sad_rho, sad_theta_c, sad_refused = _exterior_polar_axes(
         sad_gamma, (0.2, 0.5), (0.1, 0.3), -1, 4, 4,
         refusal=(1.35, 0.25, 0.15))
-    real, imag = _smooth_tensor(sad_gamma, sad_s, sad_d, SYN_LOG_W, 1.5)
-    sad_ff = FarFieldChart.from_values(
-        gamma_grid=sad_gamma, s_grid=sad_s, d_grid=sad_d,
+    real, imag = _smooth_tensor(sad_gamma, sad_rho, sad_theta_c, SYN_LOG_W, 1.5)
+    sad_ff = ExteriorPolarChart.from_values(
+        gamma_grid=sad_gamma, rho_grid=sad_rho, theta_c_grid=sad_theta_c,
         log_w_grid=SYN_LOG_W, envelope_real=real, envelope_imag=imag,
-        arc_map=sad_arc_map, image_count=4, parity=-1,
+        image_count=4, parity=-1,
         eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR, refused_points=sad_refused)
     provenance = {'chart_count': 4,
                   'chart_types': ['tube', 'farfield', 'tube', 'farfield'],
@@ -326,16 +301,13 @@ def _pos_tube():
 
 @functools.lru_cache(maxsize=1)
 def _pos_raw_out():
-    """A raw far-field chart trained OUTSIDE the caustic (extrapolates inward).
+    """An exterior-polar chart trained OUTSIDE the caustic (extrapolates inward).
 
-    Far-field-smooth ``(s, d)`` box (Build 1e-farfield port) covering the fold
-    strip at eta in ``[0.06, 0.30]`` -- i.e. the production far-field region
-    that cannot reach the near-caustic band; evaluated inside it, it
-    extrapolates.  The gamma-resolved arc-length map is built on the chart's
-    OWN gamma grid over the enclosing foot arc of the physical fold strip; the
-    box is the ``(s, d)`` image of the SAME physical fold strip on the astroid
-    branch; each grid node is mapped back to a physical eigenframe source
-    (`_from_farfield_smooth`) before the engine call, so the fitted label is
+    Exterior-polar ``(rho, theta_c)`` box covering the fold strip at eta in
+    ``[0.06, 0.30]`` -- i.e. the production exterior region that cannot reach
+    the near-caustic band; evaluated inside it, it extrapolates.  Each grid
+    node is mapped back to a physical eigenframe source
+    (`_from_caustic_fixed`) before the engine call, so the fitted label is
     the same physical envelope at the same point.
     """
     arc, log_w_grid = _pos_arc()
@@ -347,73 +319,61 @@ def _pos_raw_out():
                                      arc.inward_sign)
         for th in np.linspace(*TUBE_THETA, 12)
         for eta in np.linspace(0.06, 0.30, 4)])
-    feet = [surrogate_module.geometry.nearest_caustic_point(
-                gmid, 0.0, s, kappa=0.0).theta for s in srcs]
-    ref = feet[0]
-    feet = [t + 2.0 * np.pi * round((ref - t) / (2.0 * np.pi)) for t in feet]
-    arc_map = surrogate_module._caustic_arclength_map(
-        gamma_grid, float(min(feet)), float(max(feet)), arc.branch)
-    smooth = np.array([surrogate_module._to_farfield_smooth(
-                           gmid, float(s[0]), float(s[1]), arc_map, arc.branch)
-                       for s in srcs])
-    s_grid = np.linspace(smooth[:, 0].min(), smooth[:, 0].max(), 7)
-    d_grid = np.linspace(smooth[:, 1].min(), smooth[:, 1].max(), 7)
-    shape = (log_w_grid.size, gamma_grid.size, s_grid.size, d_grid.size)
+    rho_vals = []
+    theta_c_vals = []
+    for s in srcs:
+        rho, theta_c = surrogate_module._to_caustic_fixed(
+            gmid, float(s[0]), float(s[1]))
+        rho_vals.append(rho)
+        theta_c_vals.append(theta_c)
+    rho_grid = np.linspace(min(rho_vals), max(rho_vals), 7)
+    theta_c_grid = np.linspace(min(theta_c_vals), max(theta_c_vals), 7)
+    shape = (log_w_grid.size, gamma_grid.size, rho_grid.size, theta_c_grid.size)
     er = np.zeros(shape)
     ei = np.zeros(shape)
     for ig, gamma in enumerate(gamma_grid):
-        for i1, sv in enumerate(s_grid):
-            for i2, dv in enumerate(d_grid):
-                y1e, y2e = surrogate_module._from_farfield_smooth(
-                    float(gamma), float(sv), float(dv), arc_map, arc.branch)
+        for i1, rv in enumerate(rho_grid):
+            for i2, tcv in enumerate(theta_c_grid):
+                y1e, y2e = surrogate_module._from_caustic_fixed(
+                    float(gamma), float(rv), float(tcv))
                 env = training_module._engine_envelope(
                     w_grid, float(gamma), np.array([y1e, y2e]))
                 if env is not None:
                     er[:, ig, i1, i2] = env.real
                     ei[:, ig, i1, i2] = env.imag
-    return FarFieldChart.from_values(
-        gamma_grid=gamma_grid, s_grid=s_grid, d_grid=d_grid,
+    return ExteriorPolarChart.from_values(
+        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=er, envelope_imag=ei,
-        arc_map=arc_map, image_count=arc.image_count, parity=1,
+        image_count=arc.image_count, parity=1,
         eta_overlap_min=0.0)
 
 
 @functools.lru_cache(maxsize=1)
 def _pos_farfield_dense():
-    """A dense positive far-field over gamma [0.35, 0.65], far from caustic.
+    """A dense positive exterior-polar chart over gamma [0.35, 0.65], far from caustic.
 
     Serves both a CROWN config (gamma < 0.5) and a STRONG-SHEAR config
     (gamma' >= 0.5) far from the caustic (eta well above the caustic floor),
     at enough w / parameter density that the propagated lnL error lands inside
-    the census crown / strong bars.  Built via the reused 8a `from_engine`
-    far-field trainer.
+    the census crown / strong bars.  Built via the reused `from_engine`
+    exterior-polar trainer.
+
+    w_range starts at 0.10, just below the m = 60 Msun detector band
+    (15-1024 Hz => w in [0.111, 7.61]) and ABOVE the diffractive bottom.  The
+    chart carries the ``farfield_full_kernel_sum`` label, which diverges as
+    w -> 0 (measured max|E| = 2.7 at w = 0.12 but 69 at w = 0.02, ~40x
+    max|F|); production
+    never trains that label below the region ``w_floor`` -- it serves the
+    bounded diffractive label there -- so training down to 0.02 put the
+    fixture in a regime the label is not defined to represent (its held-out
+    eps then reads 13.6 and is insensitive to node density in every axis).
     """
-    # One explicit adjacent astroid arc, strictly away from the theta=pi cusp.
-    # Inferring this arc from a rectangular physical box collapsed every corner
-    # foot onto theta=pi, leaving a zero-width map.  Training and all probes
-    # now use this SAME one-foot basin through the chart's own inverse map.
-    # The (s, d) ranges are valid at every gamma node: s stays below the
-    # shortest arc length and the modest positive d range remains in this
-    # arc's nearest-foot basin at serve time. n_d=9 keeps radial resolution
-    # and n_s=5 keeps tangential density.
-    #
-    # w_range starts at 0.10, just below the m = 60 Msun detector band
-    # (15-1024 Hz => w in [0.111, 7.61]) and ABOVE the diffractive bottom.  The
-    # chart carries the ``farfield_full_kernel_sum`` label, which diverges as
-    # w -> 0 (measured max|E| = 2.7 at w = 0.12 but 69 at w = 0.02, ~40x
-    # max|F|); production
-    # never trains that label below the region ``w_floor`` -- it serves the
-    # bounded diffractive label there -- so training down to 0.02 put the
-    # fixture in a regime the label is not defined to represent (its held-out
-    # eps then reads 13.6 and is insensitive to node density in every axis).
-    #
     gamma_range = (0.35, 0.65)
     return LensAmplificationSurrogate.from_engine(
         gamma_range=gamma_range,
-        s_range=(0.025, 0.075), d_range=(0.05, 0.20),
-        w_range=(0.10, 260.0), arc_theta_lo=np.pi + 0.12,
-        arc_theta_hi=np.pi + 0.36, arc_branch=1,
-        n_gamma=6, n_s=5, n_d=9, w_nodes_per_decade=12)
+        rho_range=(0.025, 0.075), theta_c_range=(0.05, 0.20),
+        w_range=(0.10, 260.0),
+        n_gamma=6, n_rho=5, n_theta_c=9, w_nodes_per_decade=12)
 
 
 # ==========================================================================
@@ -479,8 +439,8 @@ def _served_eps(surrogate, chart_for_raw, gamma, source, log_w_grid,
         w_grid, gamma=gamma, y1=float(source[0]), y2=float(source[1]),
         beta=0.0, eta=part.caustic_distance, theta=part.critical_theta,
         image_count=int(part.real_mask.sum()))
-    # Raw far-field chart contracts on its gamma-resolved (s, d) map from the
-    # physical beta=0 eigenframe source.
+    # Raw exterior-polar chart contracts on its gamma-resolved (rho, theta_c)
+    # map from the physical beta=0 eigenframe source.
     e_raw = _evaluate_chart(
         chart_for_raw, gamma=gamma, eta=float('nan'), theta=float('nan'),
         log_w_query=log_w_grid, y1_eig=float(source[0]),
@@ -493,19 +453,19 @@ def _served_eps(surrogate, chart_for_raw, gamma, source, log_w_grid,
 
 
 def _dense_farfield_source(gamma, d_index: int = 4):
-    """Physical source in the dense chart's single certified foot basin.
+    """Physical source in the dense chart's rho/theta_c box.
 
     ``d_index`` keeps the likelihood-tier witnesses physically distinct while
-    every one is reconstructed through the chart's own current ``(s, d)``
+    every one is reconstructed through the chart's own ``(rho, theta_c)``
     inverse. The strong-shear witness uses the outermost node that the actual
     likelihood admission serves, so the fixed 0.1-nat tier measures the
     intended far-field regime rather than the nearer-fold crown witness.
     """
     chart = _pos_farfield_dense().charts[0]
-    s = 0.5 * (float(chart.s_grid[1]) + float(chart.s_grid[-2]))
-    d = float(chart.d_grid[d_index])
-    return surrogate_module._from_farfield_smooth(
-        float(gamma), s, d, chart.arc_map, chart.arc_map.branch)
+    rho = 0.5 * (float(chart.rho_grid[1]) + float(chart.rho_grid[-2]))
+    theta_c = float(chart.theta_c_grid[d_index])
+    return surrogate_module._from_caustic_fixed(
+        float(gamma), rho, theta_c)
 
 
 # ==========================================================================
@@ -784,7 +744,7 @@ def _reference_env_and_denom(chart, part):
     (Build 8g-b) -- the one place in this suite deciding far-field-vs-tube
     reference semantics.
 
-    A `FarFieldChart` is referenced against the far-field label
+    An `ExteriorPolarChart` is referenced against the far-field label
     ``E_ff = F - sum_{a real} H_a e^{1j w tau_a}``
     (`farfield_envelope_from_partition`) and F-normalized by
     ``max|exact_total|`` (``max|E_ff| ~ 1e-4`` is too tiny a denominator); a
@@ -792,7 +752,7 @@ def _reference_env_and_denom(chart, part):
     by ``max|E|`` (unchanged).  The deliberate ``EPS_DENOM_FLOOR`` floor is
     applied to the denominator in both branches.
     """
-    if isinstance(chart, FarFieldChart):
+    if isinstance(chart, ExteriorPolarChart):
         env_eng = farfield_envelope_from_partition(part)
         denom_base = float(np.max(np.abs(part.exact_total)))
     else:
@@ -905,11 +865,11 @@ class HeldoutEnvelopeEpsTestCase(CensusTestCase):
         chart = surrogate.charts[0]
         w_grid = np.exp(chart.log_w_grid)
         gamma = float(chart.gamma_grid[2])
-        # Far-field-smooth node -> physical eigenframe source.
-        s = float(chart.s_grid[2])
-        d = float(chart.d_grid[2])
-        y1, y2 = surrogate_module._from_farfield_smooth(
-            gamma, s, d, chart.arc_map, chart.arc_map.branch)
+        # Exterior-polar node -> physical eigenframe source.
+        rho = float(chart.rho_grid[2])
+        theta_c = float(chart.theta_c_grid[2])
+        y1, y2 = surrogate_module._from_caustic_fixed(
+            gamma, rho, theta_c)
         part = ChangRefsdalChannels(w_grid).evaluate(
             gamma=gamma, y=(y1, y2), beta=0.0, kappa=0.0)
         env_eng, denom = _reference_env_and_denom(chart, part)
@@ -931,11 +891,11 @@ class HeldoutEnvelopeEpsTestCase(CensusTestCase):
         chart = surrogate.charts[0]
         w_grid = np.exp(chart.log_w_grid)
         gmid = float(np.mean(chart.gamma_grid))
-        # Far-field-smooth off-node midpoint -> physical eigenframe source.
-        s = 0.5 * (float(chart.s_grid[1]) + float(chart.s_grid[2]))
-        d = 0.5 * (float(chart.d_grid[1]) + float(chart.d_grid[2]))
-        y1, y2 = surrogate_module._from_farfield_smooth(
-            gmid, s, d, chart.arc_map, chart.arc_map.branch)
+        # Exterior-polar off-node midpoint -> physical eigenframe source.
+        rho = 0.5 * (float(chart.rho_grid[1]) + float(chart.rho_grid[2]))
+        theta_c = 0.5 * (float(chart.theta_c_grid[1]) + float(chart.theta_c_grid[2]))
+        y1, y2 = surrogate_module._from_caustic_fixed(
+            gmid, rho, theta_c)
         part = ChangRefsdalChannels(w_grid).evaluate(
             gamma=gmid, y=(y1, y2), beta=0.0, kappa=0.0)
         env_eng, denom = _reference_env_and_denom(chart, part)
@@ -1226,8 +1186,8 @@ class MutationFalsificationTestCase(CensusTestCase):
         self.sur = _synthetic_surrogate()
         self.pos_tube = self.sur.charts[0]
         self.pos_ff = self.sur.charts[1]
-        # Physical eigenframe query inside the positive far-field chart's
-        # gamma-resolved (s, d) box but off its refused point.
+        # Physical eigenframe query inside the positive exterior-polar chart's
+        # gamma-resolved (rho, theta_c) box but off its refused point.
         self.query = dict(gamma=0.4, log_w_min=SYN_LWMIN, log_w_max=SYN_LWMAX,
                           eta=0.03, theta=0.7, image_count=2,
                           y1_eig=0.6, y2_eig=0.3)
@@ -1296,12 +1256,12 @@ class MutationFalsificationTestCase(CensusTestCase):
                                         image_count=image_count)
         lw_min, lw_max = float(log_w_grid[0]), float(log_w_grid[-1])
         self.n_checks += 1
-        self.assertFalse(surrogate_module._farfield_serves(
+        self.assertFalse(surrogate_module._exterior_polar_serves(
             refusing, gmid, lw_min, lw_max, part.caustic_distance,
             image_count, y1e, y2e),
             'precondition: far-field must refuse')
         self.n_checks += 1
-        self.assertTrue(surrogate_module._farfield_serves(
+        self.assertTrue(surrogate_module._exterior_polar_serves(
             admitting, gmid, lw_min, lw_max, part.caustic_distance,
             image_count, y1e, y2e),
             'lowering overlap did not admit the query')

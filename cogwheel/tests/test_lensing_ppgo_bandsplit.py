@@ -1094,21 +1094,27 @@ class BandSplitReconstructionTestCase(_PpgoTestCase):
         cls.exact = np.asarray(cls.partition.exact_total)
         cls.f_scale = float(np.max(np.abs(cls.exact)))
 
-        # A real trained far-field chart over a tile covering the draw, whole
-        # band -- its spline envelope serves the chart sub-band. The tiler
-        # still defines this positive-parity exterior tile in caustic-fixed
-        # coordinates; translate it to the chart's current smooth ``(s, d)``
-        # axes with the shared training bridge before construction.
+        # A real trained exterior-polar chart over the same tile, whole
+        # band -- its spline envelope serves the chart sub-band.  The tile's
+        # caustic-fixed polar coordinates (rho, theta_c) are computed directly
+        # by mapping the physical box corners through `_to_caustic_fixed`.
         gamma_range = (0.25, 0.35)
-        arc_theta_lo, arc_theta_hi, arc_branch, s_range, d_range = \
-            st._farfield_box_to_smooth(
-                gamma_band=gamma_range, box_center=(2.65, 0.775),
-                half=(0.65, 0.175))
+        rho_crn = []
+        theta_c_crn = []
+        for g in gamma_range:
+            for y1 in (2.0, 3.3):
+                for y2 in (0.6, 0.95):
+                    r, tc = surrogate._to_caustic_fixed(float(g), float(y1),
+                                                        float(y2))
+                    rho_crn.append(r)
+                    theta_c_crn.append(tc)
+        rho_range = (min(rho_crn), max(rho_crn))
+        theta_c_range = (min(theta_c_crn), max(theta_c_crn))
         surrogate = LensAmplificationSurrogate.from_engine(
-            gamma_range=gamma_range, s_range=s_range, d_range=d_range,
-            w_range=(2.0, 40.0), arc_theta_lo=arc_theta_lo,
-            arc_theta_hi=arc_theta_hi, arc_branch=arc_branch, n_gamma=4,
-            n_s=4, n_d=4, w_nodes_per_decade=8)
+            gamma_range=gamma_range, rho_range=rho_range,
+            theta_c_range=theta_c_range,
+            w_range=(2.0, 40.0), n_gamma=4,
+            n_rho=4, n_theta_c=4, w_nodes_per_decade=8)
         cls.env_chart, cls.served, cls.definition = surrogate.serve(
             cls.DENSE_W[cls.below], gamma=cls.GAMMA, y1=cls.SOURCE[0],
             y2=cls.SOURCE[1], beta=0.0, eta=cls.geom.caustic_distance,
