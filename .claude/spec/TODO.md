@@ -599,8 +599,8 @@ Tag conventions:
 
   (b) **Probes are not the production path.** Every measurement in this
   program has been made by a hand-rolled scratchpad probe that re-creates
-  what the trainer does, because the training path cannot be invoked for one
-  region ([[lensing_training_path_cannot_be_run_per_region]]). MEASURED COST:
+  what the trainer does, because the training path could not be invoked for one
+  region (now fixed: [[2026-08-07_lensing-training-path-per-region]]). MEASURED COST:
   a probe that reimplemented the subdivider agreed with a misreading of the
   code rather than the code; a probe that transcribed tile bounds rounded to
   4 decimals overshot `pi/2` and silently produced complex output; and every
@@ -2086,53 +2086,6 @@ Tag conventions:
   restore them mid-redesign.
 
 
-- **`_train_band_charts` cannot be run for ONE region, so every measurement
-  reimplements it** `[housekeeping]` — identified 2026-08-06 after it caused a
-  concrete error.
-
-  `_train_band_charts(box, config, rng, outdir, parity, label, band,
-  structure, charts, chart_reports, ppgo_map)` does an entire band — tube,
-  exterior, and interior — in one call. There is no way to say "just the
-  interior". Since the exterior costs ~39 min/band and the interior ~2, any
-  interior measurement that used the real entry point would spend 95% of its
-  time on the part not under test.
-
-  So every probe reassembles the pipeline by hand: reading the tile-dict shape
-  from `surrogate_training.py:4583`, calling `_wedge_interior_tiles` and
-  `_build_wedge_chart` directly, and recomputing eps. That is the
-  oracle-tautology trap by default rather than by accident — the measurement
-  agrees with the DRIVER'S READING of the code, not with the code.
-
-  ## It has already cost real errors
-
-  - A probe hand-rolled the subdivision split (halve `r`, split `theta` at the
-    u-midpoint) from the docstring instead of calling
-    `_subdivide_wedge_tile`. It happened to agree — `theta_split = 1.248904`
-    both ways — but only luck made that true, and the hand-rolled version also
-    applied the DRIVER's eps metric rather than the gate that actually
-    registers charts.
-  - A second probe transcribed tile bounds from a printed table rounded to 4
-    decimals, overshooting `pi/2` by 1e-4, which made
-    `_wedge_cusp_axis_map` return a silently complex array. Taking the tiles
-    FROM the tiler fixed it.
-
-  ## Work
-
-  - Give the training entry point a region filter (e.g.
-    `regions=('interior',)`) so a measurement can invoke the SHIPPING path for
-    one region at its own cost. Everything downstream — admission, tiling,
-    build, gate, subdivision, reporting — then runs exactly as production
-    does.
-  - This is the cheap structural fix that makes "the oracle must call shipping
-    code" the DEFAULT rather than a discipline the driver has to remember.
-
-  ACCEPTANCE: an interior-only band run completes in interior-scale time
-  (~minutes, not ~40), produces the same charts and chart_reports as the full
-  path restricted to that region, and the wedge probes described in
-  [[2026-08-07_subdivision-recursion-wedge-v3-r-caustic]] can be re-expressed
-  as calls to it.
-
-
 - **THE TUBE MAP IS BUILT AT ONE GAMMA AND USED ACROSS A BAND** `[→ spec]` —
   measured 2026-07-30. `_build_tube_chart` builds `theta_to_s` once at
   `rep_gamma = float(np.median(gamma_grid))` and stores it on the chart;
@@ -2459,11 +2412,10 @@ Tag conventions:
   ACTION: re-run the interior probe against v3 before quoting those figures
   again, or before they are used as a baseline for the production training
   run. Cheap (~10 min) relative to what rests on them.
-  This is a specific instance of the general problem in
-  [[lensing_training_path_cannot_be_run_per_region]]: the probes exist only
-  because the training path cannot be invoked per region, so every schema
-  change re-invalidates hand-rolled probe measurements instead of a cached
-  region run.
+  This was a specific instance of the general problem that the training path
+  could not be invoked per region (now fixed:
+  [[2026-08-07_lensing-training-path-per-region]]). That fix does not change
+  the re-run need above: these measurements used the old probes and predate it.
 
 # Envelope surrogate + micro-levers — close the lensed/unlensed per-eval gap [→ spec]
 

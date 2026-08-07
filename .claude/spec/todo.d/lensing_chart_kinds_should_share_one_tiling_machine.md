@@ -25,8 +25,8 @@ section: Backlog
 
   (b) **Probes are not the production path.** Every measurement in this
   program has been made by a hand-rolled scratchpad probe that re-creates
-  what the trainer does, because the training path cannot be invoked for one
-  region ([[lensing_training_path_cannot_be_run_per_region]]). MEASURED COST:
+  what the trainer does, because the training path could not be invoked for one
+  region (now fixed: [[2026-08-07_lensing-training-path-per-region]]). MEASURED COST:
   a probe that reimplemented the subdivider agreed with a misreading of the
   code rather than the code; a probe that transcribed tile bounds rounded to
   4 decimals overshot `pi/2` and silently produced complex output; and every

@@ -20,8 +20,7 @@ depends_on: [2026-08-07_subdivision-recursion-wedge-v3-r-caustic]
   ACTION: re-run the interior probe against v3 before quoting those figures
   again, or before they are used as a baseline for the production training
   run. Cheap (~10 min) relative to what rests on them.
-  This is a specific instance of the general problem in
-  [[lensing_training_path_cannot_be_run_per_region]]: the probes exist only
-  because the training path cannot be invoked per region, so every schema
-  change re-invalidates hand-rolled probe measurements instead of a cached
-  region run.
+  This was a specific instance of the general problem that the training path
+  could not be invoked per region (now fixed:
+  [[2026-08-07_lensing-training-path-per-region]]). That fix does not change
+  the re-run need above: these measurements used the old probes and predate it.
