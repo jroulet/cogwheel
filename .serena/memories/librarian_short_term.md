@@ -1,30 +1,50 @@
 # Librarian Short-Term Observations
 
-## 2026-08-07 wedge probe NPZ eps fix + completed.d update post-commit sync
+## 2026-08-07 ExteriorPolarChart partial build post-commit sync
 
 **Scope**: One pending commit from sync_issues.json:
-- `ab48b256` — `scripts+spec: wedge probe reads NPZ eps; record single-stratum result`
+- `4d59a6d` — `feat(lensing): partial ExteriorPolarChart + polar training wiring (build stranded)`
 
-**Changed files in commit**:
-- `scripts/probe_wedge_v3.py` — fixed eps collection to read from NPZ provenance on disk
-  rather than in-memory chart.provenance (which loses heldout_eps after load). Scripts-only,
-  reads existing NPZ files, no new disk artifacts. SCRIPTS/ REWRITE NO-OP RULE applies.
-- `.claude/spec/completed.d/2026-08-07_driver_probes_exterior_wedge.md` — updated fragment
-  with single-stratum wedge v3 results: 10 charts, 9/9 passing 5e-2 bar, eps 2.0e-3..1.6e-2,
-  median 6.0e-3. Also explains two prior probe bugs (full-prior config + in-memory eps read).
-- `.claude/spec/COMPLETED.md` — generated canonical, already updated in the commit.
+**Changed files in commit** (doc-relevant subset):
+- `cogwheel/lensing/surrogate.py` — major: added `ExteriorPolarChart` class (rho, theta_c,
+  axis-schema 'exterior_polar_rho_theta_c'), wired into `select_chart` and `LensAmplificationSurrogate`;
+  `FarFieldChart` (s, d, tag 'farfield_arclength_s_perp_d_framewinv') retained as backward-compat.
+- `cogwheel/lensing/surrogate_training.py` — training wired to ExteriorPolarChart
+- Test files — skip entirely
 
-**Subsequent commit `72ca31a`** (handoff: brief for exterior polar re-chart): only added
-`.claude/handoff/brief_exterior_polar_rechart.md` — handoff/brief file, no doc surfaces.
+**Stale surfaces found and fixed**:
 
-**Analysis**:
-- sync_derived_docs.py: lens_amplification_surrogate test-only-caller warning recurred again
-  (6th+ time). Already escalated via todo.d fragment. No diff from script.
-- render_fragments.py: "All surfaces up to date." No diff. COMPLETED.md is current.
-- This is a no-op sync — all doc surfaces already current.
+1. **SPEC.md lines 60-66** (Key abstractions section): Described `FarFieldChart` with `(s, d)`
+   as the positive-parity exterior chart and `(rho, theta_c)` as "retained only for tile proposal".
+   Now describes `ExteriorPolarChart` with `(rho, theta_c)` and tag `'exterior_polar_rho_theta_c'`
+   as the active exterior chart, with `FarFieldChart` noted as backward-compat.
+   → Created `spec_changelog.d/2026-08-07_exterior_polar_chart.md` (bump: patch)
 
-**Pattern noted — TIMESTAMP ANOMALY (af251cf)**: af251cf has author timestamp 09:10:59 but
-is topologically AFTER ab48b256 (09:17:28). Confirmed again that af251cf only handled
-commits up through c3277b6; ab48b256 was correctly identified as the new pending commit.
+2. **DATA_CONTRACTS.yaml** (lens_amplification_surrogate description): The paragraph "Each
+   FarFieldChart record (exterior far-field only...)" described FarFieldChart with (s,d) as the
+   exterior chart and said it was "replacing the retired caustic-fixed (rho, theta_c) axes".
+   This was doubly stale: the coordinate role is now inverted (rho, theta_c) is active, (s,d)
+   is compat. Replaced with ExteriorPolarChart description.
+   → Created `contracts_changelog.d/2026-08-07_exterior_polar_chart.md` (bump: patch)
 
-**Fragile cross-reference watch**: nothing new this run.
+**Skipped**:
+- SPEC.md main table rows (lines 54, 56): NAMING HAZARD mentions FarFieldChart (still exists in
+  code as a class — not wrong, just incomplete). No pipeline-step or module-attribution errors;
+  the table row is a description of the engine, not the exterior chart contract.
+- docs/source/: No mentions of FarFieldChart or ExteriorPolarChart anywhere — no Sphinx updates needed.
+- overview.rst, crash_course.rst: Neither references these chart classes directly.
+
+**Pattern**: Class renames in surrogate.py go stale in TWO places: SPEC.md "Key abstractions"
+section (which names the active exterior chart class) AND DATA_CONTRACTS.yaml (which describes
+the serialized format per chart type). A commit that adds a new chart type and retires the old
+role but doesn't delete the old class creates a documentation state where BOTH classes must be
+described, with the new one as active and old as compat — don't just replace one mention.
+
+**sync_derived_docs.py**: lens_amplification_surrogate test-only-caller warning recurred again
+(7th+ time). Existing escalation TODO fragment in place. No diff from script.
+
+**Fragile cross-reference watch**: The (s,d) arc_map description in DATA_CONTRACTS.yaml (the
+sentences after the new ExteriorPolarChart paragraph) still describes the arc_map fields
+(arc_gamma_nodes, arc_theta_fine, arc_s_table) — these belong to FarFieldChart which still
+exists. They should be accurate as long as FarFieldChart persists. If a future commit deletes
+FarFieldChart entirely, those sentences become dead description and should be removed.

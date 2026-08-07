@@ -112,6 +112,7 @@ from cogwheel.gw_prior import IASPrior
 from cogwheel.lensing import posterior as posterior_module
 from cogwheel.lensing.likelihood import (LensedBinningError,
                                          LensedRelativeBinningLikelihood)
+from cogwheel.lensing.chang_refsdal import _schwinger as schwinger_module
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 from cogwheel.lensing.posterior import LensedPosterior
@@ -202,12 +203,20 @@ MASSSHEET_CONFIGS = (
 #: every `MASSSHEET_CONFIGS` entry at the fixture masses).
 MASSSHEET_W_GRID = np.linspace(1.5, 15.0, 40)
 
-#: Max in-support seeded draws scanned to collect NAMED-refusal proposals
-#: for C6.  The prior box (gamma up to 0.45, lens mass up to 3500) overlaps
-#: a NAMED wave refusal (post-8d dominated by the Schwinger ceiling: any
-#: draw whose w grid crosses w = 60 refuses on its first such node), so
-#: such proposals are dense; this budget finds several well before exhausting.
-C6_SEARCH_BUDGET = 800
+#: Top-band ``w`` cap for the C6 refusal scan.  Each draw's lens mass is
+#: clamped so the highest-frequency bin evaluates at ``w <= 58 < 60`` -- the
+#: Schwinger double-double ceiling.  This keeps every engine call on the
+#: FAST double-double path (~0.2 s) and OFF the mpmath path (~85-120 s per
+#: call), so the whole scan runs in seconds instead of ~906 s (F061).
+C6_W_CAP = 58.0
+
+#: Max mass-capped seeded draws scanned to collect NAMED-refusal proposals
+#: for C6.  With the mass cap in force the reachable in-support refusal is
+#: `LensedBinningError` (a wide-delay saddle image pair whose relative delay
+#: exceeds the certified bins), dense near ``gamma ~ 1``; the seeded scan
+#: (SEED + 6) finds `C6_N_REFUSALS` within a few dozen draws, well inside
+#: this budget.
+C6_SEARCH_BUDGET = 120
 
 #: Number of named-refusal proposals C6 pins (posterior -> -inf, raw
 #: path -> raise, and the mutation check).
@@ -970,31 +979,38 @@ class MassSheetDegeneracyTestCase(_LensSuiteTestCase):
         plt.close(fig)
 
 
-#: Gated at CLASS level, not per method: the cost is in `setUpClass`, whose
-#: `_collect_cancellation_proposals` scan evaluates configs above the
-#: Schwinger double-double ceiling (``w > 60``) at ~85-120 s per engine call
-#: on the mpmath path instead of ~0.2 s (F061). A method-level skip does NOT
-#: prevent `setUpClass` from running, so every test in the class would still
-#: pay the scan and time out -- measured: 5 errors at setup, 906 s.
+#: Gated at CLASS level, not per method: the cost is in `setUpClass`, which
+#: builds the shared injection harness (~20 s) and then runs a seeded
+#: refusal scan.  The scan MASS-CAPS every draw so the top ``w`` bin stays
+#: below the Schwinger double-double ceiling (``w <= 58 < 60``), keeping
+#: every engine call on the FAST double-double path (~0.2 s) and OFF the
+#: mpmath path (~85-120 s per call) -- the scan now completes in ~50 s
+#: instead of the ~906 s the un-capped scan cost when draws crossed the
+#: ceiling (F061). A method-level skip does NOT prevent `setUpClass` from
+#: running, so the whole class is gated to keep the fast tier fast.
 @unittest.skipUnless(
     os.environ.get('COGWHEEL_BRUTE_ACCURACY'),
     'brute-force accuracy tier: set COGWHEEL_BRUTE_ACCURACY=1 — the '
-    'setUpClass refusal scan evaluates above the Schwinger ceiling '
-    '(w > 60), ~85-120 s per engine call on the mpmath path (F061)')
+    'setUpClass injection harness plus mass-capped refusal scan runs in '
+    '~50 s of double-double engine evaluations (F061)')
 class RefusalNetTestCase(_LensSuiteTestCase):
     """C6 -- the posterior maps NAMED engine refusals to exactly ``-inf``.
 
-    In-support proposals (``gamma <= 0.45``, ``kappa = 0`` so positive
-    parity always holds) can still trip `SchwingerCertificationError` when
-    source curvature drives the effective shear into the uncertifiable
-    band.  The suite collects real such proposals by a seeded
-    scan of the sampled box, then pins that (a) the posterior returns the
+    In-support proposals (the full ``gamma in (0, 1.6)`` box, ``kappa = 0``)
+    can still trip a NAMED wave refusal.  To keep the fast tier fast the
+    scan MASS-CAPS every draw so the top ``w`` bin stays below the Schwinger
+    double-double ceiling (``w <= 58``); within that capped box the
+    reachable in-support refusal is `LensedBinningError` (a wide-delay
+    saddle image pair whose relative delay exceeds the certified bins),
+    dense near ``gamma ~ 1``.  The suite collects real such proposals by a
+    seeded scan, then pins that (a) the posterior returns the
     ``(-inf, dict, None)`` triple with NO exception escaping, while (b) the
     raw likelihood on the SAME standard config still raises the named
     refusal.  A MUTATION that removes the refusal the box actually produces
     from the net's ``except`` clause (by patching the module global the
     clause resolves) must turn (a) red -- the standing proof the ``-inf``
-    gate is not vacuous.
+    gate is not vacuous.  The suite asserts the refusal CLASS and the mapped
+    ``-inf`` VALUE, never which evaluator band produced it.
     """
 
     @classmethod
@@ -1007,34 +1023,69 @@ class RefusalNetTestCase(_LensSuiteTestCase):
 
     @classmethod
     def _collect_cancellation_proposals(cls):
-        """Seeded in-support draws that trip a NAMED wave refusal.
+        """Mass-capped seeded draws that trip a NAMED wave refusal.
 
         Returns ``(sampled_vec, standard_par_dic, exc_class)`` triples
-        whose raw likelihood raises a named engine refusal.  The
-        reachable in-support vocabulary is `SchwingerCertificationError`
-        (dominant -- any draw whose ``w`` grid crosses the ceiling
-        refuses on its first such node) and `LensedBinningError`
-        (wide-delay saddle images).  This class pins the posterior net
-        for whatever named refusals the box actually reaches; the
-        remaining branches keep their falsification through the
-        injection tests below (reachability not required).
-        ``LensDomainError`` draws (the measure-zero boundary) are
-        skipped.
+        whose raw likelihood raises a named engine refusal.  Every draw's
+        lens mass is clamped so the top ``w`` bin evaluates at
+        ``w <= C6_W_CAP < 60`` -- the Schwinger double-double ceiling --
+        keeping the whole scan on the FAST double-double path and OFF the
+        mpmath path (F061).  Within that capped box the reachable
+        in-support vocabulary is `LensedBinningError` (a wide-delay saddle
+        image pair whose relative delay exceeds the certified bins), dense
+        near ``gamma ~ 1``.  This class pins the posterior net for whatever
+        named refusal the box actually reaches; the remaining branches keep
+        their falsification through the injection tests below (reachability
+        not required).  ``LensDomainError`` draws (the measure-zero
+        boundary) are skipped.
+
+        Side effects read by the guard tests: ``cls._mpmath_calls`` counts
+        how many times the mpmath evaluator was hit during the scan (must
+        be zero under a genuine cap), and ``cls._refusal_diagnostics``
+        records the ``(w_top, gamma, class_name)`` of each collected
+        refusal (all ``w_top <= 60``).
         """
+        i_mass = cls.prior.sampled_params.index('ln_m_lens_msun')
+        w_per_msun = float(dimensionless_frequency(
+            float(cls.likelihood.fbin[-1]), 1.0, 0.0))
+        ln_m_cap = float(np.log(C6_W_CAP / w_per_msun))
+        upper = min(cls.prior.cubemin[i_mass] + cls.prior.cubesize[i_mass],
+                    ln_m_cap)
+
+        # Spy on the mpmath evaluator: a genuine mass cap never reaches it.
+        mpmath_calls = {'n': 0}
+        original_mpmath = schwinger_module._f_schwinger_mpmath
+
+        def _spy(*args, **kwargs):
+            mpmath_calls['n'] += 1
+            return original_mpmath(*args, **kwargs)
+
+        schwinger_module._f_schwinger_mpmath = _spy
         rng = np.random.default_rng(SEED + 6)
         found = []
-        for _ in range(C6_SEARCH_BUDGET):
-            sampled = _random_sampled_point(cls.prior, rng)
-            standard = cls.prior.transform(*sampled)
-            try:
-                cls.likelihood.lnlike(standard)
-            except (SchwingerCertificationError,
-                    LensedBinningError) as exc:
-                found.append((sampled, standard, type(exc)))
-                if len(found) >= C6_N_REFUSALS:
-                    break
-            except LensDomainError:
-                pass
+        diagnostics = []
+        try:
+            for _ in range(C6_SEARCH_BUDGET):
+                sampled = _random_sampled_point(cls.prior, rng)
+                sampled[i_mass] = min(sampled[i_mass], upper)
+                standard = cls.prior.transform(*sampled)
+                w_top = w_per_msun * standard['m_lens_msun']
+                try:
+                    cls.likelihood.lnlike(standard)
+                except (SchwingerCertificationError,
+                        LensedBinningError) as exc:
+                    found.append((sampled, standard, type(exc)))
+                    diagnostics.append(
+                        (float(w_top), float(standard['gamma']),
+                         type(exc).__name__))
+                    if len(found) >= C6_N_REFUSALS:
+                        break
+                except LensDomainError:
+                    pass
+        finally:
+            schwinger_module._f_schwinger_mpmath = original_mpmath
+        cls._mpmath_calls = mpmath_calls['n']
+        cls._refusal_diagnostics = diagnostics
         return found
 
     def test_named_refusals_were_found_in_support(self):
@@ -1044,6 +1095,29 @@ class RefusalNetTestCase(_LensSuiteTestCase):
             f'only {len(self.refusals)} named-refusal proposals found in '
             f'{C6_SEARCH_BUDGET} in-support draws; C6 cannot proceed')
         self.n_compared += 1
+
+    def test_scan_stayed_on_fast_double_double_path(self):
+        """The mass cap kept every engine call off the slow mpmath path.
+
+        A genuine lens-mass cap forces the top ``w`` bin below the
+        Schwinger double-double ceiling, so `_f_schwinger_mpmath` is never
+        invoked and every collected refusal reports ``w_top <= 60`` (F061).
+        """
+        self.assertEqual(
+            self._mpmath_calls, 0,
+            f'{self._mpmath_calls} mpmath evaluator calls during the C6 '
+            'scan; the lens-mass cap failed to keep w <= 58')
+        self.assertTrue(
+            self._refusal_diagnostics,
+            'no refusal diagnostics recorded; the scan collected nothing')
+        for w_top, gamma, name in self._refusal_diagnostics:
+            with self.subTest(refusal=name, w_top=round(w_top, 2),
+                              gamma=round(gamma, 4)):
+                self.assertLessEqual(
+                    w_top, 60.0,
+                    f'{name} collected at w_top={w_top:.2f} > 60 -- the '
+                    'mass cap did not hold')
+            self.n_compared += 1
 
     def test_posterior_maps_refusal_to_neginf(self):
         """The posterior returns ``(-inf, dict, None)`` and never raises."""
