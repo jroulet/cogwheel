@@ -259,6 +259,7 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
 # finite-but-wrong reconstruction.
 _EXTERIOR_POLAR_AXIS_SCHEMA = 'exterior_polar_rho_theta_c'
 _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA})
+_EXTERIOR_POLAR_CARRIER_STEP_MAX = 1.0
 _LOBE_AXIS_SCHEMA_V1 = 'lobe_local_offset_rholobe_thetalocal_framewinv'
 _LOBE_AXIS_SCHEMA = 'lobe_local_offset_rholobe_thetalocal_sqrtedge_framewinv'
 _KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_V1, _LOBE_AXIS_SCHEMA})
@@ -1406,13 +1407,13 @@ def _assert_exterior_polar_carrier_continuity(env_grid: np.ndarray,
         both = ((mag_lead > 0.0) & (mag_trail > 0.0)
                 & np.isfinite(mag_lead) & np.isfinite(mag_trail))
         step = np.abs(lead - trail) / scale
-        bad = both & (step >= _FARFIELD_CARRIER_STEP_MAX)
+        bad = both & (step >= _EXTERIOR_POLAR_CARRIER_STEP_MAX)
         if np.any(bad):
             worst = int(np.argmax(np.where(bad, step, -np.inf)))
             rel = float(np.minimum(mag_lead, mag_trail).flat[worst] / scale)
             raise CarrierDiscontinuityError(
                 'Frame-invariant exterior-polar label jumps by more than '
-                f'the bound {_FARFIELD_CARRIER_STEP_MAX:.3g} x peak |E| '
+                f'the bound {_EXTERIOR_POLAR_CARRIER_STEP_MAX:.3g} x peak |E| '
                 f'along axis {axis} at w_max = {float(w_max):.3g} (max '
                 f'step {float(step.flat[worst]):.3g} x peak, at relative '
                 f'amplitude {rel:.3g}); subdivide the tile so the '
