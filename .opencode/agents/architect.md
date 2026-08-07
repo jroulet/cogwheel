@@ -1,6 +1,7 @@
 ---
 description: Decomposes approved Cogwheel work into a narrow, dependency-aware implementation plan.
 mode: subagent
+model: opencode-go/deepseek-v4-pro
 permission:
   edit: deny
   bash: deny

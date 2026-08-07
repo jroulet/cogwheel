@@ -1,6 +1,7 @@
 ---
 description: Implements one owned work package in the Cogwheel scientific Python codebase.
 mode: subagent
+model: opencode-go/deepseek-v4-pro
 permission:
   edit: allow
   bash: allow

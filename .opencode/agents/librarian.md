@@ -1,6 +1,7 @@
 ---
 description: Updates documentation, specs, and changelog after code changes.
 mode: subagent
+model: opencode-go/deepseek-v4-flash
 permission:
   edit: allow
   bash: allow

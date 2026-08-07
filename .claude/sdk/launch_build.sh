@@ -174,6 +174,13 @@ if [[ ! -x "$PYBIN" ]]; then
   exit 1
 fi
 
+# Sync .opencode/agents/*.md frontmatter models from the env-selected role
+# maps so interactive subagents match the build provider.  Single source of
+# truth: runtime_opencode.py; no manual frontmatter edits ever needed.
+if [[ "$AGENT_PROVIDER" == "opencode" ]]; then
+  "$PYBIN" "$REPO_ROOT/scripts/sync_opencode_agents.py" 2>/dev/null || true
+fi
+
 "$PYBIN" "$REPO_ROOT/.claude/sdk/build.py" build --provider "$AGENT_PROVIDER" \
   "${APPROVE_ARGS[@]}" --log "$LOG" "@$PROMPT" > /dev/null 2>&1 &
 BUILD_PID=$!

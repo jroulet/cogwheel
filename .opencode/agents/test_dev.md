@@ -1,6 +1,7 @@
 ---
 description: Writes domain-specific tests with tolerance-based accuracy assertions.
 mode: subagent
+model: opencode-go/deepseek-v4-pro
 permission:
   edit: allow
   bash: allow
