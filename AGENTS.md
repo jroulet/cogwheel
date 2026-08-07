@@ -85,7 +85,10 @@ Applies to **behavior changes** in `cogwheel/` (new functions, signature/logic/c
   roles; suffixed variables such as `OPENCODE_MODEL_TEST_DEV` override one
   role. Set `OPENCODE_MODEL_PROVIDER=go` to switch the entire routing table to
   OpenCode Go native models (`opencode-go/deepseek-v4-pro` for opus-tier roles,
-  `opencode-go/deepseek-v4-flash` for sonnet-tier).
+  `opencode-go/deepseek-v4-flash` for sonnet-tier). Agent frontmatter in
+  `.opencode/agents/*.md` is auto-synced at build launch by
+  `scripts/sync_opencode_agents.py` (called by `launch_build.sh`) — no manual
+  frontmatter edits are needed when switching providers.
 - The orchestration state, role contracts, specs, handoffs, and memories remain
   shared under `.claude/` and `.serena/`; never fork provider-specific copies.
 - `.claude/sdk/runtime.py` is the provider boundary. `AGENT_PROVIDER` defaults
