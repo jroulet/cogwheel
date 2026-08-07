@@ -1,53 +1,42 @@
 # Librarian Short-Term Observations
 
-## 2026-08-07 FarFieldChart deletion post-commit sync
+## 2026-08-07 _validate_farfield_axis_schema deletion post-commit sync
 
-**Scope**: Two pending commits from sync_issues.json:
-- `0a31fcf` — `feat(lensing): delete FarFieldChart and (s,d) machinery (post-strand cleanup)`
-- `0a4e18a` — `chore: sweep remaining working-tree changes`
+**Scope**: Single pending commit from sync_issues.json:
+- `c8fd88c` — `fix(lensing): restore _validate_exterior_polar_axis_schema (accidentally deleted)`
 
-**Key finding — Serena index lag**: `mcp__serena__search_for_pattern` returned
-stale results showing FarFieldChart still present in SPEC.md and DATA_CONTRACTS.yaml.
-The actual files (verified by grep/read) already had those removed by the sweep
-commit. Always cross-check Serena search results against `grep` before editing.
+**What the commit did**:
+1. Restored `_validate_exterior_polar_axis_schema` function in `cogwheel/lensing/surrogate.py`
+   (it had been accidentally deleted in a prior commit).
+2. Deleted the orphaned `_validate_farfield_axis_schema` function as dead code — this function
+   was a thin wrapper over `_validate_axis_schema` binding `_KNOWN_FARFIELD_AXIS_SCHEMAS`, which
+   no longer had any callers since `FarFieldChart` was deleted in `0a31fcf`.
+3. Updated the docstring of `_validate_axis_schema` to reference `_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS`
+   instead of `_KNOWN_FARFIELD_AXIS_SCHEMAS`.
 
-**What the sweep commit (0a4e18a) already cleaned up**:
-- SPEC.md Key abstractions: backward-compat sentence for FarFieldChart removed
-- SPEC.md NAMING HAZARD: FarFieldChart removed from the name list
-- DATA_CONTRACTS.yaml: backward-compat sentence for FarFieldChart removed
-- spec_changelog.d/2026-08-07_farfield-chart-deleted.md: created
-- contracts_changelog.d/2026-08-07_farfield-chart-deleted.md: created
-
-**What this librarian run additionally fixed**:
-1. SPEC.md LOW-W FLAT EXTRAPOLATION: "(tube, far-field, lobe, wedge)" →
-   "(tube, exterior-polar, lobe, wedge)"
-2. SPEC.md surrogate description: "exterior FAR-FIELD charts" → "exterior-polar
-   charts" (FarFieldChart was the class; ExteriorPolarChart is now the only
-   exterior chart class)
-3. spec_changelog.d/2026-08-07_farfield-chart-deleted.md: extended to mention
-   items 1 and 2 above
-4. todo.d/lensing_farfield_name_spans_three_regimes.md: updated title and body
-   to note FarFieldChart class deleted; remaining rename scope is
-   `farfield_*` helper names (farfield_envelope_from_partition, FARFIELD_KERNEL_SUM,
-   farfield_eps_max, _farfield_tiles, _validate_farfield_axis_schema)
+**What needed updating**:
+- `.claude/spec/todo.d/lensing_farfield_name_spans_three_regimes.md`: "Remaining scope" list
+  still cited `_validate_farfield_axis_schema` as a name that needed renaming. Since the function
+  was deleted (not renamed), it should be removed from the list. Fixed.
 
 **Confirmed no-ops**:
-- docs/source/: no FarFieldChart or ExteriorPolarChart mentions, no Sphinx update needed
-- DATA_CONTRACTS.yaml: already clean before this run
-- FINDINGS.md: no FarFieldChart findings to retire
-- Consumer-graph warning: escalation TODO (surrogate_contract_test_consumer_warning.md)
-  already exists — same 4 test-only callers recurred again
+- SPEC.md: no reference to either function name
+- DATA_CONTRACTS.yaml: no reference
+- FINDINGS.md: no reference
+- docs/source/: no reference
+- `.claude/handoff/brief_saddle_lobe_serve.md`: references `_validate_farfield_axis_schema` but
+  is historical operational context, not a doc surface — left as-is.
+- Test files referencing deleted function: code files, not librarian scope (Inspector/Coder territory).
 
-**Pattern — chart-type references go stale in MORE places than class-name references**:
-The sweep commit cleaned up the KEY ABSTRACTIONS sentence but missed the chart-type
-list "(tube, far-field, lobe, wedge)" and the "exterior FAR-FIELD charts" description.
-On future chart-type renames, check BOTH: (a) explicit class-name mentions, and
-(b) the informal chart-type names in multi-chart descriptions and chart-type lists.
+**Files changed**:
+- `.claude/spec/todo.d/lensing_farfield_name_spans_three_regimes.md` — removed `_validate_farfield_axis_schema` from Remaining scope list
+- `.claude/spec/TODO.md` — regenerated from fragments
 
-**Fragile cross-references to watch**:
-- SPEC.md "FAR-FIELD TILING" section header: still named "far-field" because
-  the internal functions (_farfield_tiles, etc.) are still named that way. If
-  those helper names are renamed in a future cleanup, this SPEC.md label should
-  follow.
-- lensing_exterior_should_chart_in_polar_not_sd.md TODO: still open (acceptance
-  criteria not verified). Depends on measurement of chart-count eps improvement.
+**Pattern to watch**:
+TODO fragments that list "remaining scope" of a rename task go stale silently when one of the
+listed symbols is DELETED rather than renamed. The fragment only tracks what still exists to
+rename — deletion resolves the item without renaming it.
+
+**Known stray side effects from render_fragments.py**:
+- `.claude/tidy_advisory.json` and `.claude/agent_state/librarian.json` always get a stray diff
+  from `render_fragments.py`. Reverted both before committing (git checkout --).

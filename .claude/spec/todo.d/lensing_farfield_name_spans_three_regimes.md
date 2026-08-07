@@ -6,7 +6,7 @@ section: Backlog
   audited 2026-08-06; `FarFieldChart` class deleted 2026-08-07 (`0a31fcf`,
   post-strand cleanup); rename of the class is moot. Remaining scope:
   `farfield_envelope_from_partition`, `FARFIELD_KERNEL_SUM`, `farfield_eps_max`,
-  `_farfield_tiles`, `_validate_farfield_axis_schema`. DEFERRED DELIBERATELY:
+  `_farfield_tiles`. DEFERRED DELIBERATELY:
   the confusion is endemic and the rename touches a large surface. Recorded so
   it is not rediscovered.
 
