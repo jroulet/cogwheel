@@ -454,6 +454,11 @@ njit nearest-caustic search; certified by the new
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
 
+- `0.11.5` ():
+Update Key abstractions far-field surrogate coordinate contract to reflect
+ExteriorPolarChart (rho, theta_c, tag exterior_polar_rho_theta_c) as the
+positive-parity exterior chart; FarFieldChart (s, d) noted as backward-compat.
+
 - `0.11.4` ():
 
 ### Wedge interior angular axis is cusp-adapted (u = d**(2/3)), not arc length

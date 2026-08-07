@@ -91,6 +91,12 @@ map `s = theta - theta_lo`, under which splining in `s` is the previous
 No trained artifact exists yet, so nothing on disk needs migrating — the
 window in which this is free closes when the first surrogate is trained.
 
+- `0.2.8` ():
+Update lens_amplification_surrogate description: ExteriorPolarChart (rho,
+theta_c, tag exterior_polar_rho_theta_c) replaces FarFieldChart as the
+active positive-parity exterior chart; FarFieldChart retained for
+backward-compatible loading of pre-ExteriorPolarChart artifacts.
+
 - `0.2.7` ():
 
 ### InteriorWedgeChart's coverage of the astroid interior softened to reflect measurement

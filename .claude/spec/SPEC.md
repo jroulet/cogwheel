@@ -57,13 +57,15 @@ EventData (strain + ASD)  ->  WaveformGenerator  ->  Likelihood
 
 ### Key abstractions
 
-Far-field surrogate coordinate contract: positive-parity `FarFieldChart`
-records interpolate in gamma-resolved fold-adapted `(s, d)` coordinates,
-caustic arc length and signed nearest-fold distance. Their serialized arc map
-and axis-schema tag are required at load; absent or unknown tags hard-refuse.
-The legacy caustic-fixed `(rho, theta_c)` coordinates are retained only for
-tile proposal and admission. Macro-saddle far-field charts remain
-exact-engine fall-through pending a per-deltoid-edge design.
+Far-field surrogate coordinate contract: positive-parity exterior charts are
+`ExteriorPolarChart` records, interpolating in caustic-fixed polar
+`(rho, theta_c)` coordinates (axis-schema tag `'exterior_polar_rho_theta_c'`);
+tile edges sit on cusp rays so no tile straddles a cusp, and no arc-length map
+is needed. Unknown schema tags hard-refuse at load. The `FarFieldChart` class
+(fold-adapted `(s, d)` FAR-FIELD-SMOOTH coordinates, tag
+`'farfield_arclength_s_perp_d_framewinv'`) is retained for backward
+compatibility with pre-ExteriorPolarChart artifacts. Macro-saddle exterior
+charts remain exact-engine fall-through.
 
 - **`EventData`** (`data.py`) — strain + ASD for an event.
 - **`WaveformGenerator`** (`waveform.py`) — wraps LALSimulation approximants
