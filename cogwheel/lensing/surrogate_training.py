@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -3520,13 +3521,93 @@ def _build_provenance(box: PriorBox, config: TrainingConfig,
         'training_hash': hasher.hexdigest()[:12]}
 
 
+#: Fast-tier wall-clock budget [s] for one in-build heavy operation.
+#: Far above a fast test / probe (seconds to a couple of minutes) and far
+#: below a production sweep (tens of minutes to hours), mirroring the
+#: conftest fast-tier per-test ceiling rationale (F061).
+_FAST_TIER_BUDGET_S = 900.0
+
+#: Environment names that mark an opt-in slow tier (same set the conftest
+#: uses).  Any set means long work is expected and the judge does not fire.
+_SLOW_TIER_ENV_VARS = (
+    "COGWHEEL_BRUTE_ACCURACY",
+    "COGWHEEL_TRAIN_TIER",
+    "COGWHEEL_STRICT_TIMING",
+    "COGWHEEL_RUN_TIMING_SMOKE",
+)
+
+
+def guard_slow_operation(
+    est_seconds: float,
+    *,
+    what: str,
+    budget_s: float = _FAST_TIER_BUDGET_S,
+) -> None:
+    """Deterministic admission judge for a potentially slow operation.
+
+    The CALLER supplies the honest wall-clock estimate -- the agent knows
+    what it is about to run, and tests can be arbitrarily imaginative, so a
+    fixed per-function cost model cannot cover them.  This judge is the
+    single programmatic gate: it refuses the run when the caller's estimate
+    exceeds the fast-tier budget AND no slow tier is enabled.  No prompt
+    level instructs an agent to "be fast" -- the judge enforces it, so a
+    caller that intends a multi-hour sweep in a build gets a loud refusal
+    instead of silently running.
+
+    Call before any heavy invocation with your best runtime estimate:
+
+        guard_slow_operation(est_seconds=2400, what='engine sweep')
+
+    The judge is context-aware: slow tiers are pinned OFF inside builds
+    (SDK agents.py), so it refuses there; the driver's post-build sweeps
+    enable the tiers and pass through.
+    """
+    if est_seconds <= budget_s:
+        return
+    if any(os.environ.get(v) for v in _SLOW_TIER_ENV_VARS):
+        return
+    raise ValueError(
+        f"{what}: estimated {est_seconds/60:.0f} min exceeds the in-build "
+        f"fast-tier budget ({budget_s/60:.0f} min).  Slow tiers are pinned "
+        f"OFF inside builds; run this as a post-build driver step "
+        f"(.claude/sdk/post_build_sweeps.sh) or set a slow-tier env var."
+    )
+
+
+def _self_estimate(
+    config: "TrainingConfig",
+    regions: tuple[str, ...] | None,
+) -> float:
+    """Conservative wall-clock proxy [s] for a ``train()`` call.
+
+    Not a tuned cost model -- the general judge accepts an agent-supplied
+    estimate for arbitrary operations (see `guard_slow_operation`).  This is
+    only train()'s own self-defense: a rough upper bound from the grid it is
+    about to build, so a production-scale call is refused in-build even if
+    the caller forgot to gate it.  A smoke/probe config stays under the
+    budget; a production config (many w nodes, full region set) exceeds it.
+    """
+    regions = regions or ("tube", "exterior", "wedge_interior", "lobe_interior")
+    w_nodes = int(config.w_nodes_per_decade * 2.0)
+    # Per-region engine-eval count at the config's grid.  A single-region
+    # probe pays only that region's grid, not the full 4-D union.
+    per_region = {
+        "tube": config.n_theta * config.n_u,
+        "exterior": config.n_rho * config.n_theta_c,
+        "wedge_interior": 1,
+        "lobe_interior": 1,
+    }
+    n_evals = sum(per_region[r] for r in regions) * config.n_gamma * w_nodes
+    # Tiling/subdivision expands the nominal grid; be conservative.
+    return n_evals * 8 * 0.09
 def train(*, outdir: str | Path,
           artifact_path: str | Path | None = None,
           config: TrainingConfig | None = None,
           f_lo_hz: float = DEFAULT_F_LO_HZ,
           f_hi_hz: float = DEFAULT_F_HI_HZ,
           report_path: str | Path | None = None,
-          ppgo_map: CertifiedPpgoMap | None = None
+          ppgo_map: CertifiedPpgoMap | None = None,
+          regions: tuple[str, ...] | None = None
           ) -> tuple[LensAmplificationSurrogate, dict]:
     """Build the multi-chart surrogate artifact from the prior box.
 
@@ -3557,6 +3638,15 @@ def train(*, outdir: str | Path,
     """
     box = PriorBox.from_prior_classes(f_lo_hz=f_lo_hz, f_hi_hz=f_hi_hz)
     config = config or TrainingConfig()
+    # Slow-operation admission judge (programmatic, not prompt-level).
+    # train() self-reports a conservative estimate from its own grid so a
+    # production-scale call is refused in-build even if no agent thinks to
+    # call `guard_slow_operation` first.  The general judge is exported for
+    # ANY heavy operation an agent runs, with the agent's own estimate.
+    guard_slow_operation(
+        est_seconds=_self_estimate(config, regions),
+        what="train()",
+    )
     # The certified-ppGO map trims mass strata that ppGO already serves.  Fall
     # back to the process-global map (opt-in switch); absent -> None -> no trim
     # and interior/exterior tiling proceeds under the ceiling caps unchanged.
@@ -3607,7 +3697,8 @@ def train(*, outdir: str | Path,
                 box=box, config=config, rng=rng, outdir=outdir,
                 parity=parity, label=f'{label}_b{i_band}', band=sub,
                 structure=structure, charts=charts,
-                chart_reports=chart_reports, ppgo_map=ppgo_map)
+                chart_reports=chart_reports, ppgo_map=ppgo_map,
+                regions=regions)
 
     provenance = _build_provenance(box, config, charts, all_dropped_slivers)
     surrogate = LensAmplificationSurrogate(charts, provenance)
@@ -4183,8 +4274,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                        label: str, band: tuple[float, float],
                        structure: CausticStructure, charts: list,
                        chart_reports: list[dict],
-                       ppgo_map: CertifiedPpgoMap | None = None) -> None:
+                       ppgo_map: CertifiedPpgoMap | None = None,
+                       regions: tuple[str, ...] | None = None) -> None:
     """Build the tube + far-field charts of one topology-stable gamma band."""
+    if regions is None:
+        regions = ('tube', 'exterior', 'wedge_interior', 'lobe_interior')
     gamma_grid = _log_reach_gamma_axis(band, config.n_gamma, f'gamma_{label}')
 
     # -- Tube charts (per fold arc, resumable) --
@@ -4197,9 +4291,13 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # Cap the tube w grid by the largest source magnitude it samples
     # (caustic reach plus the outer eta wall), so w * |y| stays below the
     # engine's double-double ceiling -- mirroring the prior's mass coupling.
-    tube_w_range = _capped_w_range(
-        box, parity, structure.caustic_reach + max_eta_max)
-    for idx, arc in enumerate(structure.arcs[:config.max_tube_arcs]):
+    if 'tube' in regions:
+        tube_w_range = _capped_w_range(
+            box, parity, structure.caustic_reach + max_eta_max)
+    else:
+        tube_w_range = (0.0, 0.0)
+    for idx, arc in enumerate(structure.arcs[:config.max_tube_arcs]
+                               if 'tube' in regions else ()):
         # Per-arc curvature-relative tube shell sizing.
         r_min = arc_r_min[idx]
         assert config.f_max < 0.5, (
@@ -4319,166 +4417,171 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # hence the largest local w_floor), so the ppGO / physics-floor
     # certification stays conservative.  Macro saddles keep the scalar
     # ``_farfield_tiles(exclusion_rho, ...)`` path unchanged (parity != 1).
-    exterior_tiles: list | None = None
-    if parity == 1:
-        exterior_admission = _interior_admission(
-            band, 1, reach_scalar, config, eta_max=max_eta_max)
-        # Cusp-align the exterior ``theta_c`` columns to the SAME source-plane
-        # astroid cusp rays as the interior (WP1 defect 1): the exterior
-        # ``rho > 1`` arm is a theta-independent affine push-out of
-        # ``r_caustic``, so it inherits the interior's slope kinks.  Reuse the
-        # band's ``gamma_mid`` (already computed above); cusp rays are
-        # gamma-dependent, so never recompute at a band edge.
-        cusp_angles = _cusp_source_angles(gamma_mid, config.n_caustic_samples)
-        exterior_tiles = _farfield_exterior_tiles(
-            rho_outer_region, config.n_farfield_tiles_per_side,
-            admission=exterior_admission,
-            source_magnitude_max=y_outer_region,
-            cusp_angles=cusp_angles)
-        region_exclusion_rho = (
-            min(center[0] - half[0] for center, half, _, _ in exterior_tiles)
-            if exterior_tiles else exclusion_rho)
-    else:
-        region_exclusion_rho = exclusion_rho
-    # caustic-relative inner edge (WP1 defect 1).  Derive it from the NARROWED
-    # served region ``region_exclusion_rho`` -- NOT the pre-narrowing outer
-    # rho-band -- so the certified-ppGO trim below reads ``w_trust`` /
-    # ``w_ceiling`` from the rho-band cell the region actually covers.  The
-    # positive-parity per-column admission (above) can pull the served inner
-    # edge closer to the caustic than the scalar exclusion disk; reading the
-    # farther-out cell would report an easier (lower-``w_cert``) certification
-    # than the inner columns actually enjoy, capping/dropping charts where ppGO
-    # is not in fact certified.  ``caustic_rho`` is the ONE authoritative
-    # converter into the scalar-reach ppGO gauge; feed it the physical ``|y|``
-    # recovered by inverting the additive exterior gauge
-    # (``rho = 1 + |y| - coordinate_radius_min`` => ``|y| = rho - 1 +
-    # coordinate_radius_min``).  Deriving from the narrowed region gives a
-    # smaller/closer inner edge and hence a not-easier ppGO cell --
-    # conservatism
-    # compounds, never over-accepts.  Macro saddles (parity != 1) keep the HEAD
-    # scalar-reach edge: their additive exterior gauge collapses to scalar
-    # reach, so ``region_exclusion_rho == exclusion_rho`` and the physical
-    # exclusion radius is already the authoritative inner edge.  Both branches
-    # nonetheless obtain ``rho`` through ``caustic_rho`` so the ppGO gauge
-    # lives
-    # in exactly ONE place (``_scalar_caustic_reach == caustic_geometry(gamma,
-    # 0)[0]`` bit-exact, so the saddle result is byte-identical to the former
-    # hand-rolled ``physical_exclusion_radius / reach_scalar``).
-    if parity == 1:
-        ppgo_exclusion_rho = caustic_rho(
-            gamma_mid,
-            region_exclusion_rho - 1.0 + coordinate_radius_min,
-            kappa=0.0)
-    else:
-        ppgo_exclusion_rho = caustic_rho(
-            gamma_mid, physical_exclusion_radius, kappa=0.0)
-    # -- Exterior far-field: ONE fixed [w_floor, w_trust] window (S1-3) --
-    # Build S1-3 replaces the per-mass-stratum ``w`` partitioning of the
-    # exterior with a SINGLE fixed window ``[w_floor(region),
-    # w_trust(region)]`` that contains every in-region draw's chart w-segment
-    # by construction (band-split serving is live).  ``w_floor`` is the S1-2
-    # physics threshold (`_farfield_region_w_floor`); ``w_trust`` is the
-    # ppGO-trimmed top (`_farfield_region_window`).  The geometry-admitted tile
-    # loop (`_farfield_tiles`) is UNCHANGED -- tiles are admitted by geometry,
-    # never by mass -- but the whole exterior region is now tiled ONCE over
-    # the union source extent (largest ``|y|`` at the smallest reachable lens
-    # mass), not once per stratum.  The certified-ppGO trim uses
-    # ``ppgo_exclusion_rho`` derived (above) from the region's OWN served inner
-    # edge, so the drop certifies the rho-band the region actually covers and
-    # never over-clears.
-    ext_boundary = _stratum_ppgo_boundary(
-        parity, gamma_mid, ppgo_exclusion_rho, ppgo_map)
-    ext_ceiling = _stratum_ppgo_ceiling(
-        parity, gamma_mid, ppgo_exclusion_rho, ppgo_map)
-    exterior_region_report: dict = {
-        'name': f'chart_{label}_farfield_region',
-        'parity': parity, 'exterior_region_summary': True,
-        'exclusion_rho': round(float(exclusion_rho), 6),
-        'region_exclusion_rho': round(float(region_exclusion_rho), 6),
-        'ppgo_exclusion_rho': round(float(ppgo_exclusion_rho), 6),
-        'coordinate_radius_min': round(float(coordinate_radius_min), 6),
-        'reach_scalar': round(float(reach_scalar), 6),
-        'reach_max': round(float(reach_max), 6),
-        'rho_outer': round(float(rho_outer_region), 6),
-        'mass_range': [round(float(m_lo_region), 3),
-                       round(float(m_hi_region), 3)],
-        'n_rho': config.n_rho, 'n_theta_c': config.n_theta_c}
-    if parity == 1 and not exterior_tiles:
-        # Loud zero-admission (WP1): no ``theta_c`` column clears the caustic +
-        # tube shell inside the prior box, so no exterior chart is built and
-        # those draws fall to the tube / interior / serving ladder.  (Restoring
-        # the scalar test makes the gamma 0.80-0.90 band collapse HERE -- the
-        # coverage defect this WP repairs.)
-        exterior_region_report.update(
-            {'window': None, 'admitted_tiles': 0,
-             'window_action': 'zero_admission',
-             'zero_admission': True,
-             'zero_admission_reason': 'no_exterior_column_admits_tile'})
-    else:
-        window, window_action, window_report = _farfield_region_window(
-            box, parity, band, region_exclusion_rho, rho_outer_region,
-            reach_max, ext_boundary, ext_ceiling, config,
-            source_magnitude_max=y_outer_region)
-        exterior_region_report['window_action'] = window_action
-        if window is None:
-            # No exterior chart: 'drop' (ppGO serves the whole band) or 'empty'
-            # (degenerate w_floor >= w_trust window).  Loud record; those draws
-            # fall to the tube / interior / serving ladder.
-            exterior_region_report.update(
-                {'window': None, 'admitted_tiles': 0, **window_report})
+    exterior_admission = None
+    if 'exterior' in regions:
+        exterior_tiles: list | None = None
+        if parity == 1:
+            exterior_admission = _interior_admission(
+                band, 1, reach_scalar, config, eta_max=max_eta_max)
+            # Cusp-align the exterior ``theta_c`` columns to the SAME source-plane
+            # astroid cusp rays as the interior (WP1 defect 1): the exterior
+            # ``rho > 1`` arm is a theta-independent affine push-out of
+            # ``r_caustic``, so it inherits the interior's slope kinks.  Reuse the
+            # band's ``gamma_mid`` (already computed above); cusp rays are
+            # gamma-dependent, so never recompute at a band edge.
+            cusp_angles = _cusp_source_angles(gamma_mid, config.n_caustic_samples)
+            exterior_tiles = _farfield_exterior_tiles(
+                rho_outer_region, config.n_farfield_tiles_per_side,
+                admission=exterior_admission,
+                source_magnitude_max=y_outer_region,
+                cusp_angles=cusp_angles)
+            region_exclusion_rho = (
+                min(center[0] - half[0] for center, half, _, _ in exterior_tiles)
+                if exterior_tiles else exclusion_rho)
         else:
-            w_floor, w_trust = window
-            # Containment RANGE CHECK (S1-3): every in-region draw's chart
-            # w-segment must lie within [w_floor, w_trust] to 1e-12 -- a
-            # self-consistency invariant replacing the strata whole-band
-            # containment bookkeeping.
-            contained, containment_report = _farfield_window_contains_draws(
-                box, window)
-            if parity == 1:
-                # Per-column admitted set (`_farfield_exterior_tiles`); every
-                # tile's inner edge already clears the caustic + tube shell and
-                # lies inside the prior box for its direction.
-                tiles = exterior_tiles
+            region_exclusion_rho = exclusion_rho
+        # caustic-relative inner edge (WP1 defect 1).  Derive it from the NARROWED
+        # served region ``region_exclusion_rho`` -- NOT the pre-narrowing outer
+        # rho-band -- so the certified-ppGO trim below reads ``w_trust`` /
+        # ``w_ceiling`` from the rho-band cell the region actually covers.  The
+        # positive-parity per-column admission (above) can pull the served inner
+        # edge closer to the caustic than the scalar exclusion disk; reading the
+        # farther-out cell would report an easier (lower-``w_cert``) certification
+        # than the inner columns actually enjoy, capping/dropping charts where ppGO
+        # is not in fact certified.  ``caustic_rho`` is the ONE authoritative
+        # converter into the scalar-reach ppGO gauge; feed it the physical ``|y|``
+        # recovered by inverting the additive exterior gauge
+        # (``rho = 1 + |y| - coordinate_radius_min`` => ``|y| = rho - 1 +
+        # coordinate_radius_min``).  Deriving from the narrowed region gives a
+        # smaller/closer inner edge and hence a not-easier ppGO cell --
+        # conservatism
+        # compounds, never over-accepts.  Macro saddles (parity != 1) keep the HEAD
+        # scalar-reach edge: their additive exterior gauge collapses to scalar
+        # reach, so ``region_exclusion_rho == exclusion_rho`` and the physical
+        # exclusion radius is already the authoritative inner edge.  Both branches
+        # nonetheless obtain ``rho`` through ``caustic_rho`` so the ppGO gauge
+        # lives
+        # in exactly ONE place (``_scalar_caustic_reach == caustic_geometry(gamma,
+        # 0)[0]`` bit-exact, so the saddle result is byte-identical to the former
+        # hand-rolled ``physical_exclusion_radius / reach_scalar``).
+        if parity == 1:
+            ppgo_exclusion_rho = caustic_rho(
+                gamma_mid,
+                region_exclusion_rho - 1.0 + coordinate_radius_min,
+                kappa=0.0)
+        else:
+            ppgo_exclusion_rho = caustic_rho(
+                gamma_mid, physical_exclusion_radius, kappa=0.0)
+        # -- Exterior far-field: ONE fixed [w_floor, w_trust] window (S1-3) --
+        # Build S1-3 replaces the per-mass-stratum ``w`` partitioning of the
+        # exterior with a SINGLE fixed window ``[w_floor(region),
+        # w_trust(region)]`` that contains every in-region draw's chart w-segment
+        # by construction (band-split serving is live).  ``w_floor`` is the S1-2
+        # physics threshold (`_farfield_region_w_floor`); ``w_trust`` is the
+        # ppGO-trimmed top (`_farfield_region_window`).  The geometry-admitted tile
+        # loop (`_farfield_tiles`) is UNCHANGED -- tiles are admitted by geometry,
+        # never by mass -- but the whole exterior region is now tiled ONCE over
+        # the union source extent (largest ``|y|`` at the smallest reachable lens
+        # mass), not once per stratum.  The certified-ppGO trim uses
+        # ``ppgo_exclusion_rho`` derived (above) from the region's OWN served inner
+        # edge, so the drop certifies the rho-band the region actually covers and
+        # never over-clears.
+        ext_boundary = _stratum_ppgo_boundary(
+            parity, gamma_mid, ppgo_exclusion_rho, ppgo_map)
+        ext_ceiling = _stratum_ppgo_ceiling(
+            parity, gamma_mid, ppgo_exclusion_rho, ppgo_map)
+        exterior_region_report: dict = {
+            'name': f'chart_{label}_farfield_region',
+            'parity': parity, 'exterior_region_summary': True,
+            'exclusion_rho': round(float(exclusion_rho), 6),
+            'region_exclusion_rho': round(float(region_exclusion_rho), 6),
+            'ppgo_exclusion_rho': round(float(ppgo_exclusion_rho), 6),
+            'coordinate_radius_min': round(float(coordinate_radius_min), 6),
+            'reach_scalar': round(float(reach_scalar), 6),
+            'reach_max': round(float(reach_max), 6),
+            'rho_outer': round(float(rho_outer_region), 6),
+            'mass_range': [round(float(m_lo_region), 3),
+                           round(float(m_hi_region), 3)],
+            'n_rho': config.n_rho, 'n_theta_c': config.n_theta_c}
+        if parity == 1 and not exterior_tiles:
+            # Loud zero-admission (WP1): no ``theta_c`` column clears the caustic +
+            # tube shell inside the prior box, so no exterior chart is built and
+            # those draws fall to the tube / interior / serving ladder.  (Restoring
+            # the scalar test makes the gamma 0.80-0.90 band collapse HERE -- the
+            # coverage defect this WP repairs.)
+            exterior_region_report.update(
+                {'window': None, 'admitted_tiles': 0,
+                 'window_action': 'zero_admission',
+                 'zero_admission': True,
+                 'zero_admission_reason': 'no_exterior_column_admits_tile'})
+        else:
+            window, window_action, window_report = _farfield_region_window(
+                box, parity, band, region_exclusion_rho, rho_outer_region,
+                reach_max, ext_boundary, ext_ceiling, config,
+                source_magnitude_max=y_outer_region)
+            exterior_region_report['window_action'] = window_action
+            if window is None:
+                # No exterior chart: 'drop' (ppGO serves the whole band) or 'empty'
+                # (degenerate w_floor >= w_trust window).  Loud record; those draws
+                # fall to the tube / interior / serving ladder.
+                exterior_region_report.update(
+                    {'window': None, 'admitted_tiles': 0, **window_report})
             else:
-                # Macro saddle: unchanged scalar-reach exterior tiler.
-                tiles = _farfield_tiles(
-                    exclusion_rho, rho_outer_region,
-                    config.n_farfield_tiles_per_side)
-            # Per-window node reprovision (w-axis ONLY): probe the innermost
-            # tile (largest w_floor, hardest fit) for the minimal w-node
-            # density N_rec still clearing the eps bar; the rho/theta_c tiling
-            # density is HELD.
-            n_rec = int(config.w_nodes_per_decade)
-            reprovision_report: dict = {'status': 'no_admitted_tile',
-                                        'n_rec': n_rec}
-            if tiles:
-                probe_center, probe_half = tiles[0][0], tiles[0][1]
-                probe_tile = {'center': probe_center, 'half': probe_half,
-                              'si': 0, 'i': tiles[0][2], 'j': tiles[0][3],
-                              'm_lo': m_lo_region, 'm_hi': m_hi_region,
-                              'w_range': window, 'region': 'exterior'}
-                n_rec, reprovision_report = _reprovision_w_nodes(
-                    band=band, parity=parity, tile=probe_tile, window=window,
-                    config=config, rng=rng)
-            for center, half, i, j in tiles:
-                admitted.append({
-                    'si': 0, 'i': i, 'j': j, 'center': center, 'half': half,
-                    'm_lo': m_lo_region, 'm_hi': m_hi_region,
-                    'w_range': window, 'w_nodes_per_decade': int(n_rec),
-                    'region': 'exterior'})
-            exterior_region_report.update({
-                'window': [round(float(w_floor), 6),
-                           round(float(w_trust), 6)],
-                'admitted_tiles': len(tiles),
-                'n_w_per_decade': int(n_rec),
-                'containment_ok': bool(contained),
-                'containment': containment_report,
-                'reprovision': reprovision_report, **window_report})
-            if not contained:
-                # True by construction of the clip; a violation signals a
-                # window/clip inconsistency -- flagged loudly, not silently.
-                exterior_region_report['containment_violation'] = True
-    chart_reports.append(exterior_region_report)
+                w_floor, w_trust = window
+                # Containment RANGE CHECK (S1-3): every in-region draw's chart
+                # w-segment must lie within [w_floor, w_trust] to 1e-12 -- a
+                # self-consistency invariant replacing the strata whole-band
+                # containment bookkeeping.
+                contained, containment_report = _farfield_window_contains_draws(
+                    box, window)
+                if parity == 1:
+                    # Per-column admitted set (`_farfield_exterior_tiles`); every
+                    # tile's inner edge already clears the caustic + tube shell and
+                    # lies inside the prior box for its direction.
+                    tiles = exterior_tiles
+                else:
+                    # Macro saddle: unchanged scalar-reach exterior tiler.
+                    tiles = _farfield_tiles(
+                        exclusion_rho, rho_outer_region,
+                        config.n_farfield_tiles_per_side)
+                # Per-window node reprovision (w-axis ONLY): probe the innermost
+                # tile (largest w_floor, hardest fit) for the minimal w-node
+                # density N_rec still clearing the eps bar; the rho/theta_c tiling
+                # density is HELD.
+                n_rec = int(config.w_nodes_per_decade)
+                reprovision_report: dict = {'status': 'no_admitted_tile',
+                                            'n_rec': n_rec}
+                if tiles:
+                    probe_center, probe_half = tiles[0][0], tiles[0][1]
+                    probe_tile = {'center': probe_center, 'half': probe_half,
+                                  'si': 0, 'i': tiles[0][2], 'j': tiles[0][3],
+                                  'm_lo': m_lo_region, 'm_hi': m_hi_region,
+                                  'w_range': window, 'region': 'exterior'}
+                    n_rec, reprovision_report = _reprovision_w_nodes(
+                        band=band, parity=parity, tile=probe_tile, window=window,
+                        config=config, rng=rng)
+                for center, half, i, j in tiles:
+                    admitted.append({
+                        'si': 0, 'i': i, 'j': j, 'center': center, 'half': half,
+                        'm_lo': m_lo_region, 'm_hi': m_hi_region,
+                        'w_range': window, 'w_nodes_per_decade': int(n_rec),
+                        'region': 'exterior'})
+                exterior_region_report.update({
+                    'window': [round(float(w_floor), 6),
+                               round(float(w_trust), 6)],
+                    'admitted_tiles': len(tiles),
+                    'n_w_per_decade': int(n_rec),
+                    'containment_ok': bool(contained),
+                    'containment': containment_report,
+                    'reprovision': reprovision_report, **window_report})
+                if not contained:
+                    # True by construction of the clip; a violation signals a
+                    # window/clip inconsistency -- flagged loudly, not silently.
+                    exterior_region_report['containment_violation'] = True
+        chart_reports.append(exterior_region_report)
+    else:
+        exterior_tiles = None
+        region_exclusion_rho = exclusion_rho
     # -- Interior (4-image) far-field tiles (frozen WP6, S2-1) --
     # The astroid interior is a single 4-image region enclosing the origin, so
     # an interior tile carries the SAME E_ff / far-field label (the subtraction
@@ -4504,70 +4607,71 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     cusp_angles: list[float] = []
     lobe_records: list[dict] = []
     if parity != 1:
-        # --- Saddle (gamma > 1): per-lobe deltoid interiors
-        # (frozen WP7, S2-2).
-        # The macro-saddle caustic is two disjoint 3-cusp deltoid lobes off the
-        # origin on the shear axis; neither encloses the origin, so the
-        # origin-centred astroid admission does not apply.  Each lobe gets its
-        # OWN interior family in a lobe-local frame centred on that lobe's
-        # source-plane deltoid centroid, admitted by per-lobe winding number,
-        # tube-shell nearest-distance, and the inter-lobe corridor exclusion
-        # (`_SaddleLobeAdmission`); the lobe-local theta tile edges align to
-        # the lobe's three cusp rays and no tile straddles the inter-lobe
-        # equidistance (perpendicular-bisector) line.
-        #
-        # These lobe-local tiles are packed into ``admitted`` with
-        # ``region='lobe_interior'`` and their owning ``_SaddleLobeAdmission``
-        # (S2-3 serve wiring): the build loop trains each through
-        # ``_build_lobe_chart`` / ``from_lobe_engine`` in lobe-local
-        # ``(rho_lobe, theta_local)`` coordinates and the persisted lobe frame
-        # (centroid, boundary) maps a served node back to its true physical
-        # source, so the lobe interiors are now served (not just recorded).
-        # Saddle eta_max for lobe corridor: use the band's max eta_max
-        # (widest tube shell among all fold arcs in this band).
-        saddle_eta_max = max_eta_max
-        lobe_admissions = _saddle_lobe_admissions(band, config,
-                                                  eta_max=saddle_eta_max)
-        for lobe_index, (lens_center, lobe) in enumerate(
-                zip(_SADDLE_LOBE_CENTERS, lobe_admissions)):
-            lobe_cusps = _lobe_cusp_source_angles(
-                gamma_mid, lens_center, lobe.centroid,
-                config.n_caustic_samples)
-            lobe_tiles = _lobe_interior_tiles(
-                lobe, lobe_cusps, config.n_farfield_tiles_per_side)
-            interior_admitted += len(lobe_tiles)
-            # Pack each admitted lobe tile into the served build set carrying
-            # its owning ``_SaddleLobeAdmission`` (S2-3 serve wiring): the build
-            # loop routes ``region == 'lobe_interior'`` tiles through
+        if 'lobe_interior' in regions:
+            # --- Saddle (gamma > 1): per-lobe deltoid interiors
+            # (frozen WP7, S2-2).
+            # The macro-saddle caustic is two disjoint 3-cusp deltoid lobes off the
+            # origin on the shear axis; neither encloses the origin, so the
+            # origin-centred astroid admission does not apply.  Each lobe gets its
+            # OWN interior family in a lobe-local frame centred on that lobe's
+            # source-plane deltoid centroid, admitted by per-lobe winding number,
+            # tube-shell nearest-distance, and the inter-lobe corridor exclusion
+            # (`_SaddleLobeAdmission`); the lobe-local theta tile edges align to
+            # the lobe's three cusp rays and no tile straddles the inter-lobe
+            # equidistance (perpendicular-bisector) line.
+            #
+            # These lobe-local tiles are packed into ``admitted`` with
+            # ``region='lobe_interior'`` and their owning ``_SaddleLobeAdmission``
+            # (S2-3 serve wiring): the build loop trains each through
             # ``_build_lobe_chart`` / ``from_lobe_engine`` in lobe-local
-            # ``(rho_lobe, theta_local)`` coordinates, so the lobe-centroid
-            # offset now flows through the serve pipeline.  ``si = lobe_index``
-            # disambiguates the two lobes' per-chart tags.
-            centroid_mag = float(np.hypot(lobe.centroid[0], lobe.centroid[1]))
-            r_deltoid_max = float(np.max(lobe.boundary_r))
-            for center, half, i, j in lobe_tiles:
-                rho_lobe_max = float(center[0]) + float(half[0])
-                # Union spatial extent for the frequency cap: the farthest
-                # physical source magnitude reachable inside this lobe-local
-                # tile (centroid offset + outer directional boundary radius).
-                y_max_tile = centroid_mag + rho_lobe_max * r_deltoid_max
-                admitted.append({
-                    'si': lobe_index, 'i': i, 'j': j,
-                    'center': center, 'half': half,
-                    'm_lo': m_lo_region, 'm_hi': m_hi_region,
-                    'w_range': _capped_w_range(box, parity, y_max_tile),
-                    'region': 'lobe_interior', 'lobe': lobe})
-            lobe_records.append({
-                'lens_center': round(float(lens_center), 6),
-                'centroid': [round(float(lobe.centroid[0]), 6),
-                             round(float(lobe.centroid[1]), 6)],
-                'reach': round(float(lobe.reach), 6),
-                'corridor_half': round(float(lobe.corridor_half), 6),
-                'n_cusp_rays': len(lobe_cusps),
-                'cusp_angles': [round(float(a), 6) for a in lobe_cusps],
-                'admitted_tiles': len(lobe_tiles)})
-        if interior_admitted == 0:
-            interior_skip = 'saddle_lobes_zero_admission'
+            # ``(rho_lobe, theta_local)`` coordinates and the persisted lobe frame
+            # (centroid, boundary) maps a served node back to its true physical
+            # source, so the lobe interiors are now served (not just recorded).
+            # Saddle eta_max for lobe corridor: use the band's max eta_max
+            # (widest tube shell among all fold arcs in this band).
+            saddle_eta_max = max_eta_max
+            lobe_admissions = _saddle_lobe_admissions(band, config,
+                                                      eta_max=saddle_eta_max)
+            for lobe_index, (lens_center, lobe) in enumerate(
+                    zip(_SADDLE_LOBE_CENTERS, lobe_admissions)):
+                lobe_cusps = _lobe_cusp_source_angles(
+                    gamma_mid, lens_center, lobe.centroid,
+                    config.n_caustic_samples)
+                lobe_tiles = _lobe_interior_tiles(
+                    lobe, lobe_cusps, config.n_farfield_tiles_per_side)
+                interior_admitted += len(lobe_tiles)
+                # Pack each admitted lobe tile into the served build set carrying
+                # its owning ``_SaddleLobeAdmission`` (S2-3 serve wiring): the build
+                # loop routes ``region == 'lobe_interior'`` tiles through
+                # ``_build_lobe_chart`` / ``from_lobe_engine`` in lobe-local
+                # ``(rho_lobe, theta_local)`` coordinates, so the lobe-centroid
+                # offset now flows through the serve pipeline.  ``si = lobe_index``
+                # disambiguates the two lobes' per-chart tags.
+                centroid_mag = float(np.hypot(lobe.centroid[0], lobe.centroid[1]))
+                r_deltoid_max = float(np.max(lobe.boundary_r))
+                for center, half, i, j in lobe_tiles:
+                    rho_lobe_max = float(center[0]) + float(half[0])
+                    # Union spatial extent for the frequency cap: the farthest
+                    # physical source magnitude reachable inside this lobe-local
+                    # tile (centroid offset + outer directional boundary radius).
+                    y_max_tile = centroid_mag + rho_lobe_max * r_deltoid_max
+                    admitted.append({
+                        'si': lobe_index, 'i': i, 'j': j,
+                        'center': center, 'half': half,
+                        'm_lo': m_lo_region, 'm_hi': m_hi_region,
+                        'w_range': _capped_w_range(box, parity, y_max_tile),
+                        'region': 'lobe_interior', 'lobe': lobe})
+                lobe_records.append({
+                    'lens_center': round(float(lens_center), 6),
+                    'centroid': [round(float(lobe.centroid[0]), 6),
+                                 round(float(lobe.centroid[1]), 6)],
+                    'reach': round(float(lobe.reach), 6),
+                    'corridor_half': round(float(lobe.corridor_half), 6),
+                    'n_cusp_rays': len(lobe_cusps),
+                    'cusp_angles': [round(float(a), 6) for a in lobe_cusps],
+                    'admitted_tiles': len(lobe_tiles)})
+            if interior_admitted == 0:
+                interior_skip = 'saddle_lobes_zero_admission'
     elif not encloses:
         interior_skip = 'caustic_not_origin_enclosing'
     elif reach_scalar <= max_eta_max:
@@ -4575,79 +4679,80 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         # one shell of the origin); no interior point clears the shell.
         interior_skip = 'tube_shell_fills_interior'
     else:
-        # Positive-parity astroid interior in WEDGE caustic-relative
-        # coordinates (WP1): the origin-enclosing astroid interior is charted
-        # by ``InteriorWedgeChart`` (built via ``from_wedge_engine``) instead
-        # of the retired far-field ``ffin`` tiling.  ``r`` is normalised by the
-        # directional caustic reach and ``theta_wedge = atan2(|y2|, |y1|)``
-        # spans one canonical quadrant ``[0, pi/2]`` (the astroid D2 fold maps
-        # the other three quadrants onto it).  The wedge tiler is a MINIMAL
-        # single-angular-column, uniform-radial-rows family; DD-product
-        # ``w``-capping and the arc-length ``theta_wedge -> s`` map are applied
-        # INSIDE ``from_wedge_engine`` per tile, and no cusp-alignment or
-        # directional admission geometry is needed -- the caustic-relative
-        # frame absorbs the caustic shape.  ``coordinate_radius_min`` /
-        # ``reach_max`` are the band-level bounds already computed above
-        # (bit-identical to ``np.min(admission.radius_grid)``, so no per-band
-        # ``_interior_admission`` object is built here).
-        int_rho = 0.0  # near-origin: the hardest interior region (Build 8h-a)
-        int_boundary = _stratum_ppgo_boundary(
-            parity, gamma_mid, int_rho, ppgo_map)
-        int_ceiling = _stratum_ppgo_ceiling(
-            parity, gamma_mid, int_rho, ppgo_map)
-        for si, (m_lo, m_hi) in enumerate(strata):
-            y_extent = float(_lens_prior._source_scale(m_lo))
-            # The directional interior reaches the full caustic at ``rho=1``,
-            # capped conservatively by the stratum source support divided by
-            # the smallest physical directional radius in the band.
-            grid_rho_extent = min(
-                1.0, float(y_extent) / coordinate_radius_min,
-            )
-            grid_extent = grid_rho_extent * reach_max
-            int_w_range = _stratum_w_range(
-                box, parity, m_lo, m_hi, grid_extent)
-            trimmed_w_range, action = _apply_ppgo_trim(
-                int_w_range, int_boundary, int_ceiling)
-            if action == 'drop':
-                dropped_strata.append({
-                    'stratum_index': si, 'region': 'wedge_interior',
+        if 'wedge_interior' in regions:
+            # Positive-parity astroid interior in WEDGE caustic-relative
+            # coordinates (WP1): the origin-enclosing astroid interior is charted
+            # by ``InteriorWedgeChart`` (built via ``from_wedge_engine``) instead
+            # of the retired far-field ``ffin`` tiling.  ``r`` is normalised by the
+            # directional caustic reach and ``theta_wedge = atan2(|y2|, |y1|)``
+            # spans one canonical quadrant ``[0, pi/2]`` (the astroid D2 fold maps
+            # the other three quadrants onto it).  The wedge tiler is a MINIMAL
+            # single-angular-column, uniform-radial-rows family; DD-product
+            # ``w``-capping and the arc-length ``theta_wedge -> s`` map are applied
+            # INSIDE ``from_wedge_engine`` per tile, and no cusp-alignment or
+            # directional admission geometry is needed -- the caustic-relative
+            # frame absorbs the caustic shape.  ``coordinate_radius_min`` /
+            # ``reach_max`` are the band-level bounds already computed above
+            # (bit-identical to ``np.min(admission.radius_grid)``, so no per-band
+            # ``_interior_admission`` object is built here).
+            int_rho = 0.0  # near-origin: the hardest interior region (Build 8h-a)
+            int_boundary = _stratum_ppgo_boundary(
+                parity, gamma_mid, int_rho, ppgo_map)
+            int_ceiling = _stratum_ppgo_ceiling(
+                parity, gamma_mid, int_rho, ppgo_map)
+            for si, (m_lo, m_hi) in enumerate(strata):
+                y_extent = float(_lens_prior._source_scale(m_lo))
+                # The directional interior reaches the full caustic at ``rho=1``,
+                # capped conservatively by the stratum source support divided by
+                # the smallest physical directional radius in the band.
+                grid_rho_extent = min(
+                    1.0, float(y_extent) / coordinate_radius_min,
+                )
+                grid_extent = grid_rho_extent * reach_max
+                int_w_range = _stratum_w_range(
+                    box, parity, m_lo, m_hi, grid_extent)
+                trimmed_w_range, action = _apply_ppgo_trim(
+                    int_w_range, int_boundary, int_ceiling)
+                if action == 'drop':
+                    dropped_strata.append({
+                        'stratum_index': si, 'region': 'wedge_interior',
+                        'mass_range': [round(m_lo, 3), round(m_hi, 3)],
+                        'w_range': [round(int_w_range[0], 6),
+                                    round(int_w_range[1], 6)],
+                        'w_trust': round(float(int_boundary), 6),
+                        'reason': 'ppGO certified over the whole stratum w-band'})
+                    continue
+                int_w_range = trimmed_w_range
+                # Cap the wedge radial extent one tube-shell inside the caustic so
+                # the Airy caustic edge (r -> 1) is left to the tube chart; a
+                # non-positive extent yields no tiles (ladder-served interior).
+                r_extent = min(
+                    grid_rho_extent, 1.0 - max_eta_max / coordinate_radius_min)
+                # Locate the caustic waist at the SAME band-representative gamma
+                # `from_wedge_engine` uses internally (median of the log-reach
+                # gamma grid over this band), so the tiler's angular split boundary
+                # and the engine's per-tile near-cusp classification agree exactly
+                # (no train/serve skew -- the engine asserts on disagreement).
+                gamma_rep = float(np.median(
+                    _log_reach_gamma_axis(band, config.n_gamma, 'gamma')))
+                tiles = _wedge_interior_tiles(
+                    gamma_rep, r_extent, config.n_farfield_tiles_per_side)
+                interior_admitted += len(tiles)
+                interior_records.append({
+                    'stratum_index': si,
                     'mass_range': [round(m_lo, 3), round(m_hi, 3)],
+                    'grid_extent': round(float(grid_extent), 6),
+                    'grid_rho_extent': round(float(grid_rho_extent), 6),
+                    'r_extent': round(float(r_extent), 6),
                     'w_range': [round(int_w_range[0], 6),
                                 round(int_w_range[1], 6)],
-                    'w_trust': round(float(int_boundary), 6),
-                    'reason': 'ppGO certified over the whole stratum w-band'})
-                continue
-            int_w_range = trimmed_w_range
-            # Cap the wedge radial extent one tube-shell inside the caustic so
-            # the Airy caustic edge (r -> 1) is left to the tube chart; a
-            # non-positive extent yields no tiles (ladder-served interior).
-            r_extent = min(
-                grid_rho_extent, 1.0 - max_eta_max / coordinate_radius_min)
-            # Locate the caustic waist at the SAME band-representative gamma
-            # `from_wedge_engine` uses internally (median of the log-reach
-            # gamma grid over this band), so the tiler's angular split boundary
-            # and the engine's per-tile near-cusp classification agree exactly
-            # (no train/serve skew -- the engine asserts on disagreement).
-            gamma_rep = float(np.median(
-                _log_reach_gamma_axis(band, config.n_gamma, 'gamma')))
-            tiles = _wedge_interior_tiles(
-                gamma_rep, r_extent, config.n_farfield_tiles_per_side)
-            interior_admitted += len(tiles)
-            interior_records.append({
-                'stratum_index': si,
-                'mass_range': [round(m_lo, 3), round(m_hi, 3)],
-                'grid_extent': round(float(grid_extent), 6),
-                'grid_rho_extent': round(float(grid_rho_extent), 6),
-                'r_extent': round(float(r_extent), 6),
-                'w_range': [round(int_w_range[0], 6),
-                            round(int_w_range[1], 6)],
-                'ppgo_capped': bool(action == 'cap'),
-                'admitted_tiles': len(tiles)})
-            for center, half, i, j, axis_origin in tiles:
-                admitted.append({
-                    'si': si, 'i': i, 'j': j, 'center': center, 'half': half,
-                    'm_lo': m_lo, 'm_hi': m_hi, 'w_range': int_w_range,
-                    'region': 'wedge_interior', 'axis_origin': axis_origin})
+                    'ppgo_capped': bool(action == 'cap'),
+                    'admitted_tiles': len(tiles)})
+                for center, half, i, j, axis_origin in tiles:
+                    admitted.append({
+                        'si': si, 'i': i, 'j': j, 'center': center, 'half': half,
+                        'm_lo': m_lo, 'm_hi': m_hi, 'w_range': int_w_range,
+                        'region': 'wedge_interior', 'axis_origin': axis_origin})
 
     # Loud interior summary.  Where geometry permits an interior region (origin
     # enclosed, reach clears the tube shell) admission MUST be non-empty; a
