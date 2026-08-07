@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "7a4a8ce586f5f0425e5ddcec2d85b1e053ef0344",
-  "timestamp": "2026-08-07T19:32:18Z",
+  "commit": "56369bfacffef309500de19816183e06d33802fd",
+  "timestamp": "2026-08-07T21:31:31Z",
   "touched_files": [
     "cogwheel/lensing/born_residual_chart.py",
     "cogwheel/lensing/chang_refsdal/__init__.py",
@@ -19,6 +19,7 @@
     "cogwheel/tests/test_lensing_born_residual_wiring.py",
     "cogwheel/tests/test_lensing_caustic_cusps.py",
     "cogwheel/tests/test_lensing_exterior_admission.py",
+    "cogwheel/tests/test_lensing_exterior_polar_fold.py",
     "cogwheel/tests/test_lensing_exterior_windows.py",
     "cogwheel/tests/test_lensing_extrapolate_floor.py",
     "cogwheel/tests/test_lensing_farfield_envelope.py",
