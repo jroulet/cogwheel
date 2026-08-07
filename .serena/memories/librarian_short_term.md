@@ -1,36 +1,34 @@
 # Librarian Short-Term Observations
 
-## 2026-08-07 m_lens_range post-commit sync (no-op)
+## 2026-08-07 wedge probe v3 + m_lens_range post-commit sync
 
-**Scope**: post-commit triggered by commit 6144378 (`feat(lensing): m_lens_range
-override for train()/PriorBox`). Changed files: `cogwheel/lensing/surrogate_training.py`,
-`CHANGELOG.md`, `changelog.d/2026-08-07_train_m_lens_range.md`, memory files,
-`agent_state/librarian.json`.
+**Scope**: Two pending commits from sync_issues.json:
+- `6144378` — `feat(lensing): m_lens_range override for train()/PriorBox` (surrogate_training.py)
+- `a996316` — `scripts: wedge probe to single mass stratum (v2-equivalent scope)`
 
-**Result**: clean no-op. All doc surfaces were already current from the PRIOR
-librarian run (same session, code was uncommitted then; now committed). Nothing
-new to do:
+**Findings**:
+- `6144378` was already fully processed by the previous librarian session (commit `c3277b6`
+  "docs: post-commit sync (m_lens_range — all surfaces current, no-op)"). That commit
+  updated the short-term memory but NOT `librarian.json` (still showed `b1b4570`).
+- `a996316` is a one-line parameter addition (`m_lens_range=(10.0, 15.8)`) to
+  `scripts/probe_wedge_v3.py`. Scripts-only, no new disk artifacts, no cogwheel/ public
+  API change. SCRIPTS/ REWRITE NO-OP RULE applies — no doc surfaces affected.
+- `sync_derived_docs.py` ran cleanly. Only stray diff was `tidy_advisory.json` (reverted).
+  Consumer-graph warnings for `lens_amplification_surrogate` test-only callers recurred
+  (5th+ time) — already escalated via
+  `todo.d/surrogate_contract_test_consumer_warning.md`, no further action.
+- `sync_issues.json` was already deleted before this session started.
+- `librarian.json` was already updated to `c3277b6` by some prior hook/process;
+  just committed that update.
 
-- SPEC.md TRAINING paragraph: does not cite `train()` keyword options — confirmed
-  (grep of `m_lens_range|from_prior_classes` hits only TODO.md and a TODO fragment,
-  not SPEC.md prose).
-- DATA_CONTRACTS.yaml: `lens_amplification_surrogate` producer is the script entry
-  point, not the training signature; no update needed.
-- `overview.rst`: lensing section covers engine + waveform + likelihood only; no
-  reference to `train()` or `PriorBox` signatures. Confirmed by pattern search.
-- `crash_course.rst`, `api.rst`: no relevant changes.
-- CHANGELOG.md: already updated (fragment written and rendered in prior run).
+**Pattern noted — COMMIT TIMESTAMP ANOMALY**: `c3277b6` (post-commit sync) has author
+timestamp 09:10:07, same as `6144378`, but is topologically AFTER `a996316` (09:10:59).
+Git allows out-of-order timestamps; this is not a sign of corruption. The topological
+chain is `6144378 → a996316 → c3277b6`.
 
-**sync_derived_docs.py output**: same recurring four test-only-caller warnings for
-`lens_amplification_surrogate`. Escalation TODO (`todo.d/surrogate_contract_test_
-consumer_warning.md`) already exists — confirmed present, no new fragment needed.
-"Some issues auto-fixed" message was an internal state flush (no new git diff).
+**Pattern noted — UNCOMMITTED SCRIPT CHANGES VISIBLE**: `scripts/probe_wedge_v3.py`
+had additional uncommitted working-tree changes (eps_values loop rewrite) beyond the
+committed `a996316` content. These are driver work-in-progress. Per convention: not
+staged, not committed by Librarian.
 
-**Stray diff**: `.claude/tidy_advisory.json` was already dirty before this run
-(per initial git status `M .claude/tidy_advisory.json`) and was not committed —
-left as-is per the known tidy_advisory side-effect pattern.
-
-**Pattern**: m_lens_range type of training-option changes will reliably be no-ops
-on all doc surfaces. SPEC.md's TRAINING section documents pipeline mechanics
-(band structure, tiling, registration gate), not `train()` keyword signatures.
-New optional keyword arguments with `None` defaults are invisible at the SPEC level.
+**Fragile cross-reference watch**: nothing new this run.
