@@ -1,69 +1,96 @@
-## Last session: 2026-08-06 post-commit sync (--post-commit 4962a26)
+## Last session: 2026-08-06 post-commit sync (--post-commit 2a23e14, range 842e8ad..2a23e14, ~16 commits)
 
-Scope: 10-commit backlog 1840958..4962a26 (mpmath-band F061 test demotions,
-conftest.py fast-tier ceiling, SDK known_failures gate, six lensing todo.d
-measurement fragments culminating in the interior-delay-coordinate ODE
-validation). Only 4 test files + new conftest.py touched `cogwheel/`; zero
-`cogwheel/lensing/**` changes, zero docs/source/** references (confirmed via
-targeted grep for conftest|f_schwinger|known_failures and InteriorWedgeChart|
-astroid interior|wedge — all empty) — Sphinx rebuild correctly skipped.
+Scope: unusual backlog — a build stranded at its tree gate meant its in-DAG
+Librarian never ran, AND the driver's own spec-only commits (`git add -A`)
+inadvertently carried the stranded build's production code. Verified
+independently via `git diff 842e8ad..2a23e14 --stat -- cogwheel/ scripts/`:
+real code changes were `cogwheel/lensing/surrogate.py` (+186/-),
+`surrogate_training.py` (+361/-), three test files, and
+`scripts/render_fragments.py` (+52, new dangling-`[[link]]` check). Commit
+messages in this range are all `spec:`/`test:`/`handoff:` — none hinted at
+the code payload; only reading the actual diff surfaced it. This is a new
+variant of the "don't trust commit messages" pattern already in
+librarian_knowledge — here the mislabeling was structural (tree-gate stranding
++ `git add -A`), not a hand-fix hiding in a feature commit.
 
 ### What was stale
-1. DATA_CONTRACTS.yaml `lens_amplification_surrogate`: the FarFieldChart
-   sentence's parenthetical "the astroid interior is InteriorWedgeChart's
-   domain" stated settled coverage. `todo.d/lensing_wedge_charts_fail_the_
-   eps_bar.md` (measured same day, first completed production run on the
-   wedge path) found 0/12 wedge interior charts pass the 5e-2 eps bar
-   (median 5.38e-1 vs retired `ffin`'s 106/106 at 3.42e-4) — interior is
-   CURRENTLY UNSERVED, falls to the serving ladder. Softened to "nominal
-   domain" + gate-failure note, WITHOUT reverting to describe `ffin` (the
-   recommended revert has not landed — driver was explicit not to
-   pre-empt this). contracts_changelog.d/2026-08-06_wedge-interior-
-   unserved.md (bump patch). This is the second contract sentence about
-   this same field/region corrected in three days (2026-08-04 factual
-   flip: interior moved to wedge; 2026-08-06 coverage flip: wedge doesn't
-   actually work) — the field is unusually fast-moving, worth extra
-   scrutiny on future passes until the interior story stabilizes.
-2. Nothing else. SPEC.md's conftest.py paragraph (added upstream in this
-   same backlog with its own spec_changelog fragment, bump patch) was
-   verified word-for-word against the actual `pytest_configure` body —
-   already accurate (900s ceiling, all 4 slow-tier env vars, --timeout
-   override, no-op-without-plugin) — no edit needed, a genuine no-op not
-   a missed check.
+1. SPEC.md's `InteriorWedgeChart` paragraph (inside the giant single-line
+   "Microlensing engine" table cell, line 55) had an "ARC-LENGTH ANGULAR AXIS"
+   subsection describing `s_fine` = cumulative trapezoid of
+   `geometry.caustic_speed`. Now wrong: the wedge angular spline axis is
+   `u = d**(2/3)` (`d` = angular distance to the NEAR astroid cusp), split at
+   the caustic waist `theta_waist = argmin_theta r_caustic` (new
+   `_wedge_theta_waist`), per-tile `axis_origin` verified against the engine's
+   own classification. Renamed subsection to "CUSP-ADAPTED ANGULAR AXIS" and
+   rewrote it; `_WEDGE_AXIS_SCHEMA` bumped `v1 -> v2` in the same sentence.
+   `spec_changelog.d/2026-08-06_wedge-cusp-adapted-angular-axis.md` (bump
+   patch). Confirmed via targeted grep that NO other SPEC.md location
+   mentions `InteriorWedgeChart`/`theta_wedge`/wedge arc length — one edit
+   site, not several.
+2. DATA_CONTRACTS.yaml `lens_amplification_surrogate`'s `InteriorWedgeChart`
+   sentence: same v1->v2 tag bump plus the `theta_to_s`/`s_grid` field
+   description rewritten from arc-length to cusp-adapted `u`. Field NAMES on
+   disk are unchanged (`theta_to_s`, `s_grid`, shape `(2, 2001)`) — only what
+   they encode changed; a stale v1 artifact hard-refuses (no migration).
+   Driver explicitly said do NOT upgrade the separate interior-coverage claim
+   ("currently UNSERVED") in the same entry — left that sentence's substance
+   alone, only touched the schema-tag paragraph.
+   `contracts_changelog.d/2026-08-06_wedge-axis-schema-v2-cusp-adapted.md`
+   (bump patch).
+3. Caught and fixed my OWN stray reference while writing fragment 2: a plain-
+   text (non-`[[link]]`) pointer inside DATA_CONTRACTS.yaml's `FarFieldChart`
+   sentence — "see FINDINGS/todo.d lensing_wedge_charts_fail_the_eps_bar" —
+   pointed at a fragment file DELETED earlier in this same commit range
+   (consolidated by `2d9c52b` into `lensing_wedge_angular_axis_is_cusp_
+   singular.md`, confirmed via `git show 2d9c52b --stat`). Repointed to the
+   surviving fragment. This class of dangling reference is INVISIBLE to
+   `render_fragments.py`'s new dangling-`[[link]]` check, which only scans
+   `[[wiki-link]]` syntax inside `todo.d`/`completed.d` fragments — a plain-
+   English fragment-name mention inside DATA_CONTRACTS.yaml or a changelog
+   fragment is NOT covered. Also fixed the same stale name in both of my OWN
+   new changelog fragments before rendering (would have shipped a second
+   dangling mention otherwise) — re-read fragment bodies for cross-references
+   to recently-deleted files, not just for typos, before running
+   render_fragments.py.
 
-### Cross-reference verification (the driver's specific ask)
-All four named links resolve: lensing_wedge_charts_fail_the_eps_bar.md,
-lensing_farfield_sd_coordinate_degenerates.md,
-lensing_interior_delay_coordinate_validated.md,
-lensing_farfield_name_spans_three_regimes.md all exist as files and their
-`[[...]]` backlinks (checked via full-repo grep, not per-file) target real
-fragments. F061 renders correctly in FINDINGS.md; all F061 cross-references
-in cogwheel/tests/*.py resolve to it (grep confirmed 5 test files + conftest
-all point at the same finding).
-
-### Surprise: pre-existing dangling link OUTSIDE this session's range
-`todo.d/lensing_caustic_relative_coordinates.md:298` still links
-`[[lensing_born_b1_derivation]]`, but that fragment file was deleted
-(completed) before 1840958 — predates this backlog by several commits (visible
-only because the conversation's initial `git status` showed it staged-deleted
-from an earlier session). Flagged, NOT fixed — out of the assigned commit
-range per scope discipline; leave for whichever session's range actually
-contains that deletion, or a dedicated dangling-link sweep.
+### Cross-reference / coherence check (the driver's specific ask #4)
+`render_fragments.py`'s dangling-`[[link]]` check ran clean (0 dangling) both
+before and after my edits — the four links flagged as dangling in commit
+`2d9c52b`'s own message were fixed two commits later in `42328c9` ("repoint
+four dangling wiki-links; make render_fragments catch them"), IN RANGE. Read
+the full bodies of `lensing_wedge_u_map_stored_in_arclength_fields.md`,
+`lensing_wedge_angular_axis_is_cusp_singular.md`,
+`lensing_r_caustic_should_root_find_not_scan.md`, and
+`lensing_coordinate_program_spine.md`: all four are internally coherent — the
+program-spine fragment correctly still says step 1 is "IN FLIGHT" (not DONE),
+the root-find fragment correctly says it "MUST NOT land" until step 1 lands,
+and the arclength-field-naming fragment correctly frames itself as knowingly-
+incurred debt to retire alongside the root-find. Did NOT retire any todo.d
+fragment (driver was explicit: implementation landed but production-scale
+accuracy is not yet demonstrated).
 
 ### Process notes
 - `sync_derived_docs.py` reported the same 4 test-only-caller consumer-graph
-  warnings for `lens_amplification_surrogate` as prior sessions (2026-08-06
-  1749eed session, and earlier) — THIRD session seeing this exact unchanged
-  warning set. Per my own prior note this is worth escalating to the
-  contract owner to silence rather than re-triaging; flagging again here
-  since I didn't act on my own prior advice.
-- render_fragments.py's out-of-chronological-order rendering (0.2.6 above
-  0.2.5, both below the file's top 0.4.1 entry) reconfirmed harmless —
-  same quirk as documented in librarian_knowledge, content intact.
-- No stray `.claude/tidy_advisory.json` / `foreman_lite.json` diff this time
-  (unlike a previously logged occurrence) — apparently intermittent, not
-  guaranteed on every render_fragments.py run.
-- Caught my own typo before committing: first draft of the new changelog
-  fragment had a garbled quote ("interior[`s] domain") — re-read fragment
-  bodies after writing them, before running render_fragments a second time,
-  rather than trusting the first draft.
+  warnings for `lens_amplification_surrogate` as at least three prior
+  sessions (per my own librarian_knowledge entry) — FOURTH session seeing
+  this exact unchanged warning set with zero diff produced. Still haven't
+  escalated to the contract owner as my own prior notes recommended; flagging
+  a fourth time. At some point this stops being "worth re-noting" and should
+  just get fixed or explicitly silenced.
+- No stray `.claude/tidy_advisory.json` diff survived to the final
+  `render_fragments.py` pass this time (reverted the first occurrence with
+  `git checkout --`, and the second full run after my cross-reference fixes
+  produced no stray diff at all) — reconfirms this is a sometimes-flaky
+  render_fragments.py side effect, not a fixed rule of every invocation.
+- `docs/source/` has ZERO mentions of "wedge" anywhere — confirmed via grep
+  before deciding to skip the Sphinx surface entirely; this internal lensing-
+  dev coordinate program has never touched Sphinx docs and this session is no
+  exception.
+- SPEC.md and DATA_CONTRACTS.yaml both store this subsystem's prose as ONE
+  giant single-line table-cell / YAML-string value each; `search_for_pattern`
+  with a broad multi-alternation regex against either file reliably blows the
+  answer-size limit even for a handful of real matches (same failure mode
+  noted in librarian_knowledge for SPEC.md rows, now also confirmed for
+  DATA_CONTRACTS.yaml's `lens_amplification_surrogate` description) — go
+  straight to a narrow, specific substring (e.g. the exact schema-tag string)
+  instead of iterating broader patterns.
