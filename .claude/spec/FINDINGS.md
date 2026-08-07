@@ -3480,3 +3480,67 @@ Professor, without naming a single test. Both gates now pass
 14 tests in its file pass. A gate that cannot COMPLETE hides ordinary red as
 effectively as it hides the hang — 11 unrelated failures were sitting behind
 this one (see `todo.d/lensing_serving_ladder_guards_are_red.md`).
+
+## F062 — careful staging never protected the commit message, because `git commit -m` takes the whole index (2026-08-07)
+
+`git commit -m <msg>` with NO pathspec commits the entire INDEX, not the
+paths a preceding `git add` named. Every mitigation in this repo had been
+aimed at `git add`: F047 replaced the SDK's blanket `git add -u` with a
+selective `_stage_build_output()`, and the driver's rule was "name paths,
+never `-A`". Both address the wrong call. If anything is already staged when
+the commit runs — by the operator, by an earlier agent, by a hook — it lands
+under that message regardless.
+
+**Measured, one session (2026-08-06/07).** Seven commits carried content their
+messages disown:
+
+- Five driver `spec:` commits swallowed a concurrent build's `surrogate.py`
+  and `surrogate_training.py` work. `spec: retire the arc-length field names`
+  carries +186 lines of cusp-axis implementation.
+- `memory: consolidate short-term into long-term (Dreamer, 2026-08-07)`
+  carried the driver's in-flight `DATA_CONTRACTS.yaml` major bump, `SPEC.md`,
+  three rendered changelogs, and four new fragments. The Dreamer's `git add`
+  named only `.serena/memories/*` paths — correctly — and it made no
+  difference.
+- `chore: update agent state after build` carried the build's ENTIRE
+  production diff (`geometry.py`, `surrogate.py`, `surrogate_training.py`,
+  five test files) — after the tree gate had BLOCKED that build's commit. A
+  gate that blocks the commit step does not block a later step that commits.
+
+Nothing was lost in any case; the cost is a history that cannot be read or
+bisected honestly, and a contract bump attributed to memory housekeeping.
+
+**Rules.**
+
+1. Commit with an explicit pathspec: `git commit -m <msg> -- <paths>`. It
+   ignores the rest of the index, so concurrent work cannot be captured. This
+   is the only mechanical fix; discipline about `git add` is not one.
+2. The index is a SHARED MUTABLE RESOURCE across the driver and every build
+   agent running in the same tree. Treat a non-empty index at commit time as
+   a conflict to report, not a state to inherit.
+3. A blocked gate is not a blocked build. Audit every step that can reach
+   `git commit`, not just the one the gate guards.
+
+**Partially fixed, and the pathspec alone is NOT sufficient.**
+`orchestrator.py::_git_commit` now snapshots the staged set before staging,
+commits `-- <only its own paths>`, and logs any pre-existing staged paths it
+excluded. In a scratch repo with no hooks this is exactly right: with `A` and
+`B` both staged, `git commit -m msg -- B` commits only `B` and leaves `A`
+staged.
+
+**The second path in is the pre-commit hook.** This repo's hook runs
+`sync_derived_docs.py --check` and then AUTO-FIXES AND AUTO-STAGES the
+rendered surfaces (`TODO.md`, `SPEC_CHANGELOG.md`,
+`DATA_CONTRACTS_CHANGELOG.md`, ...). Those `git add`s happen DURING the
+commit, and for a partial (pathspec) commit git folds the hook's staged paths
+into the result. Measured 2026-08-07: a commit explicitly scoped to
+`-- .serena/memories/ .claude/agent_state/` produced 30 files, including the
+whole `.claude/spec/` tree, because pending fragments made the rendered docs
+stale and the hook synced them mid-commit.
+
+So the reliable rule is about ORDER, not pathspec:
+
+4. Commit `.claude/spec/` (fragments AND their rendered outputs) FIRST, in its
+   own commit, so the hook has nothing left to sync when later commits run.
+   A pathspec commit made while any fragment is unrendered will absorb every
+   derived surface the hook touches, whatever paths you named.

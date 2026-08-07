@@ -211,6 +211,44 @@ Tag conventions:
     Any that survive carry a one-line reason that names a physical scale.
 
 
+- **BUILD-BRIEF "MEASURED FACTS" ENTER AS AXIOMS AND NOTHING RE-MEASURES
+  THEM** `[housekeeping]` — briefs carry a "Measured facts (do NOT re-derive;
+  each cost real engine time)" section. The instruction is deliberate:
+  re-measuring in-build is slow and deepens transcripts. The consequence is
+  that a stale premise is unfalsifiable inside the build.
+  MEASURED INSTANCE (2026-08-07, `subdivision_recursion`): the brief's fact 2
+  asserted `r_caustic(0.9, pi/2) = 5.67376` against an exact 5.69210, a 0.32%
+  error, and scoped WP2 as the branch-selection fix to close it. That fix had
+  ALREADY LANDED in an earlier build — both the pre-build and post-build trees
+  return `5.692099788303084`, bit-for-bit, 0 ULP apart. The error did not
+  exist when the build started.
+  It survived every layer, and no layer failed at its job: the Architect
+  planned a WP around it and wrote the "must become 5.69210 (was 5.67376)"
+  acceptance; the Professor reviewed the WP's reasoning and passed; the Test
+  Developer wrote a SHARD D test pinning the corrected value, which PASSED
+  trivially because the value was already correct; three Inspector rounds
+  (~$16 of Opus) raised one finding, about documentation. No role is
+  chartered to re-measure a brief premise, and a test pinning only the
+  CORRECTED number passes identically whether or not correction was needed.
+  The build still delivered a real 10.6x `r_caustic` speedup, so the WP was
+  not wasted — but its stated purpose was fiction. The same section's OTHER
+  premise (200 calls = 1.85 s) reproduced accurately at 1.788 s, so this is
+  not "driver numbers are unreliable"; it is that stale and fresh facts are
+  indistinguishable once written down.
+  FIX CANDIDATES: (1) every quantitative brief premise carries the SHA it was
+  measured at, and the Architect re-runs a one-line probe for any premise
+  whose SHA is not an ancestor of the build's HEAD — one shell call per
+  stale-suspect fact, not a re-derivation; (2) for any WP justified by a
+  defect, acceptance pins the CHANGE (pre-value differs from post-value), not
+  only the post-value; (3) driver-side, re-run the probe if the brief sat
+  unlaunched or intervening builds touched the same file — this fact was ~1
+  day old with two builds in between. (2) catches it in-build, (1) catches it
+  at plan time more cheaply; they compose.
+  Same root shape as [[lensing_golden_fixture_recomputes_geometry]]: a
+  provenance claim that is true when written and silently false later, with
+  nothing in the loop that re-checks it.
+
+
 - **CAUSTIC-RELATIVE COORDINATES — retire every prior-box length from the
   serving design** `[→ spec]` — the coverage map's regions are carved by
   `ANNULUS_INNER_RADIUS = 3.0`, inherited from the PRIOR BOX half-width. F036
@@ -1573,6 +1611,39 @@ Tag conventions:
   ACCEPTANCE: the three classes pass under `COGWHEEL_TRAIN_TIER=1` with a
   non-zero comparison count, and a deliberately poisoned chart makes them
   fail.
+
+
+- **THE POSITIVE-PARITY GOLDEN FIXTURE RECOMPUTES GEOMETRY, so it is a
+  tripwire on all of `geometry.py`, not a serve-path pin** `[housekeeping]` —
+  `PositiveParityGoldenTestCase` (`cogwheel/tests/test_lensing_surrogate_lobe.py`)
+  asserts the served envelope BIT-FOR-BIT against three committed
+  `float.hex()` pairs plus a SHA-256 artifact digest. Its docstring claimed
+  the golden constants were "literals baked into this file, so the test
+  remains a valid regression forever". The CONSTANTS are literals; the FIXTURE
+  they are compared against is not — `_positive_golden_arc_map()` calls
+  `surrogate._caustic_arclength_map(...)`, recomputing a `(4, 2001)`
+  arc-length table from live caustic geometry on every run.
+  MEASURED COST (2026-08-07): the `subdivision_recursion` build cut
+  `r_caustic`'s positive-parity bracket count 720 -> 48 (a real 10.6x
+  speedup, 1.788 s -> 0.169 s / 200 calls). Driver cross-tree verification
+  over 6080 (gamma, theta) samples: zero refusal mismatches, worst 7.59e-15
+  relative — pure `brentq` convergence noise. Propagated into the golden it
+  moved exactly ONE ULP in the imaginary part of one of three elements (max
+  rel 8.2e-17). That one ULP turned the tree gate RED, blocked the build's
+  commit, and cost ~40 min of driver forensics (worktree A/B at pre-build
+  HEAD, a 6080-point sweep, a timing A/B) to establish nothing was wrong.
+  `test_served_value_tracks_unchanged_physical_oracle` — the test that checks
+  the VALUE — was green throughout.
+  FIX: commit the arc map as a fixture artifact (10012 floats, ~80 KB `.npz`)
+  and load it instead of recomputing, making the golden what its docstring
+  already promises — a frozen pin on the SERVE path alone, where red means a
+  real defect. Interim state already applied: constants re-frozen with the
+  perturbation measured and recorded inline, both docstrings corrected to
+  state the real scope and the re-freeze protocol.
+  OPEN: are there other bits-exact goldens whose fixtures recompute from live
+  code? Grep the lensing suites for `tobytes()` / digest comparisons and check
+  each one's fixture provenance — any that recompute share this failure mode.
+  Same root shape as [[lensing_brief_premises_are_unverified]].
 
 
 - **VALIDATED: the interior coordinate is the MERGING-PAIR DELAY, generated by
