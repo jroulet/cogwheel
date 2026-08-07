@@ -934,7 +934,7 @@ nothing.
 
 **FIXED 2026-07-28.** The guard now measures the complex increment
 `|E_lead - E_trail|` normalized by the peak `|E_tilde|` over the WHOLE grid,
-against `_FARFIELD_CARRIER_STEP_MAX = 1.0`, replacing
+against `_EXTERIOR_POLAR_CARRIER_STEP_MAX = 1.0`, replacing
 `_FARFIELD_CARRIER_WIND_MAX = pi/2`. All three `_skip_carrier_guard=True`
 bypasses are removed and the kwarg is deleted from `from_engine`, so the
 escape hatch cannot be reached for again.
