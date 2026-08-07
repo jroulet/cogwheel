@@ -68,6 +68,7 @@ def main():
         config=config,
         report_path=f"{outdir}/report.json",
         regions=("wedge_interior",),
+        m_lens_range=(10.0, 15.8),  # single mass stratum (matches v2 scope)
     )
     elapsed = time.time() - t0
     _stop.set()
