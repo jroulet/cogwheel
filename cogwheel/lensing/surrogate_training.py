@@ -201,18 +201,27 @@ class PriorBox:
 
     @classmethod
     def from_prior_classes(cls, *, f_lo_hz: float = DEFAULT_F_LO_HZ,
-                           f_hi_hz: float = DEFAULT_F_HI_HZ) -> 'PriorBox':
+                           f_hi_hz: float = DEFAULT_F_HI_HZ,
+                           m_lens_range: tuple[float, float] | None = None
+                           ) -> 'PriorBox':
         """Read the box from the lens prior classes.
 
         Parameters
         ----------
         f_lo_hz, f_hi_hz : float, optional
             Detector frequency band bounds (Hz); defaults 20 / 1024.
+        m_lens_range : (float, float), optional
+            Restrict the lens-mass range to ``(m_lo, m_hi)`` Msun instead of
+            the full prior.  Used by per-region probes to train a single
+            mass/w stratum (the DRY single-source alternative to hand-rolled
+            probe pipelines); ``None`` uses the full prior mass range.
         """
         gamma_range = tuple(
             _lens_prior.UniformReducedShearPrior.range_dic['gamma'])
         ln_m = tuple(
             _lens_prior.UniformLensMassPrior.range_dic['ln_m_lens_msun'])
+        if m_lens_range is not None:
+            ln_m = (math.log(m_lens_range[0]), math.log(m_lens_range[1]))
         u1 = tuple(_lens_prior.UniformSourcePositionPrior.range_dic['u1'])
         u2 = tuple(_lens_prior.UniformSourcePositionPrior.range_dic['u2'])
         return cls(gamma_range=(float(gamma_range[0]), float(gamma_range[1])),
@@ -3607,7 +3616,8 @@ def train(*, outdir: str | Path,
           f_hi_hz: float = DEFAULT_F_HI_HZ,
           report_path: str | Path | None = None,
           ppgo_map: CertifiedPpgoMap | None = None,
-          regions: tuple[str, ...] | None = None
+          regions: tuple[str, ...] | None = None,
+          m_lens_range: tuple[float, float] | None = None
           ) -> tuple[LensAmplificationSurrogate, dict]:
     """Build the multi-chart surrogate artifact from the prior box.
 
@@ -3628,6 +3638,14 @@ def train(*, outdir: str | Path,
         Detector frequency band bounds (Hz) for the ``w`` band.
     report_path : str or Path, optional
         If given, the JSON report is written here.
+    regions : tuple[str, ...], optional
+        Restrict training to the given chart regions
+        (``tube`` / ``exterior`` / ``wedge_interior`` / ``lobe_interior``);
+        ``None`` trains every region.
+    m_lens_range : (float, float), optional
+        Restrict the lens-mass range to ``(m_lo, m_hi)`` Msun instead of the
+        full prior, so a per-region probe trains a single mass/w stratum via
+        the production path rather than reimplementing it.
 
     Returns
     -------
@@ -3636,7 +3654,8 @@ def train(*, outdir: str | Path,
     dict
         The training report (also written to ``report_path`` if given).
     """
-    box = PriorBox.from_prior_classes(f_lo_hz=f_lo_hz, f_hi_hz=f_hi_hz)
+    box = PriorBox.from_prior_classes(f_lo_hz=f_lo_hz, f_hi_hz=f_hi_hz,
+                                      m_lens_range=m_lens_range)
     config = config or TrainingConfig()
     # Slow-operation admission judge (programmatic, not prompt-level).
     # train() self-reports a conservative estimate from its own grid so a

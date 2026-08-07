@@ -1,43 +1,42 @@
 # Librarian Short-Term Observations
 
-## 2026-08-07 post-commit sync (commits d711934, 67338d6, 2704723)
+## 2026-08-07 m_lens_range training option sync (uncommitted code change)
 
-**Scope**: spec: record driver probe findings + correction (wedge coordinates WORK,
-NaN was probe-config artifact); scripts: probe_wedge_v3.py re-run at production gamma.
+**Scope**: `train()` / `PriorBox.from_prior_classes()` in
+`cogwheel/lensing/surrogate_training.py` gained an optional `m_lens_range`
+parameter (restrict lens-mass prior box to one mass/w stratum for per-region
+probes). Change was UNCOMMITTED in the working tree at sync time.
 
-**Changed files in scope**:
-- `.claude/spec/completed.d/2026-08-07_driver_probes_exterior_wedge.md` — corrected
-  (wedge coords valid; NaN was giant gamma_band_halfwidth=0.48 probe-config mistake;
-  re-run at 0.04 shows good eps; residual NaN is known carrier-flip fragment)
-- `.claude/spec/COMPLETED.md` / `.claude/spec/TODO.md` — regenerated
-- `.claude/spec/todo.d/lensing_exterior_recursion_never_measured.md` — deleted (done in 2704723)
-- `.claude/spec/todo.d/lensing_exterior_should_chart_in_polar_not_sd.md` — depends_on
-  updated from deleted fragment to `2026-08-07_driver_probes_exterior_wedge` (done in 2704723)
-- `scripts/probe_wedge_v3.py` — scripts-only, no-op per SCRIPTS/ REWRITE NO-OP RULE
-- Memory files — no doc surfaces
+**Result**:
+- Code docstrings: already document `m_lens_range` in both functions (edited
+  with the code). Verified, nothing to do (Librarian never edits code).
+- DATA_CONTRACTS.yaml `lens_amplification_surrogate`: producer is
+  `scripts/train_lens_surrogate.py::main` — a SCRIPT entry point, not the
+  `train()` signature; description covers artifact format/conventions only.
+  No mention of training signature params. Left alone.
+- SPEC.md: grep confirms the TRAINING paragraph never cites `train(` or
+  `from_prior_classes` by signature (zero hits for both). Precedent:
+  the same-day `regions` parameter addition
+  (`completed.d/2026-08-07_lensing-training-path-per-region.md`) was ALSO not
+  reflected in SPEC.md — SPEC's TRAINING paragraph documents pipeline
+  mechanics (bands, tiling, registration gate), not train() keyword options.
+  Left alone.
+- CHANGELOG: wrote `changelog.d/2026-08-07_train_m_lens_range.md`
+  (frontmatter `date: 2026-08-07`, `### heading` + prose), ran
+  `render_fragments.py`; renders as new `## 2026-08-07` group at top.
 
-**Result**: no doc surfaces stale. All three commits are no-ops for Sphinx/RST/SPEC.md/
-DATA_CONTRACTS.yaml. FINDINGS.md has no wedge-probe-invalid entry to retract (correction
-was confined to the completed.d fragment). sync_derived_docs.py: same four pre-existing
-`lens_amplification_surrogate` test-consumer warnings (already escalated via
-`surrogate_contract_test_consumer_warning.md`); "auto-fixed" message was the known
-internal-state-flush no-op (trust git diff, not the script message).
+**Pattern noted — RECURRING FRAGMENT-FORMAT DIVERGENCE**: several recent
+changelog.d fragments (e.g. `2026-08-04_min-gamma-band-1e-6.md`,
+`2026-08-04_born-residual-chart-shipped.md`) carry their date as a body
+header `## YYYY-MM-DD` with NO frontmatter, so `render_fragments.py` buckets
+them under `## 0000-00-00` (meta date defaults) while the body's own
+`## 2026-08-04` header renders inside the group. Harmless to the rendered
+CHANGELOG but produces ugly duplicated date headers. Correct convention
+(per AGENTS.md + task instruction) is frontmatter `date:` + `### heading`
+body. Worth remembering when writing future fragments; did NOT touch the
+pre-existing 08-04 fragments (out of scope, do-not-over-edit).
 
-**Pattern noted — TREE-GATE-STRANDING VARIANT CONFIRMED**: the previous librarian
-session (d711934/67338d6 sync) wrote its librarian_short_term.md and doc fixes
-(deleted lensing_exterior_recursion_never_measured.md, updated depends_on) but DID NOT
-commit them. The driver then ran git add -A when committing 2704723, which swept in the
-doc-fragment changes WITHOUT the memory file — leaving librarian_short_term.md as the
-only uncommitted diff entering THIS session. This is the exact pattern described in
-librarian_knowledge under "TREE-GATE-STRANDING + git add -A MISLABELING VARIANT".
-
-**Fragile cross-references to watch**:
-- `lensing_exterior_should_chart_in_polar_not_sd.md` depends_on includes
-  `2026-08-07_driver_probes_exterior_wedge` — if that completed.d fragment is renamed,
-  the reference breaks silently.
-- `lensing_wedge_centre_carrier_flips_in_gamma.md` is the open fragment for the
-  astroid-centre carrier-flip; the completed.d fragment references it correctly as still-open.
-- `lensing_exterior_followup_four_items.md` and
-  `lensing_d2_fold_unexploited_in_three_of_four_regions.md` both depend on
-  `lensing_exterior_should_chart_in_polar_not_sd` — will remain blocked until polar
-  recharting ships.
+**Fragile cross-reference watch**: `render_fragments.py` run left no stray
+tidy_advisory/foreman_lite diffs this time (clean). Pre-existing working-tree
+dirty files (`agent_state/librarian.json`, `architect_short_term.md`,
+`.claude/handoff/brief_fix_tree_gate_hang.md`) were NOT touched by this run.
