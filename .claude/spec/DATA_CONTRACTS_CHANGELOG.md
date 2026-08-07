@@ -91,6 +91,15 @@ map `s = theta - theta_lo`, under which splining in `s` is the previous
 No trained artifact exists yet, so nothing on disk needs migrating — the
 window in which this is free closes when the first surrogate is trained.
 
+- `0.2.9` ():
+bump: patch
+
+Remove stale backward-compatibility sentence for `FarFieldChart` from the
+`lens_amplification_surrogate` description in DATA_CONTRACTS.yaml.
+The class (fold-adapted (s,d) FAR-FIELD-SMOOTH coordinates, tag
+'farfield_arclength_s_perp_d_framewinv') was deleted in commit 0a31fcf;
+the compat-loading note and `_farfield_serves` reference are no longer accurate.
+
 - `0.2.8` ():
 Update lens_amplification_surrogate description: ExteriorPolarChart (rho,
 theta_c, tag exterior_polar_rho_theta_c) replaces FarFieldChart as the

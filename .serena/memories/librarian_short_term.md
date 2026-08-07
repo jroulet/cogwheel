@@ -1,50 +1,50 @@
 # Librarian Short-Term Observations
 
-## 2026-08-07 ExteriorPolarChart partial build post-commit sync
+## 2026-08-07 FarFieldChart deletion post-commit sync
 
 **Scope**: One pending commit from sync_issues.json:
-- `4d59a6d` — `feat(lensing): partial ExteriorPolarChart + polar training wiring (build stranded)`
-
-**Changed files in commit** (doc-relevant subset):
-- `cogwheel/lensing/surrogate.py` — major: added `ExteriorPolarChart` class (rho, theta_c,
-  axis-schema 'exterior_polar_rho_theta_c'), wired into `select_chart` and `LensAmplificationSurrogate`;
-  `FarFieldChart` (s, d, tag 'farfield_arclength_s_perp_d_framewinv') retained as backward-compat.
-- `cogwheel/lensing/surrogate_training.py` — training wired to ExteriorPolarChart
-- Test files — skip entirely
+- `0a31fcf` — `feat(lensing): delete FarFieldChart and (s,d) machinery (post-strand cleanup)`
+  Changed files: `cogwheel/lensing/surrogate.py`, `cogwheel/tests/test_lensing_farfield_envelope.py`
 
 **Stale surfaces found and fixed**:
 
-1. **SPEC.md lines 60-66** (Key abstractions section): Described `FarFieldChart` with `(s, d)`
-   as the positive-parity exterior chart and `(rho, theta_c)` as "retained only for tile proposal".
-   Now describes `ExteriorPolarChart` with `(rho, theta_c)` and tag `'exterior_polar_rho_theta_c'`
-   as the active exterior chart, with `FarFieldChart` noted as backward-compat.
-   → Created `spec_changelog.d/2026-08-07_exterior_polar_chart.md` (bump: patch)
+1. **SPEC.md lines 64-67** (Key abstractions paragraph): The sentence "The `FarFieldChart` class
+   (fold-adapted `(s, d)` FAR-FIELD-SMOOTH coordinates, tag
+   `'farfield_arclength_s_perp_d_framewinv'`) is retained for backward
+   compatibility with pre-ExteriorPolarChart artifacts." was removed. FarFieldChart is
+   now fully deleted from the codebase, so this backward-compat note is dead.
 
-2. **DATA_CONTRACTS.yaml** (lens_amplification_surrogate description): The paragraph "Each
-   FarFieldChart record (exterior far-field only...)" described FarFieldChart with (s,d) as the
-   exterior chart and said it was "replacing the retired caustic-fixed (rho, theta_c) axes".
-   This was doubly stale: the coordinate role is now inverted (rho, theta_c) is active, (s,d)
-   is compat. Replaced with ExteriorPolarChart description.
-   → Created `contracts_changelog.d/2026-08-07_exterior_polar_chart.md` (bump: patch)
+2. **SPEC.md line 53** (NAMING HAZARD in the Microlensing engine table row): Removed
+   `` `FarFieldChart` / `` from "NAMING HAZARD: `far-field` / `FarFieldChart` / `farfield_*`".
+   The terminology `farfield_*` still applies (many functions in channels.py, surrogate.py,
+   surrogate_training.py use the "far-field" naming for "outside the caustic") but the
+   class itself is gone.
 
-**Skipped**:
-- SPEC.md main table rows (lines 54, 56): NAMING HAZARD mentions FarFieldChart (still exists in
-  code as a class — not wrong, just incomplete). No pipeline-step or module-attribution errors;
-  the table row is a description of the engine, not the exterior chart contract.
-- docs/source/: No mentions of FarFieldChart or ExteriorPolarChart anywhere — no Sphinx updates needed.
-- overview.rst, crash_course.rst: Neither references these chart classes directly.
+3. **DATA_CONTRACTS.yaml** (lens_amplification_surrogate description): Removed the sentence
+   "The prior FarFieldChart class (fold-adapted (s, d) FAR-FIELD-SMOOTH coordinates, tag
+   'farfield_arclength_s_perp_d_framewinv') is retained for backward-compatible loading of
+   pre-ExteriorPolarChart artifacts; _farfield_serves declines any saddle-labelled FarFieldChart
+   and falls through to the engine as a safe compatibility response."
 
-**Pattern**: Class renames in surrogate.py go stale in TWO places: SPEC.md "Key abstractions"
-section (which names the active exterior chart class) AND DATA_CONTRACTS.yaml (which describes
-the serialized format per chart type). A commit that adds a new chart type and retires the old
-role but doesn't delete the old class creates a documentation state where BOTH classes must be
-described, with the new one as active and old as compat — don't just replace one mention.
+**Created changelog fragments**:
+- `.claude/spec/spec_changelog.d/2026-08-07_farfield-chart-deleted.md` (bump: patch)
+- `.claude/spec/contracts_changelog.d/2026-08-07_farfield-chart-deleted.md` (bump: patch)
 
-**sync_derived_docs.py**: lens_amplification_surrogate test-only-caller warning recurred again
-(7th+ time). Existing escalation TODO fragment in place. No diff from script.
+**Skipped / not stale**:
+- `docs/source/`: No mentions of FarFieldChart anywhere — confirmed clean.
+- `reconstruct_farfield` / `FARFIELD_KERNEL_SUM` in SPEC.md: These functions still exist in
+  `channels.py` and are still used throughout. The SPEC.md references to them are still correct.
+- `_validate_farfield_axis_schema` in surrogate.py: Still present in code at line 3758 but
+  references a schema that no longer applies to any live chart. This is a code-level dead-code
+  issue (Inspector territory), not a doc-sync issue.
+- Docstring at surrogate.py line 3614: "An 8a single-box artifact loads as a one-chart
+  `FarFieldChart` for backward compatibility." — stale code comment, cannot touch (code-only).
 
-**Fragile cross-reference watch**: The (s,d) arc_map description in DATA_CONTRACTS.yaml (the
-sentences after the new ExteriorPolarChart paragraph) still describes the arc_map fields
-(arc_gamma_nodes, arc_theta_fine, arc_s_table) — these belong to FarFieldChart which still
-exists. They should be accurate as long as FarFieldChart persists. If a future commit deletes
-FarFieldChart entirely, those sentences become dead description and should be removed.
+**Pattern from this run**: The previous librarian run (ExteriorPolarChart introduction) correctly
+anticipated the FarFieldChart deletion scenario and flagged exactly the sentences that went stale.
+The prediction-then-fix pattern worked: the short-term memory from a prior run predicted exactly
+which two passages would go stale when FarFieldChart was deleted. Read short-term memory carefully
+before any post-commit that involves class deletions.
+
+**Side effect note**: render_fragments.py modified `.claude/tidy_advisory.json` as a side effect —
+reverted with `git checkout --` before committing (known behavior, documented in librarian_knowledge).

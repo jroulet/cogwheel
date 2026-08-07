@@ -454,6 +454,13 @@ njit nearest-caustic search; certified by the new
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
 
+- `0.11.6` ():
+bump: patch
+
+Remove stale backward-compatibility prose for `FarFieldChart` from SPEC.md.
+The class was deleted in commit 0a31fcf (post-strand cleanup); the key-abstractions
+paragraph and the NAMING HAZARD note have been updated to reflect its removal.
+
 - `0.11.5` ():
 Update Key abstractions far-field surrogate coordinate contract to reflect
 ExteriorPolarChart (rho, theta_c, tag exterior_polar_rho_theta_c) as the
