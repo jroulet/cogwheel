@@ -31,7 +31,7 @@ def main():
         w_nodes_per_decade=15,
         interior_w_nodes_per_decade=15,
         engine_budget=2000,
-        gamma_band_halfwidth=0.48,  # wide band: interior probe spans the astroid
+        gamma_band_halfwidth=0.04,  # production-width band (matches 08-06 probe)
         n_heldout=30,
         max_farfield_regions=None,  # far-field excluded via regions= filter
     )
