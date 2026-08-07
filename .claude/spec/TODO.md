@@ -576,6 +576,50 @@ Tag conventions:
   follows the rename in step 5.
 
 
+- **EVERY CHART KIND REIMPLEMENTS TILING, SUBDIVISION AND PROBING — make it
+  ONE parameterised machine** `[→ spec]` — owner-directed 2026-08-07. Two
+  symptoms of one cause.
+
+  (a) **Per-kind subdividers.** There were TWO near-duplicate single-level
+  subdividers (`_subdivide_farfield_tile`, `_subdivide_wedge_tile`); the
+  2026-08-07 build unified them into one generic `_subdivide_tile`
+  parameterised by `(split_children, build_child, gate_kind, eps_bar,
+  admit_child)`, with the two names kept as thin wrappers. That was the right
+  move and it is HALF DONE: `LobeInteriorChart` still has NO subdivider at all
+  (see [[lensing_saddle_forensics]] item b), and `TubeChart` has none either.
+  A gated lobe or tube tile becomes a ladder-served gap with no recourse.
+
+  Adding lobe support must NOT mean a third copy — it is now a
+  splitter/builder/gate triple. The general shape wants OOP: a chart kind
+  declares its coordinate map, its tiler, its splitter, its admission
+  predicate and its eps bar; the tiling/subdivision/gating engine is written
+  ONCE against that interface. Today those five things are scattered across
+  free functions keyed by string region names (`'wedge_interior'`,
+  `farfield`, `lobe`), which is why each new kind re-derives the machinery.
+
+  (b) **Probes are not the production path.** Every measurement in this
+  program has been made by a hand-rolled scratchpad probe that re-creates
+  what the trainer does, because the training path cannot be invoked for one
+  region ([[lensing_training_path_cannot_be_run_per_region]]). MEASURED COST:
+  a probe that reimplemented the subdivider agreed with a misreading of the
+  code rather than the code; a probe that transcribed tile bounds rounded to
+  4 decimals overshot `pi/2` and silently produced complex output; and every
+  schema change re-invalidates probe measurements
+  ([[lensing_wedge_probe_charts_need_retraining_under_v3]]). A probe must be a
+  THIN CALLER of the production tiler/subdivider/gate, never a parallel
+  implementation — the same DRY rule the codebase already enforces for
+  `r_deltoid` (one authoritative `_lobe_boundary_radius`) and for the delay
+  frame (single-sourced via `_frame_delays` after it had drifted at four
+  sites).
+
+  ACCEPTANCE: one subdivision/tiling implementation, exercised by ALL chart
+  kinds including lobe and tube; a region-scoped training entry point that
+  probes call directly; and a test asserting that a probe-built chart and a
+  trainer-built chart for the same tile are byte-identical. That last one is
+  the falsifiable part — without it "the probe uses production code" is a
+  claim, not a property.
+
+
 - **COLLOCATION FROM LOCAL SCALES — place chart nodes by the function's own
   analytically-computed scale, not uniformly in whatever coordinate the code
   happens to use** `[→ spec]` — the same principle that fixed the guards
@@ -981,6 +1025,33 @@ Tag conventions:
   The expensive full-box campaign stays last (owner ruling 2026-07-20: train exactly
   once, on the final engine and final chart set). The coarse census is done; the
   campaign is not.
+
+
+- **BOUNDED RECURSION SHIPPED FOR THE EXTERIOR BUT WAS ONLY MEASURED ON THE
+  INTERIOR** `[housekeeping]` — the 2026-08-07 build gave BOTH subdividers
+  bounded recursion (`MAX_SUBDIVISION_DEPTH = 3`) through one generic
+  `_subdivide_tile`. The justification was measured on the astroid interior
+  only: 13/16 children cleared at one halving, the three that did not were
+  marginal (6.50e-2, 6.70e-2, 5.95e-2 against a 5e-2 bar), and one more level
+  was predicted to close them.
+
+  The EXTERIOR case that motivated extending it was inferred, not measured:
+  84% of exterior charts were subdivision children AND 35 of 57 still failed
+  the 1e-3 bar — numbers that only sit together if every marginal tile got
+  exactly one halving and was then abandoned. Plausible, and still unverified.
+
+  WHAT TO MEASURE: rerun the exterior training for one band with recursion
+  live, and report (i) how many of the 35 previously-failing charts now clear
+  the 1e-3 bar, (ii) the achieved-depth histogram, and (iii) whether any tile
+  hits the depth-3 cap — a tile that exhausts the cap is evidence the
+  COORDINATE is wrong, not that the cap is too low, and it should be routed to
+  [[lensing_exterior_should_chart_in_polar_not_sd]] rather than given a
+  deeper cap.
+
+  Do this BEFORE the polar re-chart, so the polar-vs-`(s,d)` node-budget A/B
+  in [[lensing_exterior_followup_four_items]] compares like with like: both
+  arms must have recursion, or the comparison credits the coordinate change
+  with the recursion's gains.
 
 
 - **RETIRE `(s, d)` FOR THE EXTERIOR BULK — chart in the tiler's OWN polar
@@ -1642,6 +1713,49 @@ Tag conventions:
 
   RELATED: [[lensing_wedge_angular_axis_is_cusp_singular]]. Note this is a NEW chart class,
   not a repair of `InteriorWedgeChart`.
+
+
+- **SERVE ppGO WHERE THE EXACT ENGINE CANNOT REACH, INSTEAD OF REFUSING**
+  `[→ spec]` — owner-directed 2026-08-06. Distinct from the ppGO ROUTING item
+  in [[lensing_exterior_followup_four_items]] (which is about choosing ppGO
+  where it is already available); this is about EXTENDING coverage into
+  `(y, w)` regions the engine's own ceilings forbid.
+
+  THE CONSTRAINT: charts can only be trained where the engine can be called.
+  `f_schwinger` refuses above `W_CEILING_SCHWINGER_QD = 150`, the dd path caps
+  at `w <= 60`, and the 1F1 kernel caps the PRODUCT `w*sqrt(s) <= 60`. So a
+  chart's `w_max` is pinned by `_DD_PRODUCT_MARGIN / (r_max * reach_max)`
+  regardless of whether the PHYSICS is hard there. It is not: at large `w` and
+  well-resolved images the field is MORE classical, not less. We refuse
+  exactly where the asymptotics are best.
+
+  THE IDEA: in the region where images are well-resolved, ppGO (post-post
+  geometric optics) is a good extrapolation, and its accuracy IMPROVES with
+  `w`. Serve it there under a named rung rather than falling through to a
+  refusal. The fold-ppGO interior handoff already does exactly this for one
+  case (`xi_min >= _XI_FOLD_THRESHOLD = 4.0` plus a per-pair uniform error
+  estimate below `CERTIFICATION_BAR`) — generalise that pattern.
+
+  OWNER'S SUGGESTION, worth testing: where a direct high-`w` fit is
+  impossible, use the INTERIOR FITS PLUS A SCALING. The `w`-dependence in the
+  resolved regime is largely carried by known analytic factors
+  (`exp(i w tau_a)` carriers, `w^{1/6}`/`w^{-1/6}` Airy weights, the `w^{1/2}`
+  / `w^{3/4}` Pearcey control arguments), so a chart trained in the reachable
+  band may extrapolate in `w` once those are divided out — i.e. spline the
+  DEMODULATED, scaling-stripped residual, which is `w`-flat by construction,
+  rather than the envelope itself.
+
+  ACCEPTANCE: name the region (in `rho`, `theta`, `w`) where ppGO is served;
+  certify against the exact engine INSIDE the reachable band with the same
+  eps currency used elsewhere (p50/p90/max plus worst-sample locus); show the
+  error DECREASES with `w` across that band, which is the only honest basis
+  for trusting it beyond the ceiling; and make the extrapolated region a
+  NAMED rung in the serving ladder, never a silent extension of a chart's box.
+
+  DO NOT let this become an unfenced arm. `_airy_fold`'s fence is permanent
+  precisely because a self-certificate that cannot see distance from the
+  caustic read 1.2e-2 where the true error was O(1) (F028, F032, F033). Any
+  ppGO extension needs a gate keyed on the thing that actually degrades it.
 
 
 - ~~**Normalize the far-field `d` axis by curvature radius**~~ `[RESOLVED]` —
