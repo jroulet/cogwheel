@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [2026-08-07_subdivision-recursion-wedge-v3-r-caustic, lensing_exterior_recursion_never_measured]
+depends_on: [2026-08-07_subdivision-recursion-wedge-v3-r-caustic, 2026-08-07_driver_probes_exterior_wedge]
 ---
 
 - **RETIRE `(s, d)` FOR THE EXTERIOR BULK — chart in the tiler's OWN polar

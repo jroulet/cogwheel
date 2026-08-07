@@ -26,14 +26,25 @@ The two probes the plan called for ran as driver steps on neso with the
 
 **Wedge v3 (`scripts/probe_wedge_v3.py`):**
 
-- **INVALID measurement — misconfigured probe.** Used
-  `gamma_band_halfwidth=0.48` (a single giant band, 12x production width)
-  with `regions=('wedge_interior',)`. All 58 charts report `heldout_eps: nan`
-  (zero held-out points served) and 43/58 hit depth-3. The NaN is a
-  probe-config artifact (held-out sampling falls outside the giant band's
-  tile w-ranges), NOT a v3 regression. The v2-vs-v3 question is UNANSWERED.
-- ACTION: re-run the wedge probe at the PRODUCTION `gamma_band_halfwidth`
-  (0.02-0.04) before quoting the 18-chart / 5.47e-4 v3 baseline.
+- **CORRECTED — the wedge coordinates WORK (user recollection confirmed).**
+  The first run used `gamma_band_halfwidth=0.48` (a giant band, 12x
+  production width) and returned all-NaN held-out eps — a PROBE-CONFIG
+  artifact, not a coordinate failure. Re-run at the production
+  `gamma_band_halfwidth=0.04`: the depth-0 wedge tiles carry GOOD eps
+  (3.5e-3, 7.9e-3, 3.3e-2, 7.5e-3 — under/at the 5e-2 bar), and a marginal
+  root tile subdivides to a passing child (7.5e-2 -> 7e-4). This matches
+  the 2026-08-06 validated interior result; the interior wedge
+  caustic-relative coordinate achievement stands.
+- The residual NaN cluster is confined to ONE tile branch (`_3_0_c3*`,
+  depth-3, all NaN = zero held-out points served). This is the DOCUMENTED
+  astroid-centre carrier-flip / `theta_wedge` degeneracy
+  (`lensing_wedge_centre_carrier_flips_in_gamma`), not a coordinate
+  failure — the innermost wedge tile raises CarrierDiscontinuityError at
+  small `r` (measured 2026-08-06). The v2-vs-v3 baseline question is
+  ANSWERED for the valid tiles: v3 reproduces working interior charts.
+- ACTION: the wedge centre carrier-flip (a filed fragment) is the open
+  interior gap; the wide-band probe config mistake is a lesson (probe
+  config must match the production tiling it claims to re-measure).
 
 **Methodology learnings (AGENTS.md discipline):**
 - Probes MUST emit progress beats (added: chart-count watcher thread).
