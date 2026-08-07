@@ -4249,6 +4249,19 @@ class BuildOrchestrator:
         if not self._has_uncommitted_changes():
             return None
 
+        # Whatever the operator already had STAGED before this build is not
+        # ours. `git commit -m <msg>` takes no pathspec and commits the whole
+        # INDEX, so careful staging alone never protected the message: the
+        # F047 fix below hardened `git add` and left `git commit` wide open.
+        # Measured 2026-08-07: two consecutive build commits ("memory:
+        # consolidate ..." and "chore: update agent state after build") each
+        # carried the driver's in-flight spec work and this build's entire
+        # production diff, because those paths were sitting in the index. We
+        # snapshot the pre-existing staged set here and commit with an
+        # explicit pathspec of ONLY what this build staged, leaving the
+        # operator's staged work staged and uncommitted.
+        pre_staged = self._staged_paths()
+
         # NOT a blanket `git add -u`, which stages every tracked modification
         # in the tree -- so a build sweeps in whatever the operator happened
         # to be holding uncommitted and commits it under an unrelated message.
@@ -4317,8 +4330,22 @@ class BuildOrchestrator:
             f"Co-Authored-By: Claude ({model}) <noreply@anthropic.com>"
             for model in authoring)
         full_message = f"{message}\n\n{trailers}"
+
+        # Commit ONLY this build's own paths (see the pre_staged note above).
+        # A pathspec commit ignores the rest of the index, so an operator's
+        # in-flight staged work can never land under a build's message.
+        build_paths = sorted(self._staged_paths() - pre_staged)
+        if pre_staged:
+            self._log(f"  staging: {len(pre_staged)} path(s) were ALREADY "
+                      f"staged before this build and are NOT included in "
+                      f"this commit: "
+                      f"{', '.join(sorted(pre_staged)[:6])}"
+                      + (" ..." if len(pre_staged) > 6 else ""))
+        if not build_paths:
+            self._log("  staging: nothing staged by this build; no commit")
+            return None
         subprocess.run(
-            ["git", "commit", "-m", full_message],
+            ["git", "commit", "-m", full_message, "--", *build_paths],
             cwd=self.project_root, check=True,
         )
 
@@ -4327,6 +4354,16 @@ class BuildOrchestrator:
             capture_output=True, text=True, cwd=self.project_root,
         )
         return result.stdout.strip() if result.returncode == 0 else None
+
+    def _staged_paths(self) -> set:
+        """Return the set of paths currently staged in the index."""
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            capture_output=True, text=True, cwd=self.project_root,
+        )
+        if result.returncode != 0:
+            return set()
+        return {line for line in result.stdout.splitlines() if line.strip()}
 
     def _ensure_spec_doc_fragments(self, message: str) -> None:
         """Preflight the spec/doc discipline hook; auto-stub missing
