@@ -3732,7 +3732,7 @@ def _validate_axis_schema(tag, known_set: frozenset[str],
         The ``axis_schema`` read from the artifact meta.
     known_set : frozenset[str]
         The axis schemas accepted for this chart kind (e.g.
-        `_KNOWN_FARFIELD_AXIS_SCHEMAS` or `_KNOWN_LOBE_AXIS_SCHEMAS`).
+        `_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS` or `_KNOWN_LOBE_AXIS_SCHEMAS`).
     artifact_label : str
         Human-readable identifier (e.g. ``'chart 3'``) for the error.
 
@@ -3756,19 +3756,18 @@ def _validate_axis_schema(tag, known_set: frozenset[str],
     return str(tag)
 
 
-def _validate_farfield_axis_schema(tag, artifact_label: str) -> str:
-    """Hard-refuse a far-field chart with an absent or unknown axis schema.
+    """Hard-refuse an exterior-polar chart with an absent or unknown axis schema.
 
-    Thin wrapper over `_validate_axis_schema` binding the far-field known
-    set. Positive-parity far-field charts require
-    ``'farfield_arclength_s_perp_d_framewinv'`` and use the gamma-resolved
-    far-field-smooth ``(s, d)`` transform. A chart trained on raw eigenframe
-    or retired caustic-fixed axes, or with a frame-dependent stored label,
-    would be queried or reconstructed in the wrong convention and could
-    return a finite-but-wrong amplification.
+    Thin wrapper over `_validate_axis_schema` binding the exterior-polar
+    known set.  Exterior-polar charts require the self-contained caustic-fixed
+    ``(rho, theta_c)`` coordinate and must not serve under the retired
+    far-field-smooth ``(s, d)`` convention.
     """
     return _validate_axis_schema(
-        tag, _KNOWN_FARFIELD_AXIS_SCHEMAS, f'Far-field {artifact_label}')
+        tag, _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS,
+        f'Exterior-polar {artifact_label}')
+
+
 
 def _validate_exterior_polar_axis_schema(tag, artifact_label: str) -> str:
     """Hard-refuse an exterior-polar chart with an absent or unknown axis schema.
@@ -3781,7 +3780,6 @@ def _validate_exterior_polar_axis_schema(tag, artifact_label: str) -> str:
     return _validate_axis_schema(
         tag, _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS,
         f'Exterior-polar {artifact_label}')
-
 
 def _validate_lobe_axis_schema(tag, artifact_label: str) -> str:
     """Hard-refuse a lobe-interior chart with an absent or unknown schema.
