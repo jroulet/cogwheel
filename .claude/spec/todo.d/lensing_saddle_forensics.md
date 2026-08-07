@@ -35,7 +35,7 @@ depends_on: [lensing_exterior_followup_four_items]
   d. **Is the region exterior to the deltoids ill-posed?** LIKELY WORSE than
      the positive-parity exterior. It is charted by `FarFieldChart` in
      `(s, d)`, whose foot degeneracy is already measured
-     ([[lensing_exterior_should_chart_in_polar_not_sd]]) — and with TWO
+     ([[2026-08-07_polar_rechart]]) — and with TWO
      deltoids there are two separate caustic curves, so a source can be
      near-equidistant from feet on DIFFERENT curves, not merely on different
      arcs of one. Measure `tie_ratio` over the saddle exterior.

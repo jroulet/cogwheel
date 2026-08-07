@@ -1,11 +1,11 @@
 ---
 section: Backlog
-depends_on: [lensing_exterior_should_chart_in_polar_not_sd]
+depends_on: [2026-08-07_polar_rechart]
 ---
 
 - **EXTERIOR FOLLOW-UP: ghost label, cusp exclusion, node-budget test, ppGO
   fallback** `[→ spec]` — owner-directed 2026-08-06, following
-  [[lensing_exterior_should_chart_in_polar_not_sd]]. Four coupled items; the
+  [[2026-08-07_polar_rechart]]. Four coupled items; the
   polar re-chart is the prerequisite for the second and third.
 
   ## 1. The ghost-subtraction gate is BACKWARDS relative to utility

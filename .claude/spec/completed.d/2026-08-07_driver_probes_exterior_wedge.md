@@ -19,7 +19,7 @@ The two probes the plan called for ran as driver steps on neso with the
 - **Depth histogram: {0: 2, 1: 6, 2: 7, 3: 16}** — 16/31 hit the depth-3 cap.
 - **13 depth-3 tiles still fail 1e-3**, eps 1.2e-3 .. 3.6 (hundreds to
   thousands x tolerance). Subdivision to the cap did NOT fix them.
-- CONCLUSION: confirms `lensing_exterior_should_chart_in_polar_not_sd` —
+- CONCLUSION: confirms `2026-08-07_polar_rechart` —
   the `(s, d)` coordinate is wrong for the exterior bulk. Root tiles are
   intrinsically bad (foot tie_ratio degeneracy), recursion paper-overs them
   but the depth-3 residual failures are coordinate-level, not resolution.
