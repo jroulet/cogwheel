@@ -2481,7 +2481,7 @@ class WedgeTrainingPathProducesWedgeChartsTestCase(unittest.TestCase):
         for chart in self.surrogate.charts:
             with self.subTest(chart_type=type(chart).__name__):
                 self.assertIsInstance(chart, InteriorWedgeChart)
-                self.assertNotIsInstance(chart, surrogate.FarFieldChart)
+                self.assertNotIsInstance(chart, surrogate.ExteriorPolarChart)
 
 
 class WedgeTilesSelfFalsificationTestCase(unittest.TestCase):

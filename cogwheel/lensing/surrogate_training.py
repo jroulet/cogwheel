@@ -3224,7 +3224,7 @@ def _farfield_heldout_samples(gamma_band: tuple[float, float],
     ``(rho, theta_c)`` tile coordinates. It maps each draw to a PHYSICAL
     eigenframe source ``(y1, y2)`` through `_from_caustic_fixed`; the full
     far-field serve guard then maps that source into the chart's current
-    gamma-resolved ``(s, d)`` spline coordinates. The returned
+    gamma-resolved ``(rho, theta_c)`` spline coordinates. The returned
     ``(gamma, y1, y2)`` points therefore validate the placement-to-serve
     bridge, not a retired chart-axis round trip.
     """
