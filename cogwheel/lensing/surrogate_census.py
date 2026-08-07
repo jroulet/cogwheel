@@ -623,7 +623,8 @@ def heldout_envelope_eps(
         # F-normalized by ``max|exact_total|``; a tube chart keeps the
         # caustic-region ``partition.envelope`` reference and ``max|E|``
         # normalization (byte-identical to HEAD).
-        if isinstance(surrogate.charts[chart_index], _surrogate.ExteriorPolarChart):
+        if isinstance(surrogate.charts[chart_index],
+                      _surrogate.ExteriorPolarChart):
             env_eng = farfield_envelope_from_partition(partition)
             denom_base = float(np.max(np.abs(partition.exact_total)))
         else:

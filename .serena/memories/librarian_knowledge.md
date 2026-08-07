@@ -168,3 +168,23 @@
   this exact warning should escalate to the contract owner directly
   (e.g. via a dedicated TODO fragment) rather than adding a fifth
   passive mention to this memory.
+- SPEC STATUS SENTENCE STALE SILENTLY — RENAME-PRESERVED VARIANT (polar
+  re-chart, 337ac15): a doc sync that RENAMES a symbol (FarFieldChart →
+  ExteriorPolarChart) can preserve the stale sentence BESIDE the new name
+  verbatim — 337ac15 updated the class name but kept the old parity
+  restriction ("exterior positive-parity only") in BOTH SPEC.md and
+  DATA_CONTRACTS.yaml even though the code charts both parities. When a
+  sync commit edits a NAME, re-read the REST of that sentence against the
+  code, not just the renamed token.
+- SPEC_CHANGELOG EMPTY-DATE BUCKET: a patch-bump spec fragment WITHOUT a
+  `date:` field renders into the empty-date bucket (e.g. a new fragment
+  rendering at 0.11.7 while the top version stays 0.34.0) — same family
+  as the alphabetical-ordering quirk; harmless, don't "fix".
+- SUPERSEDED FRAGMENT STAYS OPEN AS MEASUREMENT RECORD: a completed.d
+  fragment that says it "supersedes the open direction in [[X]]" does
+  NOT close X — X remains open as the measurement record until its OWN
+  acceptance criteria are met (lensing_farfield_sd_coordinate_degenerates
+  stays open pending the sd-coordinate measurement; the rename-deferral
+  fragment lensing_farfield_name_spans_three_regimes stays open too).
+  Do not mark a superseded fragment DONE on the strength of its
+  superseder's closure.

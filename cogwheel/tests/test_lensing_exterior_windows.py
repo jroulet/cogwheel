@@ -68,8 +68,8 @@ Three Architect specifications are certified here:
    the Professor R3 addition proving the tag actually routes something.
    (c) A chart whose tag is unknown / absent is hard-refused by
    `surrogate._validate_farfield_definition` at LOAD, BEFORE any numeric
-   assembly runs (proven by spying `ExteriorPolarChart._assemble`: zero calls on
-   the bad-tag path).
+   assembly runs (proven by spying `ExteriorPolarChart._assemble`: zero
+   calls on the bad-tag path).
 
 6. **Fixed ``[w_floor, w_trust]`` w-window containment replaces mass
    strata.**  For a region's fixed window, every in-region draw's chart
@@ -469,6 +469,7 @@ def _ghost_separation(source: np.ndarray, matrix: np.ndarray) -> float:
     return min(
         float(np.sqrt(np.sum(np.abs(x_a - x_c) ** 2))) for x_a in real_images)
 
+
 def _make_farfield_chart(envelope_definition: str, n: int = 4
                          ) -> 'surrogate.ExteriorPolarChart':
     """A tiny valid `ExteriorPolarChart` carrying ``envelope_definition``.
@@ -487,6 +488,7 @@ def _make_farfield_chart(envelope_definition: str, n: int = 4
         log_w_grid=log_w_grid, envelope_real=values, envelope_imag=0.2 * values,
         image_count=2, parity=1,
         envelope_definition=envelope_definition)
+
 
 def _lobe_local(lobe: 'st._SaddleLobeAdmission',
                 physical: np.ndarray) -> tuple[float, float]:
@@ -542,7 +544,8 @@ def _straddles_ray(center: tuple[float, float], half: tuple[float, float],
 
 
 @functools.lru_cache(maxsize=None)
-def _interior_chart(gamma: float, definition: str) -> 'surrogate.ExteriorPolarChart':
+def _interior_chart(gamma: float,
+                    definition: str) -> 'surrogate.ExteriorPolarChart':
     """A cusp-free polar interior chart at ``gamma``.
 
     Trains one `from_engine` chart on one cusp-free astroid arc with
@@ -557,6 +560,8 @@ def _interior_chart(gamma: float, definition: str) -> 'surrogate.ExteriorPolarCh
         w_range=SACRC_W_RANGE, n_gamma=SACRC_N_GAMMA, n_rho=SACRC_N_RHO,
         n_theta_c=SACRC_N_THETA, w_nodes_per_decade=SACRC_WNPD,
         definition=definition)
+
+
 def _interior_heldout_eps(chart: 'surrogate.ExteriorPolarChart', gamma: float,
                           interior: bool) -> tuple[float, int]:
     """Held-out interpolation error of an interior chart, in label currency.
@@ -603,8 +608,10 @@ def _interior_heldout_eps(chart: 'surrogate.ExteriorPolarChart', gamma: float,
         errs.append(float(np.max(np.abs(emul - env)) / den))
     return (max(errs) if errs else float('nan')), image_count
 
+
 @functools.lru_cache(maxsize=None)
-def _interior_chart_wnpd(gamma: float, wnpd: int) -> 'surrogate.ExteriorPolarChart':
+def _interior_chart_wnpd(gamma: float,
+                         wnpd: int) -> 'surrogate.ExteriorPolarChart':
     """Interior SACR-C chart at ``gamma`` with specified w-density.
 
     Same geometry as `_interior_chart` (same polar ranges) but parameterized
@@ -665,6 +672,7 @@ def _wnpd_heldout_eps(chart: 'surrogate.ExteriorPolarChart',
         errs.append(float(np.max(np.abs(emul - env)) / den))
     return max(errs) if errs else float('nan')
 
+
 def _engine_critical_sources(gamma: float) -> tuple[np.ndarray, float]:
     """Independent engine ``critical_source`` grid over the interior tile.
 
@@ -693,6 +701,8 @@ def _engine_critical_sources(gamma: float) -> tuple[np.ndarray, float]:
                     continue
                 grid[i, j, k] = np.asarray(part.critical_source, dtype=float)
     return grid, float(surrogate._caustic_reach(gamma))
+
+
 def _max_adjacent_carrier_jump(grid: np.ndarray) -> float:
     """Largest adjacent-node ``critical_source`` hop along any spatial axis."""
     worst = 0.0
@@ -1455,7 +1465,8 @@ class TagContractTestCase(ExteriorWindowsTestCase):
 
     def test_unknown_and_absent_tag_refused_before_numerics(self):
         # (c) A chart whose tag is unknown or absent is hard-refused at LOAD,
-        # BEFORE ExteriorPolarChart._assemble runs.  Proven by spying _assemble:
+        # BEFORE ExteriorPolarChart._assemble runs.  Proven by spying
+        # _assemble:
         # zero calls on the bad-tag paths, one call on the good-tag control
         # (so the zero-count is the validation gate, not a dead path).
         chart = _make_farfield_chart(ch.FARFIELD_KERNEL_SUM)
@@ -1474,7 +1485,8 @@ class TagContractTestCase(ExteriorWindowsTestCase):
             lambda m: m.__setitem__('envelope_definition', 'bogus_v1'))
         absent = with_tag(lambda m: m.pop('envelope_definition'))
 
-        with mock.patch.object(surrogate.ExteriorPolarChart, '_assemble') as spy:
+        with mock.patch.object(surrogate.ExteriorPolarChart,
+                               '_assemble') as spy:
             with self.assertRaises(ValueError):
                 surrogate._chart_from_npz(unknown, 0)
             self.assertEqual(spy.call_count, 0)   # refused before assembly

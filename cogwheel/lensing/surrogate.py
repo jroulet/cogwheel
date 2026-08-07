@@ -1556,6 +1556,7 @@ class ExteriorPolarChart:
             param_spacing=param_spacing,
             envelope_definition=str(envelope_definition))
 
+
 @dataclass(frozen=True, eq=False)
 class LobeInteriorChart:
     """Lobe-local-coordinate interior envelope chart for a macro-saddle lobe.
@@ -2141,14 +2142,13 @@ def _in_exclusion_ball(
     ball.
 
     ``refused_points`` and ``param_spacing`` are both in the chart's own
-    spatial coordinate -- far-field-smooth ``(gamma, s, d)`` for a
-    `ExteriorPolarChart` (caustic-fixed ``(rho, theta_c)``), lobe-local ``(gamma,
-    rho_lobe, theta_local)`` for a `LobeInteriorChart`, or wedge-fixed
-    ``(gamma, r, theta_wedge)`` for an `InteriorWedgeChart` -- so the test
-    is coordinate-agnostic: ``(p1, p2)`` are the chart's own two spatial
-    coordinates.  Tiles are sub-arcs in the tangential axis (they never
-    wrap), so no angular-wrap handling is needed: refused points and
-    queries share the tile's range.
+    spatial coordinate -- caustic-fixed ``(rho, theta_c)`` for an
+    `ExteriorPolarChart`, lobe-local ``(gamma, rho_lobe, theta_local)`` for
+    a `LobeInteriorChart`, or wedge-fixed ``(gamma, r, theta_wedge)`` for
+    an `InteriorWedgeChart` -- so the test is coordinate-agnostic:
+    ``(p1, p2)`` are the chart's own two spatial coordinates.  Tiles are
+    sub-arcs in the tangential axis (they never wrap), so no angular-wrap
+    handling is needed: refused points and queries share the tile's range.
     """
     refused = chart.refused_points
     if refused.shape[0] == 0:
@@ -2456,7 +2456,8 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
 
     Parameters
     ----------
-    charts : sequence of TubeChart, ExteriorPolarChart, LobeInteriorChart or\n        InteriorWedgeChart
+    charts : sequence of TubeChart, ExteriorPolarChart, LobeInteriorChart or
+        InteriorWedgeChart
         The surrogate's charts.
     gamma : float
         External shear magnitude.
@@ -2471,8 +2472,8 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
         Real-image count ``int(partition.real_mask.sum())``.
     y1_eig, y2_eig : float, optional
         Eigenframe source position.  Threaded to the exterior-polar guard
-        `_exterior_polar_serves` (mapped to caustic-fixed ``(rho, theta_c)`` at the
-        query's own gamma) and to the lobe-interior
+        `_exterior_polar_serves` (mapped to caustic-fixed ``(rho, theta_c)``
+        at the query's own gamma) and to the lobe-interior
         guard `_lobe_serves` and wedge guard `_wedge_serves`.  Defaults
         are non-finite: a caller that does not thread the source declines
         every exterior-polar, lobe, and wedge chart cleanly (only the tube
@@ -2480,7 +2481,7 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
 
     Returns
     -------
-    TubeChart, ExteriorPolarChart, LobeInteriorChart, InteriorWedgeChart or None
+    TubeChart, ExteriorPolarChart, LobeInteriorChart, InteriorWedgeChart
         The selected chart, or ``None`` to fall through to the engine.
     """
     # (2) gamma guard band around the det-A = 0 parity boundary.
@@ -2669,7 +2670,8 @@ class LensAmplificationSurrogate:
 
     @property
     def refused_points(self) -> np.ndarray:
-        """Refused training points of the first (exterior-polar) chart (8a shim)."""
+        """Refused training points of the first (exterior-polar) chart (8a
+        shim)."""
         return self.charts[0].refused_points
 
     # ---- Construction from the exact engine ---------------------------
@@ -3497,7 +3499,8 @@ class LensAmplificationSurrogate:
             point.
         """
         y1_eig, y2_eig = _rotate_to_eigenframe(y1, y2, beta)
-        return self._exterior_polar_raw_chart(gamma, y1_eig, y2_eig) is not None
+        return (self._exterior_polar_raw_chart(gamma, y1_eig, y2_eig)
+                is not None)
 
     def _exterior_polar_raw_chart(self, gamma: float, y1_eig: float,
                                    y2_eig: float):
@@ -3756,21 +3759,9 @@ def _validate_axis_schema(tag, known_set: frozenset[str],
     return str(tag)
 
 
-    """Hard-refuse an exterior-polar chart with an absent or unknown axis schema.
-
-    Thin wrapper over `_validate_axis_schema` binding the exterior-polar
-    known set.  Exterior-polar charts require the self-contained caustic-fixed
-    ``(rho, theta_c)`` coordinate and must not serve under the retired
-    far-field-smooth ``(s, d)`` convention.
-    """
-    return _validate_axis_schema(
-        tag, _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS,
-        f'Exterior-polar {artifact_label}')
-
-
-
 def _validate_exterior_polar_axis_schema(tag, artifact_label: str) -> str:
-    """Hard-refuse an exterior-polar chart with an absent or unknown axis schema.
+    """Hard-refuse an exterior-polar chart with an absent or unknown axis
+    schema.
 
     Thin wrapper over `_validate_axis_schema` binding the exterior-polar
     known set.  Exterior-polar charts require the self-contained caustic-fixed
@@ -3780,6 +3771,7 @@ def _validate_exterior_polar_axis_schema(tag, artifact_label: str) -> str:
     return _validate_axis_schema(
         tag, _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS,
         f'Exterior-polar {artifact_label}')
+
 
 def _validate_lobe_axis_schema(tag, artifact_label: str) -> str:
     """Hard-refuse a lobe-interior chart with an absent or unknown schema.

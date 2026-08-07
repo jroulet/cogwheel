@@ -421,3 +421,40 @@
   from the root-finder — audit for any bare arithmetic (e.g. division by a
   vanishing gamma) upstream of the raise that could leak a raw
   `ZeroDivisionError` instead.
+- EXTERIOR POLAR CHART IMPLEMENTATION (Build exterior_polar_rechart,
+  4d59a6d + 0a31fcf): ExteriorPolarChart is a frozen dataclass with
+  (rho_grid, theta_c_grid) axes and NO arc_map — the polar coordinate is
+  single-valued so no arc-length map is needed (tile edges sit on cusp
+  rays, `_exterior_polar_tiles`; no tile straddles a cusp). Gate
+  `_exterior_polar_serves`: np.isfinite guard + box containment +
+  exclusion balls + image_count + eta. `from_engine` takes polar
+  (rho_range, theta_c_range), no interior path. `select_chart` priority:
+  tube > exterior_polar > lobe > wedge. NPZ kind='exterior_polar' in
+  `_chart_to_npz` / `_chart_from_npz`. WP2 rewire: deleted the
+  `_farfield_box_to_smooth` bridge + `_saddle_arc_branch`; removed the
+  parity!=1 refusal from `_build_farfield_chart` (BOTH parities chart:
+  astroid + macro-saddle exterior via additive scalar-reach rho since the
+  deltoid lobes don't enclose the origin); added
+  `_CUSP_EXCLUSION_DISTANCE=0.2` y-units (sized by the separation-gate
+  contour, WIDER than `_CUSP_ARM_COVERAGE=0.07` image-theta rad) +
+  `_exclude_near_cusp`; `_load_or_build` catches schema mismatch. Saddle
+  axis edges NOT aligned (deltoid off-axis). `_KNOWN_ENVELOPE_DEFINITIONS`
+  widened so the loader accepts the union of far-field AND interior
+  envelope tags.
+- REGIONS FILTER (same day, remeasure_v3 WP1): `_train_band_charts` gains
+  `regions: tuple[str, ...] | None = None` (None → full tuple ('tube',
+  'exterior', 'wedge_interior', 'lobe_interior')); each section is
+  region-guarded with else-defaults (exterior_tiles=None,
+  region_exclusion_rho=exclusion_rho); `exterior_admission=None` is
+  initialized BEFORE the exterior guard to avoid a NameError in the
+  unguarded dispatch loop (iterates `admitted`, empty for skipped
+  regions). `train()` threads the kwarg; `scripts/train_lens_surrogate.py`
+  gains `--regions` nargs='*'. Combined with `m_lens_range` this makes a
+  per-region probe a REAL single-stratum production-path call.
+- PROBE ARTIFACT READING (driver probes, post-strand): chart.provenance
+  in-memory LACKS heldout_eps after an NPZ load — read heldout_eps from
+  the NPZ provenance (on-disk artifact), never the in-memory object; an
+  all-NaN held-out-eps reading can be a probe bug (wrong config scale),
+  not a coordinate failure. Probe config must match the production
+  tiling it claims to re-measure (gamma_band_halfwidth 0.04, NOT 0.48);
+  a wide band invalidates the comparison.

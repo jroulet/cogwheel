@@ -119,7 +119,8 @@ _CUSP_BRACKET_EPS = 1e-9
 _SADDLE_CUSP_WIDTH_SAFETY = 2.5
 _SADDLE_CUSP_MIN_HALFWIDTH = 0.08
 #: Minimum distance (physical source-plane units) from a tile corner to an
-#: astroid cusp vertex below which the tile is excluded from exterior charting.
+#: astroid cusp vertex below which the tile is excluded from exterior
+#: charting.
 _CUSP_EXCLUSION_DISTANCE = 0.2
 #: Fractional shrink of each fold arc away from its bounding walls.
 _ARC_MARGIN_FRAC = 0.03
@@ -1666,11 +1667,13 @@ def _cusp_aligned_theta_tiles(cusp_angles: list[float], n_per_side: int
             tiles.append((edge_lo + sub * k + half_theta, half_theta))
     return tiles
 
+
 def _exclude_near_cusp(gamma: float, center: tuple[float, float],
                        half: tuple[float, float],
                        cusp_angles: list[float],
                        d_exclude: float = _CUSP_EXCLUSION_DISTANCE) -> bool:
-    """Return True if any tile corner is within ``d_exclude`` of an astroid cusp.
+    """Return True if any tile corner is within ``d_exclude`` of an
+    astroid cusp.
 
     The four positive-parity astroid cusps are the caustic-speed minima
     whose source-plane directions ``cusp_angles`` come from
@@ -2694,6 +2697,7 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
         cusp_windows=arc.cusp_windows, s_grid=s_grid, theta_to_s=theta_to_s)
     return chart, calls, refused
 
+
 def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
                           box_center: tuple[float, float],
                           half: tuple[float, float],
@@ -2932,8 +2936,9 @@ def _heldout_eps(chart: TubeChart | ExteriorPolarChart | LobeInteriorChart
     The reference envelope and its normalization depend on the chart's
     ENVELOPE LABEL, matching the label each chart is trained on (Build 8g-b):
 
-    - a far-field `ExteriorPolarChart` (a far-field-tag `envelope_definition`) is
-      trained on its window-class far-field label, so the reference is
+    - a far-field `ExteriorPolarChart` (a far-field-tag
+      `envelope_definition`) is trained on its window-class far-field
+      label, so the reference is
       `farfield_envelope_from_partition` called with the chart's OWN
       ``envelope_definition`` (kernel-sum, diffractive-bottom, or
       kernel-sum-minus-ghost -- never the default), F-normalized by
@@ -3283,8 +3288,9 @@ def _lobe_heldout_samples(gamma_band: tuple[float, float],
 
 def _load_or_build(path: Path, build_fn: Callable[[], tuple],
                    provenance: dict
-                   ) -> tuple[TubeChart | ExteriorPolarChart | LobeInteriorChart
-                              | InteriorWedgeChart, dict, bool]:
+                   ) -> tuple[TubeChart | ExteriorPolarChart
+                              | LobeInteriorChart | InteriorWedgeChart,
+                              dict, bool]:
     """Load a per-chart file if present, else build it and save it.
 
     Returns ``(chart, chart_report, reused)``.  Resumability is a plain file
@@ -3310,7 +3316,8 @@ def _load_or_build(path: Path, build_fn: Callable[[], tuple],
             path.unlink()
         else:
             # Surface the persisted held-out eps so the registration gate is
-            # applied consistently on reuse (do NOT recompute -- deterministic).
+            # applied consistently on reuse (do NOT recompute --
+            # deterministic).
             # Pre-8g charts predate the heldout_eps provenance key; flag that
             # explicitly rather than silently defaulting eps to NaN downstream.
             report: dict = {}

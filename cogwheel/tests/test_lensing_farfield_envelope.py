@@ -301,6 +301,7 @@ def _box_to_exterior_polar(y1_range: tuple[float, float],
     return (np.linspace(min(rho_vals), max(rho_vals), n_rho),
             np.linspace(theta_c_min, theta_c_max, n_theta_c))
 
+
 @functools.lru_cache(maxsize=None)
 def _train_tile(center: tuple[float, float], label: str) -> ExteriorPolarChart:
     """Fit an `ExteriorPolarChart` to a fixed engine grid under ``label``.
@@ -359,6 +360,7 @@ def _train_tile(center: tuple[float, float], label: str) -> ExteriorPolarChart:
         log_w_grid=log_w_grid, envelope_real=envelope_real,
         envelope_imag=envelope_imag, image_count=2, parity=1,
         refused_points=refused_points)
+
 
 @functools.lru_cache(maxsize=None)
 def _held_out_eps_list(center: tuple[float, float], label: str
@@ -865,10 +867,10 @@ class StraddlingTileTrainabilityTestCase(FarfieldEnvelopeTestCase):
             f'NEW beat OLD by only {ratio:.2e}x on the straddling tile')
 
 
-
 class DegenerateCuspTileRefusalTestCase(FarfieldEnvelopeTestCase):
     """A cusp-projected physical box must not create a zero-width chart."""
-    @unittest.skip('Polar coordinate handles cusp-adjacent tiles via carve-out, not CarrierDiscontinuityError')
+    @unittest.skip('Polar coordinate handles cusp-adjacent tiles via '
+                   'carve-out, not CarrierDiscontinuityError')
     def test_cusp_projected_tile_refuses_before_training(self):
         center = DEGENERATE_CUSP_TILE_CENTER
         with self.assertRaisesRegex(
@@ -1389,9 +1391,9 @@ def _train_exterior_chart(center: tuple[float, float], half: float,
         refused_points=refused_points)
 
 
-def _chart_eps(chart: ExteriorPolarChart, center: tuple[float, float], half: float,
-               *, normalization: str, seed: int = 1, count: int = 30
-               ) -> float:
+def _chart_eps(chart: ExteriorPolarChart, center: tuple[float, float],
+               half: float, *, normalization: str, seed: int = 1,
+               count: int = 30) -> float:
     """Max held-out far-field eps of ``chart`` over an exterior tile.
 
     Serves each held-out ``(gamma, y1, y2)`` through a one-chart surrogate
@@ -1749,8 +1751,8 @@ class FarFieldGateCurrencyMutationTestCase(FarfieldEnvelopeTestCase):
 # classes below pin the ``exp(+/-1j w t_min)`` demodulation contract that
 # Build 8h-d2 introduced (channels.py) together with the two guards that
 # protect it: the exterior carrier-continuity Nyquist gate
-# (`surrogate._assert_exterior_polar_carrier_continuity`) and the axis-schema load
-# refusal (`surrogate._validate_farfield_axis_schema`).  All three are
+# (`surrogate._assert_exterior_polar_carrier_continuity`) and the axis-schema
+# load refusal (`surrogate._validate_farfield_axis_schema`).  All three are
 # fast-tier: the round trip is three single engine evaluations, the carrier
 # guard is pure numpy, and the schema refusal builds a synthetic chart -- no
 # training tier, no engine sweep.
@@ -1847,8 +1849,9 @@ def _adjacent_top_slice_steps(env_grid: np.ndarray,
 class FarfieldCarrierContinuityGuardTestCase(FarfieldEnvelopeTestCase):
     """D3: the exterior carrier-continuity guard fires on phase aliasing.
 
-    `surrogate._assert_exterior_polar_carrier_continuity` protects the far-field
-    spline: even after the ``exp(+1j w t_min)`` demodulation removes the
+    `surrogate._assert_exterior_polar_carrier_continuity` protects the
+    far-field spline: even after the ``exp(+1j w t_min)`` demodulation
+    removes the
     dominant spatial phase, a cubic spline cannot represent a complex label
     whose phase winds by a Nyquist quarter turn (``pi/2``) between adjacent
     spatial nodes.  The guard evaluates the top-of-band slice and raises
@@ -1977,7 +1980,8 @@ class FarfieldCarrierContinuityGuardTestCase(FarfieldEnvelopeTestCase):
         """The production bound equals ``pi/2`` (pinned against drift)."""
         self.comparisons += 1
         self.assertEqual(
-            surrogate_module._EXTERIOR_POLAR_CARRIER_STEP_MAX, CARRIER_STEP_MAX,
+            surrogate_module._EXTERIOR_POLAR_CARRIER_STEP_MAX,
+            CARRIER_STEP_MAX,
             'the production carrier bound is no longer 1.0 x peak |E|')
 
 
@@ -2019,16 +2023,19 @@ def _servable_synthetic_farfield_chart() -> ExteriorPolarChart:
 
 
 class MacroSaddleFarFieldFallthroughTestCase(FarfieldEnvelopeTestCase):
-    """Polar coordinate enables saddle exterior charting (no longer falls through)."""
-    @unittest.skip('Polar coordinate enables saddle exterior charting; no longer falls through')
+    """Polar coordinate enables saddle exterior charting (no longer falls
+    through)."""
 
+    @unittest.skip('Polar coordinate enables saddle exterior charting; no '
+                   'longer falls through')
     def test_manual_and_loaded_macro_saddle_chart_fall_through(self):
         pass  # skipped: polar coordinate enables saddle exterior charting
         positive = _servable_synthetic_farfield_chart()
         macro = dataclasses.replace(positive, parity=-1)
         gamma = float(positive.gamma_grid[1])
         y1, y2 = surrogate_module._from_caustic_fixed(
-            gamma, float(positive.rho_grid[1]), float(positive.theta_c_grid[1]))
+            gamma, float(positive.rho_grid[1]),
+            float(positive.theta_c_grid[1]))
         w = np.exp(positive.log_w_grid[1:3])
         query = dict(gamma=gamma, y1=float(y1), y2=float(y2), beta=0.0,
                      eta=0.2, theta=0.0, image_count=2)
@@ -2105,7 +2112,8 @@ class StaleFarfieldAxisSchemaRefusalTestCase(FarfieldEnvelopeTestCase):
         """A chart stamped with the OLD schema raises, naming the tag."""
         corrupt = self._restamp(
             'old_schema.npz',
-            lambda meta: {**meta, 'axis_schema': OLD_EXTERIOR_POLAR_AXIS_SCHEMA})
+            lambda meta: {**meta,
+                          'axis_schema': OLD_EXTERIOR_POLAR_AXIS_SCHEMA})
         self.comparisons += 1
         with self.assertRaises(ValueError) as ctx:
             LensAmplificationSurrogate.load(corrupt)

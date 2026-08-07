@@ -267,3 +267,31 @@
   grep ALL test files for the OLD field name RESTRICTED to the renamed
   TYPE only — sibling types that legitimately keep the old field name are
   correctly unaffected, not a coverage miss.
+- POST-STRAND REGIONS-FILTER AUDIT (2026-08-07, remeasure_v3): reviewed
+  surrogate_training.py regions filter + guard_slow_operation +
+  _self_estimate + train_lens_surrogate.py --regions + 52 new tests
+  (28 regions + 24 guard), all green, 64 existing surrogate-training tests
+  green, no regressions. Invariants: regions=None preserves BYTE-IDENTICAL
+  all-regions behavior (astroid + saddle); regions is keyword-only with
+  None default; all 5 train() callers forward-compatible;
+  guard_slow_operation refuses over-budget without the slow-tier env and
+  admits with one. DELIBERATE asymmetry (documented, not a defect):
+  `_self_estimate(..., ())` falls back to the FULL estimate (conservative,
+  never undercharges) while `_train_band_charts(regions=())` builds
+  nothing. Tests are value-asserting with reachable-red (self-falsification
+  classes corrupt their contracts and prove the checks trip).
+- PROBE ARTIFACT READING (driver probes, post-strand): after an NPZ load,
+  the in-memory chart.provenance LACKS heldout_eps — a probe reading
+  in-memory provenance reports NaN/missing eps and can be misread as a
+  coordinate failure. Read heldout_eps from the NPZ provenance. An all-NaN
+  reading from a config that does NOT match the production tiling
+  (e.g. gamma_band_halfwidth 0.48 vs production 0.04) is a probe-config
+  artifact, not a coordinate verdict.
+- CLASS-DELETION FOLLOW-UP DEFECTS: after a chart-class deletion commit
+  (0a31fcf, ~1064 lines) that shipped with "2 surrogate test failures
+  remain (post-commit triage)", the follow-up defects were STALE
+  REFERENCES — a stale FarFieldChart reference + a (s,d) docstring
+  (5859a78, defects D1+D2). When a deletion commit lands with known red
+  tests, grep the WHOLE tree (not just the deleted module) for the dead
+  class name and its old coordinate vocabulary — the residual failures
+  are usually references, not logic.
