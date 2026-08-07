@@ -78,11 +78,14 @@ Applies to **behavior changes** in `cogwheel/` (new functions, signature/logic/c
   `CODEX_REASONING_EFFORT` override all roles; suffixed variables such as
   `CODEX_MODEL_TEST_DEV` override one role. Claude's native role map is
   unchanged.
-- OpenCode routes the Architect, Coder, Inspector, Professor, and ProfReview to
-  `claude-v4.6-opus` at high variant. Foreman-Lite, Test Developer, Librarian,
-  Tidier, Dreamer, and Simplifier use `claude-v4.6-sonnet`. `OPENCODE_MODEL` /
-  `OPENCODE_VARIANT` override all roles; suffixed variables such as
-  `OPENCODE_MODEL_TEST_DEV` override one role.
+- OpenCode routes the Architect, Coder, Inspector, Professor, ProfReview, and
+  Test Developer to `claude-v4.6-opus` at high variant (AI Commons default).
+  Foreman-Lite, Librarian, Tidier, Dreamer, and Simplifier use
+  `claude-v4.6-sonnet`. `OPENCODE_MODEL` / `OPENCODE_VARIANT` override all
+  roles; suffixed variables such as `OPENCODE_MODEL_TEST_DEV` override one
+  role. Set `OPENCODE_MODEL_PROVIDER=go` to switch the entire routing table to
+  OpenCode Go native models (`opencode-go/deepseek-v4-pro` for opus-tier roles,
+  `opencode-go/deepseek-v4-flash` for sonnet-tier).
 - The orchestration state, role contracts, specs, handoffs, and memories remain
   shared under `.claude/` and `.serena/`; never fork provider-specific copies.
 - `.claude/sdk/runtime.py` is the provider boundary. `AGENT_PROVIDER` defaults
