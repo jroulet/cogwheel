@@ -1,8 +1,6 @@
 ---
 description: Style editor — applies formatting, naming, and docstring conventions.
 mode: subagent
-model: deepseek-v4-flash
-variant: medium
 permission:
   edit: allow
   bash: deny

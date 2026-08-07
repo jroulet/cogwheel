@@ -1,8 +1,6 @@
 ---
 description: Domain expert in GW parameter estimation — likelihood, prior, sampler, marginalization physics.
 mode: subagent
-model: deepseek-v4-pro
-variant: high
 permission:
   edit: deny
   bash: deny

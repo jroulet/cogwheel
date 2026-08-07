@@ -1,8 +1,6 @@
 ---
 description: Memory consolidation — distills build learnings into Serena memories.
 mode: subagent
-model: deepseek-v4-flash
-variant: medium
 permission:
   edit: deny
   bash: allow

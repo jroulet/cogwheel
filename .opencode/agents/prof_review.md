@@ -1,8 +1,6 @@
 ---
 description: Post-build domain review — runs the domain test suite and reviews inference correctness.
 mode: subagent
-model: deepseek-v4-pro
-variant: high
 permission:
   edit: deny
   bash: allow

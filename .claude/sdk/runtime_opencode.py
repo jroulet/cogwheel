@@ -82,8 +82,8 @@ _AI_COMMONS_CLAUDEMAP = {
 
 # ── OpenCode Go (open native models) ──
 
-_GO_OPUS = "deepseek-v4-pro"
-_GO_SONNET = "deepseek-v4-flash"
+_GO_OPUS = "opencode-go/deepseek-v4-pro"
+_GO_SONNET = "opencode-go/deepseek-v4-flash"
 
 GO_ROLE_MODELS = {
     "architect":    _GO_OPUS,

@@ -1,8 +1,6 @@
 ---
 description: Updates documentation, specs, and changelog after code changes.
 mode: subagent
-model: deepseek-v4-flash
-variant: medium
 permission:
   edit: allow
   bash: allow

@@ -1,8 +1,6 @@
 ---
 description: Writes domain-specific tests with tolerance-based accuracy assertions.
 mode: subagent
-model: deepseek-v4-pro
-variant: high
 permission:
   edit: allow
   bash: allow
