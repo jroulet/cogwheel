@@ -407,6 +407,17 @@ def _to_caustic_fixed(gamma: float, y1_eig: float, y2_eig: float
     return rho, theta_c
 
 
+def _to_exterior_fixed(gamma: float, y1_eig: float, y2_eig: float
+                       ) -> tuple[float, float]:
+    """Folded caustic-fixed ``(rho, theta_c)`` of an eigenframe source position.
+
+    Folds through the D₂ symmetry (|y1|, |y2|) so ``theta_c`` lands in the
+    canonical first quadrant ``[0, π/2]``, where the exterior-polar chart is
+    defined. Delegates to `_to_caustic_fixed` so the piecewise rho mapping is
+    identical; D₂ symmetry guarantees float64-identical results.
+    """
+    return _to_caustic_fixed(gamma, abs(y1_eig), abs(y2_eig))
+
 def _from_caustic_fixed(gamma: float, rho: float, theta_c: float
                         ) -> tuple[float, float]:
     """Eigenframe source position of a caustic-fixed ``(rho, theta_c)`` node.
@@ -2246,10 +2257,10 @@ def _exterior_polar_serves(chart: 'ExteriorPolarChart', gamma: float,
         return False
     if not _log_w_band_serveable(chart, log_w_min, log_w_max):
         return False
-    # (1b) map the source to the chart's caustic-fixed (rho, theta_c)
+    # (1b) map the source to the chart's folded exterior (rho, theta_c)
     # at the query's own gamma; decline on any refusal.
     try:
-        rho, theta_c = _to_caustic_fixed(gamma, y1_eig, y2_eig)
+        rho, theta_c = _to_exterior_fixed(gamma, y1_eig, y2_eig)
     except LensDomainError:
         return False
     if not (chart.rho_grid[0] <= rho <= chart.rho_grid[-1]
@@ -2318,6 +2329,12 @@ def _lobe_serves(chart: 'LobeInteriorChart', gamma: float, log_w_min: float,
     # than relying on NaN comparison semantics downstream.
     if not (np.isfinite(y1_eig) and np.isfinite(y2_eig)):
         return False
+    # D2 reflection fold: map the source to the canonical first quadrant
+    # so the chart serves all four quadrants (the deltoid lobe has
+    # point-group D2 symmetry in the eigenframe; the chart is trained on
+    # the positive-y1 lobe, so abs() maps there).
+    y1_eig = abs(y1_eig)
+    y2_eig = abs(y2_eig)
     # (a) certified gamma box containment.
     if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
         return False
@@ -2547,7 +2564,7 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
     elif isinstance(chart, LobeInteriorChart):
         rho_lobe, theta_local = _to_lobe_fixed(
             chart.centroid, chart.boundary_theta, chart.boundary_r,
-            y1_eig, y2_eig)
+            abs(y1_eig), abs(y2_eig))
         v1 = rho_lobe
         if chart.theta_to_s is not None:
             # Wedge-edge s-coordinate: map theta_local -> s via the stored
@@ -2572,9 +2589,9 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
         else:
             v2 = theta_wedge
     elif isinstance(chart, ExteriorPolarChart):
-        # Exterior-polar chart: caustic-fixed (rho, theta_c) at the
-        # query's own gamma.
-        v1, v2 = _to_caustic_fixed(gamma, y1_eig, y2_eig)
+        # Exterior-polar chart: folded exterior (rho, theta_c) at the
+        # query's own gamma via D₂ quadrant folding.
+        v1, v2 = _to_exterior_fixed(gamma, y1_eig, y2_eig)
     else:
         raise TypeError(
             f'Unknown chart type: {type(chart).__name__}.')
@@ -3517,7 +3534,7 @@ class LensAmplificationSurrogate:
             if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
                 continue
             try:
-                rho, theta_c = _to_caustic_fixed(gamma, y1_eig, y2_eig)
+                rho, theta_c = _to_exterior_fixed(gamma, y1_eig, y2_eig)
             except LensDomainError:
                 continue
             if not (chart.rho_grid[0] <= rho <= chart.rho_grid[-1]

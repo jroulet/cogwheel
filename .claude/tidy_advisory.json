@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "72f4b848f5203a150a29ae61ba3f5d04c6c4f605",
-  "timestamp": "2026-08-07T18:39:06Z",
+  "commit": "7a4a8ce586f5f0425e5ddcec2d85b1e053ef0344",
+  "timestamp": "2026-08-07T19:32:18Z",
   "touched_files": [
     "cogwheel/lensing/born_residual_chart.py",
     "cogwheel/lensing/chang_refsdal/__init__.py",

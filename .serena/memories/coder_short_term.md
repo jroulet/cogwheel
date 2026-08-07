@@ -1,1 +1,1 @@
-Last build: polar re-chart (7e2f532). Clean.
+Last build: INS-1-007 fix — train +y1 lobe (index 1, lens_center=π) instead of -y1 lobe (index 0). D2 fold (abs(y1), abs(y2)) is correct against +y1 centroid. INS-1-001/002 auto-resolved by this. INS-1-003/004/005/006 are Test Dev scope.

@@ -1,1 +1,1 @@
-Last build: polar re-chart (8227445). Clean.
+Last build: Added lobe select_chart D2-fold consistency (3 tests) + D2-fold regression (2 tests running tube surrogate + wedge chart suites). Total 17 tests in test_lensing_exterior_polar_fold.py, all green.

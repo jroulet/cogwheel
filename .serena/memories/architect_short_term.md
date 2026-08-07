@@ -1,1 +1,1 @@
-Last build: polar re-chart (7e2f532). Clean.
+Last build: D2 fold quadrant plan (design phase). WP1: ExteriorPolarChart fold to [0,π/2]. WP2: Lobe interior fold to one lobe, [0,π]. Simp: keep corridor test, drop resolution multiplier, fold cusp angles not filter, one helper at 3 serve sites. Prof: D2 exact both parities, r_caustic 4-fold symmetric, corridor test non-degenerate, test tolerances 1e-14 farfield / 1e-12 lobe.

@@ -1186,18 +1186,15 @@ def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int
     region.
 
     Lays a uniform ``n_per_side x n_per_side`` grid over the exterior region
-    ``rho in [rho_inner, rho_outer]`` x ``theta_c in [-pi, pi]`` and returns
+    ``rho in [rho_inner, rho_outer]`` x ``theta_c in [0, pi/2]`` and returns
     one tile per grid cell. The caller derives ``rho_inner`` from the physical
     ``reach_max + eta_max`` exclusion disk and the band's minimum coordinate
     radius. Therefore every emitted tile is in the single 2-image exterior
     region even though positive-parity rho uses a directional radius.
 
-    The ``theta_c`` axis is tiled over ``[-pi, pi]`` so tile edges fall exactly
-    on ``+-pi``; no tile spans the ``atan2`` branch cut at ``theta_c = +-pi``
-    (the serve side derives ``theta_c = atan2(y2, y1) in (-pi, pi]``).  When
-    the region is empty (``rho_outer <= rho_inner`` -- a high-mass stratum
-    whose whole ``y``-support box lies inside the caustic disk) no tile is
-    emitted; those near-caustic draws are served by the tube + serving ladder.
+    The D₂ fold maps the full ``[-pi, pi]`` angular range to the canonical
+    first quadrant ``[0, pi/2]``, reducing tile count by 4× while keeping the
+    same angular resolution per axis.
 
     Parameters
     ----------
@@ -1219,10 +1216,10 @@ def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int
     if rho_outer <= rho_inner:
         return []
     half_rho = 0.5 * (rho_outer - rho_inner) / n_per_side
-    half_theta = math.pi / n_per_side  # ((pi) - (-pi)) / n_per_side / 2
+    half_theta = 0.5 * (0.5 * math.pi) / n_per_side
     rho_centers = [rho_inner + half_rho * (2 * k + 1)
                    for k in range(n_per_side)]
-    theta_centers = [-math.pi + half_theta * (2 * k + 1)
+    theta_centers = [0.0 + half_theta * (2 * k + 1)
                      for k in range(n_per_side)]
     tiles: list[tuple[tuple[float, float], tuple[float, float], int, int]] = []
     for i, rho_c in enumerate(rho_centers):
@@ -1251,6 +1248,11 @@ def _farfield_region_w_floor(box: PriorBox, band: tuple[float, float],
     band's gamma edges/midpoint and the ``theta_c`` tile centres and returns
     the max finite value.
 
+    Theta scan is over the D₂-folded first quadrant ``[0, π/2]``, matching the
+    exterior-polar chart axis.  The max floor over the folded quadrant equals
+    the max over the full circle by D₂ symmetry, so the floor value is
+    unchanged.
+
     When every probe refuses (`_ENGINE_REFUSALS`) or yields a non-finite floor
     (fewer than two real images resolved at the inner edge), the routine falls
     back to the prior band's lowest ``w`` edge ``w(f_lo, m_lo)`` -- the
@@ -1266,8 +1268,8 @@ def _farfield_region_w_floor(box: PriorBox, band: tuple[float, float],
     """
     gammas = (band[0], 0.5 * (band[0] + band[1]), band[1])
     n_theta = max(1, config.n_farfield_tiles_per_side)
-    half_theta = math.pi / n_theta
-    thetas = [-math.pi + half_theta * (2 * k + 1) for k in range(n_theta)]
+    half_theta = 0.5 * (0.5 * math.pi) / n_theta
+    thetas = [0.0 + half_theta * (2 * k + 1) for k in range(n_theta)]
     # The physics floor reads only ``partition.delays`` /
     # ``partition.real_mask`` (both w-independent), but the channels engine
     # requires a >=2-point w grid; a fixed 2-node dummy grid suffices (its
@@ -1639,20 +1641,22 @@ def _cusp_source_angles(gamma: float, n: int) -> list[float]:
     return sorted(angles)
 
 
-def _cusp_aligned_theta_tiles(cusp_angles: list[float], n_per_side: int
+def _cusp_aligned_theta_tiles(cusp_angles: list[float], n_per_side: int,
+                              theta_range: tuple[float, float] = (
+                                  -math.pi, math.pi)
                               ) -> list[tuple[float, float]]:
-    """``theta_c`` tiles aligned to the cusp rays and the ``+-pi`` branch cut.
+    """``theta_c`` tiles aligned to the cusp rays and the domain edges.
 
-    Partitions ``[-pi, pi]`` into sectors bounded by the cusp rays (and by
-    ``+-pi``), then splits each sector into ``n_per_side`` uniform sub-tiles,
-    so NO tile straddles a cusp-ray kink (Professor caveat i) or the ``atan2``
-    branch cut at ``theta_c = +-pi`` (the serve side derives ``theta_c =
-    atan2(y2, y1) in (-pi, pi]``).  Falls back to a single sector (uniform
-    tiling) when no cusp ray is supplied.
+    Partitions ``[theta_lo, theta_hi]`` into sectors bounded by the cusp rays
+    (and by ``theta_lo, theta_hi``), then splits each sector into
+    ``n_per_side`` uniform sub-tiles, so NO tile straddles a cusp-ray kink or
+    the domain edges. Falls back to a single sector (uniform tiling) when no
+    cusp ray is supplied.
 
     Returns ``[(theta_center, half_theta), ...]`` in ascending-angle order.
     """
-    edges = {-math.pi, math.pi}
+    theta_lo, theta_hi = float(theta_range[0]), float(theta_range[1])
+    edges = {theta_lo, theta_hi}
     for angle in cusp_angles:
         edges.add((float(angle) + math.pi) % (2.0 * math.pi) - math.pi)
     sorted_edges = sorted(edges)
@@ -1916,7 +1920,7 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
                              gamma: float | None = None
                              ) -> list[tuple[tuple[float, float],
                                              tuple[float, float], int, int]]:
-    """Per-``theta_c``-column exterior tiles of the caustic-fixed region.
+    """Per-``theta_c``-column exterior tiles in the D₂-folded first quadrant.
 
     Positive-parity companion to `_farfield_tiles` that replaces the single
     over-conservative scalar ``exclusion_rho`` inner edge (built from the
@@ -1924,27 +1928,23 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
     ``gamma >= 0.85``) with a per-column DIRECTIONAL admission
     (`_InteriorAdmission.admits_exterior`).  Per column, ``n_per_side`` ``rho``
     rows over ``[1, rho_outer]`` (``rho = 1`` is the caustic in every
-    direction).  The ``theta_c`` columns follow the same cusp-alignment
-    convention as the interior tiler: when ``cusp_angles`` is
-    supplied the columns come from `_cusp_aligned_theta_tiles` so no admitted
-    tile straddles an astroid cusp ray (an ``r_caustic`` slope kink) or the
-    ``+-pi`` branch cut -- the positive-parity exterior ``rho > 1`` arm of
-    `surrogate._from_caustic_fixed` is a ``theta_c``-independent affine
-    push-out of ``r_caustic(gamma, theta_c)``, so it inherits the same four
-    source-plane cusp rays as the interior.  When ``cusp_angles`` is None/empty
-    the columns fall back to the byte-identical UNIFORM ``theta_c`` grid over
-    ``[-pi, pi]`` (edges pinned on ``+-pi``) so existing callers/tests are
-    unaffected.  Before the admission test, a tile whose corners are within
-    ``_CUSP_EXCLUSION_DISTANCE`` of an astroid cusp vertex (when ``gamma`` is
-    supplied and ``cusp_angles`` is non-empty) is silently dropped -- near-
-    cusp tiles induce oscillatory ``E_ff`` labels that a polar chart cannot
-    resolve, so the tube/cusp-arm serves them instead.  A tile is kept iff
-    ``admission.admits_exterior`` is True: its INNER ``rho`` edge stays
-    outside the caustic, at least ``eta_max`` from the nearest caustic point
-    (over all probes and band gammas), and its centre direction is inside the
-    prior source box, for every gamma in the band.  The kept tiles form a
-    per-column band whose inner radius emerges from the direction's true
-    caustic distance.
+    direction).  The ``theta_c`` columns cover ``[0, π/2]`` via the D₂ fold
+    (|y1|, |y2| → atan2(|y2|, |y1|)), aligning to the exterior-polar chart
+    axis.  Cusp rays are folded into ``[0, π/2]`` by taking ``abs(angle)``
+    and mirroring second-quadrant angles (``π − a``); the folded rays flow
+    into `_cusp_aligned_theta_tiles` so no admitted tile straddles a cusp kink
+    in the folded domain.  When ``cusp_angles`` is None/empty the columns fall
+    back to a uniform ``theta_c`` grid over ``[0, π/2]``.  Before the
+    admission test, a tile whose corners are within
+    ``_CUSP_EXCLUSION_DISTANCE`` (measured in the physical source plane) of
+    a cusp vertex is silently dropped — near-cusp tiles induce oscillatory
+    ``E_ff`` labels that a polar chart cannot resolve, so the tube/cusp-arm
+    serves them instead.  A tile is kept iff ``admission.admits_exterior`` is
+    True: its INNER ``rho`` edge stays outside the caustic, at least
+    ``eta_max`` from the nearest caustic point (over all probes and band
+    gammas), and its centre direction is inside the prior source box, for
+    every gamma in the band.  The kept tiles form a per-column band whose
+    inner radius emerges from the direction's true caustic distance.
 
     Parameters
     ----------
@@ -1952,7 +1952,7 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
         Outer prior-support radius in caustic-fixed ``rho`` units.
     n_per_side : int
         Number of ``rho`` rows and of ``theta_c`` sub-tiles per cusp sector
-        (or over the whole ``[-pi, pi]`` sector when no cusp ray is supplied).
+        (or over the whole ``[0, π/2]`` sector when no cusp ray is supplied).
     admission : _InteriorAdmission
         The band's directional-admission geometry (`_interior_admission`),
         reused via its exterior probe `admits_exterior`.
@@ -1962,9 +1962,9 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
         the prior box.
     cusp_angles : list of float, optional
         Source-plane cusp-ray angles (`_cusp_source_angles`).  When non-empty
-        the ``theta_c`` tile edges are aligned to them (and the ``+-pi`` branch
-        cut) so no tile straddles a cusp kink; when None/empty the columns fall
-        back to the byte-identical uniform ``theta_c`` grid.
+        each angle is D₂-folded into ``[0, π/2]`` and the ``theta_c`` tile
+        edges are aligned to the folded rays so no tile straddles a cusp kink;
+        when None/empty the columns use a uniform ``theta_c`` grid.
     gamma : float, optional
         Representative shear magnitude for the cusp-position computation.
         When supplied and ``cusp_angles`` is non-empty, tiles within
@@ -1987,19 +1987,24 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
     half_rho = 0.5 * (rho_outer - rho_inner_floor) / n_per_side
     rho_centers = [rho_inner_floor + half_rho * (2 * k + 1)
                    for k in range(n_per_side)]
+    folded_cusp_angles: list[float] = []
     if cusp_angles:
-        theta_tiles = _cusp_aligned_theta_tiles(cusp_angles, n_per_side)
-    else:
-        half_theta = math.pi / n_per_side
-        theta_tiles = [(-math.pi + half_theta * (2 * k + 1), half_theta)
-                       for k in range(n_per_side)]
+        for angle in cusp_angles:
+            a = abs(float(angle))
+            if a > 0.5 * math.pi:
+                a = math.pi - a
+            folded_cusp_angles.append(a)
+    theta_tiles = _cusp_aligned_theta_tiles(
+        folded_cusp_angles, n_per_side,
+        theta_range=(0.0, 0.5 * math.pi))
     tiles: list[tuple[tuple[float, float], tuple[float, float], int, int]] = []
     for i, rho_c in enumerate(rho_centers):
         for j, (theta_c, half_theta) in enumerate(theta_tiles):
             center = (float(rho_c), float(theta_c))
             half = (float(half_rho), float(half_theta))
-            if (gamma is not None and cusp_angles
-                    and _exclude_near_cusp(gamma, center, half, cusp_angles)):
+            if (gamma is not None and folded_cusp_angles
+                    and _exclude_near_cusp(gamma, center, half,
+                                           folded_cusp_angles)):
                 continue
             if admission.admits_exterior(center, half, source_magnitude_max):
                 tiles.append((center, half, i, j))
@@ -2101,7 +2106,8 @@ def _lobe_cusp_source_angles(gamma: float, lens_center: float,
                 continue
             angles.append(float(np.arctan2(src[1] - centroid[1],
                                            src[0] - centroid[0])))
-    return sorted(angles)
+    folded = sorted({abs(a) for a in angles})
+    return folded
 
 
 def _directional_lobe_boundary(points: np.ndarray, centroid: np.ndarray,
@@ -2379,7 +2385,8 @@ def _lobe_interior_tiles(admission: _SaddleLobeAdmission,
         return []
     half_rho = 0.5 / n_per_side
     rho_centers = [half_rho * (2 * k + 1) for k in range(n_per_side)]
-    theta_tiles = _cusp_aligned_theta_tiles(cusp_angles, n_per_side)
+    theta_tiles = _cusp_aligned_theta_tiles(cusp_angles, n_per_side,
+                                            theta_range=(0.0, math.pi))
     tiles: list[tuple[tuple[float, float], tuple[float, float], int, int]] = []
     for i, rho_c in enumerate(rho_centers):
         for j, (theta_c, half_theta) in enumerate(theta_tiles):
@@ -4509,8 +4516,15 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             saddle_eta_max = max_eta_max
             lobe_admissions = _saddle_lobe_admissions(band, config,
                                                       eta_max=saddle_eta_max)
-            for lobe_index, (lens_center, lobe) in enumerate(
-                    zip(_SADDLE_LOBE_CENTERS, lobe_admissions)):
+            # WP2: chart only the canonical +y1 lobe (lens_center=π).  The
+            # D2 reflection fold (|y1|, |y2|) in `_lobe_serves` /
+            # `_evaluate_chart` maps any source to the positive-y1
+            # half-plane, so the chart MUST be trained on the lobe whose
+            # centroid has positive y1.  Lobe 0 (centroid at negative y1)
+            # is served by the same chart via the fold.  si is always 0.
+            si = 0
+            for lens_center, lobe in zip(_SADDLE_LOBE_CENTERS[1:],
+                                         lobe_admissions[1:]):
                 lobe_cusps = _lobe_cusp_source_angles(
                     gamma_mid, lens_center, lobe.centroid,
                     config.n_caustic_samples)
@@ -4533,7 +4547,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     # tile (centroid offset + outer directional boundary radius).
                     y_max_tile = centroid_mag + rho_lobe_max * r_deltoid_max
                     admitted.append({
-                        'si': lobe_index, 'i': i, 'j': j,
+                        'si': si, 'i': i, 'j': j,
                         'center': center, 'half': half,
                         'm_lo': m_lo_region, 'm_hi': m_hi_region,
                         'w_range': _capped_w_range(box, parity, y_max_tile),
