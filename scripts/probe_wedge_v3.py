@@ -75,12 +75,20 @@ def main():
     _w.join(timeout=1)
 
     n_charts = len(surrogate.charts)
+    # Read held-out eps from the NPZ provenance on disk -- the in-memory chart
+    # objects' `provenance` dict does not carry heldout_eps after load.
     eps_values = []
-    for ch in surrogate.charts:
-        prov = getattr(ch, "provenance", {}) or {}
-        eps = prov.get("heldout_eps")
-        if eps is not None:
-            eps_values.append(eps)
+    import glob
+    import json
+    for f in glob.glob(f"{outdir}/*.npz"):
+        try:
+            data = np.load(f, allow_pickle=True)
+            p = json.loads(str(data.get("provenance"))) if data.get("provenance") is not None else {}
+            e = p.get("heldout_eps")
+            if e is not None:
+                eps_values.append(float(e))
+        except Exception:
+            pass
     eps_values.sort()
     import statistics
     median = statistics.median(eps_values) if eps_values else float("nan")

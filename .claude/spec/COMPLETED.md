@@ -29,9 +29,7 @@ The two probes the plan called for ran as driver steps on neso with the
   intrinsically bad (foot tie_ratio degeneracy), recursion paper-overs them
   but the depth-3 residual failures are coordinate-level, not resolution.
 
-**Wedge v3 (`scripts/probe_wedge_v3.py`):**
-
-- **CORRECTED — the wedge coordinates WORK (user recollection confirmed).**
+**Wedge v3 (`scripts/probe_wedge_v3.py`) — FINAL, single-stratum:**\n\n- **CONFIRMED with the correct minimal test.** After adding `m_lens_range`\n  to `train()` (so a per-region probe is a real single-stratum call), the\n  wedge probe ran `train(regions=('wedge_interior',), m_lens_range=(10,15.8))`\n  and produced **10 charts, 9/9 with valid eps passing the 5e-2 bar**\n  (all 2.0e-3..1.6e-2, median 6.0e-3, 3.7 min).\n- The earlier "NaN median / 19 charts" readings were TWO probe bugs: (1) the\n  full-prior config (13 w-strata -> ~130 tiles, wrong scale for the v2\n  baseline), and (2) the probe read `chart.provenance` in-memory which lacks\n  `heldout_eps` after load (fixed to read NPZ provenance).\n- Chart count 10 vs v2's 18: fewer because single-stratum with minimal\n  subdivision; all pass the bar. The v2-vs-v3 question is ANSWERED: v3\n  reproduces a clean working interior, the coordinates are sound.\n- The wedge centre carrier-flip (`lensing_wedge_centre_carrier_flips_in_gamma`)\n  remains the only open interior gap.\n\n**Correction to the earlier record (supersedes the 19-chart claim):**
   The first run used `gamma_band_halfwidth=0.48` (a giant band, 12x
   production width) and returned all-NaN held-out eps — a PROBE-CONFIG
   artifact, not a coordinate failure. Re-run at the production
