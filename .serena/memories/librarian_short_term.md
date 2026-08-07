@@ -1,47 +1,43 @@
 # Librarian Short-Term Observations
 
-## 2026-08-07 post-commit sync (commits d711934, 67338d6)
+## 2026-08-07 post-commit sync (commits d711934, 67338d6, 2704723)
 
-**Scope**: spec: record driver probe findings (exterior coordinate disease confirmed,
-wedge probe invalid) + scripts: probe_wedge_v3.py update.
+**Scope**: spec: record driver probe findings + correction (wedge coordinates WORK,
+NaN was probe-config artifact); scripts: probe_wedge_v3.py re-run at production gamma.
 
 **Changed files in scope**:
-- `.claude/spec/completed.d/2026-08-07_driver_probes_exterior_wedge.md` (new)
-- `.claude/spec/COMPLETED.md` (regenerated)
-- `scripts/probe_wedge_v3.py` (scripts-only, no-op per SCRIPTS/ REWRITE NO-OP RULE)
-- Memory files (no doc surfaces)
+- `.claude/spec/completed.d/2026-08-07_driver_probes_exterior_wedge.md` — corrected
+  (wedge coords valid; NaN was giant gamma_band_halfwidth=0.48 probe-config mistake;
+  re-run at 0.04 shows good eps; residual NaN is known carrier-flip fragment)
+- `.claude/spec/COMPLETED.md` / `.claude/spec/TODO.md` — regenerated
+- `.claude/spec/todo.d/lensing_exterior_recursion_never_measured.md` — deleted (done in 2704723)
+- `.claude/spec/todo.d/lensing_exterior_should_chart_in_polar_not_sd.md` — depends_on
+  updated from deleted fragment to `2026-08-07_driver_probes_exterior_wedge` (done in 2704723)
+- `scripts/probe_wedge_v3.py` — scripts-only, no-op per SCRIPTS/ REWRITE NO-OP RULE
+- Memory files — no doc surfaces
 
-**Issue found and fixed**: `lensing_exterior_recursion_never_measured.md` was not deleted
-by the commit that added the completion fragment covering its work. The three measurements
-it required (pass rate, depth histogram, depth-3 cap hits) are all answered in
-`2026-08-07_driver_probes_exterior_wedge.md`. Deleted the stale TODO fragment.
+**Result**: no doc surfaces stale. All three commits are no-ops for Sphinx/RST/SPEC.md/
+DATA_CONTRACTS.yaml. FINDINGS.md has no wedge-probe-invalid entry to retract (correction
+was confined to the completed.d fragment). sync_derived_docs.py: same four pre-existing
+`lens_amplification_surrogate` test-consumer warnings (already escalated via
+`surrogate_contract_test_consumer_warning.md`); "auto-fixed" message was the known
+internal-state-flush no-op (trust git diff, not the script message).
 
-**Cascade fix**: `lensing_exterior_should_chart_in_polar_not_sd.md` had
-`depends_on: [..., lensing_exterior_recursion_never_measured]` — a dangling reference
-after deletion. Updated to `2026-08-07_driver_probes_exterior_wedge` (the completed.d
-entry covering that work). Render confirmed clean (no warnings).
-
-**Files changed**:
-- `.claude/spec/todo.d/lensing_exterior_recursion_never_measured.md` — deleted
-- `.claude/spec/todo.d/lensing_exterior_should_chart_in_polar_not_sd.md` — depends_on updated
-- `.claude/spec/TODO.md` — regenerated
-
-**sync_derived_docs.py**: same four test-only-caller consumer-graph warnings for
-`lens_amplification_surrogate` — pre-existing, already escalated via
-`surrogate_contract_test_consumer_warning.md` todo fragment. No new action.
-
-**CHANGELOG**: no `changelog.d/` directory in this repo; internal builds use
-only `completed.d`/`todo.d`. No CHANGELOG entry needed for driver probe findings.
-
-**Pattern noted**: when a driver records probe findings in a completion fragment
-WITHOUT deleting the corresponding todo.d fragment, the renderer does NOT warn —
-the dangling depends_on in downstream fragments only surfaces if render_fragments.py
-is run after deletion. The two-step (delete todo + update depends_on) is easy
-to miss in the same commit.
+**Pattern noted — TREE-GATE-STRANDING VARIANT CONFIRMED**: the previous librarian
+session (d711934/67338d6 sync) wrote its librarian_short_term.md and doc fixes
+(deleted lensing_exterior_recursion_never_measured.md, updated depends_on) but DID NOT
+commit them. The driver then ran git add -A when committing 2704723, which swept in the
+doc-fragment changes WITHOUT the memory file — leaving librarian_short_term.md as the
+only uncommitted diff entering THIS session. This is the exact pattern described in
+librarian_knowledge under "TREE-GATE-STRANDING + git add -A MISLABELING VARIANT".
 
 **Fragile cross-references to watch**:
-- `lensing_exterior_should_chart_in_polar_not_sd.md` now depends on
-  `2026-08-07_driver_probes_exterior_wedge` — if that completed.d fragment is
-  renamed, the depends_on breaks silently (no dangling-link check for completed.d entries?).
-- `lensing_wedge_probe_charts_need_retraining_under_v3.md` references
-  `[[2026-08-07_lensing-training-path-per-region]]` — still valid.
+- `lensing_exterior_should_chart_in_polar_not_sd.md` depends_on includes
+  `2026-08-07_driver_probes_exterior_wedge` — if that completed.d fragment is renamed,
+  the reference breaks silently.
+- `lensing_wedge_centre_carrier_flips_in_gamma.md` is the open fragment for the
+  astroid-centre carrier-flip; the completed.d fragment references it correctly as still-open.
+- `lensing_exterior_followup_four_items.md` and
+  `lensing_d2_fold_unexploited_in_three_of_four_regions.md` both depend on
+  `lensing_exterior_should_chart_in_polar_not_sd` — will remain blocked until polar
+  recharting ships.
