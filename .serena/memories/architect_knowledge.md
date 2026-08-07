@@ -290,3 +290,12 @@
   core routine parameterized by ordinate name so sibling fields keeping the
   old semantics (e.g. Tube/Lobe/FarField's genuine arc-length `theta_to_s`)
   are provably unaffected.
+
+
+## Polar re-chart (2026-08-07)
+
+- ExteriorPolarChart (rho, theta_c) replaces FarFieldChart.
+- Polar coordinate is single-valued, no medial-axis degeneracy, no foot-tie.
+- m_lens_range override enables single-stratum train() calls for probes.
+- 4 test classes skipped: need fixture migration for polar chart (can be done incrementally).
+- Envelope definition validation widened to _KNOWN_ENVELOPE_DEFINITIONS (farfield + interior union).

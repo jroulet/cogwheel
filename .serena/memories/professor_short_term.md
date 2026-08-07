@@ -1,3 +1,1 @@
-# Professor Short-Term Observations
-
-(empty — last consolidated by Dreamer on 2026-08-07)
+Last build: polar re-chart (8227445). Clean.
