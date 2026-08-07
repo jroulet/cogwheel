@@ -3651,6 +3651,310 @@ def train(*, outdir: str | Path,
     return surrogate, report
 
 
+#: Bounded corrective-subdivision depth for `_subdivide_tile`.
+#:
+#: The Professor's measured astroid-interior case (band 0, ``gamma_mid =
+#: 0.495``) needs TWO halvings to clear the ``5e-2`` interior bar: the single
+#: shipping halving leaves three marginal children at ``1.19-1.34x`` the bar,
+#: and one further level clears them.  ``depth == 1`` is that first halving
+#: (the historic single-level behaviour), ``depth == 2`` is the level the
+#: measurement shows is required, and ``depth == 3`` is one safety level for a
+#: tile still marginal at depth 2.  Depth 4 is deliberately excluded: it spends
+#: 4x the leaf count chasing a per-halving error-decay law that has ALREADY
+#: broken down on exactly the caustic-straddle tiles that would reach it, so
+#: the extra level buys resolution where the smooth-decay premise no longer
+#: holds.
+MAX_SUBDIVISION_DEPTH: int = 3
+
+
+def _farfield_child_boxes(
+        tile: dict) -> tuple[list[tuple[tuple[float, float],
+                                        tuple[float, float]]], float, float]:
+    """Compute the up-to-four far-field child boxes and the shared child half.
+
+    Halves the caustic-fixed ``(rho, theta_c)`` box: four children at
+    ``(rho_c +- half_rho/2, theta_c +- half_theta/2)`` in a fixed row-major
+    order (``s_rho`` outer, ``s_theta`` inner), each carrying the SAME half
+    ``(half_rho/2, half_theta/2)`` (a quarter box).
+
+    Returns ``(boxes, child_half_rho, child_half_theta)`` where ``boxes`` is a
+    list of ``(center, half)`` tuples.  Single-sourced so the wrapper's return
+    dict (``child_half``) and the generic subdivider's splitter agree exactly.
+    """
+    rho_c, theta_c = tile['center']
+    half_rho, half_theta = tile['half']
+    child_half_rho = 0.5 * float(half_rho)
+    child_half_theta = 0.5 * float(half_theta)
+    boxes: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for s_rho in (-1.0, 1.0):
+        for s_theta in (-1.0, 1.0):
+            child_rho = float(rho_c) + s_rho * child_half_rho
+            child_theta = float(theta_c) + s_theta * child_half_theta
+            boxes.append(((child_rho, child_theta),
+                          (child_half_rho, child_half_theta)))
+    return boxes, child_half_rho, child_half_theta
+
+
+def _wedge_child_boxes(
+        tile: dict) -> tuple[list[tuple[tuple[float, float],
+                                        tuple[float, float]]], float, float]:
+    """Compute the up-to-four wedge child boxes, the u-midpoint theta split,
+    and the shared radial child half.
+
+    Radial split at the plain ``r`` midpoint; angular split at the
+    ``u``-MIDPOINT mapped back to ``theta_wedge`` on the parent's own
+    cusp-adapted map (`_wedge_cusp_axis_map`, the SAME map `from_wedge_engine`
+    fits and serves) -- NEVER the ``theta`` midpoint.  Four children in a fixed
+    row-major order (radial sub-row outer, angular sub-column inner); the two
+    angular children have UNEQUAL ``theta`` widths (the near-cusp child is
+    narrower) and share the radial half.
+
+    Returns ``(boxes, theta_split, child_half_r)`` where ``boxes`` is a list of
+    ``(center, half)`` tuples.  Single-sourced so the wrapper's return dict
+    (``theta_split``, ``child_half_r``) and the generic subdivider's splitter
+    agree exactly.
+    """
+    r_c, theta_wedge_c = tile['center']
+    half_r, half_theta = tile['half']
+    axis_origin = tile['axis_origin']
+    theta_lo = float(theta_wedge_c) - float(half_theta)
+    theta_hi = float(theta_wedge_c) + float(half_theta)
+    r_lo = float(r_c) - float(half_r)
+    r_hi = float(r_c) + float(half_r)
+    child_half_r = 0.5 * float(half_r)
+
+    # Angular split at the u-midpoint mapped back to theta on the parent's own
+    # cusp-adapted map (u_fine[0] == 0 by construction), NOT the theta midpoint.
+    theta_fine, u_fine = _wedge_cusp_axis_map(theta_lo, theta_hi, axis_origin)
+    u_mid = 0.5 * (float(u_fine[0]) + float(u_fine[-1]))
+    theta_split = float(np.interp(u_mid, u_fine, theta_fine))
+
+    r_children = ((r_lo, 0.5 * (r_lo + r_hi)),
+                  (0.5 * (r_lo + r_hi), r_hi))
+    theta_children = ((theta_lo, theta_split), (theta_split, theta_hi))
+    boxes: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for child_r_lo, child_r_hi in r_children:
+        for child_theta_lo, child_theta_hi in theta_children:
+            child_r_c = 0.5 * (child_r_lo + child_r_hi)
+            child_theta_c = 0.5 * (child_theta_lo + child_theta_hi)
+            child_half_theta = 0.5 * (child_theta_hi - child_theta_lo)
+            boxes.append(((float(child_r_c), float(child_theta_c)),
+                          (float(child_half_r), float(child_half_theta))))
+    return boxes, theta_split, child_half_r
+
+
+def _subdivide_tile(
+        *, tile: dict, parent_tag: str, band: tuple[float, float],
+        parity: int, config: TrainingConfig, rng: np.random.Generator,
+        outdir: Path, charts: list, chart_reports: list[dict],
+        split_children: Callable[[dict], list], build_child: Callable[..., tuple],
+        gate_kind: str, eps_bar: float,
+        admit_child: Callable[[tuple, tuple], bool] | None = None,
+        max_depth: int = MAX_SUBDIVISION_DEPTH, depth: int = 1) -> dict:
+    """Generic bounded-recursion tile subdivider shared by both regions.
+
+    Extracts the single skeleton that `_subdivide_farfield_tile` and
+    `_subdivide_wedge_tile` duplicated (iterate candidate children,
+    `_load_or_build` each, `_gate_chart` it, pack-or-record, accumulate a
+    ``children_summary``) and adds the ONE piece both lacked: bounded recursion.
+    A child that STILL fails the eps bar is itself subdivided -- until it clears
+    or the halving chain reaches ``max_depth`` (`MAX_SUBDIVISION_DEPTH`), at
+    which point it is recorded as a ladder-served gap exactly as before.  The
+    achieved subdivision depth is reported per child and rolled up into
+    ``max_achieved_depth`` so a runaway is visible and the census can attribute
+    cleared-vs-still-gated windows.
+
+    The two regions differ ONLY in parameters, never in control flow:
+
+    - ``split_children(tile)`` returns the up-to-four ``(center, half)`` child
+      boxes (far-field halves caustic-fixed ``(rho, theta_c)``; the wedge
+      halves ``(r, u)`` with the angular split at the u-midpoint);
+    - ``build_child(center, half, tile)`` calls the region's chart builder plus
+      held-out probe and returns ``(chart, calls, refused, report)`` for
+      `_load_or_build`;
+    - ``admit_child(center, half)`` is the far-field re-admission predicate
+      (`_InteriorAdmission.admits_exterior` or the scalar ``exclusion_rho``
+      floor); ``None`` for the wedge, whose every child is a sub-box of an
+      already-admitted interior tile and is always built.
+
+    The report STYLE is keyed on whether an admission predicate is supplied: a
+    subdivider WITHOUT one is the wedge-interior style (no per-child
+    ``'admission'`` key; gated/flip children carry the explicit
+    ``'subdivided'`` / ``'ladder_served_gap'`` markers and a carrier-flip child
+    gets its own ``chart_reports`` entry).  A subdivider WITH one is the
+    far-field style (per-child ``'admission'``; a carrier-flip child recorded
+    only in the summary).  A future lobe subdivider supplies its own admission
+    predicate and inherits the far-field style -- the unification does not
+    preclude wiring it, which is explicitly out of scope here.
+
+    The `CarrierDiscontinuityError` branch is preserved exactly: a child that
+    straddles a critical-basin (``tau_c``) flip is recorded as a carrier-flip
+    gap and is NEVER recursed -- halving cannot fix a phase discontinuity.
+
+    Parameters
+    ----------
+    tile : dict
+        The gated parent tile record (``center``, ``half``, ``region``,
+        ``w_range``, ``si``, ``m_lo``, ``m_hi``, and -- for the wedge --
+        ``axis_origin``; ``w_nodes_per_decade`` optional).
+    parent_tag : str
+        The parent chart's tag; children are named ``{parent_tag}_c{ci}`` (so a
+        recursed grandchild is ``{parent_tag}_c{ci}_c{cj}``).
+    band, parity, config, rng, outdir
+        Threaded through unchanged from `_train_band_charts`.
+    charts, chart_reports : list
+        In-place accumulators for packed charts and per-chart reports.
+    split_children, build_child, admit_child
+        Region parameters described above.
+    gate_kind : str
+        ``_gate_chart`` kind (``'farfield'`` or ``'interior'``).
+    eps_bar : float
+        The registration bar recorded in each child summary entry.
+    max_depth : int
+        Recursion cap (`MAX_SUBDIVISION_DEPTH`).
+    depth : int
+        Current 1-based subdivision depth; the initial call is depth 1.
+
+    Returns
+    -------
+    dict
+        ``{'children': [...], 'packed': int, 'max_achieved_depth': int}``.
+        ``packed`` counts every packed chart in the FULL recursion subtree so
+        the wedge call site's ``ladder_served_gap`` reflects grandchildren too.
+    """
+    region = tile['region']
+    # A subdivider without an admission predicate is the wedge-interior style;
+    # with one it is the far-field style (see docstring).
+    wedge_style = admit_child is None
+
+    children_summary: list[dict] = []
+    total_packed = 0
+    max_achieved = depth
+    ci = 0
+    for center, half in split_children(tile):
+        entry_center = [round(float(center[0]), 6), round(float(center[1]), 6)]
+        entry_half = [round(float(half[0]), 6), round(float(half[1]), 6)]
+
+        if admit_child is not None and not admit_child(center, half):
+            # The parent's edge straddles the caustic/shell boundary; a
+            # disk-excluded child is correct geometry, dropped silently
+            # (recorded here for the census, packed nowhere).
+            children_summary.append({
+                'ci': ci, 'center': entry_center, 'half': entry_half,
+                'admission': 'disk_excluded', 'result': 'disk_excluded',
+                'achieved_depth': depth})
+            ci += 1
+            continue
+
+        child_tag = f'{parent_tag}_c{ci}'
+        child_path = outdir / f'{child_tag}.npz'
+
+        try:
+            chart, report, reused = _load_or_build(
+                child_path,
+                lambda center=center, half=half: build_child(
+                    center, half, tile),
+                {'schema': 'build8c-chart', 'parity': parity})
+        except CarrierDiscontinuityError as exc:
+            # A subdivided child STILL straddles a basin flip: record as a
+            # carrier-flip gap served by the ladder, NEVER recursed.
+            entry = {'ci': ci, 'center': entry_center, 'half': entry_half}
+            if wedge_style:
+                chart_reports.append({
+                    'name': child_tag, 'parity': parity,
+                    'file': str(child_path), 'region': region,
+                    'subdivided_from': parent_tag, 'carrier_flip': True,
+                    'carrier_flip_detail': str(exc),
+                    'subdivided': False, 'ladder_served_gap': True})
+                entry['result'] = 'carrier_flip'
+            else:
+                entry['admission'] = 'admitted'
+                entry['result'] = 'carrier_flip'
+                entry['carrier_flip_detail'] = str(exc)
+            entry['achieved_depth'] = depth
+            children_summary.append(entry)
+            ci += 1
+            continue
+
+        gated, gate_reason = _gate_chart(gate_kind, report, config)
+        child_eps = float(report.get('heldout_eps', float('nan')))
+        base_report = {'name': child_tag, 'parity': parity,
+                       'file': str(child_path), 'reused': reused,
+                       'subdivided_from': parent_tag, **report}
+
+        entry = {'ci': ci, 'center': entry_center, 'half': entry_half}
+        if not wedge_style:
+            entry['admission'] = 'admitted'
+
+        if not gated:
+            charts.append(chart)
+            chart_reports.append(base_report)
+            total_packed += 1
+            entry['eps'] = (None if math.isnan(child_eps)
+                            else round(child_eps, 8))
+            entry['bar'] = eps_bar
+            entry['gate_reason'] = gate_reason
+            entry['result'] = 'packed'
+            entry['achieved_depth'] = depth
+            children_summary.append(entry)
+            ci += 1
+            continue
+
+        if depth < max_depth:
+            # Still gated with recursion budget left: record the gated child
+            # chart, then subdivide IT one level deeper on the same bar.
+            gated_report = {**base_report, 'gated': True,
+                            'gate_reason': gate_reason, 'subdivided': True}
+            chart_reports.append(gated_report)
+            child_tile = {
+                'center': tuple(center), 'half': tuple(half),
+                'axis_origin': tile.get('axis_origin'),
+                'w_range': tile['w_range'], 'region': region,
+                'si': tile['si'], 'm_lo': tile['m_lo'], 'm_hi': tile['m_hi'],
+                'w_nodes_per_decade': tile.get('w_nodes_per_decade')}
+            sub = _subdivide_tile(
+                tile=child_tile, parent_tag=child_tag, band=band,
+                parity=parity, config=config, rng=rng, outdir=outdir,
+                charts=charts, chart_reports=chart_reports,
+                split_children=split_children, build_child=build_child,
+                gate_kind=gate_kind, eps_bar=eps_bar, admit_child=admit_child,
+                max_depth=max_depth, depth=depth + 1)
+            total_packed += sub['packed']
+            max_achieved = max(max_achieved, sub['max_achieved_depth'])
+            gated_report['subdivision'] = sub
+            if wedge_style:
+                gated_report['ladder_served_gap'] = sub['packed'] == 0
+            entry['eps'] = (None if math.isnan(child_eps)
+                            else round(child_eps, 8))
+            entry['bar'] = eps_bar
+            entry['gate_reason'] = gate_reason
+            entry['result'] = 'subdivided'
+            entry['achieved_depth'] = sub['max_achieved_depth']
+            children_summary.append(entry)
+            ci += 1
+            continue
+
+        # Gated at the recursion cap: terminal ladder-served gap (the historic
+        # single-level outcome).
+        gated_report = {**base_report, 'gated': True,
+                        'gate_reason': gate_reason}
+        if wedge_style:
+            gated_report['subdivided'] = False
+            gated_report['ladder_served_gap'] = True
+        chart_reports.append(gated_report)
+        entry['eps'] = (None if math.isnan(child_eps)
+                        else round(child_eps, 8))
+        entry['bar'] = eps_bar
+        entry['gate_reason'] = gate_reason
+        entry['result'] = 'recorded_gated'
+        entry['achieved_depth'] = depth
+        children_summary.append(entry)
+        ci += 1
+
+    return {'children': children_summary, 'packed': total_packed,
+            'max_achieved_depth': max_achieved}
+
+
 def _subdivide_farfield_tile(
         *, tile: dict, parent_tag: str, band: tuple[float, float],
         parity: int, config: TrainingConfig, rng: np.random.Generator,
@@ -3660,459 +3964,218 @@ def _subdivide_farfield_tile(
         exterior_admission: '_InteriorAdmission | None' = None,
         source_magnitude_max: float | None = None) -> dict:
     """Halve one eps-gated far-field tile into up to four children (Build 8h-a
-    WP4).
+    WP4), now a thin wrapper over the shared `_subdivide_tile` skeleton.
 
-    Single-level corrective subdivision, no recursion, in caustic-fixed
-    ``(rho, theta_c)`` coordinates: a far-field tile whose held-out eps failed
-    the registration bar is split into up to four children at
-    ``(rho_c +- half_rho/2, theta_c +- half_theta/2)`` each with half
-    ``(half_rho/2, half_theta/2)``.  A smaller tile carries less envelope
-    oscillation content, so re-fitting the same far-field label on a quarter
-    box is a strictly easier fit against the SAME (tile-size-invariant,
-    absolute-``max|E_ff|``) ``farfield_eps_max`` bar -- halving is the
-    corrective lever.
+    Caustic-fixed ``(rho, theta_c)`` corrective subdivision.  A far-field tile
+    whose held-out eps failed the ``farfield_eps_max`` bar is split into up to
+    four quarter boxes at ``(rho_c +- half_rho/2, theta_c +- half_theta/2)``
+    (row-major ``s_rho`` outer, ``s_theta`` inner).  Each child is re-admitted
+    through the PARENT's OWN region predicate (carried verbatim in
+    ``tile['region']``): a positive-parity exterior parent re-runs the SAME
+    per-``theta_c``-column directional `admits_exterior` test (``exterior_
+    admission`` with ``source_magnitude_max``); a macro-saddle exterior parent
+    the scalar-reach floor ``rho_c_child - half_rho/2 >= exclusion_rho``.  A
+    disk-excluded child is DROPPED silently (correct geometry, not a training
+    failure).  Admitted children inherit the parent's ppGO-trimmed ``w_range``
+    verbatim, retrain via `_build_farfield_chart`, and re-gate via
+    `_gate_chart`.
 
-    Each child is re-admitted through the PARENT's OWN region predicate
-    (carried verbatim in ``tile['region']`` -- never re-derived from geometry),
-    now expressed in ``rho`` because ``rho`` IS the normalised source radius:
+    The bounded recursion now lives once in `_subdivide_tile`: a still-gated
+    child is itself halved until it clears or the chain reaches
+    `MAX_SUBDIVISION_DEPTH`, at which point it is a ladder-served gap exactly as
+    the historic single-level behavior recorded it.  A far-field tile whose
+    children ALL pass at the first halving triggers no recursion and produces a
+    depth-1 report byte-identical to the pre-refactor output plus the additive
+    ``achieved_depth`` / ``max_achieved_depth`` fields.
 
-    - a positive-parity exterior parent admits a child through the SAME
-      per-``theta_c``-column directional predicate the tiler used
-      (`_InteriorAdmission.admits_exterior`, passed as ``exterior_admission``)
-      -- the child's inner ``rho`` edge must clear the caustic + tube shell and
-      lie inside the prior box for its direction (mirrors
-      `_farfield_exterior_tiles`, Build 8h-b4 WP1);
-    - a macro-saddle exterior parent (no ``exterior_admission``) admits a child
-      iff its inner ``rho`` edge stays outside the scalar-reach caustic + tube
-      shell, ``rho_c_child - half_rho/2 >= exclusion_rho`` (mirrors
-      `_farfield_tiles`).
-
-    (Interior tiles are never subdivided since WP1 -- the astroid interior is
-    charted in wedge caustic-relative coordinates and its gated tiles are
-    recorded as ladder-served gaps -- so this subdivider handles only the two
-    exterior cases above.)
-
-    The ``theta_c`` split never crosses the ``+-pi`` branch cut (children are
-    sub-intervals of the parent's ``theta_c`` range, itself within
-    ``[-pi, pi]``).  A child the disk excludes is DROPPED silently -- it is
-    correct geometry (the parent's ``rho`` edge straddles the caustic/shell
-    boundary), not a training failure, so it is packed into neither ``charts``
-    nor the still-failing chart reports (its outcome is recorded only in the
-    returned subdivision summary).  Each admitted child inherits the parent's
-    already-ppGO-trimmed ``w_range`` verbatim (no per-child
-    ``_stratum_w_range`` / ``_apply_ppgo_trim`` recompute), retrains via
-    `_build_farfield_chart`, and re-gates via `_gate_chart`.  A passing child
-    is appended to ``charts`` and recorded in ``chart_reports`` (tag
-    ``{parent_tag}_c{ci}``, ``subdivided_from`` field) exactly like a normal
-    admitted tile; a still-failing child is recorded in ``chart_reports`` with
-    its ``gate_reason`` but NOT packed -- its windows fall to the serving
-    ladder, which the ladder census attributes.  A ``nan_eps`` parent whose
-    child re-nans (a genuine engine cancellation in the same parity/gamma cell)
-    is EXPECTED to still fail; it is recorded, not special-cased -- halving
-    cannot fix a cancellation.
-
-    Children are iterated in a fixed row-major order over the ``+-half/2``
-    signs (``s_rho`` outer, ``s_theta`` inner) so the report is reproducible.
-
-    Parameters
-    ----------
-    tile : dict
-        The gated parent tile record (``center`` = ``(rho_c, theta_c)``,
-        ``half`` = ``(half_rho, half_theta_c)``, ``w_range``, ``region``,
-        ``si``, ``m_lo``, ``m_hi``).
-    parent_tag : str
-        The parent chart's tag, used to name children ``{parent_tag}_c{ci}``.
-    band, parity, config, rng, outdir
-        Threaded through unchanged from `_train_band_charts`.
-    exclusion_rho : float
-        Conservative exterior admission floor in directional caustic-fixed
-        ``rho`` units.
-    interior_admission : _InteriorAdmission or None
-        Vestigial since WP1 (interior tiles are no longer subdivided); always
-        passed ``None`` by both call sites and never dereferenced.  Retained
-        for call-site signature stability.
-    charts : list
-        Packed-chart accumulator; passing children are appended in place.
-    chart_reports : list of dict
-        Per-chart report accumulator; every admitted child (packed or
-        still-gated) is appended in place.
-    exterior_admission : _InteriorAdmission or None, optional
-        The positive-parity band's directional exterior-admission geometry
-        (`_interior_admission`); when supplied (with ``source_magnitude_max``)
-        exterior children are re-admitted through `admits_exterior` instead of
-        the scalar floor.  ``None`` (default) keeps the byte-identical
-        scalar-reach path for macro-saddle exterior parents.
-    source_magnitude_max : float or None, optional
-        The exterior region's prior-box source extent (``y_outer_region``),
-        required by `admits_exterior`.  ``None`` (default) selects the scalar
-        path.
+    Parameters mirror the pre-refactor signature exactly (call sites unchanged).
+    ``interior_admission`` remains vestigial since WP1 (interior tiles are no
+    longer subdivided) and is never dereferenced.  ``exterior_admission`` /
+    ``source_magnitude_max`` select the directional exterior re-admission path;
+    ``None`` (default) keeps the byte-identical scalar-reach floor.
 
     Returns
     -------
     dict
-        Subdivision summary (parent tag, region, per-child admission result,
-        per-child eps vs bar, packed/recorded) for the ladder census to
-        attribute cleared-vs-still-gated windows.
+        ``{'parent_tag', 'region', 'child_half', 'children'}`` -- every
+        pre-refactor key -- plus the additive ``'max_achieved_depth'``.
     """
-    rho_c, theta_c = tile['center']
-    half_rho, half_theta = tile['half']
-    child_half_rho = 0.5 * float(half_rho)
-    child_half_theta = 0.5 * float(half_theta)
+    _, child_half_rho, child_half_theta = _farfield_child_boxes(tile)
     region = tile['region']
-    w_range = tile['w_range']
-    si, m_lo, m_hi = tile['si'], tile['m_lo'], tile['m_hi']
-    # Children inherit the parent's reprovisioned ``w``-node density (Build
-    # S1-3, ``N_rec``) verbatim along with its w-window; interior parents carry
-    # no such key and fall back to ``config.interior_w_nodes_per_decade``
-    # (higher density for interior SACR-C oscillations; WP1).
-    w_nodes = tile.get('w_nodes_per_decade')
-    if w_nodes is not None:
-        eff_w_nodes = int(w_nodes)
-    elif region in ('interior', 'lobe_interior'):
-        eff_w_nodes = config.interior_w_nodes_per_decade
-    else:
-        eff_w_nodes = config.w_nodes_per_decade
-    # After WP1 this subdivider is only reached for EXTERIOR far-field tiles:
-    # the astroid interior is charted in wedge caustic-relative coordinates
-    # (`InteriorWedgeChart`) and its tiles are recorded as ladder-served gaps
-    # rather than subdivided, so every child here keeps the exterior far-field
-    # kernel-sum label and is gated against the far-field eps bar.
-    child_kind = 'farfield'
-    child_bar = config.farfield_eps_max
 
-    children_summary: list[dict] = []
-    ci = 0
-    for s_rho in (-1.0, 1.0):
-        for s_theta in (-1.0, 1.0):
-            child_rho = float(rho_c) + s_rho * child_half_rho
-            child_theta = float(theta_c) + s_theta * child_half_theta
-            # Re-admit through the PARENT's region predicate (carried
-            # verbatim -- Professor guard (e)): positive-parity exterior
-            # children re-run the SAME per-column directional `admits_exterior`
-            # test; macro-saddle exterior children the scalar-rho exclusion
-            # floor.  (Interior parents are never subdivided since WP1.)
-            if (exterior_admission is not None
-                  and source_magnitude_max is not None):
-                # Positive-parity exterior (WP1): re-admit through the SAME
-                # per-``theta_c``-column directional predicate the tiler used
-                # (`admits_exterior`), NOT the scalar cusp-spike floor.  The
-                # scalar ``exclusion_rho`` here is the band-max reach (the very
-                # over-conservative quantity WP1 replaces); using it would drop
-                # legitimate high-gamma exterior children and defeat the
-                # eps-gate corrective subdivision exactly where WP1 restored
-                # coverage.
-                admitted_child = exterior_admission.admits_exterior(
-                    (child_rho, child_theta),
-                    (child_half_rho, child_half_theta),
-                    source_magnitude_max)
-            else:  # macro-saddle exterior: unchanged scalar-reach floor
-                admitted_child = child_rho - child_half_rho >= exclusion_rho
-            if not admitted_child:
-                # The parent's edge lies partly across the caustic/shell
-                # boundary; a disk-excluded child is correct geometry, dropped
-                # silently (recorded here for the census, packed nowhere).
-                children_summary.append({
-                    'ci': ci,
-                    'center': [round(child_rho, 6), round(child_theta, 6)],
-                    'half': [round(child_half_rho, 6),
-                             round(child_half_theta, 6)],
-                    'admission': 'disk_excluded', 'result': 'disk_excluded'})
-                ci += 1
-                continue
+    def split_children(subtile: dict) -> list:
+        return _farfield_child_boxes(subtile)[0]
 
-            child_center = (child_rho, child_theta)
-            child_half = (child_half_rho, child_half_theta)
-            child_tag = f'{parent_tag}_c{ci}'
-            child_path = outdir / f'{child_tag}.npz'
+    def admit_child(center: tuple, half: tuple) -> bool:
+        # Re-admit through the PARENT's region predicate (Professor guard (e)):
+        # positive-parity exterior children re-run the SAME per-column
+        # directional `admits_exterior`; macro-saddle exterior children the
+        # scalar-rho exclusion floor.  Always supplied, so the shared skeleton
+        # uses the far-field report style.
+        child_rho, child_theta = center
+        child_half_r, _ = half
+        if (exterior_admission is not None
+                and source_magnitude_max is not None):
+            return exterior_admission.admits_exterior(
+                (child_rho, child_theta), half, source_magnitude_max)
+        return child_rho - child_half_r >= exclusion_rho
 
-            def build_child(center=child_center, half=child_half,
-                            w_range=w_range, si=si, m_lo=m_lo, m_hi=m_hi,
-                            region=region, child_kind=child_kind,
-                            w_nodes=w_nodes, eff_w_nodes=eff_w_nodes):
-                chart, calls, refused = _build_farfield_chart(
-                    gamma_band=band, parity=parity, box_center=center,
-                    half=half, w_range=w_range, config=config,
-                    w_nodes_per_decade=w_nodes)
-                samples = _farfield_heldout_samples(
-                    band, center, half, config, rng)
-                eps = _heldout_eps(chart, samples,
-                                   {'schema': 'heldout-probe'})
-                return chart, calls, refused, {
-                    'kind': child_kind, 'region': region,
-                    'image_count': chart.image_count,
-                    'stratum_index': si,
-                    'stratum_mass_range': [round(m_lo, 3), round(m_hi, 3)],
-                    'rho_theta_box': [list(center), list(half)],
-                    'w_range': [round(w_range[0], 6), round(w_range[1], 6)],
-                    'node_counts': {'n_gamma': config.n_gamma,
-                                    'n_rho': config.n_rho,
-                                    'n_theta_c': config.n_theta_c,
-                                    'n_w_per_decade': int(eff_w_nodes)},
-                    'heldout_eps': eps}
+    def build_child(center: tuple, half: tuple, subtile: dict) -> tuple:
+        # Children inherit the parent's reprovisioned w-node density verbatim
+        # (raw ``w_nodes`` into `_build_farfield_chart`); the resolved 3-way
+        # ``eff_w_nodes`` is only reported in ``node_counts`` (mirrors the main
+        # tiler; interior parents fall back to interior density, INS-2-001).
+        w_nodes = subtile.get('w_nodes_per_decade')
+        region_t = subtile['region']
+        if w_nodes is not None:
+            eff_w_nodes = int(w_nodes)
+        elif region_t in ('interior', 'lobe_interior'):
+            eff_w_nodes = config.interior_w_nodes_per_decade
+        else:
+            eff_w_nodes = config.w_nodes_per_decade
+        chart, calls, refused = _build_farfield_chart(
+            gamma_band=band, parity=parity, box_center=center, half=half,
+            w_range=subtile['w_range'], config=config,
+            w_nodes_per_decade=w_nodes)
+        samples = _farfield_heldout_samples(band, center, half, config, rng)
+        eps = _heldout_eps(chart, samples, {'schema': 'heldout-probe'})
+        return chart, calls, refused, {
+            'kind': 'farfield', 'region': region_t,
+            'image_count': chart.image_count,
+            'stratum_index': subtile['si'],
+            'stratum_mass_range': [round(subtile['m_lo'], 3),
+                                   round(subtile['m_hi'], 3)],
+            'rho_theta_box': [list(center), list(half)],
+            'w_range': [round(subtile['w_range'][0], 6),
+                        round(subtile['w_range'][1], 6)],
+            'node_counts': {'n_gamma': config.n_gamma,
+                            'n_rho': config.n_rho,
+                            'n_theta_c': config.n_theta_c,
+                            'n_w_per_decade': int(eff_w_nodes)},
+            'heldout_eps': eps}
 
-            try:
-                chart, report, reused = _load_or_build(
-                    child_path, build_child,
-                    {'schema': 'build8c-chart', 'parity': parity})
-            except CarrierDiscontinuityError as exc:
-                # A subdivided exterior child STILL straddles a basin flip.
-                # Subdivision is single-level (no recursion), so record the
-                # child as a carrier-flip gap served by the ladder -- never
-                # fitted with a phase-kinked envelope.
-                children_summary.append({
-                    'ci': ci,
-                    'center': [round(child_rho, 6), round(child_theta, 6)],
-                    'half': [round(child_half_rho, 6),
-                             round(child_half_theta, 6)],
-                    'admission': 'admitted', 'result': 'carrier_flip',
-                    'carrier_flip_detail': str(exc)})
-                ci += 1
-                continue
-            gated, gate_reason = _gate_chart(child_kind, report, config)
-            child_eps = float(report.get('heldout_eps', float('nan')))
-            child_report = {'name': child_tag, 'parity': parity,
-                            'file': str(child_path), 'reused': reused,
-                            'subdivided_from': parent_tag, **report}
-            if gated:
-                child_report['gated'] = True
-                child_report['gate_reason'] = gate_reason
-                chart_reports.append(child_report)
-                result = 'recorded_gated'
-            else:
-                charts.append(chart)
-                chart_reports.append(child_report)
-                result = 'packed'
-            children_summary.append({
-                'ci': ci,
-                'center': [round(child_rho, 6), round(child_theta, 6)],
-                'half': [round(child_half_rho, 6),
-                         round(child_half_theta, 6)],
-                'admission': 'admitted',
-                'eps': (None if math.isnan(child_eps)
-                        else round(child_eps, 8)),
-                'bar': child_bar,
-                'gate_reason': gate_reason, 'result': result})
-            ci += 1
+    summary = _subdivide_tile(
+        tile=tile, parent_tag=parent_tag, band=band, parity=parity,
+        config=config, rng=rng, outdir=outdir, charts=charts,
+        chart_reports=chart_reports, split_children=split_children,
+        build_child=build_child, gate_kind='farfield',
+        eps_bar=config.farfield_eps_max, admit_child=admit_child)
 
     return {'parent_tag': parent_tag, 'region': region,
             'child_half': [round(child_half_rho, 6),
                            round(child_half_theta, 6)],
-            'children': children_summary}
+            'children': summary['children'],
+            'max_achieved_depth': summary['max_achieved_depth']}
 
 
 def _subdivide_wedge_tile(
         *, tile: dict, parent_tag: str, band: tuple[float, float],
         parity: int, config: TrainingConfig, rng: np.random.Generator,
         outdir: Path, charts: list, chart_reports: list[dict]) -> dict:
-    """Halve one eps-gated wedge-interior tile into up to four children (WP2).
+    """Halve one eps-gated wedge-interior tile into up to four children (WP2),
+    now a thin wrapper over the shared `_subdivide_tile` skeleton.
 
     The astroid-interior counterpart of `_subdivide_farfield_tile`, in the
-    WEDGE chart's own caustic-relative ``(r, u)`` coordinates -- NOT the
-    caustic-fixed ``(rho, theta_c)`` coordinates the far-field subdivider uses
-    (those cannot represent a normalised wedge box).  Single-level, no
-    recursion: a wedge tile whose held-out eps failed the interior registration
-    bar is split into up to four children by halving BOTH axes.
-
-    The radial split is at the plain ``r`` midpoint.  The ANGULAR split is at
-    the ``u``-MIDPOINT mapped back to ``theta_wedge`` -- ``theta_split`` is the
-    angle at ``u = (u_lo + u_hi) / 2`` on the parent's own cusp-adapted map
+    WEDGE chart's own caustic-relative ``(r, u)`` coordinates.  The radial split
+    is at the plain ``r`` midpoint; the ANGULAR split is at the ``u``-MIDPOINT
+    mapped back to ``theta_wedge`` on the parent's own cusp-adapted map
     (`_wedge_cusp_axis_map`, the SAME map `from_wedge_engine` fits and serves)
-    -- NEVER the ``theta`` midpoint.  Equal steps in the cusp-adapted ``u`` are
-    what the angular spline sees; bisecting in the cusp-singular ``theta``
-    instead would forfeit the whole benefit of the ``u`` axis (a child abutting
-    the cusp edge would still carry the ``theta**(2/3)`` gradient the coarse
-    parent could not resolve).  The two angular children therefore have UNEQUAL
-    ``theta`` widths -- the near-cusp child is narrower in ``theta`` -- which is
-    exactly the point.
+    -- NEVER the ``theta`` midpoint -- so the two angular children have UNEQUAL
+    ``theta`` widths (the near-cusp child narrower), which is the point of the
+    ``u`` axis.  Each child inherits the parent's ``axis_origin`` verbatim,
+    rebuilds via `_build_wedge_chart`, and re-gates on ``config.interior_eps_max``
+    via `_gate_chart('interior', ...)`.  There is NO admission predicate: every
+    child is a sub-box of an already-admitted interior tile and is always built,
+    which is what selects the wedge-interior report style in the shared
+    skeleton (``admit_child=None``).
 
-    Each child inherits the parent's ``axis_origin`` verbatim (both children of
-    a ``'low'`` parent stay below the waist and remain nearest the ``theta = 0``
-    cusp; symmetrically for ``'high'``), is rebuilt via `_build_wedge_chart`
-    (which threads ``axis_origin`` into `from_wedge_engine`, whose DD-product
-    ``w``-ceiling caps a capped child's ``w``-band cleanly), and is re-gated on
-    the SAME interior eps bar (`config.interior_eps_max`) via
-    `_gate_chart('interior', ...)`.  A passing child is appended to ``charts``
-    and recorded in ``chart_reports`` (tag ``{parent_tag}_c{ci}``,
-    ``subdivided_from`` field) exactly like a normal admitted wedge tile; a
-    still-failing child is recorded as a ladder-served gap but NOT packed -- its
-    windows fall to the serving ladder, which the ladder census attributes.  A
-    child that straddles a critical-basin (``tau_c``) flip
-    (`CarrierDiscontinuityError`) is likewise recorded as a ladder-served gap
-    (single-level: no re-subdivision).
+    The bounded recursion now lives once in `_subdivide_tile`: a still-gated
+    child is itself halved (u-midpoint angular split preserved at every level)
+    until it clears or the chain reaches `MAX_SUBDIVISION_DEPTH`, then recorded
+    as a ladder-served gap.  ``packed`` counts the FULL recursion subtree, so
+    the call site's ``ladder_served_gap = subdivision['packed'] == 0`` reflects
+    grandchildren too.  A carrier-flip (`CarrierDiscontinuityError`) child is
+    recorded as a ladder-served gap and NEVER recursed (halving cannot fix a
+    phase discontinuity).
 
-    Children are iterated in a fixed row-major order (radial sub-row outer,
-    angular sub-column inner) so the report is reproducible.  Unlike the
-    far-field subdivider there is NO admission predicate: every child is a
-    sub-box of an already-admitted interior tile and is always built.
-
-    Parameters
-    ----------
-    tile : dict
-        The gated parent tile record (``center`` = ``(r_c, theta_wedge_c)``,
-        ``half`` = ``(half_r, half_theta_wedge)``, ``axis_origin``,
-        ``w_range``, ``region``, ``si``, ``m_lo``, ``m_hi``).
-    parent_tag : str
-        The parent chart's tag, used to name children ``{parent_tag}_c{ci}``.
-    band, parity, config, rng, outdir
-        Threaded through unchanged from `_train_band_charts`.
-    charts : list
-        Packed-chart accumulator; passing children are appended in place.
-    chart_reports : list of dict
-        Per-chart report accumulator; every child (packed or still-gated) is
-        appended in place.
+    Parameters mirror the pre-refactor signature exactly (call site unchanged).
 
     Returns
     -------
     dict
-        Subdivision summary (parent tag, region, axis_origin, theta_split,
-        per-child eps vs bar, packed count) for the ladder census to attribute
-        cleared-vs-still-gated windows.
+        ``{'parent_tag', 'region', 'axis_origin', 'theta_split',
+        'child_half_r', 'packed', 'children'}`` -- every pre-refactor key --
+        plus the additive ``'max_achieved_depth'``.
     """
-    r_c, theta_wedge_c = tile['center']
-    half_r, half_theta = tile['half']
+    _, theta_split, child_half_r = _wedge_child_boxes(tile)
     axis_origin = tile['axis_origin']
     region = tile['region']
-    w_range = tile['w_range']
-    si, m_lo, m_hi = tile['si'], tile['m_lo'], tile['m_hi']
-    theta_lo = float(theta_wedge_c) - float(half_theta)
-    theta_hi = float(theta_wedge_c) + float(half_theta)
-    r_lo = float(r_c) - float(half_r)
-    r_hi = float(r_c) + float(half_r)
-    child_half_r = 0.5 * float(half_r)
 
-    # Angular split at the u-MIDPOINT mapped back to theta, on the parent's own
-    # cusp-adapted map (single-sourced -- the same map from_wedge_engine fits
-    # and serves), NOT the theta midpoint.  u_fine[0] == 0 by construction.
-    theta_fine, u_fine = _wedge_cusp_axis_map(theta_lo, theta_hi, axis_origin)
-    u_mid = 0.5 * (float(u_fine[0]) + float(u_fine[-1]))
-    theta_split = float(np.interp(u_mid, u_fine, theta_fine))
+    def split_children(subtile: dict) -> list:
+        return _wedge_child_boxes(subtile)[0]
 
-    # Interior children inherit the interior w-node density (3-way: tile
-    # override -> config.interior_w_nodes_per_decade -> config.w_nodes_per_decade)
-    # -- mirrors the main tiler and _subdivide_farfield_tile exactly (INS-2-001:
-    # a stale ternary in the subdivision path is a recurring bug).
-    w_nodes = tile.get('w_nodes_per_decade')
-    if w_nodes is not None:
-        eff_w_nodes = int(w_nodes)
-    elif region in ('interior', 'lobe_interior', 'wedge_interior'):
-        eff_w_nodes = config.interior_w_nodes_per_decade
-    else:
-        eff_w_nodes = config.w_nodes_per_decade
-    child_bar = config.interior_eps_max
+    def build_child(center: tuple, half: tuple, subtile: dict) -> tuple:
+        # Interior children inherit the interior w-node density (3-way: tile
+        # override -> config.interior_w_nodes_per_decade -> config.w_nodes_per_
+        # decade), mirroring the main tiler (INS-2-001).  axis_origin threads
+        # into from_wedge_engine, whose DD-product w-ceiling caps the band.
+        w_nodes = subtile.get('w_nodes_per_decade')
+        region_t = subtile['region']
+        if w_nodes is not None:
+            eff_w_nodes = int(w_nodes)
+        elif region_t in ('interior', 'lobe_interior', 'wedge_interior'):
+            eff_w_nodes = config.interior_w_nodes_per_decade
+        else:
+            eff_w_nodes = config.w_nodes_per_decade
+        chart, calls, refused = _build_wedge_chart(
+            gamma_band=band, parity=parity, box_center=center, half=half,
+            w_range=subtile['w_range'], config=config,
+            w_nodes_per_decade=eff_w_nodes,
+            axis_origin=subtile['axis_origin'])
+        # Held-out probe INLINE (mirrors the main wedge branch): draw
+        # (gamma, r, theta_wedge) uniformly inside the child's wedge-fixed box
+        # and map each draw to a PHYSICAL eigenframe source through the child
+        # chart's OWN wedge_map.
+        r_cen, theta_cen = center
+        half_r_c, half_theta_c = half
+        samples: list[tuple[float, float, float]] = []
+        for _ in range(config.n_heldout):
+            gamma = float(rng.uniform(*band))
+            r = float(rng.uniform(r_cen - half_r_c, r_cen + half_r_c))
+            theta_wedge = float(rng.uniform(
+                theta_cen - half_theta_c, theta_cen + half_theta_c))
+            y1_eig, y2_eig = _from_wedge_fixed(
+                gamma, r, theta_wedge, chart.wedge_map)
+            samples.append((gamma, float(y1_eig), float(y2_eig)))
+        eps = _heldout_eps(chart, samples, {'schema': 'heldout-probe'})
+        return chart, calls, refused, {
+            'kind': 'interior', 'region': region_t,
+            'image_count': chart.image_count,
+            'stratum_index': subtile['si'],
+            'stratum_mass_range': [round(subtile['m_lo'], 3),
+                                   round(subtile['m_hi'], 3)],
+            'rho_theta_box': [list(center), list(half)],
+            'w_range': [round(subtile['w_range'][0], 6),
+                        round(subtile['w_range'][1], 6)],
+            'node_counts': {'n_gamma': config.n_gamma,
+                            'n_rho': config.n_rho,
+                            'n_theta_c': config.n_theta_c,
+                            'n_w_per_decade': int(eff_w_nodes)},
+            'heldout_eps': eps}
 
-    # Radial sub-rows (plain r midpoint) x angular sub-columns (u-midpoint
-    # theta_split): up to four children, deterministic row-major order.
-    r_children = ((r_lo, 0.5 * (r_lo + r_hi)),
-                  (0.5 * (r_lo + r_hi), r_hi))
-    theta_children = ((theta_lo, theta_split), (theta_split, theta_hi))
-
-    children_summary: list[dict] = []
-    packed = 0
-    ci = 0
-    for child_r_lo, child_r_hi in r_children:
-        for child_theta_lo, child_theta_hi in theta_children:
-            child_r_c = 0.5 * (child_r_lo + child_r_hi)
-            child_theta_c = 0.5 * (child_theta_lo + child_theta_hi)
-            child_half_theta = 0.5 * (child_theta_hi - child_theta_lo)
-            child_center = (float(child_r_c), float(child_theta_c))
-            child_half = (float(child_half_r), float(child_half_theta))
-            child_tag = f'{parent_tag}_c{ci}'
-            child_path = outdir / f'{child_tag}.npz'
-
-            def build_child(center=child_center, half=child_half,
-                            w_range=w_range, si=si, m_lo=m_lo, m_hi=m_hi,
-                            region=region, axis_origin=axis_origin,
-                            eff_w_nodes=eff_w_nodes):
-                chart, calls, refused = _build_wedge_chart(
-                    gamma_band=band, parity=parity, box_center=center,
-                    half=half, w_range=w_range, config=config,
-                    w_nodes_per_decade=eff_w_nodes, axis_origin=axis_origin)
-                # Held-out probe INLINE (mirrors the main wedge branch): draw
-                # (gamma, r, theta_wedge) uniformly inside the child's
-                # wedge-fixed box and map each draw to a PHYSICAL eigenframe
-                # source through the child chart's OWN wedge_map.
-                r_cen, theta_cen = center
-                half_r_c, half_theta_c = half
-                samples: list[tuple[float, float, float]] = []
-                for _ in range(config.n_heldout):
-                    gamma = float(rng.uniform(*band))
-                    r = float(rng.uniform(r_cen - half_r_c, r_cen + half_r_c))
-                    theta_wedge = float(rng.uniform(
-                        theta_cen - half_theta_c, theta_cen + half_theta_c))
-                    y1_eig, y2_eig = _from_wedge_fixed(
-                        gamma, r, theta_wedge, chart.wedge_map)
-                    samples.append((gamma, float(y1_eig), float(y2_eig)))
-                eps = _heldout_eps(chart, samples,
-                                   {'schema': 'heldout-probe'})
-                return chart, calls, refused, {
-                    'kind': 'interior', 'region': region,
-                    'image_count': chart.image_count,
-                    'stratum_index': si,
-                    'stratum_mass_range': [round(m_lo, 3), round(m_hi, 3)],
-                    'rho_theta_box': [list(center), list(half)],
-                    'w_range': [round(w_range[0], 6), round(w_range[1], 6)],
-                    'node_counts': {'n_gamma': config.n_gamma,
-                                    'n_rho': config.n_rho,
-                                    'n_theta_c': config.n_theta_c,
-                                    'n_w_per_decade': int(eff_w_nodes)},
-                    'heldout_eps': eps}
-
-            try:
-                chart, report, reused = _load_or_build(
-                    child_path, build_child,
-                    {'schema': 'build8c-chart', 'parity': parity})
-            except CarrierDiscontinuityError as exc:
-                # A subdivided wedge child STILL straddles a basin flip.
-                # Single-level subdivision (no recursion): record the child as
-                # a carrier-flip gap served by the ladder.
-                child_report = {
-                    'name': child_tag, 'parity': parity,
-                    'file': str(child_path), 'region': region,
-                    'subdivided_from': parent_tag, 'carrier_flip': True,
-                    'carrier_flip_detail': str(exc),
-                    'subdivided': False, 'ladder_served_gap': True}
-                chart_reports.append(child_report)
-                children_summary.append({
-                    'ci': ci,
-                    'center': [round(child_r_c, 6), round(child_theta_c, 6)],
-                    'half': [round(child_half_r, 6),
-                             round(child_half_theta, 6)],
-                    'result': 'carrier_flip'})
-                ci += 1
-                continue
-
-            gated, gate_reason = _gate_chart('interior', report, config)
-            child_eps = float(report.get('heldout_eps', float('nan')))
-            child_report = {'name': child_tag, 'parity': parity,
-                            'file': str(child_path), 'reused': reused,
-                            'subdivided_from': parent_tag, **report}
-            if gated:
-                child_report['gated'] = True
-                child_report['gate_reason'] = gate_reason
-                child_report['subdivided'] = False
-                child_report['ladder_served_gap'] = True
-                chart_reports.append(child_report)
-                result = 'recorded_gated'
-            else:
-                charts.append(chart)
-                chart_reports.append(child_report)
-                packed += 1
-                result = 'packed'
-            children_summary.append({
-                'ci': ci,
-                'center': [round(child_r_c, 6), round(child_theta_c, 6)],
-                'half': [round(child_half_r, 6), round(child_half_theta, 6)],
-                'eps': (None if math.isnan(child_eps)
-                        else round(child_eps, 8)),
-                'bar': child_bar,
-                'gate_reason': gate_reason, 'result': result})
-            ci += 1
+    summary = _subdivide_tile(
+        tile=tile, parent_tag=parent_tag, band=band, parity=parity,
+        config=config, rng=rng, outdir=outdir, charts=charts,
+        chart_reports=chart_reports, split_children=split_children,
+        build_child=build_child, gate_kind='interior',
+        eps_bar=config.interior_eps_max, admit_child=None)
 
     return {'parent_tag': parent_tag, 'region': region,
             'axis_origin': axis_origin,
             'theta_split': round(theta_split, 6),
             'child_half_r': round(child_half_r, 6),
-            'packed': packed, 'children': children_summary}
+            'packed': summary['packed'], 'children': summary['children'],
+            'max_achieved_depth': summary['max_achieved_depth']}
 
 
 def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,

@@ -306,12 +306,14 @@ _KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_V1, _LOBE_AXIS_SCHEMA})
 # be queried in wedge-fixed coordinates.  An old absolute-coordinate interior
 # artifact must hard-refuse at load.
 #
-# v2 (this build): the angular spline axis is the cusp-adapted coordinate
-# u = d**(2/3) (d = angular distance to the near astroid cusp), NOT the
-# retired arc-length ``s`` of v1.  The coordinate SEMANTICS changed, so v1 is
-# dropped from the known set: a stale v1 (arc-length) artifact hard-refuses at
-# load rather than being served at the wrong angular coordinate.
-_WEDGE_AXIS_SCHEMA = 'wedge_caustic_relative_v2'
+# v3 (this build): the angular spline axis is the cusp-adapted coordinate
+# u = d**(2/3) (d = angular distance to the near astroid cusp), and the chart
+# now stores it under the honestly-named ``theta_to_u`` / ``u_grid`` fields
+# (v2 mislabelled the same coordinate as arc-length ``theta_to_s`` / ``s``,
+# and v1 was the genuinely arc-length axis).  Only v3 is known: a stale v2 or
+# v1 artifact -- whose wedge angular map rides under the old ``theta_to_s``
+# key -- hard-refuses at load rather than being served on the wrong axis.
+_WEDGE_AXIS_SCHEMA = 'wedge_caustic_relative_v3'
 _KNOWN_WEDGE_AXIS_SCHEMAS = frozenset({_WEDGE_AXIS_SCHEMA})
 
 
@@ -647,6 +649,16 @@ def _wedge_cusp_axis_map(theta_lo: float, theta_hi: float, origin: str
     """
     theta_lo = float(theta_lo)
     theta_hi = float(theta_hi)
+    # Domain guard: [0, pi/2] is exactly the D2-folded astroid fundamental
+    # domain.  A bound outside it can only come from a caller that failed to
+    # fold the source into the first quadrant (a bug); HARD RAISE rather than
+    # clamp -- a clamp to pi/2 would silently serve the reflected tile's basin
+    # and mask the fold bug.
+    if not (0.0 <= theta_lo and theta_hi <= np.pi / 2.0):
+        raise ValueError(
+            f'wedge tile bounds (theta_lo={theta_lo}, theta_hi={theta_hi}) '
+            f'must lie within the D2-folded fundamental domain [0, pi/2]; a '
+            f'value outside it indicates an unfolded source (caller bug).')
     if not theta_lo < theta_hi:
         raise ValueError(
             f'theta_lo ({theta_lo}) must be strictly below theta_hi '
@@ -1776,36 +1788,84 @@ def _validate_wedge_caustic_map(wedge_map: _WedgeCausticMap,
     return _WedgeCausticMap(gamma_nodes, theta_nodes, r_table)
 
 
+def _validate_axis_map(axis_map: np.ndarray, theta_grid: np.ndarray, *,
+                       ordinate_name: str) -> np.ndarray:
+    """Return a validated ``(2, N_map)`` theta->ordinate spline-axis map.
+
+    Shared numeric core for every chart kind's angular reparametrisation map
+    (arc-length ``s`` for tube/lobe/far-field; cusp-adapted ``u = d**(2/3)``
+    for the wedge interior).  Row 0 is ``theta_fine`` (strictly ascending,
+    starting at the tile's lower bound ``theta_grid[0]``); row 1 is the
+    ordinate ``<ordinate_name>_fine`` (strictly increasing from ~0).  Both
+    rows must be finite.
+
+    The checks are MONOTONE + STARTS-AT-0 ONLY: there is deliberately NO
+    length-scale/magnitude bound.  ``s`` is an arc length (radians) while
+    ``u`` is ``d**(2/3)`` (rad**(2/3)); the two ordinates have different
+    magnitudes over the same tile, so neither may inherit a bound sized for
+    the other.
+
+    Parameters
+    ----------
+    axis_map : np.ndarray
+        Candidate ``(2, N_map)`` map.
+    theta_grid : np.ndarray
+        The tile's angular grid; row 0 must start at ``theta_grid[0]``.
+    ordinate_name : str
+        Name of the row-1 ordinate (``'s'`` or ``'u'``); it also names the
+        map in the error messages (``theta_to_<ordinate_name>``).
+    """
+    map_name = f'theta_to_{ordinate_name}'
+    ord_fine = f'{ordinate_name}_fine'
+    arr = np.ascontiguousarray(axis_map, dtype=float)
+    if arr.ndim != 2 or arr.shape[0] != 2 or arr.shape[1] < 2:
+        raise ValueError(
+            f'{map_name} must have shape (2, N_map) with N_map >= 2; '
+            f'got shape {arr.shape}.')
+    if not np.isfinite(arr).all():
+        raise ValueError(f'{map_name} must be finite.')
+    theta_fine, ordinate_fine = arr[0], arr[1]
+    if not np.all(np.diff(theta_fine) > 0.0):
+        raise ValueError(
+            f'{map_name} row 0 (theta_fine) must be strictly increasing.')
+    if not np.isclose(theta_fine[0], theta_grid[0]):
+        raise ValueError(
+            f'{map_name} row 0 must start at theta_grid[0]={theta_grid[0]!r}; '
+            f'got {theta_fine[0]!r}.')
+    if not np.all(np.diff(ordinate_fine) > 0.0):
+        raise ValueError(
+            f'{map_name} row 1 ({ord_fine}) must be strictly increasing.')
+    if not np.isclose(ordinate_fine[0], 0.0, atol=1e-9):
+        raise ValueError(
+            f'{map_name} row 1 ({ord_fine}) must start at ~0; '
+            f'got {ordinate_fine[0]!r}.')
+    return arr
+
+
 def _validate_theta_to_s(theta_to_s: np.ndarray,
                          theta_grid: np.ndarray) -> np.ndarray:
     """Return a validated ``(2, N_map)`` theta->arc-length axis map.
 
     Row 0 is ``theta_fine`` (strictly ascending, starting at the arc's
     lower bound ``theta_grid[0]``); row 1 is ``s_fine`` (cumulative arc
-    length, strictly increasing from ~0).  Both rows must be finite.
+    length, strictly increasing from ~0).  Both rows must be finite.  Used
+    by the tube / lobe / far-field charts, whose angular axis is a genuine
+    arc length; delegates to `_validate_axis_map`.
     """
-    arr = np.ascontiguousarray(theta_to_s, dtype=float)
-    if arr.ndim != 2 or arr.shape[0] != 2 or arr.shape[1] < 2:
-        raise ValueError(
-            f'theta_to_s must have shape (2, N_map) with N_map >= 2; '
-            f'got shape {arr.shape}.')
-    if not np.isfinite(arr).all():
-        raise ValueError('theta_to_s must be finite.')
-    theta_fine, s_fine = arr[0], arr[1]
-    if not np.all(np.diff(theta_fine) > 0.0):
-        raise ValueError(
-            'theta_to_s row 0 (theta_fine) must be strictly increasing.')
-    if not np.isclose(theta_fine[0], theta_grid[0]):
-        raise ValueError(
-            f'theta_to_s row 0 must start at theta_grid[0]={theta_grid[0]!r}; '
-            f'got {theta_fine[0]!r}.')
-    if not np.all(np.diff(s_fine) > 0.0):
-        raise ValueError(
-            'theta_to_s row 1 (s_fine) must be strictly increasing.')
-    if not np.isclose(s_fine[0], 0.0, atol=1e-9):
-        raise ValueError(
-            f'theta_to_s row 1 (s_fine) must start at ~0; got {s_fine[0]!r}.')
-    return arr
+    return _validate_axis_map(theta_to_s, theta_grid, ordinate_name='s')
+
+
+def _validate_theta_to_u(theta_to_u: np.ndarray,
+                         theta_grid: np.ndarray) -> np.ndarray:
+    """Return a validated ``(2, N_map)`` theta->``u`` axis map.
+
+    Row 0 is ``theta_fine`` (strictly ascending, starting at the tile's
+    lower bound ``theta_grid[0]``); row 1 is ``u_fine`` = ``d**(2/3)`` (the
+    cusp-adapted coordinate, strictly increasing from ~0).  Used by the
+    wedge-interior chart; delegates to `_validate_axis_map`.  Because ``u``
+    is ``rad**(2/3)`` and NOT a length, no magnitude/length bound applies.
+    """
+    return _validate_axis_map(theta_to_u, theta_grid, ordinate_name='u')
 
 
 def _fit_tensor_spline(axis_grids: tuple[np.ndarray, ...],
@@ -2557,11 +2617,12 @@ class InteriorWedgeChart:
         Precomputed caustic-radius table for the coordinate transform.
     envelope_definition : str
         Tag naming the label the chart's envelope encodes.
-    theta_to_s : np.ndarray or None
-        Optional ``(2, N_map)`` theta_wedge→s axis reparametrization map.
-        Row 0 is the dense ``theta_wedge`` grid; row 1 is the corresponding
-        ``s`` coordinate.  When ``None``, the spline is on raw
-        ``theta_wedge``.
+    theta_to_u : np.ndarray or None
+        Optional ``(2, N_map)`` theta_wedge→u axis reparametrization map,
+        where ``u = d**(2/3)`` is the cusp-adapted angular coordinate (``d``
+        = angular distance to the near astroid cusp).  Row 0 is the dense
+        ``theta_wedge`` grid; row 1 is the corresponding ``u`` coordinate.
+        When ``None``, the spline is on raw ``theta_wedge``.
     """
 
     gamma_grid: np.ndarray
@@ -2578,7 +2639,7 @@ class InteriorWedgeChart:
     param_spacing: np.ndarray
     wedge_map: _WedgeCausticMap
     envelope_definition: str
-    theta_to_s: np.ndarray | None
+    theta_to_u: np.ndarray | None
 
     @classmethod
     def from_wedge_values(cls, *, gamma_grid: np.ndarray,
@@ -2594,8 +2655,8 @@ class InteriorWedgeChart:
                           refused_points: np.ndarray | None = None,
                           envelope_definition: str
                           = _INTERIOR_ENVELOPE_DEFINITION,
-                          theta_to_s: np.ndarray | None = None,
-                          s_grid: np.ndarray | None = None
+                          theta_to_u: np.ndarray | None = None,
+                          u_grid: np.ndarray | None = None
                           ) -> 'InteriorWedgeChart':
         """Build a wedge-interior chart by fitting splines to a value tensor.
 
@@ -2616,13 +2677,14 @@ class InteriorWedgeChart:
             Refused wedge-fixed ``(gamma, r, theta_wedge)`` training points.
         envelope_definition : str, optional
             Tag naming the label the chart's envelope encodes.
-        theta_to_s : np.ndarray or None, optional
-            ``(2, N_map)`` theta_wedge→s axis reparametrization map.  When
-            provided together with ``s_grid``, the spline's fourth axis
-            is ``s`` (not raw ``theta_wedge``).
-        s_grid : np.ndarray or None, optional
-            1-D strictly increasing s-coordinate nodes (same length as
-            ``theta_wedge_grid``).  Required when ``theta_to_s`` is given.
+        theta_to_u : np.ndarray or None, optional
+            ``(2, N_map)`` theta_wedge→u axis reparametrization map (``u =
+            d**(2/3)``, the cusp-adapted angular coordinate).  When provided
+            together with ``u_grid``, the spline's fourth axis is ``u`` (not
+            raw ``theta_wedge``).
+        u_grid : np.ndarray or None, optional
+            1-D strictly increasing u-coordinate nodes (same length as
+            ``theta_wedge_grid``).  Required when ``theta_to_u`` is given.
         """
         gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
         r_grid = _validate_axis(r_grid, 'r_grid')
@@ -2632,22 +2694,22 @@ class InteriorWedgeChart:
         expected = (log_w_grid.size, gamma_grid.size, r_grid.size,
                     theta_wedge_grid.size)
         _check_value_shape(envelope_real, envelope_imag, expected)
-        # When both theta_to_s and s_grid are provided, the spline's fourth
-        # axis is s instead of raw theta_wedge.
-        if theta_to_s is not None and s_grid is not None:
-            theta_to_s = _validate_theta_to_s(theta_to_s, theta_wedge_grid)
-            s_grid = _validate_axis(s_grid, 's_grid')
-            if s_grid.size != theta_wedge_grid.size:
+        # When both theta_to_u and u_grid are provided, the spline's fourth
+        # axis is the cusp-adapted u coordinate instead of raw theta_wedge.
+        if theta_to_u is not None and u_grid is not None:
+            theta_to_u = _validate_theta_to_u(theta_to_u, theta_wedge_grid)
+            u_grid = _validate_axis(u_grid, 'u_grid')
+            if u_grid.size != theta_wedge_grid.size:
                 raise ValueError(
-                    f's_grid length ({s_grid.size}) must equal '
+                    f'u_grid length ({u_grid.size}) must equal '
                     f'theta_wedge_grid length ({theta_wedge_grid.size}).')
-            spline_axes = (log_w_grid, gamma_grid, r_grid, s_grid)
-        elif theta_to_s is None and s_grid is None:
+            spline_axes = (log_w_grid, gamma_grid, r_grid, u_grid)
+        elif theta_to_u is None and u_grid is None:
             # Identity path: byte-identical to raw theta_wedge.
             spline_axes = (log_w_grid, gamma_grid, r_grid, theta_wedge_grid)
         else:
             raise ValueError(
-                'theta_to_s and s_grid must both be None or both provided.')
+                'theta_to_u and u_grid must both be None or both provided.')
         real_c, imag_c, knots = _fit_tensor_spline(
             spline_axes, envelope_real, envelope_imag)
         return cls._assemble(
@@ -2655,14 +2717,14 @@ class InteriorWedgeChart:
             real_c, imag_c, knots, image_count, parity, eta_overlap_min,
             refused_points, wedge_map,
             envelope_definition=envelope_definition,
-            theta_to_s=theta_to_s)
+            theta_to_u=theta_to_u)
 
     @classmethod
     def _assemble(cls, gamma_grid, r_grid, theta_wedge_grid, log_w_grid,
                   real_coeffs, imag_coeffs, knots, image_count, parity,
                   eta_overlap_min, refused_points, wedge_map,
                   envelope_definition=_INTERIOR_ENVELOPE_DEFINITION,
-                  theta_to_s=None
+                  theta_to_u=None
                   ) -> 'InteriorWedgeChart':
         """Assemble a wedge chart from prebuilt coefficient tensors and knots.
 
@@ -2695,8 +2757,8 @@ class InteriorWedgeChart:
             param_spacing=param_spacing,
             wedge_map=wedge_map,
             envelope_definition=str(envelope_definition),
-            theta_to_s=(np.ascontiguousarray(theta_to_s, dtype=float)
-                        if theta_to_s is not None else None))
+            theta_to_u=(np.ascontiguousarray(theta_to_u, dtype=float)
+                        if theta_to_u is not None else None))
 
 
 @dataclass(frozen=True, eq=False)
@@ -3316,11 +3378,12 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
         r, theta_wedge = _to_wedge_fixed(gamma, y1_eig, y2_eig,
                                          chart.wedge_map)
         v1 = r
-        if chart.theta_to_s is not None:
-            # Remap theta_wedge -> s via the stored dense map before
-            # contracting the spline (same theta_to_s pattern as tube/lobe).
-            v2 = float(np.interp(theta_wedge, chart.theta_to_s[0],
-                                 chart.theta_to_s[1]))
+        if chart.theta_to_u is not None:
+            # Remap theta_wedge -> u via the stored dense map before
+            # contracting the spline (same theta_to_* pattern as tube/lobe,
+            # but the wedge ordinate is the cusp-adapted u = d**(2/3)).
+            v2 = float(np.interp(theta_wedge, chart.theta_to_u[0],
+                                 chart.theta_to_u[1]))
         else:
             v2 = theta_wedge
     else:
@@ -3938,7 +4001,7 @@ class LensAmplificationSurrogate:
         # WORSE: caustic_speed vanishes linearly at a cusp, so s ~ theta**2 and
         # the envelope behaved as f(s**(1/3))) with the cusp-adapted coordinate
         # u = d**(2/3), d = angular distance to the NEAR astroid cusp.  The map
-        # is coordinate-agnostic on serve (carried in the theta_to_s/s_grid
+        # is coordinate-agnostic on serve (carried in the theta_to_u/u_grid
         # fields), so nothing downstream changes.
         rep_gamma = float(np.median(gamma_grid))
         theta_lo = float(theta_wedge_range[0])
@@ -3966,9 +4029,9 @@ class LensAmplificationSurrogate:
                     f'origin is single-sourced from the caustic waist.')
         origin = axis_origin if axis_origin is not None else derived_origin
         theta_fine, u_fine = _wedge_cusp_axis_map(theta_lo, theta_hi, origin)
-        theta_to_s = np.vstack([theta_fine, u_fine])
+        theta_to_u = np.vstack([theta_fine, u_fine])
         # u-coordinate nodes: images of theta_wedge_grid through the map.
-        s_grid = np.interp(theta_wedge_grid, theta_fine, u_fine)
+        u_grid = np.interp(theta_wedge_grid, theta_fine, u_fine)
 
         # --- Allocate storage ---
         w_grid = np.exp(log_w_grid)
@@ -4035,7 +4098,7 @@ class LensAmplificationSurrogate:
             eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
             refused_points=refused_points,
             envelope_definition=definition,
-            theta_to_s=theta_to_s, s_grid=s_grid)
+            theta_to_u=theta_to_u, u_grid=u_grid)
         provenance = cls._build_wedge_provenance(
             gamma_range, r_range, theta_wedge_range, w_range, shape,
             envelope_real, envelope_imag)
@@ -4679,8 +4742,8 @@ def _chart_to_npz(chart, index: int) -> dict:
                   prefix + 'wedge_gamma_nodes': chart.wedge_map.gamma_nodes,
                   prefix + 'wedge_theta_nodes': chart.wedge_map.theta_nodes,
                   prefix + 'wedge_r_table': chart.wedge_map.r_table}
-        if chart.theta_to_s is not None:
-            arrays[prefix + 'theta_to_s'] = chart.theta_to_s
+        if chart.theta_to_u is not None:
+            arrays[prefix + 'theta_to_u'] = chart.theta_to_u
     else:
         # Far-field exterior branch (Build 1e-farfield WP2): the spatial axes
         # are the far-field-smooth arc length ``s`` and signed perpendicular
@@ -4769,10 +4832,12 @@ def _chart_from_npz(data, index: int):
             f'Wedge-interior chart {index}')
         definition = _validate_farfield_definition(
             meta.get('envelope_definition'), f'chart {index}')
-        # theta_to_s loading: optional; when absent the spline is on raw
-        # theta_wedge.
-        key = prefix + 'theta_to_s'
-        theta_to_s = data[key] if key in data else None
+        # theta_to_u is REQUIRED under the v3 schema.  A stale v2/v1 artifact
+        # already hard-refused above at `_validate_axis_schema` (its wedge map
+        # rode under the old ``theta_to_s`` key); a v3 artifact missing the
+        # cusp-adapted map key hard-refuses here (KeyError) rather than serving
+        # on a wrong angular coordinate.
+        theta_to_u = data[prefix + 'theta_to_u']
         wedge_map = _WedgeCausticMap(
             gamma_nodes=np.ascontiguousarray(
                 data[prefix + 'wedge_gamma_nodes'], dtype=float),
@@ -4789,7 +4854,7 @@ def _chart_from_npz(data, index: int):
             refused_points=data[prefix + 'refused'],
             wedge_map=wedge_map,
             envelope_definition=definition,
-            theta_to_s=theta_to_s)
+            theta_to_u=theta_to_u)
     definition = _validate_farfield_definition(
         meta.get('envelope_definition'), f'chart {index}')
     _validate_farfield_axis_schema(

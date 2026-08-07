@@ -1428,8 +1428,22 @@ _POS_W_ARRAY: np.ndarray = np.array([0.6, 1.0, 1.7])
 
 #: Frozen golden served envelope, as exact ``float.hex()`` (real, imag) pairs
 #: so the fixture round-trips to the last bit and the comparison is BIT-EXACT.
+#:
+#: These bits are NOT independent of ``geometry.py``: the chart is built from
+#: :func:`_positive_golden_arc_map`, which recomputes the arc-length table from
+#: the live caustic geometry (10012 floats -- too many to inline). Any change
+#: that perturbs ``r_caustic``'s ``brentq`` convergence at the ULP level moves
+#: them, so a diff here is NOT by itself evidence of a serve-path regression:
+#: check :meth:`test_served_value_tracks_unchanged_physical_oracle` first, and
+#: re-freeze only with the perturbation measured.
+#:
+#: Last re-frozen 2026-08-07 for the ``r_caustic`` positive-parity bracket
+#: reduction (720 -> 48, a 10.6x speedup). Measured effect: ONE ULP in the
+#: imaginary part of element 0 (max rel 8.2e-17); ``r_caustic`` itself moved by
+#: at most 7.6e-15 relative over 6080 (gamma, theta) samples with zero refusal
+#: changes, and the physical-oracle test never went red.
 _POS_GOLDEN_ENVELOPE_HEX: tuple[tuple[str, str], ...] = (
-    ('0x1.11863b3a8f20bp-2', '-0x1.a344ce6e63c10p-3'),
+    ('0x1.11863b3a8f20bp-2', '-0x1.a344ce6e63c11p-3'),
     ('0x1.edf027978afc6p-3', '-0x1.8e63e50ea2764p-3'),
     ('0x1.bc3cf4db0efabp-3', '-0x1.79cda085d4502p-3'),
 )
@@ -1437,7 +1451,7 @@ _POS_GOLDEN_ENVELOPE_HEX: tuple[tuple[str, str], ...] = (
 #: Frozen SHA-256 content digest of the saved gamma<1 surrogate artifact
 #: (sorted-key hash of the loaded arrays; see the section note above).
 _POS_GOLDEN_NPZ_DIGEST: str = (
-    'd5c81aaf3f860f1c53eacac61758f1c987d42eee066a5ba156ed14cdbd80e388')
+    '6f51168cc023970206abaf70fc73a4f2ff1a77d8a0ab2ae81f0772a6db4fc80e')
 
 
 def _positive_golden_arc_map() -> surrogate_module._FarFieldArcMap:
@@ -1545,9 +1559,19 @@ class PositiveParityGoldenTestCase(LobeTestCase):
     Rebuilds the frozen synthetic positive-parity `FarFieldChart`, serves the
     frozen source, and asserts (a) the served complex envelope equals the
     committed golden bits BIT-FOR-BIT and (b) the saved-artifact content digest
-    equals the committed digest.  Neither assertion recomputes an oracle nor
-    imports HEAD -- the golden constants are literals baked into this file, so
-    the test remains a valid regression forever.
+    equals the committed digest.  Neither assertion imports HEAD.
+
+    SCOPE, precisely: the golden CONSTANTS are literals, but the FIXTURE they
+    are compared against is not.  `_positive_golden_arc_map` recomputes the
+    arc-length table from live caustic geometry, so this pair pins the serve
+    path AND everything `geometry.py` feeds into it.  That makes it a strict
+    tripwire, not a frozen serve-path regression: a ULP-level change anywhere
+    upstream turns it red without any serve-path defect.  When it goes red,
+    `test_served_value_tracks_unchanged_physical_oracle` is the test that says
+    whether the VALUE is wrong; see the note on `_POS_GOLDEN_ENVELOPE_HEX` for
+    the re-freeze protocol.  Making this a true serve-path pin needs the arc
+    map committed as a fixture artifact -- tracked in
+    `.claude/spec/todo.d/lensing_golden_fixture_recomputes_geometry.md`.
     """
 
     def test_served_envelope_matches_committed_golden_bits(self) -> None:

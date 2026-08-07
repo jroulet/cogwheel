@@ -1514,6 +1514,28 @@ def _critical_branch_source(
     return source if np.all(np.isfinite(source)) else None
 
 
+#: Lens-plane angular bracket counts used to invert the exact critical-curve
+#: parametrisation in :func:`r_caustic`.  ``phi(theta_lens)`` is NON-MONOTONE
+#: (dphi/dtheta_lens = 0 at the cusps), so a source ray can cross the caustic
+#: several times; the brackets only have to be dense enough to ISOLATE every
+#: sign change of ``phi(theta_lens) - theta`` before ``brentq`` refines each
+#: one to float64.  The returned radius is therefore independent of the density
+#: above the sign-change-isolation floor -- both counts reproduce a 720-bracket
+#: reference to ~1e-14 relative across their regimes.  Fixed internally (was the
+#: caller-tunable ``n_sample``) so the deprecated kwarg no longer changes it.
+#:
+#: Positive parity is a single smooth 4-cusp astroid with only a handful of
+#: crossings, so a coarse grid suffices (measured byte-identical to the 720
+#: reference to 8e-15 over a fine near-cusp sweep, and ~10x faster).  The macro
+#: saddle is two disjoint 3-cusp deltoid lobes confined to narrow angular
+#: wedges ``|sin 2 theta'| <= lam / |gamma|``; coarse uniform bracketing misses
+#: lobe entry/exit there and changes both values and refusals, so it keeps the
+#: dense grid.  All production callers (the wedge chart, ``abs(gamma) < 1``)
+#: take the fast positive-parity path.
+_R_CAUSTIC_BRACKETS_ASTROID = 48
+_R_CAUSTIC_BRACKETS_SADDLE = 720
+
+
 def _caustic_ray_intersections(
         gamma: float, theta: float, kappa: float, n_sample: int,
 ) -> list[np.ndarray]:
@@ -1569,12 +1591,14 @@ def r_caustic(gamma: float, theta: float, *, kappa: float = 0.0,
               n_sample: int = 720) -> float:
     """Return the exact directional radius of the source-plane caustic.
 
-    The caustic is generated from the actual critical curve. ``n_sample``
-    supplies only brackets in lens-plane angle; every ray intersection is
-    refined to float64 precision before its source-plane radius is measured.
-    The outermost forward intersection is returned, so positive-parity
-    ``rho = |y| / r_caustic(gamma, theta)`` crosses the image-count boundary
-    at ``rho = 1``. Macro-saddle rays that miss both deltoid lobes refuse.
+    The caustic is generated from the actual critical curve. Lens-plane
+    angular brackets isolate every crossing of the query ray, and each ray
+    intersection is refined with ``scipy.optimize.brentq`` against the exact
+    ``critical_point`` parametrisation to float64 precision before its
+    source-plane radius is measured. The outermost forward intersection is
+    returned, so positive-parity ``rho = |y| / r_caustic(gamma, theta)``
+    crosses the image-count boundary at ``rho = 1``. Macro-saddle rays that
+    miss both deltoid lobes refuse.
 
     Parameters
     ----------
@@ -1585,8 +1609,12 @@ def r_caustic(gamma: float, theta: float, *, kappa: float = 0.0,
     kappa : float, optional
         External convergence (default 0.0).
     n_sample : int, optional
-        Number of lens-plane angular brackets. Bracketing density does not set
-        the returned radius accuracy; it must be at least 16.
+        Deprecated and IGNORED. Retained only so existing callers that pass
+        it do not break. The bracket density is fixed internally and chosen by
+        parity (:data:`_R_CAUSTIC_BRACKETS_ASTROID` /
+        :data:`_R_CAUSTIC_BRACKETS_SADDLE`); it never set the returned
+        accuracy, which comes from the ``brentq`` refinement. Passing any
+        value has no effect and no longer raises.
 
     Returns
     -------
@@ -1596,11 +1624,11 @@ def r_caustic(gamma: float, theta: float, *, kappa: float = 0.0,
     Raises
     ------
     LensDomainError
-        If the macro geometry is outside the supported domain or the ray does
-        not intersect a caustic.
-    ValueError
-        If ``n_sample`` is smaller than 16.
+        If the macro geometry is outside the supported domain
+        (``1 - kappa <= 0``, over-critical; or ``|gamma| == 1 - kappa``, the
+        parity boundary) or the ray does not intersect a caustic.
     """
+    del n_sample  # Deprecated, ignored; kept in the signature for callers.
     lam = 1.0 - float(kappa)
     if lam <= 0.0:
         raise LensDomainError(
@@ -1613,12 +1641,13 @@ def r_caustic(gamma: float, theta: float, *, kappa: float = 0.0,
             f'({kappa}, {gamma}): |gamma| == 1 - kappa = {lam} exactly '
             f'(det A = 0, the parity boundary); this boundary is a named '
             f'refusal.')
-    n_sample = int(n_sample)
-    if n_sample < 16:
-        raise ValueError(f'n_sample must be at least 16; got {n_sample}.')
 
+    # Positive parity (single smooth astroid) isolates its few crossings on a
+    # coarse grid; the macro saddle's disjoint deltoid lobes need the dense one.
+    n_brackets = (_R_CAUSTIC_BRACKETS_ASTROID if abs(gamma) < lam
+                  else _R_CAUSTIC_BRACKETS_SADDLE)
     intersections = _caustic_ray_intersections(
-        float(gamma), float(theta), float(kappa), n_sample)
+        float(gamma), float(theta), float(kappa), n_brackets)
     if not intersections:
         raise LensDomainError(
             f'No caustic intersection found on source-plane ray theta={theta} '

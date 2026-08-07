@@ -34,6 +34,46 @@ none is added.  Positions are NEVER asserted near a fold: a double root
 there carries only ``sqrt(eps) ~ 1.5e-8``, while delays keep full
 accuracy because images are stationary points of the Fermat potential.
 
+SHARD D --- ``r_caustic`` VS THE EXACT CRITICAL CURVE
+----------------------------------------------------
+``r_caustic`` was reworked from an angular SCAN of the caustic to a
+``brentq`` inversion of the exact critical-curve parametrisation.  The
+PRIMARY accuracy gate here is INDEPENDENT of the module: on the two
+principal axes the Chang--Refsdal astroid cusp radius has the pencil-
+and-paper closed form ``2*gamma / sqrt(1 +- gamma)`` (the ``+`` on the
+shear axis ``theta = 0``, the ``-`` on the transverse axis
+``theta = pi/2``), derived straight from the lens map
+``y = A x - x / |x|**2`` and owing nothing to
+``geometry.critical_point`` or ``geometry.r_caustic``.  The bar is the
+Professor's ``1e-10``; the measured worst case is ~1e-13, so the tight
+gate has three orders of headroom.  The historically interesting corner
+is ``gamma = 0.9, theta = pi/2``, where the retired scan returned
+``5.67376`` -- a 0.32% error -- while the exact value is
+``5.692099788303083``; the tight gate would have rejected the old scan
+by four orders of magnitude.
+
+The waist invariant ``min_theta r_caustic(gamma, theta) == gamma`` is a
+second independent analytic fact (the astroid's minimum source-plane
+reach equals the shear); the argmin is found with an INDEPENDENT
+``scipy.optimize.minimize_scalar`` (``xatol ~ 1e-6``).  The bar is again
+``1e-10`` and NOT ``1e-12`` on purpose: the quadratic flatness of the
+minimum suppresses the ~1e-6 argmin error to ~1e-14, but the returned
+radius is itself only root-find accurate, so pinning tighter than the
+root-find floor would be gating on luck.
+
+A separate, clearly-labelled CONSISTENCY class checks ``r_caustic``
+against ``|critical_point(gamma, axis).source|``.  That is NOT an
+independent oracle -- both descend from the same caustic parametrisation
+-- so it is asserted only as a same-module cross-check (a ``brentq``
+ray-inversion against a direct closed-form evaluation), never as the
+accuracy gate.
+
+`RCausticBenchmarkTestCase` times 200 ``r_caustic`` calls against the
+retired 720-scan's ``1.85 s`` baseline (arithmetic: ``1.85 / 10 =
+0.185 s`` is the >=10x target; the hard gate is the robust >=5x
+``0.37 s`` and the measured ~``11x`` ratio is written to a report, never
+a bare pass).
+
 `GeometryTestCase.tearDown` fails a test that made zero comparisons, and
 `SelfFalsificationTestCase` proves the gates above can actually go red.
 """
@@ -42,9 +82,11 @@ from __future__ import annotations
 import csv
 import itertools
 import pathlib
+import time
 from unittest import TestCase, main
 
 import numpy as np
+from scipy.optimize import minimize_scalar
 
 from cogwheel.lensing.chang_refsdal import geometry
 
@@ -74,6 +116,59 @@ ANALYTIC_TOL = 1e-13
 
 #: Shear values used by the analytic, census and astroid sweeps.
 ANALYTIC_GAMMAS = (0.05, 0.1, 0.2, 0.3, 0.4)
+
+# -- SHARD D: r_caustic vs the exact critical curve ---------------------
+
+#: Positive-parity shears spanning weak (0.2) to strongly anisotropic
+#: (0.9) astroids, per the Architect's SHARD D setup.
+R_CAUSTIC_AXIS_GAMMAS = (0.2, 0.3, 0.495, 0.7, 0.9)
+
+#: Professor accuracy bar for the axis closed form and the waist
+#: invariant.  Measured worst residual is ~1e-13 (axis) / ~1e-14
+#: (waist); the bar is deliberately looser than the root-find floor.
+R_CAUSTIC_TOL = 1e-10
+
+#: ``scipy.optimize.minimize_scalar`` angular tolerance for the
+#: INDEPENDENT waist search; the quadratic minimum suppresses its
+#: propagated error well below :data:`R_CAUSTIC_TOL`.
+WAIST_ARGMIN_XATOL = 1e-6
+
+#: Exact transverse-axis caustic radius at gamma=0.9, ``2*0.9/sqrt(0.1)``.
+#: The retired scan returned 5.67376 here (a 0.32% error); this literal
+#: is the closed form to full float64 precision.
+GAMMA_09_PI2_CAUSTIC = 5.692099788303083
+
+#: The value the OLD angular scan produced at gamma=0.9, theta=pi/2 --
+#: used only to prove the tight gate rejects it by orders of magnitude.
+GAMMA_09_PI2_OLD_SCAN = 5.67376
+
+#: A macro-saddle shear (``|gamma| > 1 - kappa``): the caustic is two
+#: disjoint 3-cusp deltoid lobes, so some source rays cross it multiple
+#: times and others miss it entirely.
+SADDLE_GAMMA = 1.5
+
+# -- SHARD D: r_caustic brentq-vs-scan benchmark ------------------------
+
+#: Benchmark grid: 20 positive-parity shears x 10 interior angles = 200
+#: ``r_caustic`` calls, matching the Architect's SHARD D setup.  Every
+#: (gamma, theta) is a single-crossing astroid ray, so all 200 succeed.
+BENCHMARK_N_GAMMA = 20
+BENCHMARK_N_THETA = 10
+
+#: Wall-clock baseline of the RETIRED 720-point angular scan for the same
+#: 200 calls, per the Architect's SHARD D setup (seconds).
+BENCHMARK_BASELINE_S = 1.85
+
+#: 10x-faster target the brentq inversion is expected to beat
+#: (``1.85 / 10``, seconds).  Recorded and reported, not hard-gated: on a
+#: shared build tier the measured ~0.17s sits too close to 0.185s to
+#: assert reliably.
+BENCHMARK_TARGET_S = BENCHMARK_BASELINE_S / 10.0  # 0.185 s
+
+#: Relaxed HARD gate (>=5x faster than the scan, ``1.85 / 5``), used for
+#: the pass/fail assertion so a noisy shared tier cannot flake the suite
+#: red while the >=10x direction is still measured and reported.
+BENCHMARK_HARD_GATE_S = BENCHMARK_BASELINE_S / 5.0  # 0.37 s
 
 
 def _load_rows() -> list[dict]:
@@ -634,6 +729,431 @@ class SelfFalsificationTestCase(GeometryTestCase):
             abs(float(shear_image @ shear_image) - wrong), 1e-2,
             'the swapped convention agrees with the shear-axis value; '
             'the analytic gate would not discriminate a sign flip')
+
+
+class RCausticAxisClosedFormTestCase(GeometryTestCase):
+    """
+    SHARD D: ``r_caustic`` on the principal axes vs a pencil-and-paper
+    closed form.
+
+    On the shear axis (``theta = 0``) and the transverse axis
+    (``theta = pi/2``) the astroid cusp radius is
+    ``2*gamma / sqrt(1 +- gamma)``, obtained by hand from the lens map
+    ``y = A x - x/|x|**2`` with ``A = diag(1 - gamma, 1 + gamma)``.  This
+    oracle is fully INDEPENDENT of the module (it never calls
+    ``critical_point`` or ``r_caustic``), so it is the accuracy gate.
+    """
+
+    @staticmethod
+    def _axis_closed_form(gamma: float, theta: float) -> float:
+        """Exact cusp radius on a principal axis; theta in {0, pi/2}."""
+        if theta == 0.0:
+            return 2.0 * gamma / np.sqrt(1.0 + gamma)     # shear axis
+        return 2.0 * gamma / np.sqrt(1.0 - gamma)         # transverse
+
+    def test_axis_radius_matches_independent_closed_form(self) -> None:
+        """Relative agreement <= 1e-10 at every gamma on both axes."""
+        rel_errors: list[tuple[float, float, float]] = []
+        for gamma in R_CAUSTIC_AXIS_GAMMAS:
+            for theta in (0.0, np.pi / 2.0):
+                radius = geometry.r_caustic(gamma, theta)
+                oracle = self._axis_closed_form(gamma, theta)
+                rel = abs(radius - oracle) / abs(oracle)
+                self.assertLessEqual(
+                    rel, R_CAUSTIC_TOL,
+                    f'r_caustic({gamma}, {theta:.4f}) = {radius:.15f} '
+                    f'disagrees with closed form {oracle:.15f}; '
+                    f'relative error {rel:.3e} > {R_CAUSTIC_TOL}')
+                rel_errors.append((gamma, theta, rel))
+                self.n_checks += 1
+        self._plot(rel_errors)
+
+    def test_gamma_090_transverse_is_5p6921_not_the_old_scan(self) \
+            -> None:
+        """The historically wrong corner: gamma=0.9, theta=pi/2 now
+        equals ``5.692099788303083`` (relative error <= 1e-10), NOT the
+        retired scan's ``5.67376`` (a 0.32% error the tight gate would
+        have caught by four orders of magnitude)."""
+        radius = geometry.r_caustic(0.9, np.pi / 2.0)
+        rel = abs(radius - GAMMA_09_PI2_CAUSTIC) / GAMMA_09_PI2_CAUSTIC
+        self.assertLessEqual(
+            rel, R_CAUSTIC_TOL,
+            f'r_caustic(0.9, pi/2) = {radius:.15f} != exact '
+            f'{GAMMA_09_PI2_CAUSTIC:.15f} (relative error {rel:.3e})')
+        # And it is nowhere near the retired scan value.
+        self.assertGreater(
+            abs(radius - GAMMA_09_PI2_OLD_SCAN) / GAMMA_09_PI2_CAUSTIC,
+            1e-3,
+            'r_caustic reproduced the retired scan value 5.67376; the '
+            'brentq inversion did not fix the 0.32% cusp error')
+        self.n_checks += 1
+
+    def _plot(self, rel_errors: list[tuple[float, float, float]]) -> None:
+        if not _HAVE_MPL or not rel_errors:
+            return
+        fig, ax = plt.subplots(figsize=(6, 4))
+        for theta, marker, label in ((0.0, 'o', 'theta=0'),
+                                     (np.pi / 2.0, 's', 'theta=pi/2')):
+            xs = [g for g, t, _ in rel_errors if t == theta]
+            ys = [max(r, 1e-18) for g, t, r in rel_errors if t == theta]
+            ax.semilogy(xs, ys, marker + '-', label=label)
+        ax.axhline(R_CAUSTIC_TOL, color='k', ls='--', label='1e-10 bar')
+        ax.set_xlabel('gamma')
+        ax.set_ylabel('relative error vs closed form')
+        ax.legend()
+        ax.set_title('r_caustic axis accuracy')
+        _savefig(fig, 'geometry_r_caustic_axis_accuracy.png')
+
+
+class RCausticCriticalPointConsistencyTestCase(GeometryTestCase):
+    """
+    SHARD D (same-module cross-check, NOT an independent oracle).
+
+    ``r_caustic`` finds the caustic radius by ``brentq`` inversion of the
+    critical-curve ray crossing; ``critical_point(gamma, theta).source``
+    evaluates the SAME parametrisation directly at a known lens-plane
+    axis.  Because both descend from one caustic formula this is asserted
+    only as an algorithmic consistency check (root-find vs closed-form
+    evaluation), never as the accuracy gate -- that is the closed-form
+    class above.
+    """
+
+    def test_axis_radius_matches_critical_point_source(self) -> None:
+        for gamma in R_CAUSTIC_AXIS_GAMMAS:
+            for theta in (0.0, np.pi / 2.0):
+                radius = geometry.r_caustic(gamma, theta)
+                source_radius = float(np.linalg.norm(
+                    geometry.critical_point(gamma, theta).source))
+                rel = abs(radius - source_radius) / abs(source_radius)
+                self.assertLessEqual(
+                    rel, R_CAUSTIC_TOL,
+                    f'r_caustic and |critical_point.source| disagree at '
+                    f'gamma={gamma}, theta={theta:.4f}: {radius:.15f} vs '
+                    f'{source_radius:.15f} (relative {rel:.3e})')
+                self.n_checks += 1
+
+
+class RCausticWaistInvariantTestCase(GeometryTestCase):
+    """
+    SHARD D: the angular minimum of the caustic radius equals the shear.
+
+    ``min_theta r_caustic(gamma, theta) == gamma`` is an independent
+    analytic property of the Chang--Refsdal astroid.  The argmin is
+    located by an INDEPENDENT ``scipy.optimize.minimize_scalar`` so the
+    module never supplies its own extremum.
+    """
+
+    def test_waist_radius_equals_shear(self) -> None:
+        eps = 1e-6
+        sweep: list[tuple[float, float, np.ndarray, np.ndarray]] = []
+        for gamma in R_CAUSTIC_AXIS_GAMMAS:
+            result = minimize_scalar(
+                lambda theta: geometry.r_caustic(gamma, theta),
+                bounds=(eps, np.pi / 2.0 - eps), method='bounded',
+                options={'xatol': WAIST_ARGMIN_XATOL})
+            theta_waist = float(result.x)
+            radius_waist = geometry.r_caustic(gamma, theta_waist)
+            self.assertLessEqual(
+                abs(radius_waist - gamma), R_CAUSTIC_TOL,
+                f'waist radius at gamma={gamma} is {radius_waist:.15f}, '
+                f'not gamma; |r - gamma| = '
+                f'{abs(radius_waist - gamma):.3e} > {R_CAUSTIC_TOL}')
+            # Sanity: the waist is interior, not on an axis.
+            self.assertGreater(theta_waist, 0.1)
+            self.assertLess(theta_waist, np.pi / 2.0 - 0.1)
+            self.n_checks += 1
+            if gamma == 0.7:
+                thetas = np.linspace(eps, np.pi / 2.0 - eps, 121)
+                radii = np.array([geometry.r_caustic(gamma, t)
+                                  for t in thetas])
+                sweep.append((gamma, theta_waist, thetas, radii))
+        self._plot(sweep)
+
+    def _plot(self, sweep) -> None:
+        if not _HAVE_MPL or not sweep:
+            return
+        gamma, theta_waist, thetas, radii = sweep[0]
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.plot(thetas, radii, '-')
+        ax.axhline(gamma, color='C1', ls='--', label='gamma')
+        ax.axvline(theta_waist, color='C2', ls=':', label='waist')
+        ax.set_xlabel('source-plane theta')
+        ax.set_ylabel('r_caustic')
+        ax.set_title(f'waist invariant, gamma={gamma}')
+        ax.legend()
+        _savefig(fig, 'geometry_r_caustic_waist.png')
+
+
+class RCausticOutermostAndRefusalsTestCase(GeometryTestCase):
+    """
+    SHARD D: outermost-crossing selection and the named refusals.
+
+    (a) On a macro-saddle ray that pierces a deltoid lobe twice,
+    ``r_caustic`` must return the OUTERMOST forward crossing, strictly
+    beyond the inner fold radius.  (b) The parity boundary
+    ``|gamma| == 1 - kappa`` and (over-critical ``1 - kappa <= 0``)
+    refuse by name.  (c) A saddle ray missing both lobes refuses -- it
+    never invents a spurious inner radius.  (d) The isotropic ``gamma =
+    0`` limit (a degenerate point caustic) is a clean ``LensDomainError``
+    from ``r_caustic`` itself, NOT the ``ZeroDivisionError`` that the
+    downstream ``ppgo_map.caustic_rho`` produces at ``gamma = 0``.
+    """
+
+    def test_returns_outermost_forward_intersection(self) -> None:
+        for theta in (0.0, 0.15, -0.15):
+            intersections = geometry._caustic_ray_intersections(
+                SADDLE_GAMMA, theta, 0.0,
+                geometry._R_CAUSTIC_BRACKETS_SADDLE)
+            radii = sorted(float(np.linalg.norm(s))
+                           for s in intersections)
+            distinct = sorted({round(r, 6) for r in radii})
+            self.assertGreaterEqual(
+                len(distinct), 2,
+                f'saddle ray theta={theta} did not cross the caustic '
+                f'more than once (radii {radii}); cannot test '
+                f'"outermost"')
+            radius = geometry.r_caustic(SADDLE_GAMMA, theta)
+            self.assertAlmostEqual(
+                radius, max(radii), places=9,
+                msg=f'r_caustic returned {radius:.12f}, not the '
+                    f'outermost crossing {max(radii):.12f}')
+            self.assertGreater(
+                max(radii) - min(radii), 0.05,
+                'inner and outer fold radii coincide; the outermost '
+                'selection is not exercised on this ray')
+            self.n_checks += 1
+
+    def test_parity_boundary_refuses_by_name(self) -> None:
+        # (gamma, kappa) with |gamma| == 1 - kappa bit-for-bit.
+        for gamma, kappa in ((1.0, 0.0), (0.5, 0.5), (0.25, 0.75)):
+            with self.subTest(gamma=gamma, kappa=kappa):
+                with self.assertRaises(geometry.LensDomainError) as ctx:
+                    geometry.r_caustic(gamma, 0.3, kappa=kappa)
+                self.assertIn('parity boundary', str(ctx.exception))
+                self.n_checks += 1
+
+    def test_over_critical_refuses_by_name(self) -> None:
+        with self.assertRaises(geometry.LensDomainError) as ctx:
+            geometry.r_caustic(0.5, 0.3, kappa=1.2)
+        self.assertIn('over-critical', str(ctx.exception))
+        self.n_checks += 1
+
+    def test_saddle_ray_missing_both_lobes_refuses(self) -> None:
+        for theta in (np.pi / 2.0, np.pi / 4.0, 1.0):
+            with self.subTest(theta=theta):
+                # Independently confirm the ray truly misses the lobes.
+                intersections = geometry._caustic_ray_intersections(
+                    SADDLE_GAMMA, theta, 0.0,
+                    geometry._R_CAUSTIC_BRACKETS_SADDLE)
+                self.assertEqual(
+                    intersections, [],
+                    f'setup error: theta={theta} does hit a lobe')
+                with self.assertRaises(geometry.LensDomainError):
+                    geometry.r_caustic(SADDLE_GAMMA, theta)
+                self.n_checks += 1
+
+    def test_isotropic_gamma_zero_refuses_cleanly(self) -> None:
+        for theta in (0.0, 0.3, 1.0):
+            with self.subTest(theta=theta):
+                # Must be the named LensDomainError, NOT a raw
+                # ZeroDivisionError leaking from the degenerate caustic.
+                with self.assertRaises(geometry.LensDomainError):
+                    geometry.r_caustic(0.0, theta)
+                self.n_checks += 1
+
+
+class RCausticSelfFalsificationTestCase(GeometryTestCase):
+    """
+    Prove the SHARD D ``r_caustic`` gates can actually go red.
+
+    Each check feeds the gate a deliberately wrong value or reference and
+    shows it is rejected by a margin that dwarfs ``R_CAUSTIC_TOL``.
+    """
+
+    _expect_checks = False
+
+    def test_swapped_axis_closed_form_is_rejected(self) -> None:
+        """Using the shear-axis form on the transverse axis (a sign flip
+        in ``1 +- gamma``) misses by O(gamma) at gamma=0.9, so the axis
+        gate discriminates the convention."""
+        radius = geometry.r_caustic(0.9, np.pi / 2.0)
+        swapped = 2.0 * 0.9 / np.sqrt(1.0 + 0.9)   # wrong: 1 + gamma
+        self.assertGreater(
+            abs(radius - swapped) / radius, 1e-2,
+            'the swapped 1 +- gamma closed form agrees with the '
+            'transverse radius; the axis gate would not catch a flip')
+
+    def test_retired_scan_value_would_fail_the_gate(self) -> None:
+        """The 0.32% old-scan error at gamma=0.9,pi/2 is >> the 1e-10
+        bar, so the tight gate genuinely rejects the retired result."""
+        rel = (abs(GAMMA_09_PI2_CAUSTIC - GAMMA_09_PI2_OLD_SCAN)
+               / GAMMA_09_PI2_CAUSTIC)
+        self.assertGreater(
+            rel, R_CAUSTIC_TOL,
+            'the retired scan value clears the 1e-10 gate; the gate '
+            'could not have caught the historical cusp error')
+
+    def test_off_waist_evaluation_breaks_the_waist_invariant(self) \
+            -> None:
+        """Evaluating away from the waist (on the shear axis) yields a
+        radius far from gamma, so the waist invariant is not vacuously
+        true for any theta."""
+        off_waist = geometry.r_caustic(0.9, 0.0)
+        self.assertGreater(
+            abs(off_waist - 0.9), 1e-2,
+            'r_caustic at theta=0 already equals gamma; the waist '
+            'invariant would then assert nothing')
+
+    def test_inner_and_outer_crossings_are_distinct(self) -> None:
+        """The saddle ray used for the outermost test has genuinely
+        distinct inner/outer radii, so "return the outermost" is a real
+        choice rather than a tautology."""
+        intersections = geometry._caustic_ray_intersections(
+            SADDLE_GAMMA, 0.15, 0.0,
+            geometry._R_CAUSTIC_BRACKETS_SADDLE)
+        radii = [float(np.linalg.norm(s)) for s in intersections]
+        self.assertGreater(
+            max(radii) - min(radii), 0.05,
+            'inner and outer crossings coincide; outermost selection '
+            'is untestable on this ray')
+
+
+class RCausticBenchmarkTestCase(GeometryTestCase):
+    """
+    SHARD D: ``r_caustic`` brentq inversion is far faster than the
+    retired 720-point angular scan.
+
+    SETUP / ARITHMETIC
+    ------------------
+    The Architect's setup times 200 ``r_caustic`` calls
+    (``20`` shears x ``10`` interior angles) and compares against the
+    ``1.85 s`` wall-clock baseline of the old 720-point scan for the same
+    200 calls.  The expected speed-up is ``>= 10x``, i.e. a target of
+    ``1.85 / 10 = 0.185 s`` (~``0.93 ms`` per call).  The measured brentq
+    time on this machine is ~``0.17 s`` (~``0.84 ms`` per call), an
+    ~``11x`` speed-up -- above the 10x direction.
+
+    GATE CHOICE
+    -----------
+    ``0.17 s`` sits within noise of the ``0.185 s`` 10x target, so on a
+    shared/contended build tier a hard 10x gate would flake red.  Per the
+    Architect's relaxation the pass/fail assertion is the ``>= 5x`` gate
+    (``1.85 / 5 = 0.37 s``); the measured elapsed and the true ``>= 10x``
+    ratio are always computed and written to a diagnostic report, never a
+    bare pass.  A short scan self-falsification below proves the gate has
+    teeth (the ``1.85 s`` baseline itself would fail it).
+    """
+
+    @staticmethod
+    def _benchmark_grid() -> tuple[np.ndarray, np.ndarray]:
+        """Return the (gammas, thetas) grid whose product is 200 rays.
+
+        Every shear is positive-parity (astroid) and every angle is
+        strictly interior, so all 200 calls are single-crossing and none
+        refuses.
+        """
+        gammas = np.linspace(0.1, 0.9, BENCHMARK_N_GAMMA)
+        thetas = np.linspace(0.01, np.pi / 2.0 - 0.01, BENCHMARK_N_THETA)
+        return gammas, thetas
+
+    def _time_one_pass(self, gammas: np.ndarray,
+                       thetas: np.ndarray) -> tuple[float, int]:
+        """Time a single sweep of all 200 calls; return (elapsed, count).
+
+        Every returned radius is required to be finite and positive, so a
+        silently-refusing or degenerate configuration cannot make the
+        benchmark look fast by doing no work.
+        """
+        start = time.perf_counter()
+        count = 0
+        for gamma in gammas:
+            for theta in thetas:
+                radius = geometry.r_caustic(float(gamma), float(theta))
+                self.assertTrue(
+                    np.isfinite(radius) and radius > 0.0,
+                    f'r_caustic({gamma}, {theta}) = {radius} is not a '
+                    f'finite positive radius; the benchmark grid must do '
+                    f'real work')
+                count += 1
+        return time.perf_counter() - start, count
+
+    def test_200_calls_beat_the_720_scan_baseline(self) -> None:
+        """200 brentq ``r_caustic`` calls finish in <= 0.37 s (>= 5x the
+        1.85 s scan baseline) and the measured >= 10x direction is
+        recorded to a diagnostic report."""
+        gammas, thetas = self._benchmark_grid()
+        expected_calls = BENCHMARK_N_GAMMA * BENCHMARK_N_THETA
+        self.assertEqual(
+            expected_calls, 200,
+            'the SHARD D benchmark must time exactly 200 calls')
+
+        # Warm up once so scipy/first-call overhead is not timed, then
+        # take the best of three passes to suppress GC/scheduler noise.
+        geometry.r_caustic(0.5, 0.3)
+        elapsed_passes: list[float] = []
+        for _ in range(3):
+            elapsed, count = self._time_one_pass(gammas, thetas)
+            self.assertEqual(
+                count, expected_calls,
+                f'timed {count} calls, expected {expected_calls}')
+            elapsed_passes.append(elapsed)
+            self.n_checks += 1
+
+        best = min(elapsed_passes)
+        median = float(np.median(elapsed_passes))
+        ratio = BENCHMARK_BASELINE_S / best
+        per_call_ms = best / expected_calls * 1e3
+        self._report(best, median, ratio, per_call_ms, elapsed_passes)
+
+        # HARD gate: >= 5x faster than the retired scan (robust on a
+        # shared tier).  The measured >= 10x direction is reported, not
+        # gated, so contention cannot flake the suite red.
+        self.assertLessEqual(
+            best, BENCHMARK_HARD_GATE_S,
+            f'200 r_caustic calls took {best:.4f}s > '
+            f'{BENCHMARK_HARD_GATE_S:.4f}s (only {ratio:.1f}x vs the '
+            f'{BENCHMARK_BASELINE_S}s 720-scan baseline); the brentq '
+            f'inversion is not >= 5x faster than the retired scan')
+
+    def test_hard_gate_has_teeth_against_the_scan_baseline(self) -> None:
+        """Self-falsification: the retired 1.85 s scan baseline (and even
+        the 10x target) would themselves fail the >= 5x hard gate, so the
+        gate is a genuine speed test, not a tautology."""
+        self.assertGreater(
+            BENCHMARK_BASELINE_S, BENCHMARK_HARD_GATE_S,
+            'the 720-scan baseline already clears the hard gate; the '
+            'benchmark asserts nothing')
+        # The 10x target is stricter than the 5x hard gate, which is
+        # stricter than the baseline -- the ordering the report relies on.
+        self.assertLess(BENCHMARK_TARGET_S, BENCHMARK_HARD_GATE_S)
+        self.assertLess(BENCHMARK_HARD_GATE_S, BENCHMARK_BASELINE_S)
+        self.n_checks += 1
+
+    def _report(self, best: float, median: float, ratio: float,
+                per_call_ms: float, passes: list[float]) -> None:
+        """Write the measured timing + speed-up to a diagnostic file."""
+        lines = [
+            'SHARD D r_caustic brentq-vs-720-scan benchmark',
+            f'calls           : {BENCHMARK_N_GAMMA} gammas x '
+            f'{BENCHMARK_N_THETA} thetas = '
+            f'{BENCHMARK_N_GAMMA * BENCHMARK_N_THETA}',
+            f'scan baseline   : {BENCHMARK_BASELINE_S:.4f} s',
+            f'10x target      : {BENCHMARK_TARGET_S:.4f} s (gate: report)',
+            f'5x hard gate    : {BENCHMARK_HARD_GATE_S:.4f} s (gate: '
+            f'assert)',
+            f'passes (s)      : ' + ', '.join(f'{p:.4f}' for p in passes),
+            f'best elapsed    : {best:.4f} s',
+            f'median elapsed  : {median:.4f} s',
+            f'per-call        : {per_call_ms:.4f} ms',
+            f'measured ratio  : {ratio:.2f}x vs the 720-scan baseline',
+            f'>= 10x met      : {best <= BENCHMARK_TARGET_S}',
+        ]
+        try:
+            _OUTPUT_DIR.mkdir(exist_ok=True)
+            (_OUTPUT_DIR / 'geometry_r_caustic_benchmark.txt').write_text(
+                '\n'.join(lines) + '\n')
+        except Exception:  # pragma: no cover - environment dependent
+            pass
 
 
 if __name__ == '__main__':

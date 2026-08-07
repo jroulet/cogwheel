@@ -301,6 +301,18 @@ class NpzRoundTripTestCase(_WedgeTestCase):
         cls.refused_pts = np.array([[0.3, 0.2, 0.5],
                                     [0.6, 0.4, 1.0]])
 
+        # Cusp-adapted theta_wedge -> u map (WP3 v3 schema): the wedge NPZ
+        # reader now REQUIRES a theta_to_u map (a v2/HEAD chart persisted a
+        # theta_to_s map; a v3 chart persisted on the identity/None path can
+        # no longer round-trip -- the reader hard-refuses on the missing key).
+        # Build the real production map so this round-trip exercises the full
+        # v3 contract, including the u-map surviving the save/load.
+        theta_fine, u_fine = _wedge_cusp_axis_map(
+            float(cls.theta_wedge_grid[0]), float(cls.theta_wedge_grid[-1]),
+            'low')
+        cls.theta_to_u = np.vstack([theta_fine, u_fine])
+        cls.u_grid = np.interp(cls.theta_wedge_grid, theta_fine, u_fine)
+
         cls.chart = InteriorWedgeChart.from_wedge_values(
             gamma_grid=cls.gamma_grid,
             r_grid=cls.r_grid,
@@ -313,7 +325,9 @@ class NpzRoundTripTestCase(_WedgeTestCase):
             wedge_map=cls.wedge_map,
             eta_overlap_min=0.03,
             refused_points=cls.refused_pts,
-            envelope_definition='interior_sacr_c_envelope')
+            envelope_definition='interior_sacr_c_envelope',
+            theta_to_u=cls.theta_to_u,
+            u_grid=cls.u_grid)
 
     def _round_trip_chart(self) -> InteriorWedgeChart:
         """Save chart to NPZ and reload; return the reloaded chart."""
@@ -1415,7 +1429,7 @@ class DispatchSelfFalsificationTestCase(unittest.TestCase):
             param_spacing=chart.param_spacing,
             wedge_map=chart.wedge_map,
             envelope_definition=chart.envelope_definition,
-            theta_to_s=chart.theta_to_s)
+            theta_to_u=chart.theta_to_u)
         bad_result = _evaluate_chart(
             corrupted, gamma, eta=0.5, theta=0.7,
             log_w_query=DISPATCH_LOG_W_GRID,
@@ -2590,6 +2604,13 @@ T3_MIN_THETA_MIDPOINT_DEVIATION: float = 0.02
 T3_R_CENTER: float = 0.4
 T3_HALF_R: float = 0.1
 
+#: The pre-refactor (legacy) keys the unified `_subdivide_wedge_tile` wrapper
+#: MUST keep returning after WP1 folded both subdividers into `_subdivide_tile`.
+#: ``max_achieved_depth`` is asserted separately as the additive key.
+T3_LEGACY_SUMMARY_KEYS: tuple[str, ...] = (
+    'parent_tag', 'region', 'axis_origin', 'theta_split', 'child_half_r',
+    'packed', 'children')
+
 
 def _u_midpoint_theta(theta_lo: float, theta_hi: float, origin: str) -> float:
     """Closed-form angle at the cusp-adapted ``u``-midpoint (independent oracle).
@@ -2738,6 +2759,22 @@ class WedgeSubdivisionUMidpointTestCase(_WedgeTestCase):
             'the shipping subdivider must NOT split at the theta midpoint.')
         # Both angular children stay on the parent's near-cusp side.
         self.assertEqual(summary['axis_origin'], T3_ORIGIN)
+        # WP1 unified subdivider: the returned summary MUST keep every
+        # pre-refactor legacy key AND add the additive 'max_achieved_depth'
+        # (the wrapper is now a thin shell over the shared `_subdivide_tile`).
+        for key in T3_LEGACY_SUMMARY_KEYS:
+            self.assertIn(
+                key, summary,
+                f"the unified wrapper dropped legacy summary key {key!r}.")
+        self.assertIn(
+            'max_achieved_depth', summary,
+            "the unified wrapper must add the additive 'max_achieved_depth' "
+            'key.')
+        # With un-gated children (stubbed _gate_chart) every child packs at
+        # depth 1, so no recursion occurs: max_achieved_depth == 1.
+        self.assertEqual(summary['max_achieved_depth'], 1)
+        self.assertEqual(summary['packed'], 4)
+        self.assertEqual(len(summary['children']), 4)
 
 
 class WedgeSubdivisionSelfFalsificationTestCase(unittest.TestCase):
@@ -2981,7 +3018,7 @@ class WedgeSubdivisionFeedbackLoopTestCase(_WedgeTestCase):
 
 
 # ===========================================================================
-# Test T5 (SHARD A): node-exact on-grid + off-node vs engine + NPZ v2
+# Test T5 (SHARD A): node-exact on-grid + off-node vs engine + NPZ v3
 # round-trip of the cusp-adapted u-map.
 #
 # The cusp-adapted wedge chart is an INTERPOLATING tensor-product spline
@@ -2989,16 +3026,16 @@ class WedgeSubdivisionFeedbackLoopTestCase(_WedgeTestCase):
 # and one serialization claim:
 #   (a) ON GRID: served at a training node the spline reproduces the
 #       (deterministic) engine value to ~machine precision -- the theta_wedge
-#       -> u remap (`theta_to_s`) is a per-node `np.interp` that lands EXACTLY
-#       on the stored s_grid, so the spline is evaluated at its own fit knot.
+#       -> u remap (`theta_to_u`) is a per-node `np.interp` that lands EXACTLY
+#       on the stored u_grid, so the spline is evaluated at its own fit knot.
 #       A large on-grid residual would betray a map/serve coordinate mismatch.
 #       Measured worst node residual ~5.7e-16 (~6e-16, the spec figure).
 #   (b) OFF NODE: at held-out interior witnesses the served envelope matches a
 #       FRESH single-point engine call within the interior eps bar (5e-2).
 #       Measured worst ~1.2e-2.
-#   (c) NPZ: the chart -- including the new ``theta_to_s`` (2, N) u-map and the
+#   (c) NPZ: the chart -- including the new ``theta_to_u`` (2, N) u-map and the
 #       ``axis_schema`` meta tag -- round-trips bitwise (max|diff| = 0), and
-#       the persisted meta reports schema 'wedge_caustic_relative_v2'.
+#       the persisted meta reports schema 'wedge_caustic_relative_v3'.
 #
 # The engine-trained chart is the shared module-scope surrogate (built once,
 # ~12s); this suite adds only single-point engine calls and an in-memory NPZ
@@ -3013,7 +3050,7 @@ T5_NODE_EXACT_MAX: float = 1e-14
 T5_OFF_EPS_MAX: float = 5e-2
 
 #: The schema tag the persisted wedge chart's meta must report.
-T5_EXPECTED_SCHEMA: str = 'wedge_caustic_relative_v2'
+T5_EXPECTED_SCHEMA: str = 'wedge_caustic_relative_v3'
 
 #: Interior training-node indices probed on grid (avoid the outermost edge
 #: nodes where the caustic-fixed round-trip is least conditioned).
@@ -3028,10 +3065,10 @@ T5_OFF_GAMMA: float = 0.37
 
 
 class WedgeNodeExactAndNpzV2TestCase(_WedgeTestCase):
-    """On-grid machine precision, off-node engine accuracy, v2 NPZ round-trip.
+    """On-grid machine precision, off-node engine accuracy, v3 NPZ round-trip.
 
     Reuses the shared engine-trained wedge surrogate (chart carries a real
-    cusp-adapted ``theta_to_s`` u-map, unlike the synthetic-envelope chart in
+    cusp-adapted ``theta_to_u`` u-map, unlike the synthetic-envelope chart in
     `NpzRoundTripTestCase`).
     """
 
@@ -3058,16 +3095,16 @@ class WedgeNodeExactAndNpzV2TestCase(_WedgeTestCase):
     def test_chart_carries_u_map(self):
         """The engine-trained chart stores a (2, N) cusp-adapted u-map.
 
-        Guards the premise of the on-grid/NPZ claims: without ``theta_to_s``
-        the serve path would contract on raw theta_wedge and the v2 schema
+        Guards the premise of the on-grid/NPZ claims: without ``theta_to_u``
+        the serve path would contract on raw theta_wedge and the v3 schema
         would be meaningless.
         """
         self._tick()
         self.assertIsNotNone(
-            self.chart.theta_to_s,
-            'engine-trained wedge chart must carry a theta_to_s u-map.')
-        self.assertEqual(self.chart.theta_to_s.shape[0], 2)
-        self.assertGreater(self.chart.theta_to_s.shape[1], 1)
+            self.chart.theta_to_u,
+            'engine-trained wedge chart must carry a theta_to_u u-map.')
+        self.assertEqual(self.chart.theta_to_u.shape[0], 2)
+        self.assertGreater(self.chart.theta_to_u.shape[1], 1)
 
     def test_on_grid_nodes_match_engine_to_machine_precision(self):
         """Served-at-node envelope reproduces the engine to ~machine precision.
@@ -3128,31 +3165,31 @@ class WedgeNodeExactAndNpzV2TestCase(_WedgeTestCase):
             'on-grid residuals must be >=1e6x smaller than off-node '
             'residuals; otherwise node-exactness is not demonstrated.')
 
-    def test_meta_reports_v2_schema(self):
-        """The persisted chart meta reports the v2 axis schema."""
+    def test_meta_reports_v3_schema(self):
+        """The persisted chart meta reports the v3 axis schema."""
         arrays = _chart_to_npz(self.chart, index=0)
         meta = json.loads(str(arrays['chart0_meta']))
         self._tick()
         self.assertEqual(meta.get('kind'), 'wedge')
         self.assertEqual(
             meta.get('axis_schema'), T5_EXPECTED_SCHEMA,
-            'persisted wedge chart must tag the v2 cusp-adapted axis schema.')
+            'persisted wedge chart must tag the v3 cusp-adapted axis schema.')
         # The module constant and the emitted tag are the same string.
         self.assertEqual(_WEDGE_AXIS_SCHEMA, T5_EXPECTED_SCHEMA)
 
     def test_u_map_round_trips_bitwise(self):
-        """theta_to_s (the u-map) survives NPZ round-trip with max|diff| = 0."""
+        """theta_to_u (the u-map) survives NPZ round-trip with max|diff| = 0."""
         reloaded = self._round_trip()
         self._tick()
         self.assertIsNotNone(
-            reloaded.theta_to_s,
-            'theta_to_s must survive the NPZ round-trip (not drop to None).')
+            reloaded.theta_to_u,
+            'theta_to_u must survive the NPZ round-trip (not drop to None).')
         self.assertEqual(
-            reloaded.theta_to_s.shape, self.chart.theta_to_s.shape)
+            reloaded.theta_to_u.shape, self.chart.theta_to_u.shape)
         self.assertEqual(
             float(np.max(np.abs(
-                reloaded.theta_to_s - self.chart.theta_to_s))), 0.0,
-            'theta_to_s u-map differs after NPZ round-trip.')
+                reloaded.theta_to_u - self.chart.theta_to_u))), 0.0,
+            'theta_to_u u-map differs after NPZ round-trip.')
 
     def test_all_stored_fields_round_trip_bitwise(self):
         """Axis grids, coeffs, knots, wedge_map, refused survive bitwise."""
@@ -3216,24 +3253,31 @@ class WedgeNodeExactAndNpzV2TestCase(_WedgeTestCase):
 
 
 # ===========================================================================
-# Test T6 (SHARD A): a stale v1-schema wedge artifact hard-refuses at load.
+# Test T6 (SHARD A): a stale v1/v2-schema wedge artifact hard-refuses at load.
 #
-# The v1 -> v2 schema bump (WP1) retired the arc-length wedge angular axis in
-# favour of the cusp-adapted ``u = d**(2/3)`` axis; a chart persisted under
-# the retired 'wedge_caustic_relative_v1' tag is stored in the WRONG angular
-# coordinate and must NOT serve (a silent identity-map fallback would query
-# the spline at the wrong ``theta_wedge`` and return a finite-but-wrong F).
-# `_chart_from_npz` routes the wedge branch through `_validate_axis_schema`,
-# which hard-refuses any tag absent from `_KNOWN_WEDGE_AXIS_SCHEMAS` (only v2).
-# This suite mutates a REAL persisted wedge chart's meta to v1 and confirms a
-# named ValueError naming the offending schema -- and, as self-falsification,
-# that the same round-trip with the meta UNTOUCHED (v2) loads cleanly.
+# The v1 -> v2 -> v3 schema bumps retired the arc-length wedge angular axis
+# (v1) and then the interim ``theta_to_s``-named cusp axis (v2) in favour of
+# the honestly-named cusp-adapted ``u = d**(2/3)`` axis (v3, WP3 rename); a
+# chart persisted under any retired tag is stored under a coordinate/name the
+# v3 serve path no longer honours and must NOT serve (a silent identity-map
+# fallback would query the spline at the wrong ``theta_wedge`` and return a
+# finite-but-wrong F).  `_chart_from_npz` routes the wedge branch through
+# `_validate_axis_schema`, which hard-refuses any tag absent from
+# `_KNOWN_WEDGE_AXIS_SCHEMAS` (only v3).  This suite mutates a REAL persisted
+# wedge chart's meta to each retired tag and confirms a named ValueError
+# naming the offending schema -- and, as self-falsification, that the same
+# round-trip with the meta UNTOUCHED (v3) loads cleanly.
 #
 # Cost: reuses the shared surrogate; only in-memory NPZ save/load -- <1s.
 # ===========================================================================
 
 #: The retired wedge angular-axis schema tag (arc-length axis, pre-WP1).
 T6_STALE_SCHEMA: str = 'wedge_caustic_relative_v1'
+
+#: The retired interim cusp-axis schema tag (``theta_to_s``-named, pre-WP3
+#: rename).  Under v3 this too must hard-refuse: the rename to ``theta_to_u`` /
+#: ``u_grid`` means a v2 artifact carries the old array names and cannot load.
+T6_INTERIM_SCHEMA: str = 'wedge_caustic_relative_v2'
 
 
 def _wedge_npz_with_meta(chart, meta_override: dict | None):
@@ -3256,7 +3300,7 @@ def _wedge_npz_with_meta(chart, meta_override: dict | None):
 
 
 class WedgeStaleSchemaRefusalTestCase(_WedgeTestCase):
-    """A v1-tagged wedge artifact hard-refuses; a v2-tagged one loads."""
+    """A v1/v2-tagged wedge artifact hard-refuses; a v3-tagged one loads."""
 
     @classmethod
     def setUpClass(cls):
@@ -3285,6 +3329,32 @@ class WedgeStaleSchemaRefusalTestCase(_WedgeTestCase):
             data.close()
             tmp_path.unlink()
 
+    def test_v2_interim_schema_raises_named_valueerror(self):
+        """Loading a v2-tagged (pre-WP3-rename) wedge chart also refuses.
+
+        The WP3 rename (``theta_to_s`` -> ``theta_to_u`` / ``s_grid`` ->
+        ``u_grid``) bumped the schema v2 -> v3; a v2 artifact carries the old
+        array names and must hard-refuse rather than silently load under the
+        new coordinate names.  This gives the rename its own teeth: absent
+        the schema bump a v2 chart would load and serve wrong.
+        """
+        data, tmp_path = _wedge_npz_with_meta(
+            self.chart, {'axis_schema': T6_INTERIM_SCHEMA})
+        self._tick()
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                _chart_from_npz(data, index=0)
+            msg = str(ctx.exception)
+            self.assertIn(
+                T6_INTERIM_SCHEMA, msg,
+                'the refusal message must name the offending v2 schema.')
+            self.assertNotIn(
+                T6_INTERIM_SCHEMA, _KNOWN_WEDGE_AXIS_SCHEMAS,
+                'v2 must not be an accepted wedge schema under v3.')
+        finally:
+            data.close()
+            tmp_path.unlink()
+
     def test_absent_schema_raises_named_valueerror(self):
         """A wedge chart with axis_schema=None also hard-refuses.
 
@@ -3302,10 +3372,10 @@ class WedgeStaleSchemaRefusalTestCase(_WedgeTestCase):
             data.close()
             tmp_path.unlink()
 
-    def test_untouched_v2_schema_loads_cleanly(self):
-        """Self-falsification: the same round-trip with v2 meta loads fine.
+    def test_untouched_v3_schema_loads_cleanly(self):
+        """Self-falsification: the same round-trip with v3 meta loads fine.
 
-        Proves the refusal is caused by the v1 mutation, not by anything
+        Proves the refusal is caused by the v1/v2 mutation, not by anything
         intrinsic to the round-trip harness.
         """
         data, tmp_path = _wedge_npz_with_meta(self.chart, None)
@@ -3318,8 +3388,8 @@ class WedgeStaleSchemaRefusalTestCase(_WedgeTestCase):
             data.close()
             tmp_path.unlink()
 
-    def test_explicit_v2_schema_loads_cleanly(self):
-        """Explicitly re-stamping the current v2 tag also loads (control)."""
+    def test_explicit_v3_schema_loads_cleanly(self):
+        """Explicitly re-stamping the current v3 tag also loads (control)."""
         data, tmp_path = _wedge_npz_with_meta(
             self.chart, {'axis_schema': _WEDGE_AXIS_SCHEMA})
         self._tick()
@@ -3330,6 +3400,370 @@ class WedgeStaleSchemaRefusalTestCase(_WedgeTestCase):
             data.close()
             tmp_path.unlink()
 
+
+
+# ===========================================================================
+# Test T7 (SHARD B): bounded recursion closes the three MEASURED marginal
+# interior gaps.
+#
+# WP1 folded both subdividers into `_subdivide_tile`, whose ONE new capability
+# over the pre-refactor code is BOUNDED RECURSION: a child that STILL fails the
+# 5e-2 interior bar is itself halved (u-midpoint angular split preserved) until
+# it clears or the chain reaches `MAX_SUBDIVISION_DEPTH`.  The measured
+# configuration (astroid interior, band 0, gamma_mid=0.495) leaves three
+# marginal gaps against the bar at depth 1 -- ONE under the r=0.633 parent
+# (~6.50e-2) and TWO under r=0.811 (~6.70e-2 and ~5.95e-2).  Under the OLD
+# single-level subdivider those three would be recorded as ladder-served gaps;
+# under bounded recursion each subdivides once more and every terminal leaf
+# clears the bar at achieved depth 2.
+#
+# This runs through the REAL `_subdivide_wedge_tile` wrapper -> real
+# `_subdivide_tile` recursion -> real `_gate_chart` / `_wedge_child_boxes`
+# (u-midpoint geometry), on the fast synthetic path the existing wedge tests
+# use: only `_load_or_build` is stubbed, injecting a per-tag synthetic
+# held-out eps (above-bar for the three designated gap children, shrinking
+# ~4x per halving so ONE subdivision clears them).  No engine build runs, so
+# the whole suite is milliseconds -- the genuine engine reproduction measured
+# 210s for a single depth-2 recursion and is train-tier-only.  The stub is a
+# REACHABLE-RED data source, NOT an oracle: the recursion control flow, the
+# gating decision, and the child geometry are all the shipping code.
+# ===========================================================================
+
+#: Astroid-interior band-0 reproduction: gamma_mid = 0.495.
+RECURSION_BAND: tuple[float, float] = (0.475, 0.515)
+
+#: Parent tiles' shared near-cusp angular box (low origin: d = theta_wedge),
+#: kept below the gamma=0.495 waist so 'low' is the honest axis origin.
+RECURSION_AXIS_ORIGIN: str = 'low'
+RECURSION_THETA_C: float = 0.35
+RECURSION_HALF_THETA: float = 0.25
+RECURSION_HALF_R: float = 0.15
+RECURSION_W_RANGE: tuple[float, float] = (8.0, 45.0)
+
+#: The interior held-out eps bar (the SACR-C currency).
+RECURSION_INTERIOR_BAR: float = 0.05
+
+#: The two failing parents, keyed by tag, with their MEASURED radial centre.
+RECURSION_PARENTS: dict[str, float] = {'w_r0633': 0.633, 'w_r0811': 0.811}
+
+#: The MEASURED marginal gaps: parent tag -> {depth-1 child index: parent eps}.
+#: r=0.633 has ONE residual gap ~6.50e-2; r=0.811 has TWO ~6.70e-2 and
+#: ~5.95e-2.  All three exceed the 5e-2 bar at depth 1 and must CLOSE after
+#: one further halving (depth 2).
+RECURSION_GAP_MAP: dict[str, dict[int, float]] = {
+    'w_r0633': {2: 6.50e-2},
+    'w_r0811': {1: 6.70e-2, 3: 5.95e-2},
+}
+
+#: eps of a depth-1 child that already clears the bar (packs immediately).
+RECURSION_NONGAP_EPS: float = 3.0e-2
+
+#: A halving of a smooth interior box drops the held-out eps ~4x, so a 6.7e-2
+#: parent gap lands at ~1.7e-2 < bar after ONE subdivision (depth 2).
+RECURSION_CHILD_DECAY: float = 4.0
+
+#: Expected achieved recursion depth for both reproductions.
+RECURSION_EXPECTED_DEPTH: int = 2
+
+#: Tolerance for matching a depth-1 parent-gap eps back to RECURSION_GAP_MAP
+#: (the wrapper rounds reported eps to 8 dp).
+RECURSION_GAP_ATOL: float = 1e-6
+
+
+def _recursion_config() -> SimpleNamespace:
+    """A minimal `TrainingConfig` stand-in carrying the three eps bars.
+
+    `_chart_gated` reads all of ``tube_eps_max`` / ``farfield_eps_max`` /
+    ``interior_eps_max``; the node counts are consumed only by the (stubbed)
+    build path and are present for completeness.
+    """
+    return SimpleNamespace(
+        interior_eps_max=RECURSION_INTERIOR_BAR,
+        farfield_eps_max=RECURSION_INTERIOR_BAR,
+        tube_eps_max=RECURSION_INTERIOR_BAR,
+        interior_w_nodes_per_decade=15, w_nodes_per_decade=12,
+        n_gamma=5, n_rho=5, n_theta_c=5, n_heldout=8)
+
+
+def _stub_eps(stem: str, gap_map: dict[str, dict[int, float]]) -> float:
+    """Synthetic held-out eps for a child chart, keyed on its tag ``stem``.
+
+    ``stem`` is like ``'w_r0633_c2'`` (a depth-1 child) or
+    ``'w_r0633_c2_c0'`` (a depth-2 grandchild).  A designated depth-1 GAP
+    child gets an above-bar eps; its descendants shrink by
+    ``RECURSION_CHILD_DECAY`` per halving so a single subdivision clears the
+    bar.  Every non-gap child clears immediately.
+    """
+    parts = stem.split('_c')
+    ci_path = [int(p) for p in parts[1:]]
+    depth = len(ci_path)
+    if depth == 0:
+        return RECURSION_NONGAP_EPS
+    root = parts[0]
+    base = gap_map.get(root, {}).get(ci_path[0], RECURSION_NONGAP_EPS)
+    return base / (RECURSION_CHILD_DECAY ** (depth - 1))
+
+
+def _run_recursion(parent_tag: str, r_center: float,
+                   gap_map: dict[str, dict[int, float]],
+                   config: SimpleNamespace) -> tuple[dict, list]:
+    """Drive the REAL `_subdivide_wedge_tile` with only `_load_or_build` stubbed.
+
+    Returns ``(summary, chart_reports)``; ``chart_reports`` is the in-place
+    accumulator carrying every packed leaf and every gated (recursed) node.
+    """
+    tile = {
+        'center': (r_center, RECURSION_THETA_C),
+        'half': (RECURSION_HALF_R, RECURSION_HALF_THETA),
+        'axis_origin': RECURSION_AXIS_ORIGIN,
+        'region': 'wedge_interior',
+        'w_range': RECURSION_W_RANGE,
+        'si': 0, 'm_lo': 1.0, 'm_hi': 2.0}
+
+    def fake_load_or_build(path, build_fn, meta):
+        stem = Path(path).stem
+        eps = _stub_eps(stem, gap_map)
+        return (SimpleNamespace(image_count=4),
+                {'heldout_eps': eps, 'region': 'wedge_interior'}, False)
+
+    charts: list = []
+    chart_reports: list = []
+    outdir = Path(tempfile.mkdtemp())
+    try:
+        with mock.patch.object(surrogate_training, '_load_or_build',
+                               new=fake_load_or_build):
+            summary = surrogate_training._subdivide_wedge_tile(
+                tile=tile, parent_tag=parent_tag, band=RECURSION_BAND,
+                parity=1, config=config, rng=np.random.default_rng(0),
+                outdir=outdir, charts=charts, chart_reports=chart_reports)
+    finally:
+        for path in outdir.glob('*'):
+            path.unlink()
+        outdir.rmdir()
+    return summary, chart_reports
+
+
+def _terminal_leaves(summary: dict, chart_reports: list,
+                     parent_tag: str) -> list[dict]:
+    """Walk the subdivision tree and collect every TERMINAL leaf.
+
+    Uses ONLY the per-child summary entries the production code emits (each
+    carries its own ``center`` and ``eps``) plus the nested ``subdivision``
+    summaries stashed on gated reports -- no geometry is reconstructed here.
+    A terminal leaf is any child that was NOT further subdivided: a packed
+    leaf (cleared the bar) or a recorded_gated / carrier_flip leaf (a residual
+    gap that recursion could not close within the depth cap).
+    """
+    subdiv_index = {r['name']: r['subdivision']
+                    for r in chart_reports if 'subdivision' in r}
+    leaves: list[dict] = []
+
+    def walk(node_summary: dict, tag: str) -> None:
+        for entry in node_summary['children']:
+            child_tag = f"{tag}_c{entry['ci']}"
+            if entry['result'] == 'subdivided':
+                walk(subdiv_index[child_tag], child_tag)
+            else:
+                leaves.append({
+                    'tag': child_tag, 'center': entry['center'],
+                    'eps': entry.get('eps'), 'result': entry['result'],
+                    'depth': entry['achieved_depth']})
+
+    walk(summary, parent_tag)
+    return leaves
+
+
+class WedgeRecursionClosesGapsTestCase(_WedgeTestCase):
+    """T7: bounded recursion closes the three MEASURED marginal interior gaps.
+
+    Drives the shipping `_subdivide_wedge_tile` -> `_subdivide_tile` recursion
+    on the fast stub path (see the module comment above) for both failing
+    parents and reads back the reproduced gaps and the closed terminal leaves.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        config = _recursion_config()
+        cls.results = {}
+        for tag, r_center in RECURSION_PARENTS.items():
+            summary, reports = _run_recursion(
+                tag, r_center, RECURSION_GAP_MAP, config)
+            leaves = _terminal_leaves(summary, reports, tag)
+            cls.results[tag] = (summary, reports, leaves)
+
+    def _gap_children(self, tag: str) -> list[dict]:
+        """The depth-1 children that were gated and recursed (the gaps)."""
+        summary, _reports, _leaves = self.results[tag]
+        return [e for e in summary['children']
+                if e['result'] == 'subdivided']
+
+    def _assert_leaves_closed(self, leaves: list[dict]) -> None:
+        """Every terminal leaf packed and cleared the interior bar."""
+        self.assertGreater(len(leaves), 0,
+                           'anti-vacuity: no terminal leaves collected.')
+        for leaf in leaves:
+            self._tick()
+            with self.subTest(tag=leaf['tag']):
+                self.assertEqual(
+                    leaf['result'], 'packed',
+                    f"leaf {leaf['tag']} did not pack "
+                    f"(result={leaf['result']}); the gap did not close.")
+                self.assertLessEqual(
+                    leaf['eps'], RECURSION_INTERIOR_BAR,
+                    f"leaf {leaf['tag']} eps {leaf['eps']} exceeds the "
+                    f'{RECURSION_INTERIOR_BAR:.0e} interior bar.')
+
+    def test_r0633_one_gap_reproduced_and_closed(self):
+        """r=0.633: exactly ONE depth-1 gap (~6.50e-2) closes at depth 2."""
+        tag = 'w_r0633'
+        summary, _reports, leaves = self.results[tag]
+        gaps = self._gap_children(tag)
+        self._tick()
+        self.assertEqual(
+            len(gaps), 1,
+            'r=0.633 must reproduce exactly ONE marginal interior gap.')
+        gap_eps = gaps[0]['eps']
+        self.assertGreater(
+            gap_eps, RECURSION_INTERIOR_BAR,
+            'the reproduced gap must be ABOVE the bar at depth 1.')
+        self.assertAlmostEqual(gap_eps, 6.50e-2, delta=RECURSION_GAP_ATOL)
+        self.assertEqual(summary['max_achieved_depth'],
+                         RECURSION_EXPECTED_DEPTH)
+        self._assert_leaves_closed(leaves)
+
+    def test_r0811_two_gaps_reproduced_and_closed(self):
+        """r=0.811: exactly TWO depth-1 gaps (~6.70e-2, ~5.95e-2) close."""
+        tag = 'w_r0811'
+        summary, _reports, leaves = self.results[tag]
+        gaps = self._gap_children(tag)
+        self._tick()
+        self.assertEqual(
+            len(gaps), 2,
+            'r=0.811 must reproduce exactly TWO marginal interior gaps.')
+        gap_eps = sorted(e['eps'] for e in gaps)
+        for got, exp in zip(gap_eps, sorted((5.95e-2, 6.70e-2))):
+            self._tick()
+            self.assertGreater(
+                got, RECURSION_INTERIOR_BAR,
+                'each reproduced gap must be ABOVE the bar at depth 1.')
+            self.assertAlmostEqual(got, exp, delta=RECURSION_GAP_ATOL)
+        self.assertEqual(summary['max_achieved_depth'],
+                         RECURSION_EXPECTED_DEPTH)
+        self._assert_leaves_closed(leaves)
+
+    def test_summary_keeps_legacy_keys_and_adds_depth(self):
+        """The recursed wrapper summary keeps legacy keys + max_achieved_depth.
+
+        The additive key must be present for BOTH parents, and the legacy keys
+        must survive WP1's unification into `_subdivide_tile`.
+        """
+        for tag in RECURSION_PARENTS:
+            summary, _reports, _leaves = self.results[tag]
+            self._tick()
+            with self.subTest(tag=tag):
+                for key in T3_LEGACY_SUMMARY_KEYS:
+                    self.assertIn(
+                        key, summary,
+                        f'the unified wrapper dropped legacy key {key!r}.')
+                self.assertIn('max_achieved_depth', summary)
+                self.assertEqual(summary['parent_tag'], tag)
+                self.assertEqual(summary['region'], 'wedge_interior')
+                self.assertEqual(summary['axis_origin'],
+                                 RECURSION_AXIS_ORIGIN)
+
+    def test_terminal_leaf_eps_reported_with_worst_locus(self):
+        """Report p50/p90/max terminal-leaf eps and the worst-sample locus.
+
+        A bare max is forbidden by the house idiom; this dumps the full
+        distribution and the (r, theta_wedge) of the worst leaf per parent and
+        overall, and asserts every leaf clears the bar and that the packed
+        count equals the number of terminal leaves (no residual gaps left).
+        """
+        all_eps: list[float] = []
+        worst: tuple[float, str, list] | None = None
+        lines = ['T7 bounded-recursion terminal-leaf eps (stub-driven)',
+                 f'interior bar = {RECURSION_INTERIOR_BAR:.3e}']
+        for tag in RECURSION_PARENTS:
+            summary, _reports, leaves = self.results[tag]
+            eps_arr = np.array([leaf['eps'] for leaf in leaves], dtype=float)
+            emax = float(eps_arr.max())
+            imax = int(np.argmax(eps_arr))
+            locus = leaves[imax]['center']
+            all_eps.extend(eps_arr.tolist())
+            if worst is None or emax > worst[0]:
+                worst = (emax, tag, locus)
+            lines.append(
+                f'{tag}: n_leaves={len(leaves)} packed={summary["packed"]} '
+                f'depth={summary["max_achieved_depth"]} '
+                f'p50={float(np.percentile(eps_arr, 50)):.4e} '
+                f'p90={float(np.percentile(eps_arr, 90)):.4e} '
+                f'max={emax:.4e} '
+                f'worst_locus(r={locus[0]:.4f}, theta_wedge={locus[1]:.4f})')
+            self._tick()
+            self.assertLessEqual(emax, RECURSION_INTERIOR_BAR)
+            self.assertEqual(
+                len(leaves), summary['packed'],
+                'every terminal leaf must be packed (no residual gap left).')
+        lines.append(
+            f'OVERALL worst: max={worst[0]:.4e} at {worst[1]} '
+            f'(r={worst[2][0]:.4f}, theta_wedge={worst[2][1]:.4f})')
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        (OUTPUT_DIR / 't7_recursion_terminal_leaf_eps.txt').write_text(
+            '\n'.join(lines) + '\n')
+        self._tick()
+        self.assertLess(
+            max(all_eps), RECURSION_INTERIOR_BAR,
+            'a terminal leaf exceeded the interior bar after recursion.')
+
+
+class WedgeRecursionSelfFalsificationTestCase(unittest.TestCase):
+    """Prove the recursion-closes-gaps assertions have teeth.
+
+    Two controls exercise the two ways the main suite could read falsely
+    green: (a) with NO injected gap the tree never recurses (so the
+    "reproduce exactly one/two gaps" assertions genuinely depend on the
+    above-bar eps), and (b) a STUBBORN gap that cannot close within the depth
+    cap leaves a terminal recorded_gated leaf above the bar (so the "every
+    leaf clears the bar" assertion is falsifiable).
+    """
+
+    def test_no_injected_gap_never_recurses(self):
+        """With every child below the bar, nothing subdivides (depth 1)."""
+        summary, reports = _run_recursion(
+            'w_nogap', 0.633, {}, _recursion_config())
+        leaves = _terminal_leaves(summary, reports, 'w_nogap')
+        self.assertEqual(summary['max_achieved_depth'], 1,
+                         'a gap-free tile must not recurse.')
+        self.assertEqual(
+            [e['result'] for e in summary['children']],
+            ['packed'] * 4,
+            'every child of a gap-free tile must pack at depth 1.')
+        self.assertTrue(all(leaf['depth'] == 1 for leaf in leaves))
+        self.assertEqual(len(leaves), 4)
+
+    def test_stubborn_gap_leaves_residual_above_bar(self):
+        """A gap too large to close hits the depth cap with a leaf > bar.
+
+        Proves the main "every terminal leaf packed and <= bar" claim can
+        FAIL: a 5.0 depth-1 eps shrinks only to ~0.31 at the cap depth 3,
+        which is still above the 5e-2 bar, so a recorded_gated leaf survives.
+        """
+        stubborn = {'w_stub': {0: 5.0}}
+        summary, reports = _run_recursion(
+            'w_stub', 0.633, stubborn, _recursion_config())
+        leaves = _terminal_leaves(summary, reports, 'w_stub')
+        self.assertEqual(summary['max_achieved_depth'],
+                         surrogate_training.MAX_SUBDIVISION_DEPTH,
+                         'a stubborn gap must recurse to the depth cap.')
+        residual = [leaf for leaf in leaves
+                    if leaf['result'] == 'recorded_gated']
+        self.assertTrue(
+            residual,
+            'a stubborn gap must leave at least one recorded_gated leaf.')
+        for leaf in residual:
+            self.assertGreater(
+                leaf['eps'], RECURSION_INTERIOR_BAR,
+                'a residual gap leaf must remain above the bar (teeth).')
 
 
 if __name__ == '__main__':

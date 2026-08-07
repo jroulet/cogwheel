@@ -165,6 +165,7 @@ never sampled" but the code, today, does not keep.
 
 from __future__ import annotations
 
+import collections
 import dataclasses
 import functools
 import inspect
@@ -173,6 +174,7 @@ import math
 import os
 import re
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import TestCase, main, mock
@@ -3674,6 +3676,621 @@ class LogWAxisLOODRYTestCase(unittest.TestCase):
             seed_spacings, seed_spacings[0], rtol=1e-12,
             err_msg='LOO seed spacings not uniform in ln(w)')
 
+
+# ---------------------------------------------------------------------------
+# SHARD A -- generic bounded-recursion tile subdivider (Build WP1)
+# ---------------------------------------------------------------------------
+#
+# WP1 unified the two historic single-level subdividers (`_subdivide_farfield_
+# tile` / `_subdivide_wedge_tile`) into one generic `_subdivide_tile` skeleton
+# and added the ONE capability both lacked: bounded recursion.  A child that
+# still fails the eps bar is itself halved -- until it clears or the halving
+# chain reaches `MAX_SUBDIVISION_DEPTH` (== 3), at which point it is recorded as
+# a ladder-served gap (a flag, NOT a crash).  These tests pin three things:
+#
+#   1. UNCHANGED depth-1 behaviour (refactor guarantee): an all-passing
+#      far-field parent produces the historic single-level report -- the same
+#      centres/halves/admission/packed outcomes and summary keys -- plus the
+#      additive ``achieved_depth`` / ``max_achieved_depth`` fields, and NEVER
+#      recurses (``max_achieved_depth == 1``).
+#   2. RECURSION MECHANICS + CAP: a marginal parent that clears only at the
+#      second halving reaches depth 2 with all terminal leaves under the bar; a
+#      never-clearing parent stops at the depth-3 cap, records its leaves as
+#      ladder-served gaps, and never reaches depth 4.
+#   3. FAN-OUT / ORDERING / EDGE INVARIANTS: every level fans out to <= 4
+#      children in the fixed row-major order; the max child eps over a COMPLETED
+#      level is non-increasing (weak robust check -- a single child may bounce
+#      up); a disk-excluded far-field child is dropped silently and recorded
+#      only in the summary; a `CarrierDiscontinuityError` child is recorded as a
+#      carrier-flip gap and is NOT recursed.
+#
+# DESIGN -- FAST, ENGINE-FREE, STUB-DRIVEN.  The real chart builder is never
+# invoked: `_load_or_build` is monkeypatched with a fake that returns a sentinel
+# chart plus a controlled ``heldout_eps``, keyed on the child TAG (its ``_c``
+# depth path parsed from the file stem), so the pass/fail ladder is fully
+# deterministic.  The REAL `_gate_chart` / `_chart_gated` decide gating, and the
+# REAL `_farfield_child_boxes` split geometry runs, so what is exercised is the
+# production control flow, not a re-implementation of it.  All 84 stub calls of
+# the deepest sweep are instant (no I/O, no engine), so the whole SHARD A block
+# runs in well under a second.
+#
+# TOLERANCES.  There are none to justify numerically: the eps values are exact
+# decimals and the box halving is exact binary arithmetic, so every comparison
+# is an EXACT match against the production 6-decimal (centre/half) or 8-decimal
+# (eps) rounding, or against an INDEPENDENT closed-form quarter-box oracle
+# (`_farfield_child_oracle`, the plain ``(rho_c +- half/2, theta_c +- half/2)``
+# halving written out here, NOT a call into `_farfield_child_boxes`).
+
+#: Far-field held-out eps registration bar used by the SHARD A configs.
+_SUBDIV_BAR = 1e-3
+
+#: Minimal config whose only load-bearing field is the far-field eps bar (the
+#: stub bypasses every builder, so no other field is dereferenced).
+_SUBDIV_CONFIG = TrainingConfig(farfield_eps_max=_SUBDIV_BAR)
+
+#: Gamma band / parity threaded through unchanged; irrelevant to the stub.
+_SUBDIV_BAND = (0.2, 0.4)
+_SUBDIV_PARITY = 1
+
+#: Scalar exterior re-admission floor for the default far-field wrapper path.
+_SUBDIV_EXCLUSION = 1.0
+
+#: Stub eps levels: one comfortably UNDER the bar, one comfortably OVER it, and
+#: a second under-bar value so a level can hold two distinct (bouncing) epsilons.
+_EPS_PASS = 5e-4
+_EPS_PASS_HI = 8e-4
+_EPS_FAIL = 2e-3
+
+#: The historic packed-child summary-entry key set (pre-unification), which the
+#: refactor must preserve exactly, modulo the additive ``achieved_depth``.
+_HISTORIC_PACKED_KEYS = frozenset(
+    {'ci', 'center', 'half', 'admission', 'eps', 'bar', 'gate_reason',
+     'result'})
+
+#: Terminal (non-recursed) child results.
+_TERMINAL_RESULTS = frozenset(
+    {'packed', 'recorded_gated', 'carrier_flip', 'disk_excluded'})
+
+
+def _ff_tile(*, center, half, region='exterior', w_range=(5.0, 40.0),
+             si=0, m_lo=10.0, m_hi=20.0) -> dict:
+    """Build a minimal gated far-field parent tile record for the subdivider."""
+    return {'center': tuple(center), 'half': tuple(half), 'region': region,
+            'w_range': tuple(w_range), 'si': si, 'm_lo': m_lo, 'm_hi': m_hi}
+
+
+def _make_fake_load_or_build(eps_fn, flip_tags=()):
+    """Return a stub `_load_or_build` that never builds or touches disk.
+
+    ``eps_fn(depth, ci_path)`` supplies the child's held-out eps deterministically
+    from its ``_c`` depth path (parsed from the target file stem); any child tag
+    in ``flip_tags`` raises `CarrierDiscontinuityError` to exercise the
+    carrier-flip branch.
+    """
+    flip = set(flip_tags)
+
+    def fake(path, build_fn, provenance):  # mirror _load_or_build(path, fn, prov)
+        stem = Path(path).stem
+        if stem in flip:
+            raise surrogate_module.CarrierDiscontinuityError(
+                f'synthetic basin flip at {stem}')
+        ci_path = tuple(int(part) for part in stem.split('_c')[1:])
+        depth = len(ci_path)
+        eps = float(eps_fn(depth, ci_path))
+        chart = types.SimpleNamespace(name=stem, image_count=4)
+        report = {'heldout_eps': eps, 'image_count': 4,
+                  'engine_calls': 0, 'refused_points': 0, 'kind': 'farfield'}
+        return chart, report, False
+
+    return fake
+
+
+def _run_ff_subdivide(tile, eps_fn, *, exclusion_rho=_SUBDIV_EXCLUSION,
+                      flip_tags=(), config=_SUBDIV_CONFIG, parent_tag='ROOT'):
+    """Drive `_subdivide_farfield_tile` with the stubbed builder.
+
+    Returns ``(summary, charts, chart_reports)``.
+    """
+    charts: list = []
+    chart_reports: list = []
+    fake = _make_fake_load_or_build(eps_fn, flip_tags)
+    with tempfile.TemporaryDirectory(prefix='shardA_subdiv_') as tmp:
+        with mock.patch.object(training, '_load_or_build', new=fake):
+            summary = training._subdivide_farfield_tile(
+                tile=tile, parent_tag=parent_tag, band=_SUBDIV_BAND,
+                parity=_SUBDIV_PARITY, config=config,
+                rng=np.random.default_rng(0), outdir=Path(tmp),
+                exclusion_rho=exclusion_rho, interior_admission=None,
+                charts=charts, chart_reports=chart_reports)
+    return summary, charts, chart_reports
+
+
+def _farfield_child_oracle(center, half):
+    """Independent quarter-box halving oracle (NOT `_farfield_child_boxes`).
+
+    Row-major order: ``s_rho`` outer over ``(-1, +1)``, ``s_theta`` inner; each
+    child carries the quarter half ``(half_rho/2, half_theta/2)``.
+    """
+    rho_c, theta_c = center
+    half_rho, half_theta = half
+    child_half_rho = 0.5 * half_rho
+    child_half_theta = 0.5 * half_theta
+    boxes = []
+    for s_rho in (-1.0, 1.0):
+        for s_theta in (-1.0, 1.0):
+            boxes.append((
+                (rho_c + s_rho * child_half_rho,
+                 theta_c + s_theta * child_half_theta),
+                (child_half_rho, child_half_theta)))
+    return boxes
+
+
+def _subdivided_reports_by_name(chart_reports):
+    """Map ``name -> gated report`` for reports that carry a ``subdivision``."""
+    return {r['name']: r for r in chart_reports if 'subdivision' in r}
+
+
+def _iter_entries(children, parent_tag, by_name):
+    """Yield ``(tag, depth, entry)`` for every child entry at every level.
+
+    Descends into a subdivided child's grandchildren via the matching
+    ``subdivision`` report (the deeper summary lives on the gated report in
+    ``chart_reports``, not on the summary entry itself).
+    """
+    for entry in children:
+        tag = f'{parent_tag}_c{entry["ci"]}'
+        depth = tag.count('_c')
+        yield tag, depth, entry
+        if entry['result'] == 'subdivided':
+            sub = by_name[tag]['subdivision']
+            yield from _iter_entries(sub['children'], tag, by_name)
+
+
+def _all_entries(summary, parent_tag, chart_reports):
+    """List every ``(tag, depth, entry)`` across the full recursion subtree."""
+    by_name = _subdivided_reports_by_name(chart_reports)
+    return list(_iter_entries(summary['children'], parent_tag, by_name))
+
+
+def _terminal_leaves(summary, chart_reports, parent_tag='ROOT'):
+    """The terminal (non-recursed) leaf entries of the recursion subtree."""
+    return [(tag, depth, entry)
+            for tag, depth, entry in _all_entries(summary, parent_tag,
+                                                  chart_reports)
+            if entry['result'] in _TERMINAL_RESULTS]
+
+
+class FarfieldDepthOneUnchangedTestCase(_CountingTestCase):
+    """WP1 pin: an all-passing far-field parent halves once and stops.
+
+    Every depth-1 child clears the ``farfield_eps_max`` bar at the first
+    halving, so recursion never fires and the report is byte-identical to the
+    pre-unification single-level behaviour plus the additive achieved-depth
+    fields (``max_achieved_depth == 1``).
+    """
+
+    _CENTER = (3.0, 0.8)
+    _HALF = (0.4, 0.2)
+
+    def setUp(self):
+        super().setUp()
+        self.tile = _ff_tile(center=self._CENTER, half=self._HALF)
+        self.summary, self.charts, self.reports = _run_ff_subdivide(
+            self.tile, lambda depth, ci_path: _EPS_PASS)
+
+    def test_summary_keys_are_historic_set_plus_max_depth(self):
+        self.assertEqual(
+            set(self.summary),
+            {'parent_tag', 'region', 'child_half', 'children',
+             'max_achieved_depth'})
+        self.assertEqual(self.summary['parent_tag'], 'ROOT')
+        self.assertEqual(self.summary['region'], 'exterior')
+        self.comparisons += 3
+
+    def test_child_half_matches_independent_quarter_box(self):
+        (_center, exp_half) = _farfield_child_oracle(self._CENTER,
+                                                     self._HALF)[0]
+        self.assertEqual(self.summary['child_half'],
+                         [round(exp_half[0], 6), round(exp_half[1], 6)])
+        self.comparisons += 1
+
+    def test_no_recursion_stays_at_depth_one(self):
+        self.assertEqual(self.summary['max_achieved_depth'], 1)
+        self.comparisons += 1
+        for entry in self.summary['children']:
+            self.assertEqual(entry['achieved_depth'], 1)
+            self.assertNotIn('subdivision', entry)
+            self.comparisons += 2
+
+    def test_four_children_row_major_centres_and_halves(self):
+        oracle = _farfield_child_oracle(self._CENTER, self._HALF)
+        self.assertEqual(len(self.summary['children']), 4)
+        self.comparisons += 1
+        for ci, (entry, (ocenter, ohalf)) in enumerate(
+                zip(self.summary['children'], oracle)):
+            self.assertEqual(entry['ci'], ci)
+            self.assertEqual(entry['center'],
+                             [round(ocenter[0], 6), round(ocenter[1], 6)])
+            self.assertEqual(entry['half'],
+                             [round(ohalf[0], 6), round(ohalf[1], 6)])
+            self.comparisons += 3
+
+    def test_packed_child_entry_is_the_historic_schema(self):
+        for entry in self.summary['children']:
+            self.assertEqual(set(entry),
+                             set(_HISTORIC_PACKED_KEYS) | {'achieved_depth'})
+            self.assertEqual(entry['result'], 'packed')
+            self.assertEqual(entry['admission'], 'admitted')
+            self.assertIsNone(entry['gate_reason'])
+            self.assertEqual(entry['bar'], _SUBDIV_BAR)
+            self.assertEqual(entry['eps'], round(_EPS_PASS, 8))
+            self.comparisons += 6
+
+    def test_all_four_charts_packed_none_gated(self):
+        self.assertEqual(len(self.charts), 4)
+        packed = [r for r in self.reports if not r.get('gated')]
+        self.assertEqual(len(packed), 4)
+        self.comparisons += 2
+        for report in packed:
+            self.assertEqual(report['subdivided_from'], 'ROOT')
+            self.comparisons += 1
+
+
+def _depth_histogram(summary, chart_reports, parent_tag='ROOT'):
+    """Terminal-leaf achieved-depth histogram ``{depth: count}`` (per Professor:
+    report the whole histogram, never a bare max)."""
+    hist: collections.Counter = collections.Counter()
+    for _tag, depth, _entry in _terminal_leaves(summary, chart_reports,
+                                                parent_tag):
+        hist[depth] += 1
+    return dict(hist)
+
+
+class FarfieldBoundedRecursionTestCase(_CountingTestCase):
+    """WP1's new capability: a still-gated child is halved again, up to the cap.
+
+    A MARGINAL parent whose children clear only at the second halving reaches
+    depth 2 with every terminal leaf under the bar; a NEVER-clearing parent
+    walks the ladder to the ``MAX_SUBDIVISION_DEPTH`` cap, records its leaves as
+    ladder-served gaps (a flag, not a crash), and never recurses to depth 4.
+    """
+
+    #: Exterior geometry whose inner edge ``rho_c - half_rho == 2.6`` exceeds
+    #: the exclusion floor at EVERY depth (the low child's inner edge is halving-
+    #: invariant), so no descendant is ever disk-excluded and the leaf counts are
+    #: the clean full fan-out (4, 16, 64).
+    _CENTER = (3.0, 0.8)
+    _HALF = (0.4, 0.2)
+
+    @staticmethod
+    def _marginal_eps(depth, ci_path):
+        # Fails the bar at depth 1, clears at depth 2 and below.
+        return _EPS_PASS if depth >= 2 else _EPS_FAIL
+
+    @staticmethod
+    def _never_eps(depth, ci_path):
+        return _EPS_FAIL
+
+    def setUp(self):
+        super().setUp()
+        self.tile = _ff_tile(center=self._CENTER, half=self._HALF)
+        self.marginal = _run_ff_subdivide(self.tile, self._marginal_eps)
+        self.never = _run_ff_subdivide(self.tile, self._never_eps)
+
+    def test_marginal_parent_reaches_depth_two(self):
+        summary, _charts, reports = self.marginal
+        self.assertEqual(summary['max_achieved_depth'], 2)
+        # Every depth-1 child is subdivided (non-terminal), not packed.
+        for entry in summary['children']:
+            self.assertEqual(entry['result'], 'subdivided')
+            self.assertEqual(entry['achieved_depth'], 2)
+            self.comparisons += 2
+        self.comparisons += 1
+
+    def test_marginal_terminal_leaves_all_cleared(self):
+        summary, _charts, reports = self.marginal
+        leaves = _terminal_leaves(summary, reports)
+        self.assertEqual(len(leaves), 16)  # 4 x 4 grandchildren
+        self.comparisons += 1
+        for _tag, depth, entry in leaves:
+            self.assertEqual(depth, 2)
+            self.assertEqual(entry['result'], 'packed')
+            self.assertLessEqual(entry['eps'], entry['bar'])
+            self.comparisons += 3
+
+    def test_marginal_histogram_is_sixteen_at_depth_two(self):
+        summary, _charts, reports = self.marginal
+        self.assertEqual(_depth_histogram(summary, reports), {2: 16})
+        self.comparisons += 1
+
+    def test_marginal_packs_grandchild_charts_only(self):
+        _summary, charts, reports = self.marginal
+        self.assertEqual(len(charts), 16)
+        # The 4 depth-1 gated parents are recorded (subdivided), never packed.
+        gated = [r for r in reports if r.get('gated')]
+        self.assertEqual(len(gated), 4)
+        for report in gated:
+            self.assertTrue(report['subdivided'])
+            self.assertIn('subdivision', report)
+            self.comparisons += 2
+        self.comparisons += 2
+
+    def test_never_clearing_stops_at_depth_three(self):
+        summary, charts, _reports = self.never
+        self.assertEqual(summary['max_achieved_depth'], 3)
+        self.assertEqual(summary['max_achieved_depth'],
+                         training.MAX_SUBDIVISION_DEPTH)
+        # Not one chart is packed: the whole subtree is a gap.
+        self.assertEqual(len(charts), 0)
+        self.comparisons += 3
+
+    def test_never_clearing_leaves_are_ladder_served_gaps(self):
+        summary, _charts, reports = self.never
+        leaves = _terminal_leaves(summary, reports)
+        self.assertEqual(len(leaves), 64)  # 4 x 4 x 4
+        self.comparisons += 1
+        for _tag, depth, entry in leaves:
+            self.assertEqual(depth, 3)
+            self.assertEqual(entry['result'], 'recorded_gated')
+            self.assertGreater(entry['eps'], entry['bar'])  # a flag, not a crash
+            self.assertIsNotNone(entry['gate_reason'])
+            self.comparisons += 4
+
+    def test_never_clearing_never_reaches_depth_four(self):
+        summary, _charts, reports = self.never
+        depths = [depth for _tag, depth, _entry
+                  in _all_entries(summary, 'ROOT', reports)]
+        self.assertEqual(max(depths), 3)
+        self.assertNotIn(4, depths)
+        self.comparisons += 2
+
+    def test_never_clearing_histogram_is_sixtyfour_at_depth_three(self):
+        summary, _charts, reports = self.never
+        hist = _depth_histogram(summary, reports)
+        self.assertEqual(hist, {3: 64})
+        # Persist the achieved-depth histograms for both ladders as a diagnostic.
+        marg_hist = _depth_histogram(self.marginal[0], self.marginal[2])
+        path = _OUTPUT_DIR / 'shardA_subdivider_depth_histogram.txt'
+        path.write_text(
+            'SHARD A far-field subdivider achieved-depth histograms\n'
+            f'marginal (clears at depth 2): {marg_hist}\n'
+            f'never-clearing (cap at depth 3): {hist}\n'
+            f'MAX_SUBDIVISION_DEPTH = {training.MAX_SUBDIVISION_DEPTH}\n')
+        self.comparisons += 1
+
+
+def _entries_by_parent(summary, chart_reports, parent_tag='ROOT'):
+    """Group ``(tag, depth, entry)`` by immediate parent tag."""
+    groups: dict = collections.defaultdict(list)
+    for tag, depth, entry in _all_entries(summary, parent_tag, chart_reports):
+        parent = tag.rsplit('_c', 1)[0]
+        groups[parent].append((tag, depth, entry))
+    return groups
+
+
+def _level_max_eps(summary, chart_reports, parent_tag='ROOT'):
+    """Max recorded child eps per depth (``{depth: max_eps}``), over every entry
+    that carries an ``eps`` (packed, subdivided, or recorded_gated)."""
+    per_depth: dict = collections.defaultdict(float)
+    for _tag, depth, entry in _all_entries(summary, parent_tag, chart_reports):
+        eps = entry.get('eps')
+        if eps is not None:
+            per_depth[depth] = max(per_depth[depth], eps)
+    return dict(per_depth)
+
+
+class FarfieldFanoutOrderingTestCase(_CountingTestCase):
+    """WP1 fan-out / ordering / edge invariants of the generic subdivider."""
+
+    _CENTER = (3.0, 0.8)
+    _HALF = (0.4, 0.2)
+
+    #: A tile straddling the exclusion floor: the two low-rho children fall
+    #: inside the excluded disk (inner edge 0.5 < 1.0), the two high-rho children
+    #: clear it (inner edge 1.3 >= 1.0).
+    _STRADDLE_CENTER = (1.3, 0.8)
+    _STRADDLE_HALF = (0.8, 0.2)
+
+    @staticmethod
+    def _fanout_eps(depth, ci_path):
+        # Level 1 fails everywhere; level 2 clears, with one grandchild per
+        # parent bouncing UP to _EPS_PASS_HI (still < bar) so the per-child
+        # sequence is NOT monotone even though the LEVEL max decreases.
+        if depth < 2:
+            return _EPS_FAIL
+        return _EPS_PASS_HI if ci_path[-1] == 0 else _EPS_PASS
+
+    def setUp(self):
+        super().setUp()
+        self.tile = _ff_tile(center=self._CENTER, half=self._HALF)
+        self.fanout = _run_ff_subdivide(self.tile, self._fanout_eps)
+
+    def test_every_level_fans_out_to_at_most_four(self):
+        summary, _charts, reports = self.fanout
+        groups = _entries_by_parent(summary, reports)
+        self.assertGreater(len(groups), 1)  # recursion actually happened
+        self.comparisons += 1
+        for _parent, members in groups.items():
+            self.assertLessEqual(len(members), 4)
+            self.comparisons += 1
+
+    def test_children_are_contiguous_row_major(self):
+        summary, _charts, reports = self.fanout
+        groups = _entries_by_parent(summary, reports)
+        for _parent, members in groups.items():
+            members_sorted = sorted(members, key=lambda m: m[2]['ci'])
+            cis = [entry['ci'] for _tag, _depth, entry in members_sorted]
+            self.assertEqual(cis, list(range(len(cis))))  # 0,1,2,... contiguous
+            # row-major: rho (center[0]) non-decreasing, theta breaks ties.
+            keys = [(entry['center'][0], entry['center'][1])
+                    for _tag, _depth, entry in members_sorted]
+            self.assertEqual(keys, sorted(keys))
+            self.comparisons += 2
+
+    def test_top_level_centres_match_independent_oracle(self):
+        summary, _charts, _reports = self.fanout
+        oracle = _farfield_child_oracle(self._CENTER, self._HALF)
+        for entry, (ocenter, _ohalf) in zip(summary['children'], oracle):
+            self.assertEqual(entry['center'],
+                             [round(ocenter[0], 6), round(ocenter[1], 6)])
+            self.comparisons += 1
+
+    def test_level_max_eps_is_non_increasing(self):
+        summary, _charts, reports = self.fanout
+        level_max = _level_max_eps(summary, reports)
+        depths = sorted(level_max)
+        maxes = [level_max[d] for d in depths]
+        # Weak, robust check (Professor): the per-LEVEL max eps never rises,
+        # even though a single child bounced up within level 2.
+        self.assertEqual(maxes, sorted(maxes, reverse=True))
+        self.assertEqual(level_max[1], _EPS_FAIL)
+        self.assertEqual(level_max[2], _EPS_PASS_HI)
+        self.assertLess(level_max[2], level_max[1])
+        self.comparisons += 3
+
+    def test_disk_excluded_children_dropped_silently(self):
+        tile = _ff_tile(center=self._STRADDLE_CENTER, half=self._STRADDLE_HALF)
+        summary, charts, reports = _run_ff_subdivide(
+            tile, lambda depth, ci_path: _EPS_PASS)
+        results = [e['result'] for e in summary['children']]
+        self.assertEqual(results.count('disk_excluded'), 2)
+        self.assertEqual(results.count('packed'), 2)
+        self.comparisons += 2
+        for entry in summary['children']:
+            if entry['result'] == 'disk_excluded':
+                # Recorded in the summary only: no eps/bar, no packed chart.
+                self.assertEqual(entry['admission'], 'disk_excluded')
+                self.assertNotIn('eps', entry)
+                self.comparisons += 2
+        # Two admitted children packed; the excluded pair left no chart_report.
+        self.assertEqual(len(charts), 2)
+        self.assertEqual(len([r for r in reports if not r.get('gated')]), 2)
+        self.comparisons += 2
+
+    def test_carrier_flip_child_recorded_and_not_recursed(self):
+        summary, charts, reports = _run_ff_subdivide(
+            self.tile, lambda depth, ci_path: _EPS_PASS,
+            flip_tags=('ROOT_c1',))
+        flips = [e for e in summary['children'] if e['result'] == 'carrier_flip']
+        self.assertEqual(len(flips), 1)
+        flip = flips[0]
+        self.assertEqual(flip['ci'], 1)
+        self.assertEqual(flip['admission'], 'admitted')
+        self.assertIn('carrier_flip_detail', flip)
+        self.assertEqual(flip['achieved_depth'], 1)  # NOT recursed
+        self.assertNotIn('subdivision', flip)
+        self.comparisons += 5
+        # Far-field style: a carrier-flip child leaves NO chart_reports entry
+        # and packs no chart; the other three children pack normally.
+        self.assertFalse(any(r['name'] == 'ROOT_c1' for r in reports))
+        self.assertEqual(len(charts), 3)
+        self.comparisons += 2
+
+
+class FarfieldSubdividerSelfFalsificationTestCase(TestCase):
+    """Teeth: prove the SHARD A pins can actually go red.
+
+    A suite that cannot fail is worthless.  These cases confirm the traversal
+    helpers and the pin thresholds distinguish the states the real tests assert
+    (cleared vs gapped leaf, terminal vs subdivided node, depth-3 cap vs a
+    runaway depth-4, row-major vs shuffled order).
+    """
+
+    _CENTER = (3.0, 0.8)
+    _HALF = (0.4, 0.2)
+
+    @staticmethod
+    def _synthetic_two_level():
+        """A hand-built (summary, chart_reports) with one subdivided branch."""
+        summary = {'children': [
+            {'ci': 0, 'center': [2.8, 0.7], 'half': [0.2, 0.1],
+             'admission': 'admitted', 'eps': round(_EPS_FAIL, 8),
+             'bar': _SUBDIV_BAR, 'gate_reason': 'heldout_eps',
+             'result': 'subdivided', 'achieved_depth': 2},
+            {'ci': 1, 'center': [2.8, 0.9], 'half': [0.2, 0.1],
+             'admission': 'admitted', 'eps': round(_EPS_PASS, 8),
+             'bar': _SUBDIV_BAR, 'gate_reason': None,
+             'result': 'packed', 'achieved_depth': 1}],
+            'packed': 2, 'max_achieved_depth': 2}
+        reports = [{'name': 'ROOT_c0', 'gated': True, 'subdivided': True,
+                    'subdivision': {'children': [
+                        {'ci': 0, 'center': [2.7, 0.65], 'half': [0.1, 0.05],
+                         'admission': 'admitted', 'eps': round(_EPS_PASS, 8),
+                         'bar': _SUBDIV_BAR, 'gate_reason': None,
+                         'result': 'packed', 'achieved_depth': 2}],
+                        'packed': 1, 'max_achieved_depth': 2}}]
+        return summary, reports
+
+    def test_terminal_filter_excludes_subdivided_nodes(self):
+        # A 'subdivided' node is NOT a terminal leaf; only the packed grandchild
+        # and the packed sibling are.  If the filter wrongly counted the
+        # subdivided node the marginal test's ``len == 16`` pin would be blind.
+        summary, reports = self._synthetic_two_level()
+        leaves = _terminal_leaves(summary, reports)
+        tags = sorted(tag for tag, _d, _e in leaves)
+        self.assertEqual(tags, ['ROOT_c0_c0', 'ROOT_c1'])
+        self.assertNotIn('ROOT_c0', tags)
+
+    def test_depth_histogram_would_surface_a_runaway_depth_four(self):
+        # Splice a genuine tag-depth-4 leaf (``ROOT_c0_c0_c0_c0``) onto the
+        # synthetic tree and confirm the traversal SURFACES depth 4 -- so Test
+        # B's ``assertNotIn(4, depths)`` is a real guard, not a tautology.  The
+        # traversal depth is STRUCTURAL (``tag.count('_c')``), so a runaway must
+        # be built as an extra nesting level, not merely an ``achieved_depth``
+        # label.
+        summary, reports = self._synthetic_two_level()
+        # ROOT_c0_c0 stops being a leaf ...
+        reports[0]['subdivision']['children'][0]['result'] = 'subdivided'
+        # ... it subdivides into ROOT_c0_c0_c0 (depth 3, also subdivided) ...
+        reports.append({'name': 'ROOT_c0_c0', 'gated': True, 'subdivided': True,
+                        'subdivision': {'children': [
+                            {'ci': 0, 'center': [2.65, 0.62],
+                             'half': [0.05, 0.025], 'admission': 'admitted',
+                             'eps': round(_EPS_FAIL, 8), 'bar': _SUBDIV_BAR,
+                             'gate_reason': 'heldout_eps',
+                             'result': 'subdivided', 'achieved_depth': 4}],
+                            'packed': 0, 'max_achieved_depth': 4}})
+        # ... which subdivides once more into the depth-4 leaf.
+        reports.append({'name': 'ROOT_c0_c0_c0', 'gated': True,
+                        'subdivided': True,
+                        'subdivision': {'children': [
+                            {'ci': 0, 'center': [2.625, 0.61],
+                             'half': [0.025, 0.0125], 'admission': 'admitted',
+                             'eps': round(_EPS_FAIL, 8), 'bar': _SUBDIV_BAR,
+                             'gate_reason': 'heldout_eps',
+                             'result': 'recorded_gated', 'achieved_depth': 4}],
+                            'packed': 0, 'max_achieved_depth': 4}})
+        depths = [d for _t, d, _e in _all_entries(summary, 'ROOT', reports)]
+        self.assertIn(4, depths)  # the guard would have fired  # the guard would have fired
+
+    def test_row_major_check_rejects_shuffled_children(self):
+        # The real order passes ``keys == sorted(keys)``; a reversed order must
+        # fail it, or the ordering pin has no teeth.
+        summary, _charts, _reports = _run_ff_subdivide(
+            _ff_tile(center=self._CENTER, half=self._HALF),
+            lambda depth, ci_path: _EPS_PASS)
+        keys = [(e['center'][0], e['center'][1]) for e in summary['children']]
+        self.assertEqual(keys, sorted(keys))          # honest order passes
+        self.assertNotEqual(list(reversed(keys)), sorted(keys))  # shuffle fails
+
+    def test_gap_and_cleared_thresholds_are_separable(self):
+        # The gap (eps > bar) and cleared (eps <= bar) assertions rely on the
+        # stub levels straddling the bar; confirm they genuinely do.
+        self.assertGreater(_EPS_FAIL, _SUBDIV_BAR)
+        self.assertLessEqual(_EPS_PASS, _SUBDIV_BAR)
+        self.assertLessEqual(_EPS_PASS_HI, _SUBDIV_BAR)
+
+    def test_all_pass_never_recurses_but_never_clearing_caps(self):
+        # The two ends of the ladder are distinguishable end-to-end.
+        tile = _ff_tile(center=self._CENTER, half=self._HALF)
+        clean, clean_charts, _cr = _run_ff_subdivide(
+            tile, lambda depth, ci_path: _EPS_PASS)
+        gap, gap_charts, _gr = _run_ff_subdivide(
+            tile, lambda depth, ci_path: _EPS_FAIL)
+        self.assertEqual(clean['max_achieved_depth'], 1)
+        self.assertEqual(len(clean_charts), 4)
+        self.assertEqual(gap['max_achieved_depth'], 3)
+        self.assertEqual(len(gap_charts), 0)
 
 
 if __name__ == '__main__':
