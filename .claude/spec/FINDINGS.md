@@ -3544,3 +3544,88 @@ So the reliable rule is about ORDER, not pathspec:
    own commit, so the hook has nothing left to sync when later commits run.
    A pathspec commit made while any fragment is unrendered will absorb every
    derived surface the hook touches, whatever paths you named.
+
+## F063 — a non-deterministic failure cannot be confirmed fixed by a single passing run (2026-07-16, salvaged 2026-08-07)
+
+Salvaged from `.claude/handoff/lensing/META_PLAN.md` before that journal was
+deleted. Recorded here so the hypotheses are not re-derived.
+
+**FALSIFIED — do not act on these.**
+
+1. *"Builds cannot write files — a permission layer denies all writes."* FALSE.
+   The grants in `settings.local.json` were expanded from 1 to 55 rules and the
+   next build failed identically, because SDK agents use
+   `setting_sources=["user"]` and NEVER read project or local settings. Agent
+   permissions come from `AGENT_PERMISSION_MODES` (Phase 2+ is
+   `bypassPermissions`); `settings.local.json` affects only the human's
+   interactive session.
+2. *"The sandbox denying out-of-workspace `/tmp` writes is the root cause, and
+   `ignoreViolations` fixes it."* FALSE, and it was stated as verified off ONE
+   observation. Tested properly the denial is NOT positional (4/4 sequential
+   `/tmp` writes succeed), NOT content-dependent (the byte-for-byte denied
+   command replays clean 3/3), NOT hooks, NOT deny-rules. It is transient and
+   external — "The user doesn't want to take this action right now" is the
+   harness's wording for a refused permission REQUEST — and it struck different
+   coders at different call indices. NOT REPRODUCIBLE ON DEMAND. The
+   `ignoreViolations` change was REVERTED in all three repos (cogwheel 8aa96c2,
+   skill 426f29f, gw c4c4e354): it loosened the sandbox for no demonstrated
+   benefit. Do not reinstate without measuring a denial RATE with and without
+   it over many trials.
+
+**THE LESSON, which generalises well beyond permissions.** If a fix cannot be
+shown to change a RATE, it has not been shown to do anything. A single green
+run after a change is not evidence when the failure was intermittent to begin
+with. This is the same discipline the repo already applies to numerics —
+report a distribution (p50/p90/max) and a worst-case locus, never a bare max —
+applied to infrastructure.
+
+**Operational facts worth keeping from the same journal.**
+
+- Serena SSE orphans hold port 8322 and kill the next launch with "SSE server
+  exited during startup (rc=3)". Diagnose with `lsof -tiTCP:8322`; kill the
+  `--transport sse --port 8322` process, NEVER the session's own
+  `--project-from-cwd` stdio server.
+- SIBLING-GREP EVERY PATH FIX. `_run_hook_script` resolved its script path with
+  two `dirname`s instead of three, yielding `<repo>/.claude/.claude/hooks/...`
+  — a path that never exists — so hooks NEVER fired in cogwheel OR gw, and
+  `hook_trace.log` had never been written anywhere. `gw`'s `_build_env` carried
+  the identical defect (silently loading no `.env`, so `GW_*` vars never
+  reached subagents) and was found only because gw's own agent looked, after
+  one instance had been fixed without grepping for siblings.
+- The zero-write builds were caused by the BRIEF, not the SDK: briefs demanding
+  test-authoring work packages turned Coders into experimentalists who wrote
+  `/tmp` probe scripts and stalled. Measured tool-call profile, cogwheel's
+  failing build vs 24 gw build logs (149 coder calls): gw WRITE 26% / SHELL
+  16% / zero `/tmp` probes, against build1b WRITE 1% / SHELL 60% / four `/tmp`
+  probes. Fixed in `.claude/crew/architect.md`, which now forbids
+  test-authoring WPs.
+
+## F064 — normalising a chart radius by a caustic radius drags the cusp singularity to every radius (2026-08-06, generalised 2026-08-07)
+
+Salvaged from the coordinate-program spine when that file was reduced to
+ordering links. This is the defect the whole coordinate program exists to
+cure, and it has now appeared twice in two different chart classes.
+
+**The pattern.** A chart interpolates on a NORMALISED radius
+`r = |y| / r_caustic(gamma, theta)`. Near a cusp the caustic reach behaves as
+`r_caustic ~ const - c * d**(2/3)` in the angular distance `d` to that cusp.
+Dividing by it therefore injects a `theta**(2/3)` non-smoothness into EVERY
+radius at once, `w`-independently — the singular structure is no longer
+confined to the neighbourhood of the cusp, it is smeared across the tile.
+
+Curing it is a COORDINATE CHANGE, not more nodes. Splining the angular axis in
+`u = d**(2/3)` measured 171x better than arc length on the wedge
+(4.88e-2 -> 2.85e-4 on a 1-D transverse cut). Adding nodes in the bad
+coordinate buys the usual 2-5x per halving and never closes the gap.
+
+**Confirmed instances.** `InteriorWedgeChart` (`r = |y_eig| / r_caustic`,
+four astroid cusps) — measured and cured 2026-08-06. `LobeInteriorChart`
+(`rho_lobe = |y - centroid| / r_deltoid(theta_local)`, THREE deltoid cusps per
+lobe) — predicted, not yet measured; see
+`todo.d/lensing_saddle_forensics.md` item (a).
+
+**The companion defect, which is why it stayed hidden.** A tiler with no eps
+feedback cannot discover that it needs more tiles. Both instances were
+invisible until someone read the eps DISTRIBUTION rather than its max — a
+max-metric summary hid the wedge defect for a full day. Report p50/p90/max and
+the worst-sample LOCUS in any chart diagnostic, never a bare max.

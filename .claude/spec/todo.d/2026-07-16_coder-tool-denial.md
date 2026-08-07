@@ -15,10 +15,10 @@ section: Backlog
   `ClaudeAgentOptions(settings=...)`; allowlisted tools bypass the classifier.
   REMAINING: (1) confirm empirically — next full build should show ~zero bare
   denials on allowlisted tools (compare against the 106/59 baseline via the
-  transcript grep in META_PLAN); (2) after cogwheel proves it, propagate to
+  transcript grep; see FINDINGS F063); (2) after cogwheel proves it, propagate to
   teja-force + gw with the rest of the validated batch; (3) optional
   defense-in-depth: a single delayed orchestrator retry on the bare-denial
   signature (the classifier's own reason text says "usually transient —
   retrying often succeeds") for tools that stay classifier-exposed. Full
-  diagnosis with the decompiled fail-closed path: META_PLAN + the deep-dive
+  diagnosis with the decompiled fail-closed path: FINDINGS F063 + the deep-dive
   report (2026-07-16).

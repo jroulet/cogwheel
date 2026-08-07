@@ -3343,7 +3343,7 @@ class BuildOrchestrator:
         """True if a stream message carries the bare classifier denial.
 
         A REAL denial is a short standalone tool_result; file/grep results
-        that merely QUOTE the sentence (it appears in TODO/META_PLAN) are
+        that merely QUOTE the sentence (it appears in TODO) are
         long — the length guard keeps them from tripping the retry.
         """
         for block in getattr(message, "content", None) or []:

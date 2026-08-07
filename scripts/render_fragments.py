@@ -357,19 +357,85 @@ def render_completed(frag_dir):
 # current section/subsection.
 
 
+def _frag_name(fname):
+    """Fragment stem, which is what a ``[[link]]`` and ``depends_on:`` use."""
+    return fname[:-3] if fname.endswith(".md") else fname
+
+
+def _topo_sort_items(items):
+    """Order ``(fname, body, deps)`` so dependencies render before dependents.
+
+    Kahn's algorithm with the ready set kept sorted, so the result is
+    deterministic and a fragment declaring no dependency keeps its
+    alphabetical position. A dependency naming a fragment outside this
+    section (typically one already moved to ``completed.d``) is treated as
+    satisfied -- ordering constrains what is still open, not what is done.
+
+    This is what lets ordering live ON the work item instead of in a separate
+    sequencing document. The previous arrangement kept a spine file that
+    restated each fragment it ordered, so the same fact lived twice and went
+    stale in both (2026-08-07).
+    """
+    by_name = {_frag_name(f): (f, b, deps) for f, b, deps in items}
+    names = set(by_name)
+    indeg = {n: 0 for n in names}
+    dependents = {n: set() for n in names}
+    for name, (_f, _b, deps) in by_name.items():
+        for dep in deps:
+            if dep in names and name not in dependents[dep]:
+                dependents[dep].add(name)
+                indeg[name] += 1
+
+    ready = sorted(n for n in names if indeg[n] == 0)
+    ordered = []
+    while ready:
+        name = ready.pop(0)
+        ordered.append(name)
+        for dependent in sorted(dependents[name]):
+            indeg[dependent] -= 1
+            if indeg[dependent] == 0:
+                ready.append(dependent)
+                ready.sort()
+
+    if len(ordered) != len(names):
+        stuck = sorted(names - set(ordered))
+        print(f"  WARNING: depends_on cycle among [{', '.join(stuck)}] — "
+              "these were rendered in filename order instead. Break the "
+              "cycle; a work item cannot depend on itself transitively.")
+        ordered.extend(stuck)
+
+    return [(by_name[n][0], by_name[n][1]) for n in ordered]
+
+
 def render_todo(frag_dir):
     _, template = load_seed(frag_dir)
     fragments = load_fragments(frag_dir)
     if not template:
         return None
 
-    # Build item lookup: (section, subsection) -> [(fname, body)]
+    # Every fragment name that a `depends_on:` may legitimately reference:
+    # still-open work, or work already closed out (a satisfied dependency).
+    known = {_frag_name(f) for _m, _b, f in fragments}
+    known |= {_frag_name(f)
+              for _m, _b, f in load_fragments(".claude/spec/completed.d")}
+
+    # Build item lookup: (section, subsection) -> [(fname, body, deps)]
     items_by_loc = {}
     for meta, body, fname in fragments:
         key = (meta.get("section", ""), meta.get("subsection", ""))
-        items_by_loc.setdefault(key, []).append((fname, body))
+        deps = meta.get("depends_on", [])
+        if isinstance(deps, str):
+            deps = [deps] if deps.strip() else []
+        for dep in deps:
+            if dep not in known:
+                print(f"  WARNING: {fname} declares depends_on: {dep!r}, "
+                      "which names no fragment in todo.d/ or completed.d/ — "
+                      "typo, or the dependency was deleted rather than "
+                      "completed.")
+        items_by_loc.setdefault(key, []).append((fname, body, deps))
     for key in items_by_loc:
         items_by_loc[key].sort(key=lambda x: x[0])
+        items_by_loc[key] = _topo_sort_items(items_by_loc[key])
 
     lines = template.splitlines(keepends=True)
     output = [

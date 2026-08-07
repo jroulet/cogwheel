@@ -1,10 +1,11 @@
 ---
 section: Backlog
+depends_on: [lensing_exterior_followup_four_items]
 ---
 
 - **SADDLE FORENSICS: audit the macro-saddle charts for the same defects found
   in the astroid interior** `[→ spec]` — owner-directed 2026-08-06. Sequenced
-  after the exterior work in [[lensing_coordinate_program_spine]]. Six
+  after the exterior work (see this fragment's `depends_on:`). Six
   questions; what is already established is marked.
 
   a. **Are the deltoid interior charts similarly ill-adapted?** VERY LIKELY.

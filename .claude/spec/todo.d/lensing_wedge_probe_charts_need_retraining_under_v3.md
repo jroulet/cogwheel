@@ -1,5 +1,6 @@
 ---
 section: Backlog
+depends_on: [2026-08-07_subdivision-recursion-wedge-v3-r-caustic]
 ---
 
 - **EVERY WEDGE CHART BUILT BEFORE 2026-08-07 IS UNLOADABLE, SO ANY

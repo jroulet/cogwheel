@@ -124,12 +124,22 @@ shallow:
 - A brief contains: mission, in/out scope fences, measured facts the agents
   cannot obtain themselves (inline, ~15 lines), build-level acceptance, and
   constraints. It does NOT contain WP decompositions (the Architect owns
-  decomposition), history/narrative (reference files instead), or pointers
-  to `.claude/handoff/**/META_PLAN.md` (driver journal, never agent
-  context).
-- Live documents (META_PLAN, plans, configs, briefs) state CURRENT truth
-  only: rewrite superseded content in place — git is the archive. Never
-  append corrections atop stale entries.
+  decomposition) or history/narrative (reference files instead).
+- Every quantitative "measured fact" in a brief MUST carry the SHA it was
+  measured at, and the Architect re-probes any whose SHA is not an ancestor
+  of the build's HEAD. A stale premise is otherwise unfalsifiable in-build:
+  no role is chartered to re-measure one, and an acceptance test that pins
+  only the CORRECTED value passes identically whether or not the correction
+  was needed (2026-08-07, `todo.d/lensing_brief_premises_are_unverified.md`).
+- ONE level of work tracking: `.claude/spec/todo.d/` fragments, rendered to
+  `TODO.md`. Ordering lives ON the fragment as `depends_on: [...]` and the
+  renderer topologically sorts. Do NOT create a sequencing document, a
+  meta-plan, or a driver journal that lists work — every such file becomes a
+  parallel source that drifts. The 2758-line `META_PLAN.md` was deleted
+  2026-08-07 after 11 days stale; its durable content is FINDINGS F063.
+- Live documents (plans, configs, briefs) state CURRENT truth only: rewrite
+  superseded content in place — git is the archive. Never append corrections
+  atop stale entries.
 - NO engine-run launch (campaign, pilot, sweep, probe) without a cost
   estimate computed first — unit count x measured per-unit cost, quoted
   in the launch message. Applies to every config change, including

@@ -1,5 +1,6 @@
 ---
 section: Backlog
+depends_on: [lensing_exterior_should_chart_in_polar_not_sd]
 ---
 
 - **EXTERIOR FOLLOW-UP: ghost label, cusp exclusion, node-budget test, ppGO

@@ -27,12 +27,12 @@ Tag conventions:
   `ClaudeAgentOptions(settings=...)`; allowlisted tools bypass the classifier.
   REMAINING: (1) confirm empirically — next full build should show ~zero bare
   denials on allowlisted tools (compare against the 106/59 baseline via the
-  transcript grep in META_PLAN); (2) after cogwheel proves it, propagate to
+  transcript grep; see FINDINGS F063); (2) after cogwheel proves it, propagate to
   teja-force + gw with the rest of the validated batch; (3) optional
   defense-in-depth: a single delayed orchestrator retry on the bare-denial
   signature (the classifier's own reason text says "usually transient —
   retrying often succeeds") for tools that stay classifier-exposed. Full
-  diagnosis with the decompiled fail-closed path: META_PLAN + the deep-dive
+  diagnosis with the decompiled fail-closed path: FINDINGS F063 + the deep-dive
   report (2026-07-16).
 
 - **Declare and modernize the Claude Agent SDK dependency** `[housekeeping]` — the
@@ -268,8 +268,8 @@ Tag conventions:
   - assert every declared envelope label is stamped by some producer;
   - assert every chart class is constructed by the training path.
 
-  RELATED STANDING REQUIREMENT for the coordinate program
-  ([[lensing_coordinate_program_spine]]): every step retires what it replaces
+  RELATED STANDING REQUIREMENT for the coordinate program: every step
+  retires what it replaces
   — no `(s, d)` bridge left reachable after the exterior re-chart, no
   arc-length map left in the wedge path (done 2026-08-07). A grep for retired
   coordinate machinery should return nothing reachable. These guards are how
@@ -880,59 +880,6 @@ Tag conventions:
     violation and a future drift bug, not an implementation detail.
 
 
-- **PROGRAM SPINE: a parsimonious patchwork of coordinates for the whole
-  chartable plane** `[→ spec]` — owner-directed 2026-08-06, to be carried
-  through autonomously.
-
-  THIS FILE HOLDS ORDER ONLY. Every step is a link to the fragment that owns
-  its detail, with no restatement of that fragment's content. That rule is not
-  stylistic: this file previously summarised its linked fragments in
-  parentheses, so the same fact lived in two places — and when
-  `r_caustic`'s "0.32% error at gamma=0.9" went stale, it went stale in BOTH,
-  and the duplicate fed a build brief that scoped a work package around a
-  defect that no longer existed ([[lensing_brief_premises_are_unverified]]).
-  If you want to know what a step involves, open its fragment.
-
-  GOAL: for the union of the (cusp-excluded, tube-excluded) regions, one
-  well-posed coordinate per region, each adapted to that region's actual
-  singular structure, with adaptive subdivision everywhere and no orphaned
-  machinery left behind.
-
-  ## The lesson that generalises
-
-  Twice now the same defect: a chart's radius is NORMALISED by a caustic
-  radius that carries a cusp's `theta^(2/3)`, which drags the singularity to
-  EVERY radius, `w`-independently. Curing it is a coordinate change, not more
-  nodes. And twice: a tiler with no eps feedback cannot discover it needs more
-  tiles, so the defect stays invisible until someone reads the eps
-  DISTRIBUTION rather than its max.
-
-  ## Sequence
-
-  1. DONE (2026-08-06) — [[lensing_wedge_angular_axis_is_cusp_singular]]
-  2. DONE (2026-08-07) —
-     [[2026-08-07_subdivision-recursion-wedge-v3-r-caustic]]
-     (re-measure the probe figures first:
-     [[lensing_wedge_probe_charts_need_retraining_under_v3]])
-  3. EXTERIOR — [[lensing_exterior_should_chart_in_polar_not_sd]]
-  4. EXTERIOR follow-ups — [[lensing_exterior_followup_four_items]]
-  5. SADDLE FORENSICS — [[lensing_saddle_forensics]]
-  6. Then, and only then, the full-gamma training sweep —
-     [[lensing_production_training_covers_four_percent_of_gamma]]
-
-  Cross-cutting, not sequenced:
-  [[lensing_d2_fold_unexploited_in_three_of_four_regions]] (composes with step
-  3), [[lensing_built_but_unused_machinery_guards]] (the standing
-  leave-nothing-dangling requirement, made checkable),
-  [[lensing_training_path_cannot_be_run_per_region]] (why every step needs
-  hand-rolled probes).
-
-  ACCEPTANCE for the program: every chartable region has a coordinate adapted
-  to its own singular structure; every tiler subdivides on eps failure; cusp
-  and tube regions are explicitly carved and served by a NAMED rung; and a
-  grep for retired coordinate machinery returns nothing reachable.
-
-
 - **MASTER COVERAGE MAP — every held-out region and what closes it**
   `[→ spec]` — the index for the zero-quadrature goal. Individual items have
   their own fragments; this is the map that says whether the enumeration is
@@ -1034,6 +981,119 @@ Tag conventions:
   The expensive full-box campaign stays last (owner ruling 2026-07-20: train exactly
   once, on the final engine and final chart set). The coarse census is done; the
   campaign is not.
+
+
+- **RETIRE `(s, d)` FOR THE EXTERIOR BULK — chart in the tiler's OWN polar
+  frame; the bridge is pure loss** `[→ spec]` — Professor review (Fable tier,
+  owner-authorised) + measurement, 2026-08-06. Supersedes the open direction in
+  [[lensing_farfield_sd_coordinate_degenerates]], which measured the symptom
+  correctly and left the fix open.
+
+  ## The decisive analytic fact
+
+  At fixed finite `w`, the kernel-sum residual
+  `E(y) = F - sum_{a real} H_a exp(i w tau_a)` is **REAL-ANALYTIC on the whole
+  open exterior except cusp neighbourhoods**:
+
+  - `F(w; y)` is entire in `y` (the diffraction integral has no
+    source-position singularity);
+  - the two exterior real images are SPECTATORS at the fold — the pair that
+    merges there is the GHOST pair becoming real INSIDE — so `x_a(y)`,
+    `tau_a(y)`, `H_a(y)` continue analytically ACROSS the fold and across the
+    principal axes;
+  - only at the CUSPS does a subtracted kernel diverge, where one exterior
+    image joins the three-image merger.
+
+  **So there is no hidden fractional power outside, and the interior analogy
+  does NOT transfer.** The interior's `theta^(2/3)` was a singularity of the
+  coordinate MAP (the `r/r_caustic(theta)` normalisation imported the cusp
+  power at every radius, `w`-independently). The exterior maps contain no such
+  power; the `d^(3/2)` lives only in the ASYMPTOTIC REPRESENTATION of an object
+  that is analytic at finite `w`.
+
+  ## Therefore the failure is purely that `(s, d)` is not single-valued
+
+  Measured earlier: foot `tie_ratio` reaches **1.000** on a generic ray at
+  `|d| = 1.25`, INSIDE the charted `|d| <= 1.22`; `s` amplifies position error
+  ~2.4x. A spline over a discontinuous coordinate produces eps of order the
+  jump — consistent with the observed max eps 64.2 and with subdivision
+  children failing FARTHER OUT than the tiles that survived.
+
+  ## The fix is to delete a conversion, not to invent a coordinate
+
+  `_build_farfield_chart` already lays tiles out in origin-centred eigenframe
+  polar `(rho, theta_c)` and THEN bridges to `(s, d)` via
+  `_farfield_box_to_smooth`. Polar is single-valued, well-conditioned, respects
+  both reflection symmetries, and every window's object is analytic in it away
+  from cusps. **One spatial coordinate serves all three windows** — the LABELS
+  are band-split in `w`, the COORDINATE need not be.
+
+  ## The ghost-delay proposal is REFUTED — do not retry
+
+  The driver proposed `((Im tau_g)^(2/3), Re tau_g)` as the exterior chart.
+  Measured against it:
+
+  - **AXES**: `Im tau_g ~ 1.74 * |y2|` — a C0 KINK along both principal axes
+    (log-log slope 1.000, even under `y2 -> -y2`). The driver's "constant to
+    2%" fold scaling was measured on a GENERIC ray and does not generalise: at
+    `|y| = 1.9`, `phi = 0.25 deg`, the point is ~1.1 from the caustic but
+    `Im tau_g` reads as `d ~ 0.08` — a **factor-14 misread**. The axes are the
+    anti-Stokes lines of the ghost expansion; any ghost-built coordinate
+    degenerates exactly there.
+  - **CUSPS**: the `Im tau_g = 0` set has a TRIPLE POINT at each cusp (two fold
+    arcs plus the axis ray), so no `(f(Im), Re)` pair is injective near a cusp.
+  - **FOLD**: `d(Re, Im)/d(s, d) ~ d^(1/2) -> 0` at the caustic, so the raw
+    pair collapses at the inner edge.
+  - Conditioning the driver's table missed by not sampling close enough to an
+    axis: `cond` reaches **21.7 at phi = 85.5 deg**, worsening with distance.
+
+  Its correct role is as the REGIME / GATE field — which the code already uses
+  it for — and optionally as a fold-adapted coordinate for the thin near-fold
+  TUBE, where `((Im tau_g)^(2/3), Re tau_g)` is the Chester-Friedman-Ursell
+  pair and is foot-free (a genuine but separate opportunity, since the tube's
+  foot is unique and `(s, d)` already works there).
+
+  ## SEPARATE FINDING — `FARFIELD_KERNEL_SUM_MINUS_GHOST` is never stamped
+
+  `_build_farfield_chart` passes `definition=FARFIELD_KERNEL_SUM`
+  UNCONDITIONALLY (`surrogate_training.py:2891`; docstring ~2820: "always
+  trained on the exterior far-field kernel-sum label"), and
+  `_FARFIELD_ENVELOPE_DEFINITION = FARFIELD_KERNEL_SUM` is the persisted
+  default. The MINUS_GHOST and DIFFRACTIVE tags exist only in the label/serve
+  algebra and in tests. So every shipping exterior chart carries the LIVE ghost
+  across its whole window.
+
+  And the design, if wired, would be nearly inert in band 0: the decay gate
+  `_GHOST_DECAY_IM_THRESHOLD = 0.4` admits subtraction only where
+  `Im tau_g >= 0.4`, i.e. `d >~ 0.75` by the measured fold scaling — where the
+  ghost is already suppressed by `exp(-3.6)` at `w_max = 8.93`. The "smooth
+  across the fold" benefit the label was designed for is unrealised.
+
+  NOT a correctness defect (the gates are deliberately biased to refuse) and
+  NOT a reason to move a label boundary — the live-ghost content is smooth but
+  oscillatory, bounded at a few cycles per tile at `w <= 8.93`, so it is a
+  node-budget item. But the gap between the designed and the wired behaviour
+  should be closed or documented.
+
+  ## Work
+
+  1. Re-chart the exterior bulk in `(rho, theta_c)`; delete the
+     `_farfield_box_to_smooth` bridge, the arc-length maps, and the
+     medial-axis guard for the bulk path. New `axis_schema` tag; stale `(s,d)`
+     artifacts hard-refuse.
+  2. Keep `(s, d)` for the thin near-fold tube only.
+  3. Put tile edges ON the principal axes (kink-free by symmetry).
+  4. Add an explicit CUSP CARVE-OUT sized by the separation-gate contour —
+     measured ~0.2 y-units from the cusp on-axis at `gamma ~ 0.5`, which is
+     substantially WIDER than the Pearcey arm's certified reach
+     (`_CUSP_ARM_COVERAGE = 0.07` image-theta rad). The exterior tiler
+     currently has NO cusp-ball exclusion, so cusp-adjacent tile corners fail
+     eps by construction and burn subdivision budget.
+  5. Do NOT move any label boundary. Document the MINUS_GHOST gap above.
+
+  ACCEPTANCE: exterior charts per band fall well below 57 at the SAME 1e-3
+  bar; no chart's eps is dominated by a coordinate discontinuity; a query at a
+  former foot-tie location serves to tolerance.
 
 
 - **THE D2 REFLECTION FOLD IS EXPLOITED IN ONLY ONE OF FOUR REGIONS — 4x more
@@ -1182,119 +1242,6 @@ Tag conventions:
   (3) polar beats `(s, d)` on eps at matched node count and needs materially
   fewer charts than 57/band; (4) regions beyond the engine's reach report a
   ppGO-served coverage class, not a gap.
-
-
-- **RETIRE `(s, d)` FOR THE EXTERIOR BULK — chart in the tiler's OWN polar
-  frame; the bridge is pure loss** `[→ spec]` — Professor review (Fable tier,
-  owner-authorised) + measurement, 2026-08-06. Supersedes the open direction in
-  [[lensing_farfield_sd_coordinate_degenerates]], which measured the symptom
-  correctly and left the fix open.
-
-  ## The decisive analytic fact
-
-  At fixed finite `w`, the kernel-sum residual
-  `E(y) = F - sum_{a real} H_a exp(i w tau_a)` is **REAL-ANALYTIC on the whole
-  open exterior except cusp neighbourhoods**:
-
-  - `F(w; y)` is entire in `y` (the diffraction integral has no
-    source-position singularity);
-  - the two exterior real images are SPECTATORS at the fold — the pair that
-    merges there is the GHOST pair becoming real INSIDE — so `x_a(y)`,
-    `tau_a(y)`, `H_a(y)` continue analytically ACROSS the fold and across the
-    principal axes;
-  - only at the CUSPS does a subtracted kernel diverge, where one exterior
-    image joins the three-image merger.
-
-  **So there is no hidden fractional power outside, and the interior analogy
-  does NOT transfer.** The interior's `theta^(2/3)` was a singularity of the
-  coordinate MAP (the `r/r_caustic(theta)` normalisation imported the cusp
-  power at every radius, `w`-independently). The exterior maps contain no such
-  power; the `d^(3/2)` lives only in the ASYMPTOTIC REPRESENTATION of an object
-  that is analytic at finite `w`.
-
-  ## Therefore the failure is purely that `(s, d)` is not single-valued
-
-  Measured earlier: foot `tie_ratio` reaches **1.000** on a generic ray at
-  `|d| = 1.25`, INSIDE the charted `|d| <= 1.22`; `s` amplifies position error
-  ~2.4x. A spline over a discontinuous coordinate produces eps of order the
-  jump — consistent with the observed max eps 64.2 and with subdivision
-  children failing FARTHER OUT than the tiles that survived.
-
-  ## The fix is to delete a conversion, not to invent a coordinate
-
-  `_build_farfield_chart` already lays tiles out in origin-centred eigenframe
-  polar `(rho, theta_c)` and THEN bridges to `(s, d)` via
-  `_farfield_box_to_smooth`. Polar is single-valued, well-conditioned, respects
-  both reflection symmetries, and every window's object is analytic in it away
-  from cusps. **One spatial coordinate serves all three windows** — the LABELS
-  are band-split in `w`, the COORDINATE need not be.
-
-  ## The ghost-delay proposal is REFUTED — do not retry
-
-  The driver proposed `((Im tau_g)^(2/3), Re tau_g)` as the exterior chart.
-  Measured against it:
-
-  - **AXES**: `Im tau_g ~ 1.74 * |y2|` — a C0 KINK along both principal axes
-    (log-log slope 1.000, even under `y2 -> -y2`). The driver's "constant to
-    2%" fold scaling was measured on a GENERIC ray and does not generalise: at
-    `|y| = 1.9`, `phi = 0.25 deg`, the point is ~1.1 from the caustic but
-    `Im tau_g` reads as `d ~ 0.08` — a **factor-14 misread**. The axes are the
-    anti-Stokes lines of the ghost expansion; any ghost-built coordinate
-    degenerates exactly there.
-  - **CUSPS**: the `Im tau_g = 0` set has a TRIPLE POINT at each cusp (two fold
-    arcs plus the axis ray), so no `(f(Im), Re)` pair is injective near a cusp.
-  - **FOLD**: `d(Re, Im)/d(s, d) ~ d^(1/2) -> 0` at the caustic, so the raw
-    pair collapses at the inner edge.
-  - Conditioning the driver's table missed by not sampling close enough to an
-    axis: `cond` reaches **21.7 at phi = 85.5 deg**, worsening with distance.
-
-  Its correct role is as the REGIME / GATE field — which the code already uses
-  it for — and optionally as a fold-adapted coordinate for the thin near-fold
-  TUBE, where `((Im tau_g)^(2/3), Re tau_g)` is the Chester-Friedman-Ursell
-  pair and is foot-free (a genuine but separate opportunity, since the tube's
-  foot is unique and `(s, d)` already works there).
-
-  ## SEPARATE FINDING — `FARFIELD_KERNEL_SUM_MINUS_GHOST` is never stamped
-
-  `_build_farfield_chart` passes `definition=FARFIELD_KERNEL_SUM`
-  UNCONDITIONALLY (`surrogate_training.py:2891`; docstring ~2820: "always
-  trained on the exterior far-field kernel-sum label"), and
-  `_FARFIELD_ENVELOPE_DEFINITION = FARFIELD_KERNEL_SUM` is the persisted
-  default. The MINUS_GHOST and DIFFRACTIVE tags exist only in the label/serve
-  algebra and in tests. So every shipping exterior chart carries the LIVE ghost
-  across its whole window.
-
-  And the design, if wired, would be nearly inert in band 0: the decay gate
-  `_GHOST_DECAY_IM_THRESHOLD = 0.4` admits subtraction only where
-  `Im tau_g >= 0.4`, i.e. `d >~ 0.75` by the measured fold scaling — where the
-  ghost is already suppressed by `exp(-3.6)` at `w_max = 8.93`. The "smooth
-  across the fold" benefit the label was designed for is unrealised.
-
-  NOT a correctness defect (the gates are deliberately biased to refuse) and
-  NOT a reason to move a label boundary — the live-ghost content is smooth but
-  oscillatory, bounded at a few cycles per tile at `w <= 8.93`, so it is a
-  node-budget item. But the gap between the designed and the wired behaviour
-  should be closed or documented.
-
-  ## Work
-
-  1. Re-chart the exterior bulk in `(rho, theta_c)`; delete the
-     `_farfield_box_to_smooth` bridge, the arc-length maps, and the
-     medial-axis guard for the bulk path. New `axis_schema` tag; stale `(s,d)`
-     artifacts hard-refuse.
-  2. Keep `(s, d)` for the thin near-fold tube only.
-  3. Put tile edges ON the principal axes (kink-free by symmetry).
-  4. Add an explicit CUSP CARVE-OUT sized by the separation-gate contour —
-     measured ~0.2 y-units from the cusp on-axis at `gamma ~ 0.5`, which is
-     substantially WIDER than the Pearcey arm's certified reach
-     (`_CUSP_ARM_COVERAGE = 0.07` image-theta rad). The exterior tiler
-     currently has NO cusp-ball exclusion, so cusp-adjacent tile corners fail
-     eps by construction and burn subdivision budget.
-  5. Do NOT move any label boundary. Document the MINUS_GHOST gap above.
-
-  ACCEPTANCE: exterior charts per band fall well below 57 at the SAME 1e-3
-  bar; no chart's eps is dominated by a coordinate discontinuity; a query at a
-  former foot-tie location serves to tolerance.
 
 
 - **`FarFieldChart` IS NOT A FAR-FIELD OBJECT — the name spans two regimes**
@@ -1697,65 +1644,6 @@ Tag conventions:
   not a repair of `InteriorWedgeChart`.
 
 
-- **`train()` COVERS ONE 0.04-WIDE GAMMA BAND PER PARITY — about 4% of the
-  prior box** `[→ spec]` — measured 2026-08-06.
-
-  `PriorBox.from_prior_classes(f_lo_hz=0.16, f_hi_hz=0.40).gamma_range` is
-  `(0.0, 1.6)`. `_gamma_band(box, parity, halfwidth)` returns a band CENTRED
-  in the parity's sub-range and `halfwidth` wide — its docstring says "A
-  narrow gamma band", so this is deliberate, not a bug in the function:
-
-      parity +1: sub-range (0.00, 0.99), centre 0.495 -> (0.475, 0.515)
-      parity -1: sub-range (1.01, 1.60), centre 1.305 -> (1.285, 1.325)
-
-  With the production `gamma_band_halfwidth=0.02` that is **0.04 of 0.99
-  (4%)** for positive parity and **0.04 of 0.59 (7%)** for the macro saddle.
-  `train()` loops `for parity in (1, -1)` and calls `_gamma_band` ONCE per
-  parity, so there is no outer sweep: everything outside those two slivers is
-  simply never trained.
-
-  ## Why this went unnoticed
-
-  `scripts/train_surrogate_production.py` is named "production" and prints
-  "PRODUCTION SURROGATE TRAINING", so its artifact reads as a full-domain
-  surrogate. The narrowness is visible only by evaluating `_gamma_band`
-  against the box. The 2026-08-05 run that died after 2h24m was not 60%
-  through the domain — it was ~60% through ONE BAND of a 4% slice.
-
-  ## Cost of actual coverage (measured, not estimated)
-
-  Per band on the wedge path: ~42 min (tube 1.2 + exterior 39.4 + interior
-  1.8; the interior figure is measured, the exterior from the dead run's
-  timestamps). Tiling the parity sub-ranges at 0.04:
-
-      positive parity  0.99 / 0.04 ~ 25 bands
-      macro saddle     0.59 / 0.04 ~ 15 bands
-      TOTAL            ~40 bands x 42 min ~ 28 h
-
-  `stable_gamma_bands` may bisect further near the parity wall
-  (`gamma -> 1`), so treat 28 h as a floor. This is a WEEKEND run, not an
-  overnight one, and it wants a resumable driver and a box that will not be
-  OOM-killed by another user (the 2026-08-05 death).
-
-  ## Work
-
-  - Decide the intended contract: is `train()` meant to be called REPEATEDLY
-    (once per band, with the caller sweeping gamma) and the artifacts merged,
-    or should it sweep internally? The `_load_or_build` resume path and the
-    `label=f'{label}_b{i_band}'` naming suggest the former was intended, but
-    nothing in `scripts/train_surrogate_production.py` does the sweep.
-  - Whichever it is, make the narrowness IMPOSSIBLE TO MISS: the training
-    report should record the gamma coverage actually trained as a FRACTION of
-    the box, and `serve` should refuse (not silently extrapolate) outside it.
-  - Only then run the full sweep, with a cost quoted from the measured 42
-    min/band.
-
-  ACCEPTANCE: the training report states trained-gamma coverage as a fraction
-  of `box.gamma_range`; a serve query at a gamma outside every trained band
-  refuses with a named error rather than returning a value; and the pilot
-  artifact is labelled as a pilot.
-
-
 - ~~**Normalize the far-field `d` axis by curvature radius**~~ `[RESOLVED]` —
   Evaluated 2026-08-03 (build `eval_d_norm`). Rejected: wrong physics (Airy
   transition is ξ not d/R_c), wrong chart (far-field operates at d >> R_c),
@@ -1841,7 +1729,7 @@ Tag conventions:
 
 - **SADDLE FORENSICS: audit the macro-saddle charts for the same defects found
   in the astroid interior** `[→ spec]` — owner-directed 2026-08-06. Sequenced
-  after the exterior work in [[lensing_coordinate_program_spine]]. Six
+  after the exterior work (see this fragment's `depends_on:`). Six
   questions; what is already established is marked.
 
   a. **Are the deltoid interior charts similarly ill-adapted?** VERY LIKELY.
@@ -1905,6 +1793,65 @@ Tag conventions:
   path. The brief said "transcribe the lobe path"; the plan gate then trimmed
   the cusp alignment the lobe actually has. So the lobe is better than the
   wedge was, and still carries the normalised-radius disease.
+
+
+- **`train()` COVERS ONE 0.04-WIDE GAMMA BAND PER PARITY — about 4% of the
+  prior box** `[→ spec]` — measured 2026-08-06.
+
+  `PriorBox.from_prior_classes(f_lo_hz=0.16, f_hi_hz=0.40).gamma_range` is
+  `(0.0, 1.6)`. `_gamma_band(box, parity, halfwidth)` returns a band CENTRED
+  in the parity's sub-range and `halfwidth` wide — its docstring says "A
+  narrow gamma band", so this is deliberate, not a bug in the function:
+
+      parity +1: sub-range (0.00, 0.99), centre 0.495 -> (0.475, 0.515)
+      parity -1: sub-range (1.01, 1.60), centre 1.305 -> (1.285, 1.325)
+
+  With the production `gamma_band_halfwidth=0.02` that is **0.04 of 0.99
+  (4%)** for positive parity and **0.04 of 0.59 (7%)** for the macro saddle.
+  `train()` loops `for parity in (1, -1)` and calls `_gamma_band` ONCE per
+  parity, so there is no outer sweep: everything outside those two slivers is
+  simply never trained.
+
+  ## Why this went unnoticed
+
+  `scripts/train_surrogate_production.py` is named "production" and prints
+  "PRODUCTION SURROGATE TRAINING", so its artifact reads as a full-domain
+  surrogate. The narrowness is visible only by evaluating `_gamma_band`
+  against the box. The 2026-08-05 run that died after 2h24m was not 60%
+  through the domain — it was ~60% through ONE BAND of a 4% slice.
+
+  ## Cost of actual coverage (measured, not estimated)
+
+  Per band on the wedge path: ~42 min (tube 1.2 + exterior 39.4 + interior
+  1.8; the interior figure is measured, the exterior from the dead run's
+  timestamps). Tiling the parity sub-ranges at 0.04:
+
+      positive parity  0.99 / 0.04 ~ 25 bands
+      macro saddle     0.59 / 0.04 ~ 15 bands
+      TOTAL            ~40 bands x 42 min ~ 28 h
+
+  `stable_gamma_bands` may bisect further near the parity wall
+  (`gamma -> 1`), so treat 28 h as a floor. This is a WEEKEND run, not an
+  overnight one, and it wants a resumable driver and a box that will not be
+  OOM-killed by another user (the 2026-08-05 death).
+
+  ## Work
+
+  - Decide the intended contract: is `train()` meant to be called REPEATEDLY
+    (once per band, with the caller sweeping gamma) and the artifacts merged,
+    or should it sweep internally? The `_load_or_build` resume path and the
+    `label=f'{label}_b{i_band}'` naming suggest the former was intended, but
+    nothing in `scripts/train_surrogate_production.py` does the sweep.
+  - Whichever it is, make the narrowness IMPOSSIBLE TO MISS: the training
+    report should record the gamma coverage actually trained as a FRACTION of
+    the box, and `serve` should refuse (not silently extrapolate) outside it.
+  - Only then run the full sweep, with a cost quoted from the measured 42
+    min/band.
+
+  ACCEPTANCE: the training report states trained-gamma coverage as a fraction
+  of `box.gamma_range`; a serve query at a gamma outside every trained band
+  refuses with a named error rather than returning a value; and the pilot
+  artifact is labelled as a pilot.
 
 
 - **ELEVEN SERVING-LADDER / CERTIFICATION GUARDS ARE RED AT HEAD — and have

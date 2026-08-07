@@ -77,7 +77,7 @@ async def _run_hook_script(script_name: str, hook_input, _tool_use_id, _context)
     # retry with the Serena equivalent. Note this was NOT the cause of the
     # 2026-07-16 zero-write builds; that was a role-scoping error in the plans
     # (Coder WPs must not author tests or run measurement campaigns — see
-    # .claude/crew/architect.md and META_PLAN).
+    # .claude/crew/architect.md and FINDINGS F063).
     project_root = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     script = os.path.join(project_root, ".claude", "hooks", script_name)
@@ -700,7 +700,7 @@ async def build_agent_options(
     # coders hit it repeatedly, so the trigger is something the probe lacks —
     # a large system prompt (crew prompt + pre-read spec files + full WP text),
     # max_turns=90, and 7-10 prior tool calls. Suspect session depth/size, not
-    # the sandbox. See META_PLAN; scratchpad/denial_rate.py is the harness.
+    # the sandbox. See FINDINGS F063; scratchpad/denial_rate.py is the harness.
     sandbox: SandboxSettings = {
         "enabled": True,
         "autoAllowBashIfSandboxed": True,

@@ -1,5 +1,6 @@
 ---
 section: Backlog
+depends_on: [lensing_saddle_forensics]
 ---
 
 - **`train()` COVERS ONE 0.04-WIDE GAMMA BAND PER PARITY — about 4% of the

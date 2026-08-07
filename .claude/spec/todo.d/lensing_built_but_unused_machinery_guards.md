@@ -21,8 +21,8 @@ section: Backlog
   - assert every declared envelope label is stamped by some producer;
   - assert every chart class is constructed by the training path.
 
-  RELATED STANDING REQUIREMENT for the coordinate program
-  ([[lensing_coordinate_program_spine]]): every step retires what it replaces
+  RELATED STANDING REQUIREMENT for the coordinate program: every step
+  retires what it replaces
   — no `(s, d)` bridge left reachable after the exterior re-chart, no
   arc-length map left in the wedge path (done 2026-08-07). A grep for retired
   coordinate machinery should return nothing reachable. These guards are how
