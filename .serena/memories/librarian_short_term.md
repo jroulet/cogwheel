@@ -1,34 +1,30 @@
 # Librarian Short-Term Observations
 
-## 2026-08-07 wedge probe v3 + m_lens_range post-commit sync
+## 2026-08-07 wedge probe NPZ eps fix + completed.d update post-commit sync
 
-**Scope**: Two pending commits from sync_issues.json:
-- `6144378` — `feat(lensing): m_lens_range override for train()/PriorBox` (surrogate_training.py)
-- `a996316` — `scripts: wedge probe to single mass stratum (v2-equivalent scope)`
+**Scope**: One pending commit from sync_issues.json:
+- `ab48b256` — `scripts+spec: wedge probe reads NPZ eps; record single-stratum result`
 
-**Findings**:
-- `6144378` was already fully processed by the previous librarian session (commit `c3277b6`
-  "docs: post-commit sync (m_lens_range — all surfaces current, no-op)"). That commit
-  updated the short-term memory but NOT `librarian.json` (still showed `b1b4570`).
-- `a996316` is a one-line parameter addition (`m_lens_range=(10.0, 15.8)`) to
-  `scripts/probe_wedge_v3.py`. Scripts-only, no new disk artifacts, no cogwheel/ public
-  API change. SCRIPTS/ REWRITE NO-OP RULE applies — no doc surfaces affected.
-- `sync_derived_docs.py` ran cleanly. Only stray diff was `tidy_advisory.json` (reverted).
-  Consumer-graph warnings for `lens_amplification_surrogate` test-only callers recurred
-  (5th+ time) — already escalated via
-  `todo.d/surrogate_contract_test_consumer_warning.md`, no further action.
-- `sync_issues.json` was already deleted before this session started.
-- `librarian.json` was already updated to `c3277b6` by some prior hook/process;
-  just committed that update.
+**Changed files in commit**:
+- `scripts/probe_wedge_v3.py` — fixed eps collection to read from NPZ provenance on disk
+  rather than in-memory chart.provenance (which loses heldout_eps after load). Scripts-only,
+  reads existing NPZ files, no new disk artifacts. SCRIPTS/ REWRITE NO-OP RULE applies.
+- `.claude/spec/completed.d/2026-08-07_driver_probes_exterior_wedge.md` — updated fragment
+  with single-stratum wedge v3 results: 10 charts, 9/9 passing 5e-2 bar, eps 2.0e-3..1.6e-2,
+  median 6.0e-3. Also explains two prior probe bugs (full-prior config + in-memory eps read).
+- `.claude/spec/COMPLETED.md` — generated canonical, already updated in the commit.
 
-**Pattern noted — COMMIT TIMESTAMP ANOMALY**: `c3277b6` (post-commit sync) has author
-timestamp 09:10:07, same as `6144378`, but is topologically AFTER `a996316` (09:10:59).
-Git allows out-of-order timestamps; this is not a sign of corruption. The topological
-chain is `6144378 → a996316 → c3277b6`.
+**Subsequent commit `72ca31a`** (handoff: brief for exterior polar re-chart): only added
+`.claude/handoff/brief_exterior_polar_rechart.md` — handoff/brief file, no doc surfaces.
 
-**Pattern noted — UNCOMMITTED SCRIPT CHANGES VISIBLE**: `scripts/probe_wedge_v3.py`
-had additional uncommitted working-tree changes (eps_values loop rewrite) beyond the
-committed `a996316` content. These are driver work-in-progress. Per convention: not
-staged, not committed by Librarian.
+**Analysis**:
+- sync_derived_docs.py: lens_amplification_surrogate test-only-caller warning recurred again
+  (6th+ time). Already escalated via todo.d fragment. No diff from script.
+- render_fragments.py: "All surfaces up to date." No diff. COMPLETED.md is current.
+- This is a no-op sync — all doc surfaces already current.
+
+**Pattern noted — TIMESTAMP ANOMALY (af251cf)**: af251cf has author timestamp 09:10:59 but
+is topologically AFTER ab48b256 (09:17:28). Confirmed again that af251cf only handled
+commits up through c3277b6; ab48b256 was correctly identified as the new pending commit.
 
 **Fragile cross-reference watch**: nothing new this run.
