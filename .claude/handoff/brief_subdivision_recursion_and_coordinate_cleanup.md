@@ -6,8 +6,9 @@ Four small fixes in the coordinate/tiling layer, all measured, all independent
 of each other. They are batched because they touch the same files and the layer
 should be opened once, not four times.
 
-1. Both subdividers are SINGLE-LEVEL: a tile needing two halvings gets one and
-   is abandoned. Give them bounded recursion.
+1. There are TWO subdividers duplicating one algorithm, and BOTH are
+   SINGLE-LEVEL: a tile needing two halvings gets one and is abandoned. Unify
+   them into ONE generic subdivider and give it bounded recursion — once.
 2. `r_caustic` inverts a smooth monotone map by scanning 720 points. Root-find
    instead.
 3. The wedge's `u` map is stored in fields named for ARC LENGTH.
@@ -44,6 +45,34 @@ if every marginal tile gets exactly one halving and is then abandoned.
 DO NOT replace this with a cleverer initial tiling. Adaptive subdivision adds
 resolution where it is needed BY CONSTRUCTION; an asymmetric seed would only
 reduce round count while over-tiling where the first pass already passes.
+
+### 1b. The two subdividers duplicate one algorithm — UNIFY, do not patch twice
+
+`_subdivide_farfield_tile` (247 lines) and `_subdivide_wedge_tile` (213 lines)
+share their entire SKELETON: iterate candidate children, `_load_or_build` each,
+`_gate_chart` it, pack or record, accumulate a `children_summary`, return a
+`{parent_tag, region, ..., children}` dict. Measured 21 identical statements
+and the same control flow throughout.
+
+What genuinely differs is only:
+  (a) HOW child boxes are computed — the far-field halves caustic-fixed
+      `(rho, theta_c)`; the wedge halves `(r, u)` with the angular split at the
+      u-midpoint mapped back to theta;
+  (b) WHICH build function is called (`_build_farfield_chart` vs
+      `_build_wedge_chart`, with their own kwargs).
+
+Those are PARAMETERS, not separate algorithms. Adding recursion to both
+separately means writing the same loop twice and letting them drift.
+
+The duplication has ALREADY caused a defect: there is no `_subdivide_lobe_tile`
+at all, so a gated macro-saddle lobe tile becomes a ladder-served gap with no
+recourse. A generic subdivider would have given the lobe path one for free.
+
+So: extract ONE subdivider parameterised by a child-box splitter and a build
+callable, put the bounded recursion in it ONCE, and have both existing call
+sites use it. Shape it so the LOBE path can adopt it without further
+refactoring — but WIRING the lobe is explicitly OUT of scope for this build
+(it needs its own admission and testing); just do not preclude it.
 
 ### 2. `r_caustic` scans instead of root-finding
 
@@ -92,9 +121,9 @@ frames later inside `np.interp` as an unrelated-looking cast error.
 
 ## Scope
 
-IN — bounded recursion in BOTH subdividers with per-tile achieved depth
-reported; `r_caustic` root-find; wedge field/validator renaming; the
-`_wedge_cusp_axis_map` domain guard; tests.
+IN — ONE generic subdivider replacing the two, with bounded recursion and
+per-tile achieved depth reported; `r_caustic` root-find; wedge field/validator
+renaming; the `_wedge_cusp_axis_map` domain guard; tests.
 
 OUT — the `u = d^(2/3)` coordinate itself (settled, working); the exterior
 polar re-chart and the D2 fold (separate, sequenced after this); the centre
@@ -104,11 +133,15 @@ run.
 
 ## Work
 
-- **Recursion**: add a bounded depth to both subdividers (subdivide until the
-  child clears or a cap is reached). Record the ACHIEVED depth per tile in the
-  chart report so a runaway is visible and so the census can attribute cleared
-  vs still-gated windows. Pick the cap so the measured interior case (needs 2)
-  is comfortably inside it; do not make it unbounded.
+- **Unify + recurse**: extract one generic subdivider taking a child-box
+  splitter and a build callable; both existing call sites use it. Bounded
+  depth lives there ONCE (subdivide until the child clears or a cap is
+  reached). Record the ACHIEVED depth per tile in the chart report so a
+  runaway is visible and the census can attribute cleared vs still-gated
+  windows. Pick the cap so the measured interior case (needs 2) is comfortably
+  inside it; do not make it unbounded. Behaviour for existing far-field tiles
+  must be UNCHANGED at depth 1 — pin that with a test, so the unification is
+  provably a refactor plus a new capability, not a silent change.
 - **`r_caustic`**: replace the scan with a `brentq` inversion of the exact
   parametrisation. Keep the signature; `n_sample` may stay as an ignored
   deprecated kwarg if callers pass it.
