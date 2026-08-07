@@ -208,7 +208,7 @@ _DEFAULT_CAUSTIC_FLOOR = 0.05
 # caustic-region envelope, so reconstructing them under the new definition
 # would be finite-but-wrong).  Mixed-tag charts are legal.
 _FARFIELD_ENVELOPE_DEFINITION = FARFIELD_KERNEL_SUM
-_KNOWN_FARFIELD_DEFINITIONS = KNOWN_FARFIELD_DEFINITIONS
+_KNOWN_ENVELOPE_DEFINITIONS = KNOWN_FARFIELD_DEFINITIONS
 
 # Interior (inside-the-caustic) envelope-definition tag persisted in each
 # interior chart's npz meta (Build S2-3, frozen WP8 amended to whole-interior).
