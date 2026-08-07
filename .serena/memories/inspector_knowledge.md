@@ -251,3 +251,19 @@
   (6) 100% structural coverage = zero draws reaching `exact_engine` residual
   bucket confirms production training can proceed. If any non-trivial
   fraction lands in exact_engine, review gate ordering before launching.
+- GENERIC SUBDIVIDER REVIEW (Build subdivision_recursion_and_coordinate_
+  cleanup, 2026-08-07): when reviewing a bounded-recursion tile subdivider
+  that replaces two near-duplicate single-level subdividers, confirm (a)
+  legacy summary/report keys are preserved verbatim, with only ADDITIVE
+  new keys (e.g. achieved_depth); (b) a field like 'packed' now counting
+  the FULL subtree rather than just the immediate level is an intentional,
+  brief-endorsed behavior change — verify it's INTENDED, not a silent
+  regression; (c) a structural-refusal branch (e.g.
+  CarrierDiscontinuityError) is caught and treated as a terminal gap, never
+  recursed.
+- WEDGE FIELD RENAME CONSUMER CHECK (same build): after renaming a
+  dataclass field consumed via an isinstance-dispatched evaluate (e.g.
+  Tube/Lobe/FarField keep theta_to_s, only Wedge is renamed to theta_to_u),
+  grep ALL test files for the OLD field name RESTRICTED to the renamed
+  TYPE only — sibling types that legitimately keep the old field name are
+  correctly unaffected, not a coverage miss.

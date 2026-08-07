@@ -282,3 +282,28 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   `_ENGINE_REFUSALS` (it's ValueError but not LensDomainError/
   SchwingerCertificationError/HypergeometricDomainError) so a SEPARATE
   except clause after the existing `_ENGINE_REFUSALS` catch is required.
+- SUBDIVISION_RECURSION_AND_COORDINATE_CLEANUP PHYSICS VERIFICATION
+  (2026-08-07, verdict PASS, 4-shard build): (a) generic `_subdivide_tile`
+  bounded-recursion subdivider correctly reproduces the pre-refactor
+  single-level far-field result at depth 1 (byte-identity pin held) and
+  correctly extends to depth 2/3 for stubborn gaps (MAX_SUBDIVISION_DEPTH=3
+  cap, ladder-served-gap flag on cap-out, never a crash);
+  CarrierDiscontinuityError branch confirmed never recursed. (b) wedge
+  recursion closes 3 measured marginal gaps (~6.50e-2 @r=0.633, ~6.70e-2/
+  ~5.95e-2 @r=0.811) that sat above the 5e-2 bar at depth 1, down to
+  max eps 3.0e-2 at depth 2; child boundary theta_split is confirmed the
+  u-midpoint image (u=d**(2/3)), NOT the theta-midpoint. (c) theta_to_u/
+  u_grid rename: `_validate_theta_to_u` correctly has NO magnitude/length-
+  scale bound (only monotone + starts-at-0) since u=rad**(2/3) has a
+  different magnitude than the true arc-length s carried by Tube/Lobe/
+  FarField (theta_to_s, deliberately untouched); `_wedge_cusp_axis_map`
+  correctly HARD-RAISES (never clamps) outside [0, pi/2]. (d) r_caustic
+  brentq replacement matches the parametric caustic radius r(u)=|y(u)| to
+  <=1e-10 at every tested gamma/theta including the pi/2 axis case
+  (5.692099788303083, NOT the truncated SPEC literal 5.67376); waist
+  invariant |r-gamma|<=1e-10 confirmed via an independent minimize_scalar;
+  gamma=0 and parity-boundary/saddle-miss configs correctly raise the
+  NAMED LensDomainError from inside the root-finder (no leaked
+  ZeroDivisionError); measured 11.74x speedup vs the 1.85s dense-scan
+  baseline. Full engine-training + sampling validation remains operator-
+  deferred (COGWHEEL_TRAIN_TIER=1); no further physics concerns.

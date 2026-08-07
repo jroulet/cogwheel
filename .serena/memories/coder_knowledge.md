@@ -234,7 +234,9 @@
   to `from_wedge_values`. The 2001-node fine grid matches `_FARFIELD_ARC_MAP_SIZE`;
   avoid introducing a separate local constant that silently duplicates it
   (INS-w3-001: local `_ARC_MAP_NODES = 2001` harmless but should reference the
-  module constant).
+  module constant). SUPERSEDED for the wedge chart by the cusp-adapted axis
+  pattern below (2026-08-07 WP3) — Tube/Lobe/FarField still use this genuine
+  arc-length pattern unchanged.
 - SCHWINGER CEILING IS INDEPENDENT OF DD CAP: the DD cap prevents training nodes
   from exceeding `w * |y| = 58` (the diffraction-delay product above which double-
   double quadrature cannot maintain 1e-10 accuracy). However, the engine has its
@@ -380,3 +382,42 @@
   threshold-grid histograms (not per-sample arrays). 100% structural
   coverage means every draw reaches at least one gate — confirms no
   uncovered region before launching production training.
+- GENERIC TILE SUBDIVIDER `_subdivide_tile` (Build
+  subdivision_recursion_and_coordinate_cleanup, 2026-08-07): unifies
+  `_subdivide_farfield_tile`/`_subdivide_wedge_tile` behind one helper
+  parameterized by (child-box splitter, build_child, admit_child); bounded
+  recursion via a module constant `MAX_SUBDIVISION_DEPTH` (=3), recursing
+  full subtrees and accumulating `total_packed` from each subtree. Each
+  child summary entry gains an ADDITIVE `achieved_depth` key; the return
+  dict adds `max_achieved_depth` on top of the pre-existing keys — never
+  removes/renames existing keys. `CarrierDiscontinuityError` is caught and
+  treated as a terminal ladder gap, never recursed. The two original
+  functions become thin wrappers building closures over the module's own
+  `_build_*_chart` + held-out probe helpers, signatures and all call sites
+  (`_train_band_charts`) unchanged.
+- WEDGE FIELD RENAME IMPLEMENTATION (WP3, same build):
+  theta_to_s->theta_to_u, s_grid->u_grid on `InteriorWedgeChart` ONLY
+  (Tube/Lobe/FarField charts keep genuine arc-length theta_to_s/s_grid
+  untouched — DO NOT rename those). DRY validator core
+  `_validate_axis_map(arr, grid, *, ordinate_name)` checks ONLY shape
+  (2,N>=2) + finite + row0 strictly increasing from grid[0] + row1
+  strictly increasing from ~0 — NO magnitude/length-scale bound (u=d**(2/3)
+  has different magnitude than a true arc-length s over the same tile).
+  `_validate_theta_to_s`/`_validate_theta_to_u` both delegate to it.
+  Schema bump hard-refuses the OLD tag (no `_KNOWN_..._SCHEMAS` overlap);
+  the renamed field becomes a REQUIRED NPZ key on load (no optional
+  fallback) — any synthetic/legacy artifact built on the identity/None
+  path now hard-refuses (KeyError) and must be rebuilt with a real map.
+  Domain guard: raise (never clamp) outside the physical domain
+  ([0, pi/2] here) — clamping would silently serve the reflected/adjacent
+  tile's basin and mask a caller bug.
+- CLOSED-FORM r_caustic (same build): replaced a 720-point dense scan with
+  brentq bracket+refine on the parametric caustic curve r(u)=|y(u)|;
+  bracket count keyed to topology (48 nodes astroid / 720 saddle, by
+  parity). The `n_sample` parameter (and its `<16` validation) is fully
+  retired — delete rather than deprecate-in-place when a plan explicitly
+  says the parameter is dead. gamma=0 and parity-boundary/saddle-miss
+  configs must raise the NAMED domain error (`LensDomainError`) directly
+  from the root-finder — audit for any bare arithmetic (e.g. division by a
+  vanishing gamma) upstream of the raise that could leak a raw
+  `ZeroDivisionError` instead.

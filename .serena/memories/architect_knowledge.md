@@ -25,6 +25,11 @@
   Coder defect) should be OVERRIDDEN as Librarian-routed at triage rather
   than surfaced as Coder work; include the exact suggested replacement text
   in the override note so Librarian can apply it without re-analyzing.
+  RECURRING (2026-08-07): also applies when the finding cites BOTH
+  DATA_CONTRACTS.yaml AND SPEC.md describing a superseded schema after an
+  approved WP shipped the new one — doc-sync is the automatic post-build
+  Librarian phase's job, not a Coder WP, regardless of how many canonical
+  surfaces are named.
 - Don't escalate a perf/accuracy floor measured on a defective build —
   fix, retune, re-measure, then escalate. Unreachable target: document the
   measured floor honestly, escalate; never widen tolerances. Timing
@@ -254,3 +259,34 @@
   category 'ppgo_fold' with served=True skips fallthrough bucket. Mirror
   _XI_FOLD_THRESHOLD as a LOCAL constant in census.py (same pattern as
   DD_PRODUCT_MARGIN). One WP pattern: likelihood.py + surrogate_census.py.
+- GENERIC BOUNDED-RECURSION SUBDIVIDER DESIGN (Build
+  subdivision_recursion_and_coordinate_cleanup, 2026-08-07): when two
+  near-duplicate tile subdividers exist (e.g. far-field + wedge, ~200 lines
+  each), unify into ONE generic helper parameterized by (child-box splitter,
+  build callable, gate/admission fn) plus a small hard-coded recursion depth
+  cap (e.g. 3); keep the two original named functions as THIN WRAPPERS that
+  build closures over the module's own chart-builder/probe helpers and
+  preserve their exact signatures + all call sites. Require a BYTE-IDENTITY
+  pin for the common case (a tile whose children all pass at depth 1 -> no
+  recursion -> only ADDITIVE report keys, e.g. achieved_depth, change).
+  A structural-refusal branch (e.g. CarrierDiscontinuityError) must never be
+  recursed. Recursion can legitimately change a summary field's SEMANTICS
+  (e.g. 'packed' becomes a full-subtree count instead of single-level) —
+  this is an intended, brief-endorsed accuracy improvement, not a defect.
+- CLOSED-FORM ROOT-FINDER REPLACES DENSE SCAN (r_caustic, same build):
+  replacing a legacy dense numerical scan with a parametric-curve brentq
+  bracket+refine (bracket count/parity keyed to topology, e.g. 48 nodes for
+  astroid vs 720 for saddle) gives an order-of-magnitude speedup with no
+  serve-value drift; the domain-necessary refusal at a true divergence
+  (e.g. gamma=0, parity boundary) must raise the NAMED domain error
+  directly from inside the new root-finder — never let a raw
+  ZeroDivisionError leak from the arithmetic.
+- SEMANTIC FIELD RENAME + SCHEMA BUMP PATTERN (WP3, same build): renaming a
+  stored field to reflect its TRUE semantics (e.g. arc-length `theta_to_s`
+  actually stores a cusp-adapted angular coordinate `u = d**(2/3)`) requires,
+  in one merged WP: (1) the rename across every producer/consumer/NPZ-key
+  site, (2) a schema version bump that HARD-REFUSES pre-rename artifacts
+  (no migration/fallback), and (3) DRY-ing any per-field validator into one
+  core routine parameterized by ordinate name so sibling fields keeping the
+  old semantics (e.g. Tube/Lobe/FarField's genuine arc-length `theta_to_s`)
+  are provably unaffected.

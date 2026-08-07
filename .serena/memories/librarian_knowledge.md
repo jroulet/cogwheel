@@ -145,3 +145,26 @@
   OPEN if other conditions remain (e.g. mass measurement, treatment
   decision). Update the advisory from "do not close by lowering" to reflect
   the new state, and note why the TODO remains open.
+- TREE-GATE-STRANDING + `git add -A` MISLABELING VARIANT: when a commit
+  message describes only the intended file(s) but the actual commit
+  (via `git add -A`) swept in unrelated stray diffs left by a tree-gated
+  tool run, `git show --stat` will show extra paths the message never
+  mentions — treat this as a distinct recurring variant of the "verify
+  the caller's framing" check (see the `git show --stat` bullet above),
+  not a one-off; flag/split it rather than accepting the commit message
+  at face value.
+- PLAIN-TEXT FRAGMENT-NAME REFERENCES ARE INVISIBLE TO THE DANGLING-LINK
+  CHECKER: `render_fragments.py`'s dangling-link check only inspects
+  `[[fragment_name]]`-bracketed backlinks; a fragment that references
+  another fragment's name in plain prose (no brackets) is silently
+  unchecked — such a reference can go stale (renamed/retired target)
+  with zero tooling signal. When auditing cross-references for coherence,
+  grep for bare fragment-name substrings too, not just `[[...]]` syntax.
+- ESCALATE (not just re-note) a repeatedly-unfixed warning: the
+  `lens_amplification_surrogate` test-only-caller consumer-graph warning
+  from `sync_derived_docs.py` has now recurred identically across FOUR+
+  librarian sessions with zero diff/fix each time. Re-noting it a fifth
+  time is no longer proportionate — the next librarian session that sees
+  this exact warning should escalate to the contract owner directly
+  (e.g. via a dedicated TODO fragment) rather than adding a fifth
+  passive mention to this memory.

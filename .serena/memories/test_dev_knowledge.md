@@ -248,3 +248,28 @@
   select_chart→None + get_certified_ppgo_map→None; use REAL geometry_partition.
   Backward-compat: existing test fixtures with w < 20 have xi < 4.0 even
   at rho=0.3, so the coarse gate refuses and falls through — no regression.
+- REACHABLE-RED SUBDIVIDER MOCK PATTERN (Build subdivision_recursion_and_
+  coordinate_cleanup, 2026-08-07): to test the generic bounded-recursion
+  `_subdivide_tile` without engine access, mock
+  `surrogate_training._load_or_build` + `surrogate_training._gate_chart`
+  so the REAL subdivider function runs end-to-end against synthetic
+  gate outcomes (stubborn-gap vs no-gap), rather than reconstructing the
+  recursion logic in the test. Depth-cap teeth: a stubborn gap that never
+  decays below bar must terminate at `MAX_SUBDIVISION_DEPTH` as a
+  'recorded_gated' leaf, never crash or infinite-loop.
+- CLOSED-FORM U-MIDPOINT ORACLE FOR WEDGE SUBDIVISION: the child boundary
+  `theta_split` in `_subdivide_wedge_tile` is the u-midpoint image, NOT the
+  theta-midpoint — verify via a closed-form oracle
+  `_u_midpoint_theta(theta_lo, theta_hi, side)` (low side:
+  `(0.5*(tl**(2/3)+th**(2/3)))**1.5`; high side mirrored about pi/2) that
+  independently reproduces `_wedge_cusp_axis_map`'s u=d**(2/3) convention;
+  match to ~1e-9, not 1e-16 (production rounds the returned split to 6dp).
+- OPTIONAL-TO-MANDATORY NPZ KEY RENAME BREAKS IDENTITY-PATH FIXTURES: when
+  a rename (e.g. theta_to_s->theta_to_u) also flips the field from
+  optional-on-load (old reader: `data[key] if key in data else None`) to
+  UNCONDITIONALLY REQUIRED, any existing test fixture built on the
+  identity/None path (map omitted) now hard-refuses at load with a
+  KeyError referencing the NEW field name — audit every synthetic-chart
+  setUpClass for map=None fixtures and rebuild them with a real map (e.g.
+  via the production axis-map helper) rather than widening the loader
+  back to optional.
