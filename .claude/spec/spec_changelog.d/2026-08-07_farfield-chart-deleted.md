@@ -1,5 +1,9 @@
 bump: patch
 
-Remove stale backward-compatibility prose for `FarFieldChart` from SPEC.md.
-The class was deleted in commit 0a31fcf (post-strand cleanup); the key-abstractions
-paragraph and the NAMING HAZARD note have been updated to reflect its removal.
+Remove stale `FarFieldChart` references from SPEC.md (class deleted in commit
+0a31fcf, post-strand cleanup):
+- Key-abstractions paragraph: backward-compat sentence removed.
+- NAMING HAZARD: `FarFieldChart` removed from the name list.
+- LOW-W FLAT EXTRAPOLATION chart-type list: `far-field` → `exterior-polar`.
+- Surrogate collection description: `exterior FAR-FIELD charts` → `exterior-polar
+  charts`.
