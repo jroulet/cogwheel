@@ -1,30 +1,47 @@
 # Librarian Short-Term Observations
 
-## 2026-08-07 post-commit sync (commit 3aedd41)
+## 2026-08-07 post-commit sync (commits d711934, 67338d6)
 
-**Scope**: scripts: add progress beats to driver probes (observable runs).
+**Scope**: spec: record driver probe findings (exterior coordinate disease confirmed,
+wedge probe invalid) + scripts: probe_wedge_v3.py update.
 
-**Changed files**: `scripts/probe_exterior_recursion.py`, `scripts/probe_wedge_v3.py` — driver
-probe scripts only; no `cogwheel/` library code touched.
+**Changed files in scope**:
+- `.claude/spec/completed.d/2026-08-07_driver_probes_exterior_wedge.md` (new)
+- `.claude/spec/COMPLETED.md` (regenerated)
+- `scripts/probe_wedge_v3.py` (scripts-only, no-op per SCRIPTS/ REWRITE NO-OP RULE)
+- Memory files (no doc surfaces)
 
-**Result**: Confirmed no-op per SCRIPTS/ REWRITE NO-OP RULE. These scripts stay under
-`scripts/`, introduce no new serialization artifacts, and make no changes to the
-`cogwheel/` public API. All doc surfaces (SPEC.md, DATA_CONTRACTS.yaml, overview.rst,
-api.rst, crash_course.rst) remain accurate with no edits needed.
+**Issue found and fixed**: `lensing_exterior_recursion_never_measured.md` was not deleted
+by the commit that added the completion fragment covering its work. The three measurements
+it required (pass rate, depth histogram, depth-3 cap hits) are all answered in
+`2026-08-07_driver_probes_exterior_wedge.md`. Deleted the stale TODO fragment.
+
+**Cascade fix**: `lensing_exterior_should_chart_in_polar_not_sd.md` had
+`depends_on: [..., lensing_exterior_recursion_never_measured]` — a dangling reference
+after deletion. Updated to `2026-08-07_driver_probes_exterior_wedge` (the completed.d
+entry covering that work). Render confirmed clean (no warnings).
+
+**Files changed**:
+- `.claude/spec/todo.d/lensing_exterior_recursion_never_measured.md` — deleted
+- `.claude/spec/todo.d/lensing_exterior_should_chart_in_polar_not_sd.md` — depends_on updated
+- `.claude/spec/TODO.md` — regenerated
 
 **sync_derived_docs.py**: same four test-only-caller consumer-graph warnings for
 `lens_amplification_surrogate` — pre-existing, already escalated via
 `surrogate_contract_test_consumer_warning.md` todo fragment. No new action.
-"Some issues auto-fixed" with only stray diffs in `tidy_advisory.json` and
-`librarian.json` — reverted both (known side effect, not real doc changes).
 
-**Pattern noted**: scripts-only commits (progress beats, probe refactors) are routine
-no-ops for the librarian. The SCRIPTS/ REWRITE NO-OP RULE covers even large additions
-(100+ lines) when the script stays in `scripts/` and has no serialization artifacts.
+**CHANGELOG**: no `changelog.d/` directory in this repo; internal builds use
+only `completed.d`/`todo.d`. No CHANGELOG entry needed for driver probe findings.
 
-**Fragile cross-references to watch** (carried forward from prior session):
-- `completed.d/2026-08-07_lensing-training-path-per-region.md` is linked from
-  `lensing_chart_kinds_should_share_one_tiling_machine.md` and
-  `lensing_wedge_probe_charts_need_retraining_under_v3.md`. If the completed file is
-  renamed, both links dangle.
-- `guard_slow_operation` cited nowhere in docs — self-documented via docstring.
+**Pattern noted**: when a driver records probe findings in a completion fragment
+WITHOUT deleting the corresponding todo.d fragment, the renderer does NOT warn —
+the dangling depends_on in downstream fragments only surfaces if render_fragments.py
+is run after deletion. The two-step (delete todo + update depends_on) is easy
+to miss in the same commit.
+
+**Fragile cross-references to watch**:
+- `lensing_exterior_should_chart_in_polar_not_sd.md` now depends on
+  `2026-08-07_driver_probes_exterior_wedge` — if that completed.d fragment is
+  renamed, the depends_on breaks silently (no dangling-link check for completed.d entries?).
+- `lensing_wedge_probe_charts_need_retraining_under_v3.md` references
+  `[[2026-08-07_lensing-training-path-per-region]]` — still valid.
