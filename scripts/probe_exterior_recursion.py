@@ -37,6 +37,27 @@ def main():
     os.makedirs(outdir, exist_ok=True)
 
     print(f"Probe: exterior (one band), recursion live", flush=True)
+
+    # Progress stream: count chart files as they are written.
+    import threading
+
+    def _watch(outdir, stop):
+        last = -1
+        while not stop.is_set():
+            try:
+                n = len([f for f in os.listdir(outdir)
+                         if f.endswith('.npz')])
+            except FileNotFoundError:
+                n = 0
+            if n != last:
+                print(f"  [beat] {n} chart(s) written", flush=True)
+                last = n
+            stop.wait(15)
+
+    _stop = threading.Event()
+    _w = threading.Thread(target=_watch, args=(outdir, _stop), daemon=True)
+    _w.start()
+
     t0 = time.time()
     surrogate, report = train(
         outdir=outdir,
@@ -45,6 +66,8 @@ def main():
         regions=("exterior",),
     )
     elapsed = time.time() - t0
+    _stop.set()
+    _w.join(timeout=1)
 
     # Report: charts, eps distribution, achieved depth histogram.
     n_charts = len(surrogate.charts)
