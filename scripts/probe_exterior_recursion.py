@@ -24,7 +24,7 @@ from dataclasses import replace
 def main():
     config = replace(
         TrainingConfig(),
-        n_gamma=3, n_u=3, n_theta=3,
+        n_gamma=4, n_u=3, n_theta=3,
         n_rho=3, n_theta_c=3,
         w_nodes_per_decade=8,
         engine_budget=200,
