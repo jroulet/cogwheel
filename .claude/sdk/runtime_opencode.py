@@ -115,22 +115,63 @@ _GO_CLAUDEMAP = {
     "claude-haiku-3-5":  _GO_SONNET,
 }
 
+# ── DeepSeek (API-key provider) ──
+#
+# Same DeepSeek models as OpenCode Go, but through the user's own DeepSeek
+# API key.  Use when opencode-go quota is exhausted (OPENCODE_MODEL_PROVIDER=
+# deepseek) -- the models are billed to the API key, not the Go subscription.
+
+_DS_OPUS = "deepseek/deepseek-v4-pro"
+_DS_SONNET = "deepseek/deepseek-v4-flash"
+
+DEEPSEEK_ROLE_MODELS = {
+    "architect":    _DS_OPUS,
+    "coder":        _DS_OPUS,
+    "inspector":    _DS_OPUS,
+    "professor":    _DS_OPUS,
+    "prof_review":  _DS_OPUS,
+    "foreman_lite": _DS_SONNET,
+    "test_dev":     _DS_OPUS,
+    "librarian":    _DS_SONNET,
+    "tidier":       _DS_SONNET,
+    "dreamer":      _DS_SONNET,
+    "simplifier":   _DS_SONNET,
+}
+
+DEEPSEEK_ROLE_VARIANTS = {role: "" for role in DEEPSEEK_ROLE_MODELS}
+
+_DS_CLAUDEMAP = {
+    "claude-opus-4-8":   _DS_OPUS,
+    "claude-opus-4":     _DS_OPUS,
+    "claude-sonnet-5":   _DS_SONNET,
+    "claude-sonnet-4-6": _DS_SONNET,
+    "claude-haiku-3-5":  _DS_SONNET,
+}
+
 # ── Active selection ──
 #
 # Set OPENCODE_MODEL_PROVIDER=go in the environment (or in .env) to use
-# the Go native models.  Unset or empty retains the AI Commons mappings.
+# the Go native models; =deepseek to use the API-key DeepSeek provider.
+# Unset or empty retains the AI Commons mappings.
 
-_GO_MODE = os.environ.get("OPENCODE_MODEL_PROVIDER", "").strip() == "go"
+_PROVIDER = os.environ.get("OPENCODE_MODEL_PROVIDER", "").strip().lower()
+_GO_MODE = _PROVIDER == "go"
+_DS_MODE = _PROVIDER == "deepseek"
 
-OPENCODE_ROLE_MODELS = GO_ROLE_MODELS if _GO_MODE else AI_COMMONS_ROLE_MODELS
-OPENCODE_ROLE_VARIANTS = (
-    GO_ROLE_VARIANTS if _GO_MODE else AI_COMMONS_ROLE_VARIANTS)
-_CLAUDE_TO_OPENCODE_MODEL = (
-    _GO_CLAUDEMAP if _GO_MODE else _AI_COMMONS_CLAUDEMAP)
+if _GO_MODE:
+    OPENCODE_ROLE_MODELS = GO_ROLE_MODELS
+    OPENCODE_ROLE_VARIANTS = GO_ROLE_VARIANTS
+    _CLAUDE_TO_OPENCODE_MODEL = _GO_CLAUDEMAP
+elif _DS_MODE:
+    OPENCODE_ROLE_MODELS = DEEPSEEK_ROLE_MODELS
+    OPENCODE_ROLE_VARIANTS = DEEPSEEK_ROLE_VARIANTS
+    _CLAUDE_TO_OPENCODE_MODEL = _DS_CLAUDEMAP
+else:
+    OPENCODE_ROLE_MODELS = AI_COMMONS_ROLE_MODELS
+    OPENCODE_ROLE_VARIANTS = AI_COMMONS_ROLE_VARIANTS
+    _CLAUDE_TO_OPENCODE_MODEL = _AI_COMMONS_CLAUDEMAP
 
 DEFAULT_OPENCODE_JSON_STREAM_LIMIT = 8 * 1024 * 1024
-
-
 @dataclass
 class AgentDefinition:
     description: str = ""
