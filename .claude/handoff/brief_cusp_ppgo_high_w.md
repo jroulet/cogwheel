@@ -25,4 +25,5 @@ At high `w`, the Pearcey function asymptotes to the geometric image sum — `fol
 - Fast tests. Follow AGENTS.md.
 - The ppGO rung must certify — never serve a wrong value silently
 - Cross-over `w` must be measured, not guessed
+- `cusp_amplification` already serves both astroid and saddle cusp branches — the ppGO rung applies to both
 - Live quadrature remains for `w < CROSS_OVER_W_CUSP_PPGO`
