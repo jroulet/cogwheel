@@ -23,6 +23,13 @@ Gated tiles subdivide at the u-midpoint, and the `_LOBE_CUSP_EXCLUSION_DISTANCE`
 carve-out is retired — the cusp-adapted coordinate handles near-cusp tiles
 directly. 149 tests pass (0 fail).
 
+BREAKING for stored lobe-chart artifacts: the lobe axis-schema tag is now
+`lobe_caustic_relative_v1` and the angular map is stored under
+`theta_to_u` / `u_grid`, both required. The two old lobe tags (raw
+`theta_local` V1 and sqrt-edge) are dropped from the known set, so any lobe
+chart written before this change hard-refuses at load instead of being
+served on a mislabelled axis.
+
 ---
 
 ## 2026-08-07

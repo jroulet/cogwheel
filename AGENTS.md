@@ -14,7 +14,7 @@ mandatory unless flagged optional.
 ## Local Override Convention
 - Tracked `AGENTS.md` stays portable and repo-relative; `CLAUDE.md` remains
   its tracked symlink for Claude Code compatibility.
-- Machine-specific instructions (conda env name, absolute interpreter/data paths, cluster details) go in untracked `CLAUDE.local.md` (never commit). Copy `CLAUDE.local.md.example` to start.
+- Machine-specific instructions (conda env name, absolute interpreter/data paths, cluster details) go in untracked `CLAUDE.local.md` (never commit) and/or `.env` (copy `.env.example` to start). Set `SDK_CONDA_ENV` there; the build pipeline and git hooks consume it.
 
 ## Knowledge Anchoring
 MUST read before any work that reads, modifies, or creates code or spec:
@@ -71,24 +71,8 @@ Applies to **behavior changes** in `cogwheel/` (new functions, signature/logic/c
 - All providers launch builds via `.claude/sdk/launch_build.sh` with
   `AGENT_PROVIDER=claude|codex|opencode`. There are no separate per-provider
   build scripts.
-- Codex routes the Architect and planning Professor to `gpt-5.6-sol` at high
-  reasoning. Coder, Test Developer, Inspector, and ProfReview use
-  `gpt-5.6-terra` at high reasoning; administrative support roles use Terra at
-  medium reasoning. `CODEX_MODEL` /
-  `CODEX_REASONING_EFFORT` override all roles; suffixed variables such as
-  `CODEX_MODEL_TEST_DEV` override one role. Claude's native role map is
-  unchanged.
-- OpenCode routes the Architect, Coder, Inspector, Professor, ProfReview, and
-  Test Developer to `claude-v4.6-opus` at high variant (AI Commons default).
-  Foreman-Lite, Librarian, Tidier, Dreamer, and Simplifier use
-  `claude-v4.6-sonnet`. `OPENCODE_MODEL` / `OPENCODE_VARIANT` override all
-  roles; suffixed variables such as `OPENCODE_MODEL_TEST_DEV` override one
-  role. Set `OPENCODE_MODEL_PROVIDER=go` to switch the entire routing table to
-  OpenCode Go native models (`opencode-go/deepseek-v4-pro` for opus-tier roles,
-  `opencode-go/deepseek-v4-flash` for sonnet-tier). Agent frontmatter in
-  `.opencode/agents/*.md` is auto-synced at build launch by
-  `scripts/sync_opencode_agents.py` (called by `launch_build.sh`) — no manual
-  frontmatter edits are needed when switching providers.
+- Codex model routing is configured in `.codex/config.toml`. `CODEX_MODEL` / `CODEX_REASONING_EFFORT` override all roles; suffixed variables such as `CODEX_MODEL_TEST_DEV` override one role.
+- OpenCode model routing is configured in `.opencode/opencode.json`. `OPENCODE_MODEL` / `OPENCODE_VARIANT` override all roles; suffixed variables override one role. Set `OPENCODE_MODEL_PROVIDER=go` for OpenCode Go native models. Agent frontmatter in `.opencode/agents/*.md` is auto-synced at build launch by `scripts/sync_opencode_agents.py` (called by `launch_build.sh`).
 - The orchestration state, role contracts, specs, handoffs, and memories remain
   shared under `.claude/` and `.serena/`; never fork provider-specific copies.
 - `.claude/sdk/runtime.py` is the provider boundary. `AGENT_PROVIDER` defaults
@@ -194,15 +178,18 @@ approval loop for routine plans.
 
 ## Testing
 - Tests live in `cogwheel/tests/` (stdlib `unittest`), **not** a top-level `tests/`.
-- Run: `python -m pytest cogwheel/tests/ -v` (or `python -m unittest discover -s cogwheel/tests`).
+- Run all fast tests: `python -m pytest cogwheel/tests/ -v`
+- Run one file: `python -m pytest cogwheel/tests/test_prior.py -v`
+- Run one test: `python -m pytest cogwheel/tests/test_prior.py::PriorTestCase::test_m1m2 -v`
 - New tests go beside the suite in `cogwheel/tests/`. Cover numerical-accuracy paths with tolerance-based assertions.
+- **Setup gotcha**: Fresh worktrees lack the untracked `cogwheel/waveform_models/IMRPhenomXODE` symlink; recreate it or `test_waveform`/`test_posterior`/`test_gw_prior` silently collect-error.
+- Conda env is machine-specific: set `SDK_CONDA_ENV` in untracked `.env` (copy `.env.example`).
 
 ### Assert VALUES, not code paths
 - A test should assert **what the answer is**, against an oracle and a tolerance — not **which branch produced it**. Value claims survive refactors and catch bugs; structural claims break on every refactor and catch nothing.
 - Each routing decision gets **ONE canonical pin**, in the file that owns the predicate. Do not re-assert the same decision in every consumer suite. `test_lensing_operator.py::test_thresholds_have_one_home` is the model.
 - Before adding a test that asserts a served path, an exception type, or an internal call, ask: *if this code were wrong but still took this path, would this test fail?* If no, write the value assertion instead.
-- MEASURED COST (2026-07-29): the `select_branch` decision was pinned in 16 test methods across 6 files and `SchwingerCertificationError` identity in 32 methods across 10. Changing two branch conditions therefore re-pointed eight files over three revision rounds — about two-thirds of that build's wall clock — and none of those tests had caught the two real defects (F028, F029), because every one of them asserted the path rather than the number.
-- Conda env is machine-specific: set `SDK_CONDA_ENV` in untracked `.env` (copy `.env.example`).
+- Path-assertion tests break on refactor and miss real defects (F028, F029: 48 assertions across 16 files caught nothing). Assert values instead.
 
 ### Test tiers
 - Default runs execute the fast tier only; slow tests skip with a loud reason.
@@ -241,7 +228,6 @@ gate command, or a watch loop, one of these already does it.
 - `pgrep -f`/`pkill -f`: bracket idiom (`pgrep -f "pytest [c]ogwheel"`) or the check matches itself.
 - Kill a run only on ~10x contention-adjusted overshoot or zero log growth.
 - Never write in place to a script a live shell may be executing (bash reads incrementally; a mid-run edit corrupts the running instance). Patch via sidecar + atomic replace (os.replace / mv).
-- Fresh worktrees lack the untracked `cogwheel/waveform_models/IMRPhenomXODE` symlink; recreate it or `test_waveform`/`test_posterior`/`test_gw_prior` silently collect-error.
 
 ## CHANGELOG.md Invariant
 - `CHANGELOG.md` is generated by `scripts/render_fragments.py` — do not edit it directly.
