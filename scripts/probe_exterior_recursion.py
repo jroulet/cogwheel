@@ -1,12 +1,10 @@
 #!/usr/bin/env python
 """Measure exterior recursion effectiveness (post-build driver probe).
 
-Baseline (2026-08-06): 84% of exterior charts were subdivision children and
-35 of 57 failed the 1e-3 bar. Hypothesis: every marginal tile got one
-halving and was then abandoned. This probe trains ONE exterior band with
-recursion live and reports (i) how many of the previously-failing charts
-now clear 1e-3, (ii) the achieved-depth histogram, (iii) whether any tile
-hits the depth-3 cap (a cap hit = coordinate problem, not cap too low).
+Post-polar-rechart probe. Trains ONE exterior band with recursion live
+in (rho, theta_c) coordinates. Reports (i) how many charts clear 1e-3,
+(ii) achieved-depth histogram, (iii) whether any tile hits the depth-3
+cap (cap hit = coordinate / subdivision problem).
 
 Usage (driver, post-build — slow tier enabled):
     COGWHEEL_TRAIN_TIER=1 python scripts/probe_exterior_recursion.py
@@ -97,11 +95,9 @@ def main():
     print(f"  achieved depths:   {dict(depths)}")
     print(f"  depth-3 cap hits:  {cap_hits}")
     print(f"  runtime:           {elapsed/60:.1f} min")
-    print(f"\n  Baseline (2026-08-06): 57 charts, 35 failed 1e-3, "
-          f"84% subdivision children")
     if cap_hits:
-        print(f"  WARNING: depth-3 cap hits — evidence the (s,d) coordinate is "
-              f"wrong, route to polar re-chart.")
+        print(f"  WARNING: depth-3 cap hits — coordinate or subdivision "
+              f"problem in polar (rho, theta_c).")
 
 
 if __name__ == "__main__":

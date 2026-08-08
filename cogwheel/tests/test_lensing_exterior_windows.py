@@ -870,19 +870,17 @@ class ExteriorTilerReachTestCase(ExteriorWindowsTestCase):
             surrogate._caustic_reach(GAMMA), map_reach, places=12)
         self.record_comparison()
 
-    def test_tiles_pin_theta_edges_on_plus_minus_pi(self) -> None:
-        # The theta_c axis is tiled over [-pi, pi]; the outer edges land
-        # exactly on +-pi so the serve-side atan2 range (-pi, pi] is covered.
+    def test_tiles_pin_theta_edges_on_0_and_pi_over_2(self) -> None:
+        # D2 fold maps theta_c to [0, pi/2]; outer edges pin those bounds.
         reach = surrogate._caustic_reach(GAMMA)
         rho_inner = 1.0 + ETA_MAX / reach
         tiles = st._farfield_tiles(rho_inner, 2.5, N_PER_SIDE)
         self.assertEqual(len(tiles), N_PER_SIDE * N_PER_SIDE)
         left_edges = [tc - htheta for (_r, tc), (_hr, htheta), _i, _j in tiles]
         right_edges = [tc + htheta for (_r, tc), (_hr, htheta), _i, _j in tiles]
-        self.assertAlmostEqual(min(left_edges), -math.pi, places=12)
-        self.assertAlmostEqual(max(right_edges), math.pi, places=12)
+        self.assertAlmostEqual(min(left_edges), 0., places=12)
+        self.assertAlmostEqual(max(right_edges), 0.5 * math.pi, places=12)
         self.record_comparison()
-
     def test_no_admitted_tile_straddles_the_branch_cut(self) -> None:
         # +-pi must never be strictly interior to a tile's theta_c interval.
         reach = surrogate._caustic_reach(GAMMA)
@@ -2167,7 +2165,7 @@ class SaddleLobeAdmissionTestCase(ExteriorWindowsTestCase):
                 cusp_angles = st._lobe_cusp_source_angles(
                     SADDLE_GAMMA, lens_center, lobe.centroid,
                     self.config.n_caustic_samples)
-                self.assertEqual(len(cusp_angles), 3)  # three deltoid cusps
+                self.assertEqual(len(cusp_angles), 2)  # D2-f reduced 3 deltoid cusps to 2 (abs-folding)
                 tiles = st._lobe_interior_tiles(lobe, cusp_angles, N_PER_SIDE)
                 self.assertGreater(len(tiles), 0)
                 straddling = [

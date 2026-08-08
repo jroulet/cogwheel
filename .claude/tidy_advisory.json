@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "56369bfacffef309500de19816183e06d33802fd",
-  "timestamp": "2026-08-07T21:31:31Z",
+  "commit": "609d8d30de01dc2babd9a12c9a1417f6d96ce9c7",
+  "timestamp": "2026-08-08T11:01:54Z",
   "touched_files": [
     "cogwheel/lensing/born_residual_chart.py",
     "cogwheel/lensing/chang_refsdal/__init__.py",
@@ -34,6 +34,7 @@
     "cogwheel/tests/test_lensing_marginalized_likelihood.py",
     "cogwheel/tests/test_lensing_min_gamma_band.py",
     "cogwheel/tests/test_lensing_part0_mechanical.py",
+    "cogwheel/tests/test_lensing_ppgo_above_ceiling.py",
     "cogwheel/tests/test_lensing_ppgo_bandsplit.py",
     "cogwheel/tests/test_lensing_ppgo_map.py",
     "cogwheel/tests/test_lensing_prior.py",
