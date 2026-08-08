@@ -1,9 +1,9 @@
 Launch the Librarian as a subagent to sync documentation with recent code changes.
 
-1. Read the crew prompt from `.claude/crew/librarian.md`
 2. Call the Agent tool with:
-   - Do not pass an explicit `model` — the Librarian agent frontmatter
-     (`.opencode/agents/librarian.md`) carries the provider-correct model
+   - `model`: the provider-correct Librarian model — `"sonnet"` when running
+     under Claude Code (its native alias), or the `model:` from
+     `.opencode/agents/librarian.md` when running under opencode
    - The full crew prompt as the system context
    - Append the current `git log --oneline -10` and `git diff --stat HEAD~3` under a `## Recent Changes` header
    - Append user arguments under a `## Task` header: $ARGUMENTS
