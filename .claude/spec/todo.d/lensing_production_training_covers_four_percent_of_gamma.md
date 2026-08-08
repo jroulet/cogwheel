@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [lensing_lobe_cusp_adapted_coordinate]
+depends_on: [lensing_cusp_ppgo_at_high_w]
 ---
 
 - **`train()` COVERS ONE 0.04-WIDE GAMMA BAND PER PARITY — about 4% of the
