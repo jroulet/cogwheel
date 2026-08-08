@@ -99,6 +99,8 @@ from cogwheel.lensing.chang_refsdal.channels import (
     KNOWN_FARFIELD_DEFINITIONS, KNOWN_INTERIOR_DEFINITIONS)
 from cogwheel.lensing.chang_refsdal.geometry import (
     LensDomainError, GhostDomainError, macro_matrix)
+from cogwheel.lensing.chang_refsdal._schwinger import W_CEILING_SCHWINGER_QD
+from cogwheel.lensing.chang_refsdal.operator import RHO_END
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
 from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
@@ -1899,6 +1901,79 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         delays = self._image_delays(lens, geom)
         return delays, k0, k1, geom
 
+    def _ppgo_above_ceiling(self, lens, dense_w):
+        """Whole-band ppGO serve when w_max exceeds the Schwinger QD ceiling.
+
+        When ``w_max > W_CEILING_SCHWINGER_QD`` (=150) AND the narrowest
+        image pair is resolved (``w_lo * min_delta_tau >= RHO_END``), the
+        fold-corrected ppGO carrier is accurate across the entire band.
+        On any gate miss, returns ``None`` -- the caller falls through to
+        the exact engine, which raises ``SchwingerCertificationError``
+        unchanged from HEAD.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters from `_lens_params`.
+        dense_w : np.ndarray
+            Dimensionless frequency grid for the kernel subsamples.
+
+        Returns
+        -------
+        tuple or None
+            ``(delays, k0, k1, partition)`` on success, ``None`` to fall
+            through.
+        """
+        w_max = float(dense_w.max())
+        if w_max <= W_CEILING_SCHWINGER_QD:
+            return None
+
+        geom = ChangRefsdalChannels(dense_w).geometry_partition(
+            gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
+            beta=lens['beta'], kappa=lens['kappa'])
+
+        real = np.asarray(geom.real_mask, dtype=bool)
+        real_delays = np.asarray(geom.delays)[real]
+        if len(real_delays) < 2:
+            return None
+        sorted_delays = np.sort(real_delays)
+        delta_taus = np.diff(sorted_delays)
+        positive_deltas = delta_taus[delta_taus > 0]
+        if len(positive_deltas) == 0:
+            return None
+        w_lo = float(dense_w.min())
+        min_delta_tau = float(np.min(positive_deltas))
+        if w_lo * min_delta_tau < RHO_END:
+            return None
+
+        from cogwheel.lensing.chang_refsdal._airy_fold import (
+            fold_ppgo_correction)
+
+        source = np.array([lens['y1'], lens['y2']], dtype=float)
+        f_total = np.atleast_1d(fold_ppgo_correction(
+            dense_w, source, lens['gamma'],
+            beta=lens['beta'], kappa=lens['kappa']))
+
+        finite_mask = np.isfinite(f_total)
+        f_total = np.where(finite_mask, f_total, 0.0)
+
+        f_minrel = f_total * np.exp(-1j * dense_w * geom.t_min)
+
+        ppgo_sum = np.sum(
+            geom.saddle_kernels[:, real]
+            * np.exp(1j * dense_w[:, None] * real_delays[None, :]),
+            axis=1)
+
+        envelope = (f_minrel - ppgo_sum) * np.exp(1j * dense_w * geom.t_min)
+
+        kernels, _total = reconstruct_farfield(
+            dense_w, envelope, geom.delays, geom.saddle_kernels,
+            geom.real_mask, FARFIELD_KERNEL_SUM, geom.t_min)
+
+        k0, k1 = self._reduce_dense_kernels(kernels)
+        delays = self._image_delays(lens, geom)
+        return delays, k0, k1, geom
+
     def _amplification_coefficients(self, par_dic):
         """
         Candidate amplification coefficients (ratio-layer dispatch).
@@ -1976,6 +2051,18 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             raise LensedBinningError(
                 'All kernel sub-sample frequencies must map to positive '
                 'dimensionless frequency w = xi*f; got a non-positive value.')
+
+        # ppGO above-ceiling intercept (Build exterior_followup WP4).
+        # Some draws exceed the Schwinger QD ceiling (w > 150) where the
+        # exact engine hard-refuses.  When the image pair is resolved
+        # (w_lo * min_delta_tau >= RHO_END), the fold-corrected ppGO
+        # carrier is accurate across the whole band and serves without
+        # any per-candidate engine cost.  On gate miss, fall through to
+        # the exact engine -> SchwingerCertificationError unchanged.
+        if float(dense_w.max()) > W_CEILING_SCHWINGER_QD:
+            ppgo = self._ppgo_above_ceiling(lens, dense_w)
+            if ppgo is not None:
+                return ppgo
 
         # Candidate seed engine evaluation (single call).  A candidate-side
         # `geometry.LensDomainError` / `SchwingerCertificationError` from

@@ -1,33 +1,17 @@
-Build: D2 reflection fold follow-up (brief_d2_fold_quadrant, 2026-08-07)
-Working tree: surrogate.py (+31), surrogate_training.py (~130 refactor), test_lensing_exterior_polar_fold.py (new, 17/17 PASS)
+Build: exterior_followup WP4 ppGO above-ceiling (brief_exterior_followup_four_items, 2026-08-08)
+Working tree: cogwheel/lensing/likelihood.py (+87 lines), test_lensing_ppgo_above_ceiling.py (new, untracked, 15/15 PASS)
 
-Resolved from prior review:
-- INS-1-001: RESOLVED — train on +y1 lobe (`_SADDLE_LOBE_CENTERS[1:]`), abs fold in _lobe_serves
-- INS-1-002: RESOLVED — abs(y1_eig), abs(y2_eig) in _evaluate_chart for LobeInteriorChart
-- INS-1-007: RESOLVED — test fixture centroid (+1.5, 0) matches production +y1 orientation
+Verified:
+- Production: _ppgo_above_ceiling gate order correct (w_max>150, >=2 real, min_dt>0, w_lo*min_dt>=RHO_END)
+- Reconstruction pattern matches existing fold-ppGO interior in _surrogate_coefficients: fold_ppgo_correction → f_minrel → ppgo_sum subtraction → envelope → reconstruct_farfield(FARFIELD_KERNEL_SUM)
+- Phase convention: fold_ppgo_correction returns absolute-frame F, demodulates by exp(-1j*w*t_min), envelope re-modulates by exp(+1j*w*t_min), reconstruct_farfield de-tilts by exp(-1j*_frame_phase(w,t_min)) — round-trip correct
+- NaN guard: np.where(isfinite, f_total, 0.0) — belt-and-braces, more conservative than existing fold-ppGO interior (no NaN guard)
+- Lazy import of fold_ppgo_correction from _airy_fold — correct pattern (circular import avoidance)
+- Intercept placement in _amplification_coefficients: after surrogate + lens/dense_w, before engine seed eval — correct
+- Import of W_CEILING_SCHWINGER_QD (150.0) and RHO_END (4.0) correct
+- Tests: 15/15 pass, 7 test classes, comprehensive coverage (boundary continuity, error decay, gate borders, self-falsification, fallthrough, no-surrogate, telescoping identity)
+- Pre-existing test failure: test_fop_refuses_uncertifiable_contractions (confirmed by stash+run — NOT caused by this change)
+- No regressions: test_lensing_likelihood.py (17P/12S/1X), test_lensing_surrogate.py (66P)
+- All callers of _amplification_coefficients forward-compatible (return shape unchanged)
 
-Unresolved (pre-existing test breakages, not new from this build):
-- INS-1-003: test_tiles_pin_theta_edges_on_plus_minus_pi still asserts [-π,π]
-- INS-1-004: test_none_tiling_is_the_uniform_grid still expects [-π,π] centers
-- INS-1-005: test_lobe_interior_tiles_are_nonempty_and_cusp_aligned still asserts ==3 cusp angles
-- INS-1-006: 21+8 failures in test_lensing_surrogate_lobe.py — test fixtures use admissions[0] (-y1 centroid), need migration to admissions[1] (+y1 canonical)
-
-Production code verified correct:
-- _to_exterior_fixed uses abs(y1),abs(y2) -> _to_caustic_fixed (3 call sites consistent)
-- _lobe_serves: abs fold correct when chart.centroid[0] > 0
-- _evaluate_chart LobeInteriorChart: abs(y1_eig),abs(y2_eig) consistent with gate
-- _farfield_tiles: [0,π/2] theta at same n_per_side → same tile count, 4x finer resolution
-- _farfield_exterior_tiles: cusp-angle fold into [0,π/2] verified consistent with _exclude_near_cusp
-- _lobe_cusp_source_angles: abs-dedup correct physics for deltoid D2 symmetry
-- _lobe_interior_tiles: theta_range=(0,π) correct for folded lobe-local coordinates
-- Training: _SADDLE_LOBE_CENTERS[1:] trains +y1 lobe, si=0 always
-- select_chart dispatch unchanged (priorities correct)
-- Tube/wedge serve paths unchanged (no y1_eig,y2_eig args — structurally unaffected)
-
-New test file (test_lensing_exterior_polar_fold.py):
-- 17/17 PASS, ~113 s total
-- Exterior: envelope bit-identity, reconstructed F identity (1e-14), select_chart consistency, delay identity
-- Lobe: F identity (1e-12), corridor gate non-degenerate, select_chart consistency
-- Regression: tube surrogate (66/66) and wedge chart suites subprocess-gated, both green
-
-No new production bugs found. Verdict: PASS.
+No bugs or design issues found. Verdict: PASS.
