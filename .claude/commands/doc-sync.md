@@ -1,5 +1,6 @@
 Launch the Librarian as a subagent to sync documentation with recent code changes.
 
+1. Read the crew prompt from `.claude/crew/librarian.md`
 2. Call the Agent tool with:
    - `model`: the provider-correct Librarian model — `"sonnet"` when running
      under Claude Code (its native alias), or the `model:` from
