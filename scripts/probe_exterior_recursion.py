@@ -26,8 +26,8 @@ def main():
         TrainingConfig(),
         n_gamma=4, n_u=4, n_theta=4,
         n_rho=4, n_theta_c=4,
-        w_nodes_per_decade=8,
-        engine_budget=200,
+        w_nodes_per_decade=4,
+        engine_budget=80,
         gamma_band_halfwidth=0.04,
         n_heldout=100,
     )
