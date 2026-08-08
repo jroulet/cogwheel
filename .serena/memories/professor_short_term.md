@@ -1,44 +1,17 @@
-## D2 fold quadrant plan — Professor consultation (2026-08-07)
+# Professor session 2026-08-07 — Ghost gate and ppGO fallback design consultation
 
-### Physics grounding
-The Fermat potential for a diagonal macro matrix A=diag(1-γ,1+γ) at β=0, κ=0:
-  τ(x; y) = ½ Σ λ_i x_i² - Σ y_i x_i + ½ Σ y_i² - ln|(x1,x2)|
+## Ghost Airy/CFU approach verdict: INCORRECT PHYSICS
 
-Under any sign flip y_i → -y_i, the substitution x_i → -x_i in the full
-diffraction integral maps the integrand pointwise onto itself, and the
-integration measure/domain (ℝ²) are invariant. Therefore F(w; y) is D2
-(Klein four-group) invariant for BOTH parities — the sign of λ_i does not
-appear in the reflection argument. This is an exact continuous symmetry,
-not an approximation.
+The ghost is a complex saddle (Picard-Lefschetz thimble), never a coalescing real pair. It does not undergo a fold bifurcation — its own self-merge is an artifact of the quartic continuation, caught by `_GHOST_DET_FLOOR`. The two existing gates (separation and decay) guard orthogonal failure modes: near-cusp coalescence (separation) and near-axis non-decay (decay gate). F027 measured the decay gate's retirement as a regression with 1000x degradation on the positive-parity near-axis. An Airy/CFU form would solve a problem that doesn't exist while leaving the real problem unaddressed and introducing an unverified new analytic form.
 
-The dual-deltoid saddle case (γ > 1): lobe 1 is the mirror image of lobe 0
-across the y2-axis, so the lobe-local angular coordinate folds identically.
+Recommendation: keep both gates, verify all three call sites (train label, Born carrier, serve mirror) route through `farfield_ghost_term` with both gates live.
 
-### Image-level confirmation
-Under y1 → -y1, image x1 → -x1 (and similarly for y2). Each image's:
-- delay τ: invariant (cross-term y1x1 → (-y1)(-x1) = y1x1)
-- magnification: invariant (Hessian quadratic in x)
-- Morse index: invariant (signature unchanged by coordinate reflection)
+## ppGO above w=150 verdict: ALREADY IMPLEMENTED
 
-Hence F(w) = Σ √|μ_a| e^{iwτ_a + iπ n_a/2} is element-by-element invariant.
+The geometric serve above `W_CEILING_SCHWINGER_QD = 150` exists in `_positive_parity_grid` / `_saddle_grid` via `select_branch → geometric_amplification`. The η ≥ 0.3 gate in `select_branch` is measured (F031: four orders of magnitude improvement, p90 117% → 7.65e-5). ppGO error is O(1/w²) at fixed η, with the caveat that at η < 0.1, error is flat in w — the η gate IS the accuracy guarantee. At w > 150 and η ≥ 0.3, the resolution leg always passes (w*delta_min ≥ ~82 >> 4), so select_branch always returns 'geometric'. No new code path needed for correctness. A surrogate-level intercept (fact-5 slot) would be a marginal performance optimization only, since the Born rung already serves rho > 1 and the interior fold-ppgo handoff already exists.
 
-### Neighbourhood of γ=1 (parity boundary)
-γ→1 has |λ1|→0 → infinite extent on BOTH sides (F026). The fold is valid
-arbitrarily close to the parity boundary, but the parity boundary itself
-is refused by name (det A = 0 → LensDomainError), so no edge case.
-
-### Carrier-phase ambiguity caveat for envelope comparison
-The SACR-C tau_c-demodulated envelope E(w) = F(w) e^{-iwτ_c} depends on
-which nearest caustic point `nearest_caustic_point` selects. Under D2, an
-equivalent nearest point at a different angle would change τ_c by an
-additive constant Δ, making the raw envelope differ by e^{-iwΔ}. The
-farfield kernel-sum label (FARFIELD_KERNEL_SUM) is carrier-independent and
-should be bitwise D2-invariant. Tests comparing raw chart envelope values
-must account for this phase ambiguity.
-
-### Corridor test assessment
-After folding to (|y1|, |y2|), sources from BOTH lobes map to lobe 0's
-local frame. The corridor test correctly discriminates:
-- Inside lobe (|y1| ≈ a): near_this ≈ 0 ≪ near_other ≈ 2a → serve
-- Corridor (|y1| ≈ 0): near_this ≈ near_other → decline
-The test is not degenerate after folding.
+## Source files consulted
+- `channels.py`: ghost term, both gates at lines 1101-1114, born_carrier_from_partition
+- `operator.py`: select_branch (L1630-1634), ETA_MIN_GEOMETRIC=0.3, W_CEILING_SCHWINGER_QD=150, _positive_parity_grid/_saddle_grid above-ceiling routing
+- `_airy_fold.py`: fold_amplification with eta < _ETA_MAX_FOLD gate (L420), q=0 symmetric-fold assumption (L267), F028/F032 confirmations
+- FINDINGS.md: F027 (decay gate regression), F028 (Airy arm O(1) wrong), F029 (geometric error controlled by η), F031 (L_MAX re-derivation + η gate measurement), F032 (GLoW confirms F028), F033 (cubic normal form truncation, not q=0)
