@@ -76,7 +76,6 @@ import dataclasses
 from unittest import TestCase, main, mock, skip
 
 import numpy as np
-import scipy.interpolate
 
 import matplotlib
 matplotlib.use('Agg')
@@ -1404,7 +1403,6 @@ class EngineLobeSelfFalsificationTestCase(TestCase):
             'interior gate would be vacuous otherwise')
 
 
-
 # ---------------------------------------------------------------------------
 # Positive-parity (gamma < 1) golden-value regression (acceptance #5).
 #
@@ -1488,7 +1486,6 @@ _POS_GOLDEN_ENVELOPE_HEX: tuple[tuple[str, str], ...] = (
 #: (sorted-key hash of the loaded arrays; see the section note above).
 _POS_GOLDEN_NPZ_DIGEST: str = (
     '6f51168cc023970206abaf70fc73a4f2ff1a77d8a0ab2ae81f0772a6db4fc80e')
-
 
 
 def _positive_physical_envelope(log_w: np.ndarray, gamma: float,
@@ -2166,8 +2163,6 @@ class LobeUCoorDSelfFalsificationTestCase(TestCase):
             f'{_U_COORD_ROUNDTRIP_TOL} (teeth)')
 
 
-
-
 # ---------------------------------------------------------------------------
 # Carve-out retirement (WP lobe-4): _LOBE_CUSP_EXCLUSION_DISTANCE is gone.
 
@@ -2287,7 +2282,6 @@ class LobeCuspAxisMapSelfFalsificationTestCase(TestCase):
 
     def test_reversed_map_has_nonzero_at_start(self) -> None:
         """A u starting at nonzero breaks the u_fine[0] ≈ 0 invariant."""
-        import types
         original = surrogate_module._lobe_cusp_axis_map
 
         def _fake(theta_lo, theta_hi, cusp_angle, side):

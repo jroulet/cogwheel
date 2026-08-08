@@ -59,7 +59,7 @@ from cogwheel.lensing.ppgo_map import (
     CertifiedPpgoMap, UNKNOWN, caustic_rho, get_certified_ppgo_map)
 from cogwheel.lensing.surrogate import (
     ExteriorPolarChart, TubeChart, LensAmplificationSurrogate,
-    _REFUSAL_ERRORS, _log_w_grid, _uniform_axis, _log_reach_gamma_axis,
+    _REFUSAL_ERRORS, _log_w_grid, _log_reach_gamma_axis,
     _caustic_reach as _scalar_caustic_reach, _from_caustic_fixed,
     _from_lobe_fixed, _lobe_boundary_radius, LobeInteriorChart,
     InteriorWedgeChart, _from_wedge_fixed,
@@ -3729,7 +3729,6 @@ def _wedge_child_boxes(
             boxes.append(((float(child_r_c), float(child_theta_c)),
                           (float(child_half_r), float(child_half_theta))))
     return boxes, theta_split, child_half_r
-
 
 
 def _lobe_nearest_cusp(

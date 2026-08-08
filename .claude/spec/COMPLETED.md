@@ -998,6 +998,41 @@ cases; `GhostFrameCollapseTestCase` and `RealImagePathBitIdentityTestCase` in
   on `t_min` for a fixed `(source, matrix)`.
 
 
+## lensing-surrogate
+
+
+### Lobe cusp-adapted coordinate (`u = d**(2/3)`)
+
+`LobeInteriorChart`'s sqrt-edge angular coordinate (`theta_to_s`) is replaced
+with the cusp-adapted `u = d**(2/3)` coordinate, `d` the angular distance to
+the nearest deltoid cusp vertex — mirroring the `InteriorWedgeChart` v3
+pattern (`[[2026-08-07_subdivision-recursion-wedge-v3-r-caustic]]`). The
+`|dtheta|**(1/3)` singularity `rho_lobe` carried on the raw `theta_local`
+axis at a cusp vertex is gone, and the cusp carve-out
+(`_LOBE_CUSP_EXCLUSION_DISTANCE`) is retired: the `eta_max` nearest-caustic-
+distance test alone excludes near-cusp tiles, and a tile centred at a cusp
+vertex clears the eps bar without subdivision.
+
+- `surrogate.py`: `_lobe_cusp_axis_map` (uniform-in-`u` `(2, 2001)` map
+  `[theta_fine, u_fine]`, same node count as `_FARFIELD_ARC_MAP_SIZE`);
+  schema/field rename `theta_to_s` -> `theta_to_u` / `u_grid`;
+  `_LOBE_AXIS_SCHEMA_NEW = 'lobe_caustic_relative_v1'` is the ONLY known lobe
+  tag — both OLD tags (`_LOBE_AXIS_SCHEMA_V1` raw-theta, sqrt-edge
+  `_LOBE_AXIS_SCHEMA`) hard-refuse at load, and `theta_to_u` is read
+  unconditionally so an absent map hard-refuses; `from_lobe_engine` builds
+  the cusp-adapted `u` grid via the map.
+- `surrogate_training.py`: `_lobe_nearest_cusp` (single authoritative
+  nearest-cusp derivation), `_lobe_child_boxes` (angular split at the
+  U-MIDPOINT mapped back to `theta_local`, not the raw theta midpoint),
+  `_build_lobe_chart` gains `cusp_angle` / `cusp_side`; the
+  `_LOBE_CUSP_EXCLUSION_DISTANCE` constant is deleted.
+
+Tests migrated in `test_lensing_surrogate_lobe.py` (u-coordinate round-trips
+vs closed-form oracle, `(2, 2001)` shape, bound-shift stability, single-
+schema persistence), `test_lensing_lobe_subdivision.py`, and
+`test_lensing_wedge_dd_arclength.py`. 149 passed / 16 skipped, 0 failed.
+
+
 ## likelihood
 
 ### Build 8g — far-field tiling + eps registration gate (complete)

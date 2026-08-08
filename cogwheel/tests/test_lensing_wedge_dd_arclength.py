@@ -77,7 +77,6 @@ train-tier.
 """
 from __future__ import annotations
 
-import copy
 import dataclasses
 import json
 import os
@@ -89,8 +88,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
-from cogwheel.lensing.chang_refsdal.geometry import r_caustic
 from cogwheel.lensing.surrogate import (
     ExteriorPolarChart,
     InteriorWedgeChart,

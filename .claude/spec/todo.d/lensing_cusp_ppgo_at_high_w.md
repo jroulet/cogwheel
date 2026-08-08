@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [lensing_lobe_cusp_adapted_coordinate]
+depends_on: [2026-08-08_lobe-cusp-adapted-coordinate]
 ---
 
 - **High-w cusp serving falls through to live Pearcey quadrature instead of

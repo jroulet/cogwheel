@@ -6,6 +6,26 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
+- `0.35.0` (2026-08-08):
+
+### Lobe interior chart adopts the cusp-adapted `u = d**(2/3)` angular axis
+
+The `LobeInteriorChart` paragraph now states the shipping contract:
+`(rho_lobe, u)` where `u = d**(2/3)`, `d` the angular distance to the nearest
+deltoid cusp vertex — the macro-saddle counterpart of the wedge's cusp-adapted
+axis, absorbing the `r_deltoid ~ const - c*d**(2/3)` caustic-reach power law so
+`rho_lobe` no longer carries the `|dtheta|**(1/3)` divergence of the raw
+`theta_local` axis. The single known axis-schema tag is
+`_LOBE_AXIS_SCHEMA_NEW = 'lobe_caustic_relative_v1'`; the cusp-adapted
+`theta_to_u` map is REQUIRED (built by `from_lobe_engine` via
+`_lobe_cusp_axis_map`, a uniform-in-`u` `(2, 2001)` array), and both old lobe
+tags (raw `theta_local` V1 and sqrt-edge) are dropped from the known set so a
+stale artifact hard-refuses at load. Gated lobe tiles subdivide at the
+U-midpoint rather than the raw theta midpoint, and the
+`_LOBE_CUSP_EXCLUSION_DISTANCE` carve-out is retired — the cusp-adapted
+coordinate handles near-cusp tiles, so the `eta_max` nearest-caustic-distance
+test alone excludes them.
+
 - `0.34.0` (2026-08-07):
 
 ### Wedge axis schema v3, bounded subdivision recursion, exact-parametrisation `r_caustic`

@@ -1033,6 +1033,21 @@ Tag conventions:
   campaign is not.
 
 
+- **High-w cusp serving falls through to live Pearcey quadrature instead of
+  geometric optics + ghost** `[→ spec]` — identified 2026-08-08.
+
+  At high ``w`` the Pearcey controls ``(x, y)`` are large and the uniform
+  Pearcey integral asymptotes to the geometric image sum: the fold-corrected
+  ppGO (`fold_ppgo_correction` including the Airy ghost at merging fold
+  pairs) plus non-merging image kernels is accurate and ~10^3× faster than
+  live certified quadrature. The cusp arm should certify and serve ppGO
+  above a cross-over ``w``.
+
+  WORK: add a ppGO rung in the cusp arm (or a bypass in the ladder) above
+  a measured cross-over ``w`` where the ppGO error drops below the bar.
+  Retire the live-quadrature fallback for the high-w regime.
+
+
 - **THE D2 REFLECTION FOLD IS EXPLOITED IN ONLY ONE OF FOUR REGIONS — 4x more
   charts than needed almost everywhere** `[→ spec]` — owner-identified,
   verified 2026-08-06.
@@ -1179,6 +1194,33 @@ Tag conventions:
   (3) polar beats `(s, d)` on eps at matched node count and needs materially
   fewer charts than 57/band; (4) regions beyond the engine's reach report a
   ppGO-served coverage class, not a gap.
+
+
+- **Exterior polar chart needs `u = d^(2/3)` angular coordinate**
+  `[→ spec]` — identified 2026-08-08 by Professor.
+
+  `ExteriorPolarChart` uses ``(rho, theta_c)``. Near cusp angles
+  (``theta_c → 0, π/2``) the caustic radius ``r_caustic ~ const -
+  c d^(2/3)`` makes the envelope ``E(rho, theta_c, w)`` vary as
+  ``d^{-1/3}`` in theta_c — a cubic spline on uniform theta_c nodes
+  cannot fit it.  Result: aggressive subdivision, 500+ charts for a
+  4×4×4 probe.
+
+  **Fix**: ``theta_c → u = d^(2/3)`` where ``d`` is angular distance
+  to the nearer cusp in the D₂-folded quadrant (``d = theta_c`` or
+  ``d = π/2 - theta_c``).  ``dE/du`` is finite — the exponent cancels
+  the ``d^(2/3)`` in ``r_caustic`` exactly.  Same pattern as
+  `InteriorWedgeChart`'s ``u`` coordinate (wedge v3, F064), using the
+  same ``_wedge_cusp_axis_map`` helper and ``theta_to_u`` serialization.
+  ``rho`` stays as-is (``drho/d|y| = 1``, well-behaved).
+
+  Saddle exterior (``gamma > 1``) uses a scalar ``rho`` without
+  directional ``r_caustic`` — no angular cusp singularity, no change
+  needed.
+
+  ACCEPTANCE: a 4×4×4 probe produces ~70 charts (not 500); a tile at
+  ``u=0`` (cusp vertex) clears the 1e-3 bar; the serving path maps
+  ``theta_c → u`` via ``np.interp`` before spline contraction.
 
 
 - **`farfield_*` HELPER NAMES SPAN TWO PHYSICAL REGIMES** `[housekeeping]` —
@@ -1611,6 +1653,65 @@ Tag conventions:
   ppGO extension needs a gate keyed on the thing that actually degrades it.
 
 
+- **`train()` COVERS ONE 0.04-WIDE GAMMA BAND PER PARITY — about 4% of the
+  prior box** `[→ spec]` — measured 2026-08-06.
+
+  `PriorBox.from_prior_classes(f_lo_hz=0.16, f_hi_hz=0.40).gamma_range` is
+  `(0.0, 1.6)`. `_gamma_band(box, parity, halfwidth)` returns a band CENTRED
+  in the parity's sub-range and `halfwidth` wide — its docstring says "A
+  narrow gamma band", so this is deliberate, not a bug in the function:
+
+      parity +1: sub-range (0.00, 0.99), centre 0.495 -> (0.475, 0.515)
+      parity -1: sub-range (1.01, 1.60), centre 1.305 -> (1.285, 1.325)
+
+  With the production `gamma_band_halfwidth=0.02` that is **0.04 of 0.99
+  (4%)** for positive parity and **0.04 of 0.59 (7%)** for the macro saddle.
+  `train()` loops `for parity in (1, -1)` and calls `_gamma_band` ONCE per
+  parity, so there is no outer sweep: everything outside those two slivers is
+  simply never trained.
+
+  ## Why this went unnoticed
+
+  `scripts/train_surrogate_production.py` is named "production" and prints
+  "PRODUCTION SURROGATE TRAINING", so its artifact reads as a full-domain
+  surrogate. The narrowness is visible only by evaluating `_gamma_band`
+  against the box. The 2026-08-05 run that died after 2h24m was not 60%
+  through the domain — it was ~60% through ONE BAND of a 4% slice.
+
+  ## Cost of actual coverage (measured, not estimated)
+
+  Per band on the wedge path: ~42 min (tube 1.2 + exterior 39.4 + interior
+  1.8; the interior figure is measured, the exterior from the dead run's
+  timestamps). Tiling the parity sub-ranges at 0.04:
+
+      positive parity  0.99 / 0.04 ~ 25 bands
+      macro saddle     0.59 / 0.04 ~ 15 bands
+      TOTAL            ~40 bands x 42 min ~ 28 h
+
+  `stable_gamma_bands` may bisect further near the parity wall
+  (`gamma -> 1`), so treat 28 h as a floor. This is a WEEKEND run, not an
+  overnight one, and it wants a resumable driver and a box that will not be
+  OOM-killed by another user (the 2026-08-05 death).
+
+  ## Work
+
+  - Decide the intended contract: is `train()` meant to be called REPEATEDLY
+    (once per band, with the caller sweeping gamma) and the artifacts merged,
+    or should it sweep internally? The `_load_or_build` resume path and the
+    `label=f'{label}_b{i_band}'` naming suggest the former was intended, but
+    nothing in `scripts/train_surrogate_production.py` does the sweep.
+  - Whichever it is, make the narrowness IMPOSSIBLE TO MISS: the training
+    report should record the gamma coverage actually trained as a FRACTION of
+    the box, and `serve` should refuse (not silently extrapolate) outside it.
+  - Only then run the full sweep, with a cost quoted from the measured 42
+    min/band.
+
+  ACCEPTANCE: the training report states trained-gamma coverage as a fraction
+  of `box.gamma_range`; a serve query at a gamma outside every trained band
+  refuses with a named error rather than returning a value; and the pilot
+  artifact is labelled as a pilot.
+
+
 - ~~**Normalize the far-field `d` axis by curvature radius**~~ `[RESOLVED]` —
   Evaluated 2026-08-03 (build `eval_d_norm`). Rejected: wrong physics (Airy
   transition is ξ not d/R_c), wrong chart (far-field operates at d >> R_c),
@@ -1770,106 +1871,6 @@ Tag conventions:
   path. The brief said "transcribe the lobe path"; the plan gate then trimmed
   the cusp alignment the lobe actually has. So the lobe is better than the
   wedge was, and still carries the normalised-radius disease.
-
-
-- **Lobe interior needs cusp-adapted angular coordinate** `[→ spec]` —
-  identified by Professor in saddle forensics.
-
-  `LobeInteriorChart` uses ``(rho_lobe, theta_local)`` where ``rho_lobe =
-  |y - centroid| / r_deltoid``. At a cusp vertex ``r_deltoid`` scales as
-  ``|dtheta|^(1/3)`` (same exponent as the astroid), so ``rho_lobe`` is
-  singular — a cusp-adapted coordinate is required for the angular axis.
-
-  **Fix**: Map ``theta_local → u = d^(2/3)`` where ``d`` is the angular
-  distance to the nearest deltoid cusp vertex. Same pattern as
-  `InteriorWedgeChart`'s ``u = d^(2/3)`` coordinate (wedge v3). Eliminates
-  the ``|dtheta|^(1/3)`` singularity in ``r_deltoid`` and makes the lobe
-  interior envelope smooth at cusp vertices.
-
-  **Scope**:
-  - Replace ``theta_local`` with ``u`` in `LobeInteriorChart` axis schema
-  - Add ``_lobe_cusp_angles(gamma)`` → ``theta_to_u`` map per gamma
-  - Update training, serving, and serialization for the new coordinate
-  - Remove the cusp carve-out (`_LOBE_CUSP_EXCLUSION_DISTANCE`) — no longer
-    needed with a smooth coordinate
-
-  ACCEPTANCE: lobe interior chart trains and serves with ``(rho_lobe, u)``
-  coordinates; a tile centered at ``u=0`` (cusp vertex) clears the 1e-3 bar
-  without subdivision; the carve-out guard can retire.
-
-
-- **High-w cusp serving falls through to live Pearcey quadrature instead of
-  geometric optics + ghost** `[→ spec]` — identified 2026-08-08.
-
-  At high ``w`` the Pearcey controls ``(x, y)`` are large and the uniform
-  Pearcey integral asymptotes to the geometric image sum: the fold-corrected
-  ppGO (`fold_ppgo_correction` including the Airy ghost at merging fold
-  pairs) plus non-merging image kernels is accurate and ~10^3× faster than
-  live certified quadrature. The cusp arm should certify and serve ppGO
-  above a cross-over ``w``.
-
-  WORK: add a ppGO rung in the cusp arm (or a bypass in the ladder) above
-  a measured cross-over ``w`` where the ppGO error drops below the bar.
-  Retire the live-quadrature fallback for the high-w regime.
-
-
-- **`train()` COVERS ONE 0.04-WIDE GAMMA BAND PER PARITY — about 4% of the
-  prior box** `[→ spec]` — measured 2026-08-06.
-
-  `PriorBox.from_prior_classes(f_lo_hz=0.16, f_hi_hz=0.40).gamma_range` is
-  `(0.0, 1.6)`. `_gamma_band(box, parity, halfwidth)` returns a band CENTRED
-  in the parity's sub-range and `halfwidth` wide — its docstring says "A
-  narrow gamma band", so this is deliberate, not a bug in the function:
-
-      parity +1: sub-range (0.00, 0.99), centre 0.495 -> (0.475, 0.515)
-      parity -1: sub-range (1.01, 1.60), centre 1.305 -> (1.285, 1.325)
-
-  With the production `gamma_band_halfwidth=0.02` that is **0.04 of 0.99
-  (4%)** for positive parity and **0.04 of 0.59 (7%)** for the macro saddle.
-  `train()` loops `for parity in (1, -1)` and calls `_gamma_band` ONCE per
-  parity, so there is no outer sweep: everything outside those two slivers is
-  simply never trained.
-
-  ## Why this went unnoticed
-
-  `scripts/train_surrogate_production.py` is named "production" and prints
-  "PRODUCTION SURROGATE TRAINING", so its artifact reads as a full-domain
-  surrogate. The narrowness is visible only by evaluating `_gamma_band`
-  against the box. The 2026-08-05 run that died after 2h24m was not 60%
-  through the domain — it was ~60% through ONE BAND of a 4% slice.
-
-  ## Cost of actual coverage (measured, not estimated)
-
-  Per band on the wedge path: ~42 min (tube 1.2 + exterior 39.4 + interior
-  1.8; the interior figure is measured, the exterior from the dead run's
-  timestamps). Tiling the parity sub-ranges at 0.04:
-
-      positive parity  0.99 / 0.04 ~ 25 bands
-      macro saddle     0.59 / 0.04 ~ 15 bands
-      TOTAL            ~40 bands x 42 min ~ 28 h
-
-  `stable_gamma_bands` may bisect further near the parity wall
-  (`gamma -> 1`), so treat 28 h as a floor. This is a WEEKEND run, not an
-  overnight one, and it wants a resumable driver and a box that will not be
-  OOM-killed by another user (the 2026-08-05 death).
-
-  ## Work
-
-  - Decide the intended contract: is `train()` meant to be called REPEATEDLY
-    (once per band, with the caller sweeping gamma) and the artifacts merged,
-    or should it sweep internally? The `_load_or_build` resume path and the
-    `label=f'{label}_b{i_band}'` naming suggest the former was intended, but
-    nothing in `scripts/train_surrogate_production.py` does the sweep.
-  - Whichever it is, make the narrowness IMPOSSIBLE TO MISS: the training
-    report should record the gamma coverage actually trained as a FRACTION of
-    the box, and `serve` should refuse (not silently extrapolate) outside it.
-  - Only then run the full sweep, with a cost quoted from the measured 42
-    min/band.
-
-  ACCEPTANCE: the training report states trained-gamma coverage as a fraction
-  of `box.gamma_range`; a serve query at a gamma outside every trained band
-  refuses with a named error rather than returning a value; and the pilot
-  artifact is labelled as a pilot.
 
 
 - **ELEVEN SERVING-LADDER / CERTIFICATION GUARDS ARE RED AT HEAD — and have

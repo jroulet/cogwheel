@@ -95,7 +95,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.integrate import cumulative_trapezoid
 from scipy.interpolate import BSpline, make_interp_spline
 from scipy.optimize import minimize_scalar
 
