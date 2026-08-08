@@ -120,9 +120,20 @@
   text joins. Always verify SPEC.md edits by checking raw bytes (Python
   snippet) rather than Serena's `read_file` view (which un-escapes
   backslashes in the display).
+- SPEC.md backtick-in-bash trap (2026-08-08): a `MAX_SUBDIVISION_DEPTH`
+  backtick inside a double-quoted bash `python -c "..."` was eaten by
+  command substitution — repair via a heredoc temp script; verify by raw-
+  bytes read (already known, bit me again).
 - Constant names cited in SPEC.md and DATA_CONTRACTS.yaml become fragile
   cross-references: if `_LOBE_AXIS_SCHEMA*` or any schema constant is
   renamed in code, BOTH doc surfaces need updating simultaneously.
+- ENUMERATED-KIND-LIST CROSS-REF (2026-08-08): a SPEC sentence that names
+  the kinds that have a capability (e.g. "subdivided recursively where the
+  kind has a subdivider (far-field, wedge, lobe)") becomes a fragile pair
+  with the TODO item listing the missing kind ("TubeChart still has none") —
+  if TubeChart ever gains a subdivider, BOTH the SPEC list and that TODO
+  item need touching (same rename-preserved-staleness family as the polar
+  re-chart case).
 - `sync_derived_docs.py` reporting "some issues auto-fixed" with no actual
   git diff is likely an internal state flush (a no-op) — trust `git diff`
   as the source of truth, not the script's exit message.

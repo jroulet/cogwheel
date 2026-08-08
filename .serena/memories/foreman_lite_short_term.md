@@ -1,1 +1,3 @@
-Last build: polar re-chart (8227445). Clean.
+# Foreman-Lite Short-Term Observations
+
+(empty — last consolidated by Dreamer on 2026-08-08)

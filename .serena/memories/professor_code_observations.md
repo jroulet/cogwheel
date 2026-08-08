@@ -307,3 +307,44 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   ZeroDivisionError); measured 11.74x speedup vs the 1.85s dense-scan
   baseline. Full engine-training + sampling validation remains operator-
   deferred (COGWHEEL_TRAIN_TIER=1); no further physics concerns.
+- SADDLE FORENSICS AUDIT (2026-08-08, Q1-Q4):
+  - Q1 LOBE NORMALIZED-RADIUS DISEASE (PATHOLOGICAL): r_deltoid vanishes at
+    deltoid cusps by |dtheta|^(1/3), the SAME power law as astroid cusps, so
+    rho_lobe loses radial resolution near cusp directions. Milder than
+    astroid only because deltoid lobes have smaller angular extent (~pi/3 vs
+    ~pi/2 per astroid quadrant). Cure: either a cusp-adapted u=d**(2/3)
+    coordinate (wedge pattern) or cusp carve-out + subdivision (pragmatic,
+    loses coverage). Test: transverse rho_lobe cut at fixed theta_local
+    ~2deg from the cusp ray; error grows rapidly as rho_lobe -> 1.
+  - Q2 GHOST KERNEL PARITY GATE: the Morse reference exp(-0.5j*pi) is CORRECT
+    for both parities — the fold is parity-blind (Fermat-potential reflection
+    symmetry), and the merged saddle at any fold has the same Berry phase
+    -pi/2 regardless of whether the merging pair is (min,saddle) or
+    (saddle,saddle). NO parity-dependent branch needed. Verification: compare
+    the ghost-kernel phase to the engine residual R = F_op - ppGO at a saddle
+    config near the fold; phase alignment within a few degrees confirms the
+    reference. (No code change shipped for this.)
+  - Q3 LOBE CUSP CARVE-OUT CONSTANT: recommend a physical y-unit exclusion
+    (~0.1-0.15 y-units from the cusp vertex) mirroring the exterior polar
+    chart's 0.2 y-units, scaled for the deltoid's smaller extent. The
+    separation-gate connection: near-cusp is where |tau_a - tau_c| -> 0,
+    making E(w) non-smooth — both the spline and the SACR-C construction
+    degrade there. RESOLVED in-build: the existing eta_max tube-shell
+    exclusion already rejects near-cusp tiles (cusp vertices are in
+    caustic_cloud), so NO explicit carve-out code shipped;
+    `_LOBE_CUSP_EXCLUSION_DISTANCE=0.1` landed as documented dead code.
+  - Q4 SADDLE EXTERIOR POLAR CHART: the scalar-reach rho = 1 + |y| -
+    caustic_reach(gamma) is functionally correct as a coordinate frame
+    (envelope smooth, drho/d|y|=1) but GEOMETRICALLY APPROXIMATE: rho does
+    NOT align with the deltoid boundary directionally, so sources at the same
+    rho but different theta_c can have very different physical proximity to
+    the caustic. May need higher angular resolution. Test: served-vs-engine
+    accuracy sweep with an angular-uniformity check across theta_c bins;
+    monotonic decay of envelope magnitude along radial rays.
+- ppGO ABOVE-CEILING RUNG (Build ppgo_above_ceiling, 2026-08-08): serving
+  above the QD ceiling (w>150) via an ENGINE-INTERCEPT in
+  `_amplification_coefficients` (before engine eval), gate w_max>150 AND
+  w_lo*min_delta_tau>=RHO_END (4.0), whole-band via fold_ppgo_correction +
+  reconstruct_farfield(FARFIELD_KERNEL_SUM). Error scale measured: ~1e-2 at
+  w=150, ~1e-3 at w=500, decreasing trend; boundary-continuity is the
+  primary gate. All-image serve (fold_ppgo_correction handles all 4 images).

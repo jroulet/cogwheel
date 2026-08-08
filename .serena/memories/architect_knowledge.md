@@ -305,3 +305,31 @@
 - Exterior recursion probe (post-strand, production gamma_band_halfwidth=0.04): 31 charts, 9/31 pass 1e-3; depth histogram {0:2, 1:6, 2:7, 3:16}; 13 depth-3 tiles STILL fail (eps 1.2e-3..3.6, hundreds-to-thousands x tolerance) — subdivision to the recursion cap does NOT fix a coordinate-level disease. Root tiles intrinsically bad (foot tie_ratio degeneracy); recursion paper-overs them. Confirms (s,d) is wrong for the exterior bulk (coordinate-level, not resolution-level).
 - Wedge v3 single-stratum probe (FINAL): train(regions=('wedge_interior',), m_lens_range=(10,15.8)) → 10 charts, 9/9 valid eps pass the 5e-2 bar (2.0e-3..1.6e-2, median 6.0e-3). Earlier "NaN median / 19 charts" was TWO probe bugs, not a coordinate failure: (1) full-prior config (13 w-strata → ~130 tiles, wrong scale), (2) reading chart.provenance in-memory which LACKS heldout_eps after NPZ load (read the NPZ provenance).
 - fix_tree_gate_hang (housekeeping, same day): conftest's 900s timeout was a NO-OP because pytest-timeout was NOT installed — a timeout guard is inert without its package. Fix: install pytest-timeout, pin COGWHEEL_TRAIN_TIER="" in build env (train-tier tests un-skip if the env var leaks), add _f_schwinger_mpmath sentinel guard to conftest.py.
+
+
+## Lobe subdivision + ppGO above-ceiling (2026-08-08)
+
+- LOBE SUBDIVIDER (saddle_forensics WP-1): lobe now covered by
+  `_subdivide_lobe_tile`, a THIRD wrapper over the generic `_subdivide_tile`
+  (after far-field + wedge), wired into `_train_band_charts` lobe branch
+  (subdivision replaces immediate ladder_served_gap). D2 cusp carve-out
+  RESOLVED as no-carve-out-needed: existing eta_max tube-shell nearest-
+  distance test in `_SaddleLobeAdmission.admits` already rejects near-cusp
+  tiles (cusp vertices are in caustic_cloud); the added
+  `_LOBE_CUSP_EXCLUSION_DISTANCE=0.1` constant is intentionally dead,
+  documented with rationale. Simplifier: WPs independent; carve-out sited in
+  admits (not the tiler) — but ultimately no carve-out was needed at all.
+- PPGO ABOVE-CEILING ENGINE-INTERCEPT RUNG DESIGN (Build ppgo_above_ceiling,
+  WP-4): ONE Coder WP intercepting `_amplification_coefficients` BEFORE the
+  engine eval. Gate: w_max>150 AND w_lo*min_delta_tau>=RHO_END (4.0);
+  whole-band serve via fold_ppgo_correction + reconstruct_farfield
+  (FARFIELD_KERNEL_SUM). Explicitly NO band-split, NO census mirror, NO
+  kappa/beta guards. Simplifier: engine-intercept (NOT the surrogate path —
+  unreachable there), band-split trimmed, engine-intercept cleaner.
+  Professor: error ~1e-2 @150, ~1e-3 @500, decreasing trend; RHO_END=4.0;
+  all-image serve; boundary-continuity is the primary gate.
+- Lobe normalized-radius disease (Professor, follow-on): r_deltoid->0 at
+  deltoid cusps by |dtheta|^(1/3) (same power law as astroid) — subdivision
+  alone does NOT fix the coordinate-level disease; the clean fix is a
+  cusp-adapted u=d**(2/3) coordinate (wedge pattern), LEFT for a follow-on
+  build.

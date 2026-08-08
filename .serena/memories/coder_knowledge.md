@@ -458,3 +458,25 @@
   not a coordinate failure. Probe config must match the production
   tiling it claims to re-measure (gamma_band_halfwidth 0.04, NOT 0.48);
   a wide band invalidates the comparison.
+- LOBE SUBDIVIDER IMPLEMENTATION (Build saddle_forensics, 2026-08-08):
+  `_lobe_child_boxes` + `_subdivide_lobe_tile` — a THIRD wrapper over the
+  shared `_subdivide_tile` (after far-field + wedge), threading a lobe key
+  into the child tile dict; wired into `_train_band_charts` lobe branch so
+  subdivision replaces the immediate ladder_served_gap. INS-1-001: build_child
+  must pass `w_nodes_per_decade=eff_w_nodes` (3-way resolve: tile override ->
+  config.interior_w_nodes_per_decade -> config.w_nodes_per_decade) NOT the raw
+  `w_nodes`, matching the wedge subdivider pattern — lobe-interior children
+  get the interior node density. `_LOBE_CUSP_EXCLUSION_DISTANCE=0.1` added but
+  is INTENTIONALLY DEAD (Professor ruling): the existing eta_max tube-shell
+  nearest-distance test in `_SaddleLobeAdmission.admits` already rejects
+  near-cusp-vertex tiles (cusp vertices are in caustic_cloud) — documented
+  with rationale, no explicit carve-out code.
+- PPGO ABOVE-CEILING ENGINE-INTERCEPT RUNG (Build ppgo_above_ceiling,
+  2026-08-08): `_ppgo_above_ceiling` method + intercept in
+  `_amplification_coefficients` BEFORE the engine eval. Imports
+  W_CEILING_SCHWINGER_QD (150.0) from `_schwinger` and RHO_END (4.0) from
+  operator. Gate: w_max > 150 AND min_delta_tau > 0 AND
+  w_lo*min_delta_tau >= 4.0. Whole-band serve via fold_ppgo_correction +
+  reconstruct_farfield(FARFIELD_KERNEL_SUM). LensDomainError propagates
+  unswallowed; non-finite guarded; fallthrough -> SchwingerCertificationError
+  unchanged.

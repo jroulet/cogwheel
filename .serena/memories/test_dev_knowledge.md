@@ -273,3 +273,21 @@
   setUpClass for map=None fixtures and rebuild them with a real map (e.g.
   via the production axis-map helper) rather than widening the loader
   back to optional.
+- LOBE SUBDIVISION + CARRIER-FLIP + GHOST-SADDLE TEST PATTERNS (Build
+  saddle_forensics, 2026-08-08, test_lensing_lobe_subdivision.py, 19 tests):
+  (1) LobeCuspProximityTestCase — near-cusp tile refused, far-from-cusp
+  probes clear eta_max, near-cusp proximity witness; LobeCuspSelfFalsification
+  — deep-interior same-cusp-ray tile admitted. (2) LobeSubdivisionTestCase —
+  children clear the bar, packed>=1, additive keys, admission predicate;
+  LobeSubSelfFalsification — stubborn gap packed=0. (3) GhostKernelSaddleTestCase
+  — finite non-trivial kernel + multi-source sweep on SADDLE parity (gamma>1);
+  GhostSaddleSelfFalsification — wrong shape -> ValueError, origin ->
+  GhostDomainError. (4) LobeCarrierFlipRefusalTestCase — mock
+  `_build_lobe_chart` raising CarrierDiscontinuityError; `_subdivide_lobe_tile`
+  catches it and records children as result='carrier_flip' with
+  admission='admitted' + carrier_flip_detail, packed=0, terminating (NON-wedge
+  style — the structural refusal is never recursed, unlike the wedge
+  subdivider's ladder-served-gap leaf); LobeCarrierFlipSelfFalsification —
+  normal build packs children. (5) ppGO above-ceiling suite extension:
+  test_lensing_ppgo_above_ceiling.py (15 tests) exercising the w>150
+  engine-intercept rung.
