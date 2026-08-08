@@ -244,6 +244,42 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   production phenomenon at cusp-adjacent tiles (12+ nodes); smoke-scale
   tests (7 nodes, ~0.37rad span) show ~0.138 eps for BOTH coords (not cusp-
   adjacent) — do not read smoke-scale swing as evidence of knife-edge.
+  SUPERSEDED 2026-08-08 (98c4e7f): the sqrt-edge axis (A2-designed) was
+  WRONG for the deltoid's A3 cusps; the lobe interior now uses the
+  cusp-adapted u = d**(2/3) axis (see the LOBE CUSP-ADAPTED COORDINATE
+  PHYSICS entry below; also `mem:lobe_interior_chart`).
+- LOBE CUSP-ADAPTED COORDINATE PHYSICS (Build lobe_cusp_coordinate,
+  98c4e7f, verdict PASS w/ 1 non-blocking concern): (1) 2/3 exponent is
+  UNIVERSAL for A3 — deltoid lobe cusps are A3 fold-cusp singularities
+  (same catastrophe class as astroid cusps); u = d**(2/3) is the exact
+  gamma-universal caustic-reach scaling, while the retired sqrt-edge
+  exponent 1/2 was designed for A2 fold edges, not cusps. (2) Smoothness:
+  rho_lobe normalizes by the deltoid radius (smooth at cusps, rho ~
+  1 + O(dtheta)); u absorbs the d**(2/3) term in caustic reach, removing
+  the d**(-1/3) derivative singularity a raw-theta spline would see at the
+  cusp vertex — (rho_lobe, u) is smooth everywhere in the lobe interior.
+  (3) `_lobe_cusp_axis_map` mirrors `_wedge_cusp_axis_map`: uniform-in-u
+  np.linspace, node-exact endpoints explicitly pinned, offset so
+  u(theta_lo)=0, monotone d->u->theta inverse on both sides, np.clip FP
+  guard on the 'right' side. (4) u-midpoint subdivision correct:
+  `_lobe_child_boxes` computes u_mid from the parent's map and splits
+  children at equal u-range via np.interp inverse; angular children have
+  UNEQUAL theta-widths (near-cusp child narrower) — correct for a cubic
+  spline in u. (5) Schema hard-refuse correct: both old tags removed from
+  `_KNOWN_LOBE_AXIS_SCHEMAS`, `_validate_lobe_axis_schema` rejects them at
+  load (tests cover both old tags, None, unknown) — no silent degradation.
+  (6) Carve-out retirement correct: `_LOBE_CUSP_EXCLUSION_DISTANCE` removed
+  because the cusp-adapted coordinate now handles near-cusp tiles; the
+  eta_max nearest-caustic-distance test in `_SaddleLobeAdmission.admits`
+  already excluded near-cusp tiles — a separate carve-out was always
+  redundant. CONCERN (non-blocking, latent trap for external callers):
+  `_chart_from_npz` UNCONDITIONALLY accesses data['theta_to_u'] (KeyError
+  if absent) but `_chart_to_npz` only writes theta_to_u when not None —
+  the raw-theta fallback path (cusp_angle=None) produces charts with
+  theta_to_u=None that CAN be built but CANNOT survive an NPZ round-trip.
+  Not triggered in the current training pipeline (all tiles carry cusp
+  angles). Mitigation: tolerate missing theta_to_u in `_chart_from_npz`, or
+  raise a clear error in `_chart_to_npz` when saving a theta_to_u=None chart.
 - `surrogate_training.py` C6 (Build 3, 2026-08-01): `TrainingConfig.eta_max`
   and `TrainingConfig.eta_floor` fields were REMOVED; tube-shell exclusion
   geometry is now controlled by explicit kwargs `eta_max` and `eta_floor`

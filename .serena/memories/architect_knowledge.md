@@ -316,8 +316,10 @@
   RESOLVED as no-carve-out-needed: existing eta_max tube-shell nearest-
   distance test in `_SaddleLobeAdmission.admits` already rejects near-cusp
   tiles (cusp vertices are in caustic_cloud); the added
-  `_LOBE_CUSP_EXCLUSION_DISTANCE=0.1` constant is intentionally dead,
-  documented with rationale. Simplifier: WPs independent; carve-out sited in
+  `_LOBE_CUSP_EXCLUSION_DISTANCE=0.1` constant was RETIRED (deleted) by the
+  follow-on cusp-adapted coordinate build (98c4e7f, 2026-08-08) — the eta_max
+  tube-shell test alone excludes near-cusp tiles; the carve-out was always
+  redundant. Simplifier: WPs independent; carve-out sited in
   admits (not the tiler) — but ultimately no carve-out was needed at all.
 - PPGO ABOVE-CEILING ENGINE-INTERCEPT RUNG DESIGN (Build ppgo_above_ceiling,
   WP-4): ONE Coder WP intercepting `_amplification_coefficients` BEFORE the
@@ -331,5 +333,16 @@
 - Lobe normalized-radius disease (Professor, follow-on): r_deltoid->0 at
   deltoid cusps by |dtheta|^(1/3) (same power law as astroid) — subdivision
   alone does NOT fix the coordinate-level disease; the clean fix is a
-  cusp-adapted u=d**(2/3) coordinate (wedge pattern), LEFT for a follow-on
-  build.
+  cusp-adapted u=d**(2/3) coordinate (wedge pattern) — SHIPPED 2026-08-08
+  (98c4e7f). Design record: `mem:lobe_interior_chart`.
+
+## Lobe cusp-adapted coordinate build (2026-08-08)
+
+- QUOTA-DEATH SALVAGE PATTERN: the build died at inspector-17 (quota
+  exhaustion) AFTER coder-16's fixes were committed but BEFORE the Inspector
+  verified them; the code was salvaged as b18e6a8 and a FRESH Inspector
+  audit (re-run suites + re-derive invariants, 149 pass) was required
+  before the build could close. A quota-killed build does NOT close on its
+  last green partial pass — salvage the commit, then re-audit from scratch.
+  Distinct failure mode from the stranded-build pattern (agent error); both
+  need a driver/Inspector completion pass.

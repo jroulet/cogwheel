@@ -295,3 +295,18 @@
   tests, grep the WHOLE tree (not just the deleted module) for the dead
   class name and its old coordinate vocabulary — the residual failures
   are usually references, not logic.
+- QUOTA-DEATH SALVAGE RE-AUDIT (2026-08-08, lobe_cusp_coordinate build):
+  the build died at inspector-17 (quota exhaustion) after coder-16 fixed
+  revision-2 findings; the code was salvaged as b18e6a8 UNVERIFIED. The
+  salvage audit re-ran ALL changed-file suites to completion (149 pass /
+  16 pre-existing skip, 0 fail) and re-derived every invariant by hand:
+  single schema tag `lobe_caustic_relative_v1` (no old constants anywhere),
+  zero `theta_to_s` in ANY lobe code path (remaining refs = Tube/FarField
+  only), `_LOBE_ARC_MAP_SIZE` + `_LOBE_CUSP_EXCLUSION_DISTANCE` deleted,
+  lobe_cusps threaded through all tiers (train -> tile dict -> subdivision
+  children -> nearest_cusp -> child boxes -> build -> from_lobe_engine),
+  both from_lobe_engine paths (cusp-adapted + raw-theta fallback) work,
+  `_lobe_cusp_axis_map` both sides u_fine[0]~0 monotone endpoint-exact.
+  Lesson: a quota-killed build's salvage commit is UNVERIFIED — a green
+  partial pass from before the death does not certify it; re-audit the
+  whole changed surface from scratch. See `mem:lobe_interior_chart`.

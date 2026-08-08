@@ -69,3 +69,10 @@
 - `stable_gamma_bands` return type: returns `(stable, dropped)` where each
   entry in `dropped` is a `(lo, hi)` float tuple; sum dropped widths with a
   generator expression `sum(hi - lo for lo, hi in dropped)`.
+- CARRY-FORWARD DOC-FINDING GREP LESSON (2026-08-08, INS-4-001): a carried
+  doc-staleness finding (docstring said "Used by the wedge-interior chart"
+  though `_validate_theta_to_u` ALSO serves LobeInteriorChart) was missed by
+  earlier greps because the needle was a PARAPHRASE without the word "lobe".
+  When a doc finding is carried across reviews, grep the EXACT docstring
+  sentence from the finding, never a paraphrase — and confirm BOTH callers
+  by search before editing.

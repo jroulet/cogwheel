@@ -127,6 +127,13 @@
 - Constant names cited in SPEC.md and DATA_CONTRACTS.yaml become fragile
   cross-references: if `_LOBE_AXIS_SCHEMA*` or any schema constant is
   renamed in code, BOTH doc surfaces need updating simultaneously.
+- PENDING (2026-08-08, lobe cusp-adapted build 98c4e7f): the data-product
+  contract still describes the OLD lobe axis schemas (raw-theta V1 and
+  sqrt-edge); the production code now ships the SINGLE tag
+  `lobe_caustic_relative_v1` (`theta_to_u` required, old tags hard-refuse).
+  Deferred to Librarian as INS-4-002 / F050 — DATA_CONTRACTS.yaml needs the
+  lobe axis-schema rows updated to the single v1 tag. See
+  `mem:lobe_interior_chart` for the schema contract.
 - ENUMERATED-KIND-LIST CROSS-REF (2026-08-08): a SPEC sentence that names
   the kinds that have a capability (e.g. "subdivided recursively where the
   kind has a subdivider (far-field, wedge, lobe)") becomes a fragile pair

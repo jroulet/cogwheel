@@ -466,11 +466,12 @@
   must pass `w_nodes_per_decade=eff_w_nodes` (3-way resolve: tile override ->
   config.interior_w_nodes_per_decade -> config.w_nodes_per_decade) NOT the raw
   `w_nodes`, matching the wedge subdivider pattern — lobe-interior children
-  get the interior node density. `_LOBE_CUSP_EXCLUSION_DISTANCE=0.1` added but
-  is INTENTIONALLY DEAD (Professor ruling): the existing eta_max tube-shell
-  nearest-distance test in `_SaddleLobeAdmission.admits` already rejects
-  near-cusp-vertex tiles (cusp vertices are in caustic_cloud) — documented
-  with rationale, no explicit carve-out code.
+  get the interior node density. `_LOBE_CUSP_EXCLUSION_DISTANCE=0.1` was added but then RETIRED
+  (deleted, 98c4e7f) by the follow-on cusp-adapted-coordinate build: the
+  existing eta_max tube-shell nearest-distance test in
+  `_SaddleLobeAdmission.admits` already rejects near-cusp-vertex tiles (cusp
+  vertices are in caustic_cloud), so the carve-out constant was never
+  functionally needed — no explicit carve-out code shipped.
 - PPGO ABOVE-CEILING ENGINE-INTERCEPT RUNG (Build ppgo_above_ceiling,
   2026-08-08): `_ppgo_above_ceiling` method + intercept in
   `_amplification_coefficients` BEFORE the engine eval. Imports
@@ -480,3 +481,27 @@
   reconstruct_farfield(FARFIELD_KERNEL_SUM). LensDomainError propagates
   unswallowed; non-finite guarded; fallthrough -> SchwingerCertificationError
   unchanged.
+- LOBE CUSP-ADAPTED COORDINATE IMPLEMENTATION (Build lobe_cusp_coordinate,
+  98c4e7f, 2026-08-08): `_lobe_cusp_axis_map` (uniform-in-u `(2, 2001)`
+  `[theta_fine, u_fine]`, same node count as `_FARFIELD_ARC_MAP_SIZE`)
+  mirrors `_wedge_cusp_axis_map`; renamed theta_to_s -> theta_to_u /
+  s_grid -> u_grid on `LobeInteriorChart` ONLY (field, docstring,
+  from_lobe_values params, _assemble, _evaluate_chart lobe branch,
+  _chart_to_npz / _chart_from_npz lobe branches, _build_lobe_provenance);
+  single schema tag `_LOBE_AXIS_SCHEMA_NEW='lobe_caustic_relative_v1'` in
+  `_KNOWN_LOBE_AXIS_SCHEMAS` — old V1 and sqrt-edge tags hard-refuse at load,
+  no identity fallback; `_LOBE_ARC_MAP_SIZE` deleted (unused). INS-3-001
+  fix: cusp-adapted u-coordinate was BUILT but NEVER ACTIVATED in production
+  (build_lobe closure + _subdivide_lobe_tile.build_child called
+  `_build_lobe_chart` WITHOUT cusp_angle/cusp_side -> raw-theta fallback
+  won); fix = derive nearest-cusp+side via the SHARED `_lobe_nearest_cusp`
+  helper (single source with `_lobe_child_boxes`) at BOTH build sites.
+  `_lobe_child_boxes` splits at the U-MIDPOINT (u=d**(2/3)) mapped back to
+  theta_local via np.interp — NOT the raw theta midpoint. from_lobe_engine:
+  cusp_angle=None keeps a raw-theta uniform grid fallback (backward compat);
+  all tiles carry cusp angles in the production pipeline. Professor's
+  non-blocking note: `_chart_from_npz` unconditionally accesses
+  `data['theta_to_u']` (KeyError if absent) while `_chart_to_npz` only
+  writes it when not None — a theta_to_u=None chart builds but cannot
+  survive an NPZ round-trip (latent trap for external callers; not hit by
+  the current pipeline).

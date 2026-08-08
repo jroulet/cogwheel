@@ -273,6 +273,25 @@
   setUpClass for map=None fixtures and rebuild them with a real map (e.g.
   via the production axis-map helper) rather than widening the loader
   back to optional.
+- LOBE U-COORDINATE MIGRATION TEST PATTERNS (Build lobe_cusp_coordinate,
+  2026-08-08): migrated test_lensing_surrogate_lobe.py (73 tests) +
+  test_lensing_lobe_subdivision.py + test_lensing_wedge_dd_arclength.py:
+  theta_to_s/s_grid -> theta_to_u/u_grid on ALL lobe references, retired
+  V1 identity-path tests (theta_to_s=None unsupported), SQRTEDGE ->
+  U_COORD (u = d**(2/3)), `_engine_lobe_fixture` now calls from_lobe_engine
+  with cusp_angle from tile cusps. Added 6 new classes/30 tests:
+  CarveOutRetirement (2), LobeCuspAxisMap (10), CuspAdjacentRoundTrip (2),
+  LobeSchemaHardRefuse (7), UAxisNodeExact (3), OpenCuspEdgeProbe (1) +
+  4 self-falsification classes. Key measurements: theta_to_u is REQUIRED
+  under lobe_caustic_relative_v1 (no identity fallback on load — second
+  instance of the OPTIONAL-TO-MANDATORY NPZ KEY pattern, audit every
+  synthetic setUpClass for map=None fixtures and rebuild with a real
+  axis-map helper); U-axis B-spline reproduces stored u-nodes to 1e-7
+  (both test files); open-cusp smoke-scale 4x4x4 chart ~7% error near cusp
+  (gate at 0.10; production bar 1e-3 only at 12+ nodes); rho_lobe must be
+  <=0.5 at cusp edge for eta > DEFAULT_CAUSTIC_FLOOR=0.05 (rho=0.95 at
+  cusp edge gives eta~0.0001). 10 golden-value tests need re-freeze (D2
+  fold skips, pre-existing).
 - LOBE SUBDIVISION + CARRIER-FLIP + GHOST-SADDLE TEST PATTERNS (Build
   saddle_forensics, 2026-08-08, test_lensing_lobe_subdivision.py, 19 tests):
   (1) LobeCuspProximityTestCase — near-cusp tile refused, far-from-cusp
