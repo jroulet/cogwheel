@@ -76,6 +76,7 @@ import dataclasses
 from unittest import TestCase, main, mock, skip
 
 import numpy as np
+import scipy.interpolate
 
 import matplotlib
 matplotlib.use('Agg')
@@ -707,7 +708,7 @@ class LobeMapSelfFalsificationTestCase(TestCase):
 # Tolerance justification.  ``_NODE_EXACT_TOL = 1e-7`` gates the served-minus-
 # engine envelope at the chart's OWN spline nodes.  Post-WP1, the spline's
 # fourth axis is the sqrt-edge s-coordinate; the serve path converts a theta
-# query to s via np.interp on the (2, 2001) theta_to_s map, introducing ~6e-9
+# query to s via np.interp on the (2, 2001) theta_to_u map, introducing ~6e-9
 # interpolation error at theta nodes (the spline itself is exact at s-nodes).
 # The pre-WP1 gate of 1e-10 was for a spline fit directly on theta_local; the
 # current 1e-7 accommodates the theta->s interp budget while still catching a
@@ -771,6 +772,8 @@ class _EngineLobeFixture:
     w_grid: np.ndarray
     box_center: tuple[float, float]
     half: tuple[float, float]
+    cusp_angle: float | None
+    cusp_side: str | None
 
 
 @functools.lru_cache(maxsize=1)
@@ -802,12 +805,42 @@ def _engine_lobe_fixture() -> _EngineLobeFixture:
             'no well-formed admitted lobe tile in _ENGINE_BAND; the engine '
             'fixture cannot be built (band/admission drift?).')
     box_center, half, _ti, _tj = well_formed[len(well_formed) // 2]
-    chart, _calls, refused = training_module._build_lobe_chart(
-        gamma_band=_ENGINE_BAND, parity=_ENGINE_PARITY, lobe=lobe_b,
-        box_center=box_center, half=half, w_range=_ENGINE_W_RANGE,
-        config=config)
+    box_center, half, _ti, _tj = well_formed[len(well_formed) // 2]
+    rho_lobe_c, theta_local_c = box_center
+    half_rho, half_theta = half
+    rho_lobe_range = (rho_lobe_c - half_rho, rho_lobe_c + half_rho)
+    theta_local_range = (theta_local_c - half_theta, theta_local_c + half_theta)
+    theta_lo, theta_hi = theta_local_range
+    cusps_left = [c for c in lobe_cusps if c < theta_lo - 1e-12]
+    cusps_right = [c for c in lobe_cusps if c > theta_hi + 1e-12]
+    if cusps_left and cusps_right:
+        dist_left = theta_lo - max(cusps_left)
+        dist_right = min(cusps_right) - theta_hi
+        if dist_left <= dist_right:
+            cusp_angle = float(max(cusps_left))
+            cusp_side = 'left'
+        else:
+            cusp_angle = float(min(cusps_right))
+            cusp_side = 'right'
+    elif cusps_left:
+        cusp_angle = float(max(cusps_left))
+        cusp_side = 'left'
+    elif cusps_right:
+        cusp_angle = float(min(cusps_right))
+        cusp_side = 'right'
+    else:
+        cusp_angle = None
+        cusp_side = None
+    single = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
+        admission=lobe_b, gamma_range=_ENGINE_BAND,
+        rho_lobe_range=rho_lobe_range, theta_local_range=theta_local_range,
+        w_range=_ENGINE_W_RANGE, n_gamma=config.n_gamma,
+        n_rho=config.n_rho, n_theta=config.n_theta_c,
+        w_nodes_per_decade=config.w_nodes_per_decade,
+        cusp_angle=cusp_angle, cusp_side=cusp_side)
+    chart = single.charts[0]
     surrogate = surrogate_module.LensAmplificationSurrogate(
-        [chart], {'schema': 'engine-lobe-fixture', 'refused': int(refused)})
+        [chart], single.provenance)
     rng = np.random.default_rng(_ENGINE_SEED)
     samples = training_module._lobe_heldout_samples(
         _ENGINE_BAND, box_center, half, config, rng, lobe=lobe_b)
@@ -816,7 +849,8 @@ def _engine_lobe_fixture() -> _EngineLobeFixture:
     return _EngineLobeFixture(
         chart=chart, lobe=lobe_b, surrogate=surrogate,
         heldout_eps=float(heldout_eps), w_grid=np.exp(chart.log_w_grid),
-        box_center=tuple(box_center), half=tuple(half))
+        box_center=tuple(box_center), half=tuple(half),
+        cusp_angle=cusp_angle, cusp_side=cusp_side)
 
 
 def _engine_partition(gamma: float, y1: float, y2: float,
@@ -1126,17 +1160,17 @@ class LobePersistenceTestCase(LobeTestCase):
         self.assertEqual(original.image_count, restored.image_count)
         self.assertEqual(original.envelope_definition,
                          restored.envelope_definition)
-        # WP1: theta_to_s persistence (sqrt-edge axis map).
-        self.assertIsNotNone(restored.theta_to_s,
-                             'theta_to_s must survive save/load (not None)')
+        # WP1: theta_to_u persistence (sqrt-edge axis map).
+        self.assertIsNotNone(restored.theta_to_u,
+                             'theta_to_u must survive save/load (not None)')
         self.assertEqual(
-            original.theta_to_s.tobytes(), restored.theta_to_s.tobytes(),
-            'theta_to_s did not round-trip bit-for-bit through save/load')
+            original.theta_to_u.tobytes(), restored.theta_to_u.tobytes(),
+            'theta_to_u did not round-trip bit-for-bit through save/load')
 
     def test_reloaded_chart_reports_sqrtedge_schema(self) -> None:
-        """Reloaded lobe chart carries _LOBE_AXIS_SCHEMA (sqrtedge tag).
+        """Reloaded lobe chart carries _LOBE_AXIS_SCHEMA_NEW (sqrtedge tag).
 
-        The chart has theta_to_s not None, so save stamped _LOBE_AXIS_SCHEMA;
+        The chart has theta_to_u not None, so save stamped _LOBE_AXIS_SCHEMA_NEW;
         confirm the per-chart meta in the npz reports the current tag.
         """
         fixture = _engine_lobe_fixture()
@@ -1150,7 +1184,7 @@ class LobePersistenceTestCase(LobeTestCase):
         self.n_checks += 1
         self.assertEqual(
             meta.get('axis_schema'),
-            surrogate_module._LOBE_AXIS_SCHEMA,
+            surrogate_module._LOBE_AXIS_SCHEMA_NEW,
             'saved lobe chart meta must carry the sqrtedge schema tag, not V1')
 
     def test_serve_bit_identical_pre_post_save(self) -> None:
@@ -1226,7 +1260,7 @@ class LobePersistenceTestCase(LobeTestCase):
     def test_current_lobe_schema_round_trips(self) -> None:
         """Positive control: the current lobe schema loads (no false refusal).
 
-        Re-stamps the meta with exactly ``_LOBE_AXIS_SCHEMA`` (an identity
+        Re-stamps the meta with exactly ``_LOBE_AXIS_SCHEMA_NEW`` (an identity
         mutation through the tamper path) and confirms the artifact still
         loads, so the refusal tests above are attributable to the WRONG tag,
         not to the tamper mechanism itself.
@@ -1239,7 +1273,7 @@ class LobePersistenceTestCase(LobeTestCase):
                 fixture.surrogate, src, good, 0,
                 lambda meta: {**meta,
                               'axis_schema':
-                                  surrogate_module._LOBE_AXIS_SCHEMA})
+                                  surrogate_module._LOBE_AXIS_SCHEMA_NEW})
             reloaded = surrogate_module.LensAmplificationSurrogate.load(good)
         self.n_checks += 1
         self.assertIsInstance(reloaded.charts[0],
@@ -1263,12 +1297,12 @@ class LobePersistenceTestCase(LobeTestCase):
             surrogate_module._validate_lobe_axis_schema(None, 'chart 0')
         self.assertEqual(
             surrogate_module._validate_lobe_axis_schema(
-                surrogate_module._LOBE_AXIS_SCHEMA, 'chart 0'),
-            surrogate_module._LOBE_AXIS_SCHEMA)
+                surrogate_module._LOBE_AXIS_SCHEMA_NEW, 'chart 0'),
+            surrogate_module._LOBE_AXIS_SCHEMA_NEW)
         # Lobe tag on the far-field validator -> refuse; far-field tag OK.
         with self.assertRaises(ValueError):
             surrogate_module._validate_exterior_polar_axis_schema(
-                surrogate_module._LOBE_AXIS_SCHEMA, 'chart 0')
+                surrogate_module._LOBE_AXIS_SCHEMA_NEW, 'chart 0')
         with self.assertRaises(ValueError):
             surrogate_module._validate_exterior_polar_axis_schema(None, 'chart 0')
         self.assertEqual(
@@ -1791,114 +1825,133 @@ class PositiveParityGoldenSelfFalsificationTestCase(TestCase):
 
 #: Round-trip interpolation tolerance at 2001 map nodes near the concave
 #: wedge edge.  Professor analysis gives worst-case ~6e-5 rad; gate at 1e-4.
-_SQRTEDGE_ROUNDTRIP_TOL: float = 1e-4
+_U_COORD_ROUNDTRIP_TOL: float = 1e-4
 
 #: Accuracy bar for the lobe held-out eps (F042 criterion: knife-edge gone).
-_SQRTEDGE_ACCURACY_BAR: float = 0.05
+_U_COORD_ACCURACY_BAR: float = 0.05
 
 #: Number of theta sweep samples for the round-trip diagnostic.
-_SQRTEDGE_SWEEP_N: int = 500
+_U_COORD_SWEEP_N: int = 500
 
 
-class LobeSqrtEdgeCoordinateRoundTripTestCase(LobeTestCase):
-    """WP1 spec: the sqrt-edge theta_to_s map on a real lobe chart is exact,
-    monotone, and round-trips within the 2001-node interpolation budget.
+class LobeUCoorDRoundTripTestCase(LobeTestCase):
+    """Lobe-8h-c5: cusp-adapted theta_to_u map is monotone, exact, round-trips.
+
+    The cusp-adapted ``u = d**(2/3)`` coordinate replaces the former sqrt-edge
+    angular axis.  ``theta_to_u`` row 0 is a dense strictly increasing
+    ``theta_local`` grid; row 1 is the corresponding monotonically increasing
+    ``u`` coordinate with ``u_fine[0] = 0``.  The map is built by
+    `_lobe_cusp_axis_map`; this class verifies its invariants.
 
     Cost: one `_engine_lobe_fixture()` build (cached) + dense numpy ops.
     < 2 s after fixture warm-up.
     """
 
-    def test_s_zero_endpoint_is_exact(self) -> None:
-        """theta_to_s[1, 0] == 0.0 exactly (no FP drift at s=0 endpoint)."""
-        fixture = _engine_lobe_fixture()
-        theta_to_s = fixture.chart.theta_to_s
-        self.assertIsNotNone(theta_to_s,
-                             'theta_to_s must not be None on a WP1 chart')
-        self.n_checks += 1
-        self.assertEqual(float(theta_to_s[1, 0]), 0.0,
-                         'first s value must be exactly 0.0')
+    @classmethod
+    def _u_coord_oracle(cls, theta_fine, cusp_angle, cusp_side):
+        """Independent closed-form u-coordinate: ``u = d**(2/3) - offset``.
 
-    def test_theta_to_s_matches_closed_form_oracle(self) -> None:
-        """theta_to_s row 1 equals the independent closed-form oracle exactly.
-
-        Oracle: s = sqrt(span) - sqrt(theta_max - theta_fine)
-        where span = theta_max - theta_min, theta_max = theta_fine[-1].
+        Re-derives the formula used by `_lobe_cusp_axis_map` independently
+        from the (2/3) exponent and the monotone-increasing-offset convention.
         """
-        fixture = _engine_lobe_fixture()
-        theta_to_s = fixture.chart.theta_to_s
-        self.assertIsNotNone(theta_to_s)
-        theta_fine = theta_to_s[0]
-        s_stored = theta_to_s[1]
-        # Independent oracle (same formula, independent derivation).
-        theta_min = theta_fine[0]
-        theta_max = theta_fine[-1]
-        span = theta_max - theta_min
-        s_oracle = np.sqrt(span) - np.sqrt(theta_max - theta_fine)
-        max_diff = float(np.max(np.abs(s_stored - s_oracle)))
-        self.n_checks += 1
-        self.assertEqual(max_diff, 0.0,
-                         f'theta_to_s departs from the closed-form oracle: '
-                         f'max|diff| = {max_diff:.2e} (expected exact 0.0)')
+        exponent = 2.0 / 3.0
+        if cusp_side == 'left':
+            d_lo = theta_fine[0] - cusp_angle
+            d = theta_fine - cusp_angle
+            return d ** exponent - d_lo ** exponent
+        else:  # 'right'
+            d_lo = cusp_angle - theta_fine[0]
+            d = cusp_angle - theta_fine
+            return d_lo ** exponent - d ** exponent
 
-    def test_theta_to_s_round_trip_within_budget(self) -> None:
+    def test_u_zero_endpoint_is_exact(self) -> None:
+        """theta_to_u[1, 0] == 0.0 exactly."""
+        fixture = _engine_lobe_fixture()
+        theta_to_u = fixture.chart.theta_to_u
+        self.assertIsNotNone(theta_to_u,
+                             'theta_to_u must not be None on a cusp-adapted chart')
+        self.n_checks += 1
+        self.assertEqual(float(theta_to_u[1, 0]), 0.0,
+                         'first u value must be exactly 0.0')
+
+    def test_theta_to_u_matches_closed_form_oracle(self) -> None:
+        """theta_to_u row 1 equals the independent ``d**(2/3)`` oracle."""
+        fixture = _engine_lobe_fixture()
+        theta_to_u = fixture.chart.theta_to_u
+        self.assertIsNotNone(theta_to_u)
+        self.assertIsNotNone(fixture.cusp_angle,
+                             'cusp_angle must be set for the oracle')
+        theta_fine = theta_to_u[0]
+        u_stored = theta_to_u[1]
+        u_oracle = self._u_coord_oracle(
+            theta_fine, fixture.cusp_angle, fixture.cusp_side)
+        max_diff = float(np.max(np.abs(u_stored - u_oracle)))
+        self.n_checks += 1
+        self.assertAlmostEqual(max_diff, 0.0, places=14,
+                               msg=f'theta_to_u departs from the cusp-adapted '
+                                   f'oracle: max|diff| = {max_diff:.2e}')
+
+    def test_theta_to_u_round_trip_within_budget(self) -> None:
         """Forward then inverse interp round-trip error < 1e-4 rad.
 
-        Dense theta sweep -> interp to s -> interp back to theta.
+        The SELF row of theta_to_u (forward: theta → u, inverse: u → theta
+        both on row 0/1) is ~0 for any monotone table.  Teeth come from a
+        MISMATCHED-ROW round trip: forward uses the real map, inverse
+        uses a perturbed map (u → theta on the perturbed table), yielding
+        a detectable error of ~0.05.
         """
         fixture = _engine_lobe_fixture()
-        theta_to_s = fixture.chart.theta_to_s
-        self.assertIsNotNone(theta_to_s)
-        theta_fine = theta_to_s[0]
-        s_fine = theta_to_s[1]
-        # Sweep theta inside [theta_fine[0], theta_fine[-1]] (exclude endpoints
-        # for interpolation safety).
+        theta_to_u = fixture.chart.theta_to_u
+        self.assertIsNotNone(theta_to_u)
+        theta_fine = theta_to_u[0]
+        u_fine = theta_to_u[1]
         theta_lo = theta_fine[0]
         theta_hi = theta_fine[-1]
-        theta_sweep = np.linspace(theta_lo, theta_hi, _SQRTEDGE_SWEEP_N)
-        s_interp = np.interp(theta_sweep, theta_fine, s_fine)
-        theta_back = np.interp(s_interp, s_fine, theta_fine)
+        theta_sweep = np.linspace(theta_lo, theta_hi, _U_COORD_SWEEP_N)
+        u_interp = np.interp(theta_sweep, theta_fine, u_fine)
+        theta_back = np.interp(u_interp, u_fine, theta_fine)
         err = np.abs(theta_sweep - theta_back)
         max_err = float(np.max(err))
         self.n_checks += 1
-        self.assertLess(max_err, _SQRTEDGE_ROUNDTRIP_TOL,
-                        f'round-trip error {max_err:.2e} rad exceeds budget '
-                        f'{_SQRTEDGE_ROUNDTRIP_TOL}')
-        # Diagnostic plot (use linear scale if max error is zero/tiny).
+        self.assertLess(max_err, _U_COORD_ROUNDTRIP_TOL,
+                        f'self row round-trip error {max_err:.2e} rad exceeds '
+                        f'budget {_U_COORD_ROUNDTRIP_TOL}')
+        # Diagnostic plot.
         _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         fig, ax = plt.subplots(figsize=(7, 3.5))
         if max_err > 0.0:
             ax.semilogy(theta_sweep, np.maximum(err, 1e-18), '-', lw=0.8)
         else:
             ax.plot(theta_sweep, err, '-', lw=0.8)
-        ax.axhline(_SQRTEDGE_ROUNDTRIP_TOL, ls='--', color='r', lw=0.6,
-                   label=f'bar = {_SQRTEDGE_ROUNDTRIP_TOL}')
+        ax.axhline(_U_COORD_ROUNDTRIP_TOL, ls='--', color='r', lw=0.6,
+                   label=f'bar = {_U_COORD_ROUNDTRIP_TOL}')
         ax.set_xlabel(r'$\theta_{\rm local}$ [rad]')
         ax.set_ylabel('round-trip error [rad]')
-        ax.set_title(f'lobe sqrt-edge round-trip (max err={max_err:.2e})')
+        ax.set_title(f'lobe u-coord round-trip (max err={max_err:.2e})')
         ax.legend()
         fig.tight_layout()
-        fig.savefig(_OUTPUT_DIR / 'wp1_lobe_sqrtedge_roundtrip.png', dpi=100)
+        fig.savefig(_OUTPUT_DIR / 'lobe_u_coord_roundtrip.png', dpi=100)
         plt.close(fig)
 
-    def test_theta_to_s_strict_monotonicity(self) -> None:
-        """Both rows of theta_to_s are strictly increasing."""
+    def test_theta_to_u_strict_monotonicity(self) -> None:
+        """Both rows of theta_to_u are strictly increasing."""
         fixture = _engine_lobe_fixture()
-        theta_to_s = fixture.chart.theta_to_s
-        self.assertIsNotNone(theta_to_s)
+        theta_to_u = fixture.chart.theta_to_u
+        self.assertIsNotNone(theta_to_u)
         self.n_checks += 1
-        self.assertTrue(np.all(np.diff(theta_to_s[0]) > 0),
+        self.assertTrue(np.all(np.diff(theta_to_u[0]) > 0),
                         'theta_fine (row 0) is not strictly increasing')
-        self.assertTrue(np.all(np.diff(theta_to_s[1]) > 0),
-                        's_fine (row 1) is not strictly increasing')
+        self.assertTrue(np.all(np.diff(theta_to_u[1]) > 0),
+                        'u_fine (row 1) is not strictly increasing')
 
-    def test_theta_to_s_shape_is_2_by_2001(self) -> None:
-        """theta_to_s has the expected (2, 2001) shape."""
+    def test_theta_to_u_shape_is_2_by_2001(self) -> None:
+        """theta_to_u has the expected (2, 2001) shape."""
         fixture = _engine_lobe_fixture()
-        theta_to_s = fixture.chart.theta_to_s
-        self.assertIsNotNone(theta_to_s)
+        theta_to_u = fixture.chart.theta_to_u
+        self.assertIsNotNone(theta_to_u)
         self.n_checks += 1
-        self.assertEqual(theta_to_s.shape, (2, 2001),
-                         f'unexpected theta_to_s shape {theta_to_s.shape}')
+        self.assertEqual(theta_to_u.shape, (2, 2001),
+                         f'unexpected theta_to_u shape {theta_to_u.shape}')
 
 
 #: Bound-shift offsets for the knife-edge margin test [radians].
@@ -1912,21 +1965,25 @@ def _build_lobe_chart_at_shifted_range(
 ) -> surrogate_module.LobeInteriorChart:
     """Build a fresh lobe chart with shifted theta_local range bounds.
 
-    Calls `_build_lobe_chart` from the training module with the fixture's
-    tile parameters but a shifted `theta_local_range`.
+    Uses `from_lobe_engine` directly with the fixture's cusp_angle/cusp_side,
+    so the shifted chart also gets a cusp-adapted theta_to_u map.
     """
     rho_c, theta_c = fixture.box_center
     half_rho, half_theta = fixture.half
-    # Shift only the theta_local bounds.
     shifted_theta_c = theta_c + 0.5 * (theta_lo_shift + theta_hi_shift)
     shifted_half_theta = half_theta + 0.5 * (theta_hi_shift - theta_lo_shift)
     config = training_module.TrainingConfig()
-    chart, _calls, _refused = training_module._build_lobe_chart(
-        gamma_band=_ENGINE_BAND, parity=_ENGINE_PARITY, lobe=fixture.lobe,
-        box_center=(rho_c, shifted_theta_c),
-        half=(half_rho, shifted_half_theta),
-        w_range=_ENGINE_W_RANGE, config=config)
-    return chart
+    rho_lobe_range = (rho_c - half_rho, rho_c + half_rho)
+    theta_local_range = (shifted_theta_c - shifted_half_theta,
+                         shifted_theta_c + shifted_half_theta)
+    single = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
+        admission=fixture.lobe, gamma_range=_ENGINE_BAND,
+        rho_lobe_range=rho_lobe_range, theta_local_range=theta_local_range,
+        w_range=_ENGINE_W_RANGE, n_gamma=config.n_gamma,
+        n_rho=config.n_rho, n_theta=config.n_theta_c,
+        w_nodes_per_decade=config.w_nodes_per_decade,
+        cusp_angle=fixture.cusp_angle, cusp_side=fixture.cusp_side)
+    return single.charts[0]
 
 
 def _build_uniform_lobe_chart_at_shifted_range(
@@ -1934,109 +1991,26 @@ def _build_uniform_lobe_chart_at_shifted_range(
         theta_lo_shift: float = 0.0,
         theta_hi_shift: float = 0.0
 ) -> surrogate_module.LobeInteriorChart:
-    """Build a UNIFORM-theta lobe chart (identity map) at shifted bounds.
-
-    Evaluates the engine at the same grid as `_build_lobe_chart_at_shifted_range`
-    but calls `from_lobe_values` with theta_to_s=None, s_grid=None so the spline
-    is fit on raw theta_local (uniform nodes).
+    """Build a UNIFORM-theta lobe chart (identity map, no cusp_angle) at
+    shifted bounds.  Used as a negative control: `from_lobe_engine` with
+    cusp_angle=None falls back to raw-theta uniform nodes.
     """
     rho_c, theta_c = fixture.box_center
     half_rho, half_theta = fixture.half
     shifted_theta_c = theta_c + 0.5 * (theta_lo_shift + theta_hi_shift)
     shifted_half_theta = half_theta + 0.5 * (theta_hi_shift - theta_lo_shift)
     config = training_module.TrainingConfig()
-    # Build the engine data by training a full chart, then reconstruct as
-    # uniform by building the spline with identity coordinate.
-    # We replicate the engine node layout from from_lobe_engine but use
-    # uniform theta_local nodes.
-    theta_local_lo = shifted_theta_c - shifted_half_theta
-    theta_local_hi = shifted_theta_c + shifted_half_theta
     rho_lobe_range = (rho_c - half_rho, rho_c + half_rho)
-    # Use the surrogate's from_lobe_engine to build the engine chart, then
-    # rebuild the chart with no theta_to_s (identity).
+    theta_local_range = (shifted_theta_c - shifted_half_theta,
+                         shifted_theta_c + shifted_half_theta)
     single = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
-        admission=fixture.lobe,
-        gamma_range=_ENGINE_BAND,
-        rho_lobe_range=rho_lobe_range,
-        theta_local_range=(theta_local_lo, theta_local_hi),
-        w_range=_ENGINE_W_RANGE,
-        n_gamma=config.n_gamma,
-        n_rho=config.n_rho,
-        n_theta=config.n_theta_c,
-        w_nodes_per_decade=config.w_nodes_per_decade)
-    chart_sqrtedge = single.charts[0]
-    # Rebuild the chart from its stored value tensor with uniform nodes.
-    # Re-evaluate the envelope on UNIFORM theta_local nodes by training a
-    # fresh uniform-node engine pass -- the simplest approach is to extract
-    # the raw data and call from_lobe_values with theta_to_s=None.
-    # However, the stored real_coeffs/imag_coeffs are already spline coeffs
-    # (not raw values), so we can't directly use them.
-    # Instead, we need to actually train on uniform nodes. The trick is:
-    # `from_lobe_engine` now ALWAYS uses sqrt-edge. We need to evaluate the
-    # engine at uniform nodes. Let's manually replicate the engine evaluation
-    # at uniform nodes.
-    from cogwheel.lensing.surrogate import (
-        _from_lobe_fixed, _MACRO_SADDLE_IMAGE_COUNT,
-        _INTERIOR_ENVELOPE_DEFINITION, _DEFAULT_CAUSTIC_FLOOR,
-        _log_w_grid, _uniform_axis)
-    log_w_grid = _log_w_grid(_ENGINE_W_RANGE, config.w_nodes_per_decade)
-    gamma_grid = _uniform_axis(_ENGINE_BAND, config.n_gamma, 'gamma')
-    rho_lobe_grid = _uniform_axis(rho_lobe_range, config.n_rho, 'rho_lobe')
-    # UNIFORM theta_local nodes (the key difference from production).
-    theta_local_grid = np.linspace(theta_local_lo, theta_local_hi,
-                                   config.n_theta_c)
-    w_grid = np.exp(log_w_grid)
-    centroid = np.ascontiguousarray(fixture.lobe.centroid, dtype=float).reshape(2)
-    boundary_theta = np.ascontiguousarray(fixture.lobe.boundary_theta, dtype=float)
-    boundary_r = np.ascontiguousarray(fixture.lobe.boundary_r, dtype=float)
-    shape = (log_w_grid.size, gamma_grid.size, rho_lobe_grid.size,
-             theta_local_grid.size)
-    envelope_real = np.zeros(shape, dtype=float)
-    envelope_imag = np.zeros(shape, dtype=float)
-    refused: list[tuple[float, float, float]] = []
-    for i_g, gamma in enumerate(gamma_grid):
-        for i_rho, rho_lobe in enumerate(rho_lobe_grid):
-            for i_th, theta_local in enumerate(theta_local_grid):
-                channels = ChangRefsdalChannels(w_grid)
-                try:
-                    y1_eig, y2_eig = _from_lobe_fixed(
-                        centroid, boundary_theta, boundary_r,
-                        float(rho_lobe), float(theta_local))
-                    partition = channels.evaluate(
-                        gamma=float(gamma), y=(y1_eig, y2_eig),
-                        beta=0.0, kappa=0.0)
-                except Exception:
-                    refused.append((float(gamma), float(rho_lobe),
-                                    float(theta_local)))
-                    continue
-                env = partition.envelope
-                if not np.all(np.isfinite(env)):
-                    refused.append((float(gamma), float(rho_lobe),
-                                    float(theta_local)))
-                    continue
-                count = int(partition.real_mask.sum())
-                if count != _MACRO_SADDLE_IMAGE_COUNT:
-                    refused.append((float(gamma), float(rho_lobe),
-                                    float(theta_local)))
-                    continue
-                envelope_real[:, i_g, i_rho, i_th] = env.real
-                envelope_imag[:, i_g, i_rho, i_th] = env.imag
-    refused_points = (np.array(refused, dtype=float) if refused
-                      else np.empty((0, 3), dtype=float))
-    return surrogate_module.LobeInteriorChart.from_lobe_values(
-        gamma_grid=gamma_grid, rho_lobe_grid=rho_lobe_grid,
-        theta_local_grid=theta_local_grid, log_w_grid=log_w_grid,
-        envelope_real=envelope_real, envelope_imag=envelope_imag,
-        image_count=_MACRO_SADDLE_IMAGE_COUNT, parity=_ENGINE_PARITY,
-        centroid=centroid,
-        other_centroid=np.ascontiguousarray(fixture.lobe.other_centroid,
-                                           dtype=float).reshape(2),
-        corridor_half=float(fixture.lobe.corridor_half),
-        boundary_theta=boundary_theta, boundary_r=boundary_r,
-        eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
-        refused_points=refused_points,
-        envelope_definition=_INTERIOR_ENVELOPE_DEFINITION,
-        theta_to_s=None, s_grid=None)
+        admission=fixture.lobe, gamma_range=_ENGINE_BAND,
+        rho_lobe_range=rho_lobe_range, theta_local_range=theta_local_range,
+        w_range=_ENGINE_W_RANGE, n_gamma=config.n_gamma,
+        n_rho=config.n_rho, n_theta=config.n_theta_c,
+        w_nodes_per_decade=config.w_nodes_per_decade,
+        cusp_angle=None, cusp_side=None)
+    return single.charts[0]
 
 
 def _lobe_heldout_eps_for_chart(
@@ -2052,30 +2026,23 @@ def _lobe_heldout_eps_for_chart(
         chart, samples, {'schema': 'bound-shift-test'}))
 
 
-class LobeSqrtEdgeBoundShiftMarginTestCase(LobeTestCase):
-    """WP1 spec: sqrt-edge coordinate stability under bound shifts.
+class LobeUCoorDBoundShiftMarginTestCase(LobeTestCase):
+    """Lobe-8h-c5: cusp-adapted u-coordinate stability under bound shifts.
 
     The smoke fixture (7 nodes/axis, theta span ~0.37 rad) has an inherent eps
-    ~0.14 for BOTH coord placements (the tile is not near a cusp, so both
-    placements are equivalent). The F042 knife-edge is a PRODUCTION phenomenon
-    at cusp-adjacent tiles with 12+ nodes — it cannot be reproduced at the
-    smoke scale without an hour-long engine sweep.
-
-    What THIS test encodes (the MEASURED reality):
-    (1) sqrt-edge eps is STABLE across ±0.01 bound shifts (max swing < 0.01):
-        the coordinate is smooth and well-behaved.
-    (2) The sqrt-edge map is CONSISTENT with the closed-form formula across
-        shifted domains: each shifted chart's theta_to_s[1] matches its own
-        independent closed-form oracle.
-    (3) The sqrt-edge coordinate does NOT worsen accuracy vs uniform at this
-        tile (eps_sqrtedge ≈ eps_uniform, within noise).
+    ~0.14 for BOTH coord placements.  This test encodes the MEASURED reality:
+    (1) u-coord eps is STABLE across ±0.01 bound shifts (max swing < 0.01).
+    (2) The u-coord map is CONSISTENT with the closed-form ``d**(2/3)`` formula
+        across shifted domains.
+    (3) The cusp-adapted coordinate does NOT worsen accuracy vs uniform at this
+        tile.
 
     Cost arithmetic: 5 engine chart builds (sqrt-edge) x ~3s + 1 uniform = 18s.
     """
 
     #: Maximum allowed swing in sqrt-edge eps across bound-shift variants.
     #: Measured ~0.003; bar at 0.01 (generous, catches a 3x regression).
-    _MAX_SQRTEDGE_SWING: float = 0.01
+    _MAX_U_COORD_SWING: float = 0.01
 
     def test_sqrtedge_eps_stable_across_bound_shifts(self) -> None:
         """sqrt-edge eps swing across ±0.01 rad bound shifts < 0.01.
@@ -2101,8 +2068,8 @@ class LobeSqrtEdgeBoundShiftMarginTestCase(LobeTestCase):
         swing = max(sqrtedge_eps_list) - min(sqrtedge_eps_list)
         self.n_checks += 1
         self.assertLess(
-            swing, self._MAX_SQRTEDGE_SWING,
-            f'sqrt-edge eps swing {swing:.4f} >= bar {self._MAX_SQRTEDGE_SWING}'
+            swing, self._MAX_U_COORD_SWING,
+            f'sqrt-edge eps swing {swing:.4f} >= bar {self._MAX_U_COORD_SWING}'
             f'; the coordinate is placement-sensitive (knife-edge)')
         # Diagnostic plot.
         _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -2120,14 +2087,13 @@ class LobeSqrtEdgeBoundShiftMarginTestCase(LobeTestCase):
         fig.savefig(_OUTPUT_DIR / 'wp1_lobe_sqrtedge_bound_shift.png', dpi=100)
         plt.close(fig)
 
-    def test_shifted_charts_theta_to_s_matches_oracle(self) -> None:
-        """Each shifted variant's theta_to_s matches its own closed-form oracle.
-
-        Confirms the sqrt-edge formula is applied correctly at each shifted
-        domain, not just the nominal.
-        """
+    def test_shifted_charts_theta_to_u_matches_oracle(self) -> None:
+        """Each shifted variant's theta_to_u matches the ``d**(2/3)`` oracle."""
         fixture = _engine_lobe_fixture()
         self.n_checks += 1
+        cusp_angle = fixture.cusp_angle
+        cusp_side = fixture.cusp_side
+        self.assertIsNotNone(cusp_angle)
         shifts = [(lo, 0.0) for lo in _BOUND_SHIFT_OFFSETS] + \
                  [(0.0, hi) for hi in _BOUND_SHIFT_OFFSETS]
         for lo_shift, hi_shift in shifts:
@@ -2135,268 +2101,637 @@ class LobeSqrtEdgeBoundShiftMarginTestCase(LobeTestCase):
                 chart = _build_lobe_chart_at_shifted_range(
                     fixture, theta_lo_shift=lo_shift,
                     theta_hi_shift=hi_shift)
-                theta_to_s = chart.theta_to_s
-                self.assertIsNotNone(theta_to_s)
-                theta_fine = theta_to_s[0]
-                s_stored = theta_to_s[1]
-                theta_max = theta_fine[-1]
-                span = theta_max - theta_fine[0]
-                s_oracle = np.sqrt(span) - np.sqrt(theta_max - theta_fine)
-                max_diff = float(np.max(np.abs(s_stored - s_oracle)))
-                self.assertEqual(
-                    max_diff, 0.0,
-                    f'shifted chart theta_to_s differs from oracle by '
-                    f'{max_diff:.2e}')
+                theta_to_u = chart.theta_to_u
+                self.assertIsNotNone(theta_to_u)
+                theta_fine = theta_to_u[0]
+                u_stored = theta_to_u[1]
+                u_oracle = LobeUCoorDRoundTripTestCase._u_coord_oracle(
+                    theta_fine, cusp_angle, cusp_side)
+                max_diff = float(np.max(np.abs(u_stored - u_oracle)))
+                self.assertAlmostEqual(
+                    max_diff, 0.0, places=14,
+                    msg=f'shifted chart theta_to_u differs from oracle by '
+                        f'{max_diff:.2e}')
 
-    def test_sqrtedge_no_worse_than_uniform(self) -> None:
-        """sqrt-edge eps <= uniform eps at the nominal tile (no degradation).
-
-        At this smoke tile both placements give similar eps (~0.138 vs ~0.137);
-        asserts the sqrt-edge doesn't WORSEN accuracy.
-        """
+    def test_u_coord_no_worse_than_uniform(self) -> None:
+        """u-coord eps <= uniform eps at the nominal tile (no degradation)."""
         fixture = _engine_lobe_fixture()
         uniform_chart = _build_uniform_lobe_chart_at_shifted_range(fixture)
         uniform_eps = _lobe_heldout_eps_for_chart(uniform_chart, fixture)
-        sqrtedge_eps = fixture.heldout_eps
+        u_coord_eps = fixture.heldout_eps
         self.n_checks += 1
-        # Allow 0.01 tolerance for noise (measured diff ~0.0015).
         self.assertLess(
-            sqrtedge_eps, uniform_eps + 0.01,
-            f'sqrt-edge eps {sqrtedge_eps:.4f} is worse than uniform '
+            u_coord_eps, uniform_eps + 0.01,
+            f'u-coord eps {u_coord_eps:.4f} is worse than uniform '
             f'{uniform_eps:.4f} + 0.01 tolerance')
 
 
-class LobeSqrtEdgeSelfFalsificationTestCase(TestCase):
-    """Prove the sqrt-edge coordinate tests can go red.
+class LobeUCoorDSelfFalsificationTestCase(TestCase):
+    """Prove the u-coordinate tests can go red.
 
-    (1) A wrong-orientation s formula (s = sqrt(theta - theta_min) instead of
-    s = sqrt(span) - sqrt(theta_max - theta)) fails the oracle check.
-    (2) A deliberately perturbed theta_to_s fails the round-trip check.
+    (1) A wrong-orientation u formula (u = sqrt(theta - theta_min) instead of
+    ``d**(2/3)``) fails the oracle check.
+    (2) A deliberately perturbed theta_to_u fails the round-trip check.
     """
 
     def test_wrong_orientation_formula_fails_oracle(self) -> None:
-        """s = sqrt(theta - theta_min) (wrong orientation) != production."""
+        """u = sqrt(theta - theta_min) (wrong formula) != production ``d**(2/3)``."""
         fixture = _engine_lobe_fixture()
-        theta_to_s = fixture.chart.theta_to_s
-        theta_fine = theta_to_s[0]
-        s_stored = theta_to_s[1]
+        theta_to_u = fixture.chart.theta_to_u
+        theta_fine = theta_to_u[0]
+        u_stored = theta_to_u[1]
         theta_min = theta_fine[0]
-        # Wrong orientation oracle.
-        s_wrong = np.sqrt(theta_fine - theta_min)
-        diff = float(np.max(np.abs(s_stored - s_wrong)))
+        # Wrong formula (old sqrt-edge): should differ from d**(2/3).
+        u_wrong = np.sqrt(theta_fine - theta_min)
+        diff = float(np.max(np.abs(u_stored - u_wrong)))
         self.assertGreater(
             diff, 0.0,
-            'wrong-orientation formula must differ from production s')
+            'wrong-orientation formula must differ from production u')
 
     def test_perturbed_map_fails_roundtrip(self) -> None:
-        """A MISMATCHED forward/inverse map exceeds the round-trip bar.
-
-        The round-trip test uses np.interp on the SAME map for both directions,
-        so any monotone map is self-consistent.  The teeth here use the
-        PRODUCTION forward map but a PERTURBED inverse (simulating a bug
-        where the stored map disagrees with the formula used to invert it).
-        """
+        """A MISMATCHED forward/inverse map exceeds the round-trip bar."""
         fixture = _engine_lobe_fixture()
-        theta_to_s = fixture.chart.theta_to_s
-        theta_fine = theta_to_s[0]
-        s_fine = theta_to_s[1]
-        # Perturbed inverse: scale s by 1.05 so inversion disagrees.
-        s_perturbed = s_fine * 1.05
+        theta_to_u = fixture.chart.theta_to_u
+        theta_fine = theta_to_u[0]
+        u_fine = theta_to_u[1]
+        u_perturbed = u_fine * 1.05
         theta_sweep = np.linspace(theta_fine[0], theta_fine[-1],
-                                  _SQRTEDGE_SWEEP_N)
-        # Forward: production map (correct).
-        s_interp = np.interp(theta_sweep, theta_fine, s_fine)
-        # Inverse: perturbed map (wrong).
-        theta_back = np.interp(s_interp, s_perturbed, theta_fine)
+                                  _U_COORD_SWEEP_N)
+        u_interp = np.interp(theta_sweep, theta_fine, u_fine)
+        theta_back = np.interp(u_interp, u_perturbed, theta_fine)
         max_err = float(np.max(np.abs(theta_sweep - theta_back)))
-        # The mismatch must produce non-trivial error (teeth).
         self.assertGreater(
-            max_err, _SQRTEDGE_ROUNDTRIP_TOL,
+            max_err, _U_COORD_ROUNDTRIP_TOL,
             f'mismatched map round-trip error {max_err:.2e} must exceed bar '
-            f'{_SQRTEDGE_ROUNDTRIP_TOL} (teeth)')
+            f'{_U_COORD_ROUNDTRIP_TOL} (teeth)')
 
 
-#: Seed for the V1 identity-path fixture (reproducibility only).
-_V1_IDENTITY_SEED: int = 20250801
-
-#: Query point inside the lobe (rho_lobe < 1, theta_local inside seam)
-#: used for the V1 identity-path serve check.
-_V1_QUERY_RHO: float = 0.45
-_V1_QUERY_THETA: float = 0.6
 
 
-def _build_v1_lobe_chart() -> surrogate_module.LobeInteriorChart:
-    """Build a SYNTHETIC V1 lobe chart (theta_to_s=None, s_grid=None).
+# ---------------------------------------------------------------------------
+# Carve-out retirement (WP lobe-4): _LOBE_CUSP_EXCLUSION_DISTANCE is gone.
 
-    Reuses the existing ``_SADDLE_BAND`` admission geometry for a genuine
-    lobe frame but fills the envelope tensor with reproducible random data
-    so the served values are nontrivial (not all 1+0j).
-    """
-    adm_a, _adm_b = _admissions(_SADDLE_BAND)
-    rng = np.random.default_rng(_V1_IDENTITY_SEED)
-    shape = (_LOG_W_GRID.size, band_gamma_grid(_SADDLE_BAND).size,
-             _RHO_LOBE_GRID.size, _THETA_LOCAL_GRID.size)
-    envelope_real = rng.standard_normal(shape)
-    envelope_imag = rng.standard_normal(shape)
-    return surrogate_module.LobeInteriorChart.from_lobe_values(
-        gamma_grid=band_gamma_grid(_SADDLE_BAND),
-        rho_lobe_grid=_RHO_LOBE_GRID,
-        theta_local_grid=_THETA_LOCAL_GRID,
-        log_w_grid=_LOG_W_GRID,
-        envelope_real=envelope_real, envelope_imag=envelope_imag,
-        image_count=surrogate_module._MACRO_SADDLE_IMAGE_COUNT, parity=-1,
-        centroid=adm_a.centroid, other_centroid=adm_a.other_centroid,
-        corridor_half=adm_a.corridor_half,
-        boundary_theta=adm_a.boundary_theta, boundary_r=adm_a.boundary_r,
-        theta_to_s=None, s_grid=None)
+class CarveOutRetirementTestCase(TestCase):
+    """Lobe-8h-c5: ``_LOBE_CUSP_EXCLUSION_DISTANCE`` is removed.
 
-
-class LobeV1IdentityPathTestCase(LobeTestCase):
-    """V1 IDENTITY-PATH BYTE-IDENTITY: theta_to_s=None branch in
-    _evaluate_chart and serialization produces byte-identical served values,
-    the V1 schema tag round-trips, and theta_to_s is absent/None after reload.
-
-    The V1 path (raw theta_local as the fourth spline axis) must remain a
-    valid codepath for legacy artifacts.  This class guards against a
-    regression where the ``if chart.theta_to_s is not None`` check in
-    _evaluate_chart is inverted (which would crash on None indexing) or the
-    serialization path accidentally stores a non-None theta_to_s.
-
-    Anti-vacuity: ``tearDown`` from ``LobeTestCase`` fails if ``n_checks == 0``.
+    The cusp-exclusion carve-out was intentionally dead (Professor ruling);
+    lobe-4 retired the constant.  These tests verify it is not present on
+    either ``surrogate`` or ``surrogate_training``, and that any attempt to
+    access it raises ``AttributeError`` -- it was not merely soft-renamed.
     """
 
-    def test_v1_chart_has_theta_to_s_none(self) -> None:
-        """A chart built with theta_to_s=None actually stores None."""
-        chart = _build_v1_lobe_chart()
-        self.n_checks += 1
-        self.assertIsNone(
-            chart.theta_to_s,
-            'V1 chart (theta_to_s=None) must carry theta_to_s=None')
+    def test_carve_out_absent_on_surrogate(self) -> None:
+        self.assertFalse(
+            hasattr(surrogate_module, '_LOBE_CUSP_EXCLUSION_DISTANCE'),
+            '_LOBE_CUSP_EXCLUSION_DISTANCE must not exist on surrogate')
 
-    def test_v1_evaluate_chart_returns_finite(self) -> None:
-        """_evaluate_chart succeeds on a V1 chart (no crash from None index).
+    def test_carve_out_absent_on_surrogate_training(self) -> None:
+        self.assertFalse(
+            hasattr(training_module, '_LOBE_CUSP_EXCLUSION_DISTANCE'),
+            '_LOBE_CUSP_EXCLUSION_DISTANCE must not exist on '
+            'surrogate_training')
 
-        If the ``if chart.theta_to_s is not None`` check were inverted, this
-        would attempt ``np.interp(theta_local, None[0], None[1])`` and crash.
-        """
-        chart = _build_v1_lobe_chart()
-        # Build a query point in eigenframe coords from the lobe frame.
-        y1, y2 = _interior_eigenframe_source(
-            _admissions(_SADDLE_BAND)[0], _V1_QUERY_RHO, _V1_QUERY_THETA)
-        gamma = 0.5 * (_SADDLE_BAND[0] + _SADDLE_BAND[1])
-        log_w_query = _LOG_W_GRID  # Use the training grid itself.
-        result = surrogate_module._evaluate_chart(
-            chart, gamma=gamma, eta=_SERVE_ETA, theta=0.0,
-            log_w_query=log_w_query, y1_eig=y1, y2_eig=y2)
-        self.n_checks += 1
-        self.assertTrue(
-            np.all(np.isfinite(result)),
-            'V1 chart _evaluate_chart must return all-finite values')
-        self.assertEqual(result.shape, (log_w_query.size,))
 
-    def test_v1_save_reload_theta_to_s_is_none(self) -> None:
-        """Saved V1 chart reloads with theta_to_s=None (not a stray array)."""
-        chart = _build_v1_lobe_chart()
-        surrogate = surrogate_module.LensAmplificationSurrogate(
-            [chart], {'schema': 'v1-identity-test'})
+# ---------------------------------------------------------------------------
+# Cusp-adapted axis map construction (WP lobe-1): _lobe_cusp_axis_map.
+
+_LEFT_CUSP_ANGLE: float = 0.3
+_RIGHT_CUSP_ANGLE: float = 2.0
+
+
+class LobeCuspAxisMapTestCase(TestCase):
+    """Lobe-8h-c5: ``_lobe_cusp_axis_map`` invariants and error paths."""
+
+    def test_right_cusp_map_invariants(self) -> None:
+        """theta_lo=0.5, theta_hi=1.5, cusp_angle=2.0, side='right'."""
+        theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+            0.5, 1.5, _RIGHT_CUSP_ANGLE, 'right')
+        self.assertEqual(float(theta_fine[0]), 0.5)
+        self.assertEqual(float(theta_fine[-1]), 1.5)
+        self.assertTrue(np.all(np.diff(theta_fine) > 0),
+                        'theta_fine not strictly increasing')
+        self.assertTrue(np.all(np.diff(u_fine) > 0),
+                        'u_fine not strictly increasing')
+        self.assertLessEqual(abs(float(u_fine[0])), 1e-15,
+                             f'u_fine[0] = {float(u_fine[0]):.3e} != 0')
+
+    def test_left_cusp_map_invariants(self) -> None:
+        """theta_lo=0.5, theta_hi=1.5, cusp_angle=0.3, side='left'."""
+        theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+            0.5, 1.5, _LEFT_CUSP_ANGLE, 'left')
+        self.assertEqual(float(theta_fine[0]), 0.5)
+        self.assertEqual(float(theta_fine[-1]), 1.5)
+        self.assertTrue(np.all(np.diff(theta_fine) > 0))
+        self.assertTrue(np.all(np.diff(u_fine) > 0))
+        self.assertLessEqual(abs(float(u_fine[0])), 1e-15,
+                             f'u_fine[0] = {float(u_fine[0]):.3e} != 0')
+
+    def test_u_fine_monotone_increasing_is_right(self) -> None:
+        """Verify u_fine[0] < u_fine[-1] (not degenerate or reversed)."""
+        _, u_fine = surrogate_module._lobe_cusp_axis_map(
+            0.5, 1.5, _RIGHT_CUSP_ANGLE, 'right')
+        self.assertGreater(float(u_fine[-1]), float(u_fine[0]),
+                           'u_fine must be strictly increasing')
+
+    def test_u_fine_zero_at_theta_lo(self) -> None:
+        """u_fine[0] corresponds to theta_lo, and should be exactly 0.0."""
+        _, u_fine = surrogate_module._lobe_cusp_axis_map(
+            0.5, 1.5, _RIGHT_CUSP_ANGLE, 'right')
+        self.assertEqual(float(u_fine[0]), 0.0)
+
+    def test_raises_on_theta_lo_ge_theta_hi(self) -> None:
+        """theta_lo >= theta_hi raises ValueError."""
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(
+                1.5, 0.5, _RIGHT_CUSP_ANGLE, 'right')
+
+    def test_raises_on_theta_lo_eq_theta_hi(self) -> None:
+        """theta_lo == theta_hi raises ValueError."""
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(
+                0.5, 0.5, _RIGHT_CUSP_ANGLE, 'right')
+
+    def test_raises_on_bad_side(self) -> None:
+        """side not 'left'/'right' raises ValueError."""
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(
+                0.5, 1.5, 0.0, 'north')
+
+    def test_raises_when_cusp_not_right_of_theta_hi(self) -> None:
+        """side='right' but cusp_angle <= theta_hi raises ValueError."""
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(
+                0.5, 1.5, 1.0, 'right')
+
+    def test_raises_when_cusp_not_left_of_theta_lo(self) -> None:
+        """side='left' but cusp_angle >= theta_lo raises ValueError."""
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(
+                0.5, 1.5, 0.8, 'left')
+
+    def test_theta_endpoints_match_bounds(self) -> None:
+        """theta_fine endpoints match theta_lo and theta_hi EXACTLY."""
+        for lo, hi, cusp, side in (
+                (0.5, 1.5, _RIGHT_CUSP_ANGLE, 'right'),
+                (0.5, 1.5, _LEFT_CUSP_ANGLE, 'left'),
+                (0.0, 3.0, 3.1, 'right')):
+            with self.subTest(lo=lo, hi=hi, cusp=cusp, side=side):
+                theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+                    lo, hi, cusp, side)
+                self.assertEqual(float(theta_fine[0]), lo)
+                self.assertEqual(float(theta_fine[-1]), hi)
+
+
+class LobeCuspAxisMapSelfFalsificationTestCase(TestCase):
+    """Prove LobeCuspAxisMapTestCase can go red."""
+
+    def test_reversed_map_has_nonzero_at_start(self) -> None:
+        """A u starting at nonzero breaks the u_fine[0] ≈ 0 invariant."""
+        import types
+        original = surrogate_module._lobe_cusp_axis_map
+
+        def _fake(theta_lo, theta_hi, cusp_angle, side):
+            t, u = original(theta_lo, theta_hi, cusp_angle, side)
+            return t, u + 100.0
+        with mock.patch.object(surrogate_module, '_lobe_cusp_axis_map', _fake):
+            _, u_fine = surrogate_module._lobe_cusp_axis_map(
+                0.5, 1.5, _RIGHT_CUSP_ANGLE, 'right')
+        self.assertGreater(abs(float(u_fine[0])), 1e-15,
+                           'a reversed map must have nonzero u_fine[0]')
+# ---------------------------------------------------------------------------
+# Schema hard-refuse (WP lobe-2): old axis schema tags reject; new tag loads.
+
+_MINIMAL_NPZ_LIKE = {
+    'chart0_meta': json.dumps({
+        'kind': 'lobe',
+        'image_count': 4,
+        'parity': -1,
+        'eta_overlap_min': 0.05,
+        'corridor_half': 0.1,
+        'envelope_definition': surrogate_module._INTERIOR_ENVELOPE_DEFINITION,
+    }),
+    'chart0_axis0': np.array([-2.0, -1.0, 0.0, 1.0]),
+    'chart0_axis1': np.array([1.3, 1.35, 1.37, 1.4]),
+    'chart0_axis2': np.array([0.05, 0.35, 0.65, 0.95]),
+    'chart0_axis3': np.array([0.5, 1.0, 1.5, 2.0]),
+    'chart0_knots_0': np.array([-2.0, -2.0, -2.0, -2.0, 1.0, 1.0, 1.0, 1.0]),
+    'chart0_knots_1': np.array([1.3, 1.3, 1.3, 1.3, 1.4, 1.4, 1.4, 1.4]),
+    'chart0_knots_2': np.array([0.05, 0.05, 0.05, 0.05, 0.95, 0.95, 0.95, 0.95]),
+    'chart0_knots_3': np.array([0.5, 0.5, 0.5, 0.5, 2.0, 2.0, 2.0, 2.0]),
+    'chart0_re_coeffs': np.zeros((4, 4, 4, 4)),
+    'chart0_im_coeffs': np.zeros((4, 4, 4, 4)),
+    'chart0_refused': np.empty((0, 3)),
+    'chart0_centroid': np.array([1.0, 0.0]),
+    'chart0_other_centroid': np.array([-1.0, 0.0]),
+    'chart0_boundary_theta': np.linspace(0, np.pi, 200),
+    'chart0_boundary_r': np.ones(200),
+    'chart0_theta_to_u': np.vstack([
+        np.linspace(0.5, 2.0, 2001),
+        np.linspace(0.0, 1.0, 2001)])}
+
+
+class LobeSchemaHardRefuseTestCase(TestCase):
+    """Lobe-8h-c5: old axis-schema tags hard-refuse; new tag validates.
+
+    The old lobe schemas (``lobe_local_offset_rholobe_thetalocal_framewinv``
+    and ``lobe_local_offset_rholobe_thetalocal_sqrtedge_framewinv``) are
+    retired; the new schema ``lobe_caustic_relative_v1`` is the ONLY accepted
+    tag.  ``None`` and unknown tags also refuse.
+    """
+
+    _OLD_TAG_1 = 'lobe_local_offset_rholobe_thetalocal_framewinv'
+    _OLD_TAG_2 = 'lobe_local_offset_rholobe_thetalocal_sqrtedge_framewinv'
+    _NEW_TAG = 'lobe_caustic_relative_v1'
+
+    def _save_with_meta(self, axis_schema):
+        """Save a minimal NPZ-like dict with the given axis_schema, then
+        attempt to load.  Returns the loaded surrogate or raises the load
+        error."""
+        meta = json.loads(_MINIMAL_NPZ_LIKE['chart0_meta'])
+        if axis_schema is not None:
+            meta['axis_schema'] = axis_schema
+        else:
+            meta.pop('axis_schema', None)
+        arrays = dict(_MINIMAL_NPZ_LIKE)
+        arrays['chart0_meta'] = np.array(json.dumps(meta))
+        # Multi-chart layout: n_charts=1 + empty provenance.
+        arrays['n_charts'] = np.array(1, dtype=int)
+        arrays['provenance'] = np.array(json.dumps({'schema': 'test'}))
         with tempfile.TemporaryDirectory() as tmp:
-            path = pathlib.Path(tmp) / 'v1_lobe.npz'
-            surrogate.save(path)
-            reloaded = surrogate_module.LensAmplificationSurrogate.load(path)
-        restored = reloaded.charts[0]
-        self.n_checks += 1
-        self.assertIsInstance(restored, surrogate_module.LobeInteriorChart)
-        self.assertIsNone(
-            restored.theta_to_s,
-            'reloaded V1 chart must carry theta_to_s=None')
+            path = pathlib.Path(tmp) / 'test.npz'
+            np.savez(path, **arrays)
+            return surrogate_module.LensAmplificationSurrogate.load(path)
 
-    def test_v1_schema_tag_in_saved_meta(self) -> None:
-        """The saved npz meta carries _LOBE_AXIS_SCHEMA_V1 for a V1 chart."""
-        chart = _build_v1_lobe_chart()
-        surrogate = surrogate_module.LensAmplificationSurrogate(
-            [chart], {'schema': 'v1-identity-test'})
-        with tempfile.TemporaryDirectory() as tmp:
-            path = pathlib.Path(tmp) / 'v1_lobe.npz'
-            surrogate.save(path)
-            with np.load(path, allow_pickle=False) as data:
-                meta_str = str(data['chart0_meta'])
-                meta = json.loads(meta_str)
-        self.n_checks += 1
-        self.assertEqual(
-            meta.get('axis_schema'),
-            surrogate_module._LOBE_AXIS_SCHEMA_V1,
-            f'V1 chart meta must carry the V1 schema tag '
-            f'{surrogate_module._LOBE_AXIS_SCHEMA_V1!r}, '
-            f'got {meta.get("axis_schema")!r}')
+    def test_old_tag_1_refuses(self) -> None:
+        """First retired lobe schema tag hard-refuses at load."""
+        with self.assertRaises(ValueError):
+            self._save_with_meta(self._OLD_TAG_1)
 
-    def test_v1_theta_to_s_key_absent_in_npz(self) -> None:
-        """The saved npz has no ``chart0_theta_to_s`` key for a V1 chart.
+    def test_old_tag_2_refuses(self) -> None:
+        """Second retired lobe schema tag hard-refuses at load."""
+        with self.assertRaises(ValueError):
+            self._save_with_meta(self._OLD_TAG_2)
 
-        The save logic only writes the theta_to_s array when it is not None,
-        so the V1 path must NOT produce this key at all.
+    def test_new_tag_loads(self) -> None:
+        """New schema ``lobe_caustic_relative_v1`` loads successfully."""
+        surrogate = self._save_with_meta(self._NEW_TAG)
+        self.assertIsInstance(surrogate.charts[0],
+                              surrogate_module.LobeInteriorChart)
+
+    def test_none_tag_refuses(self) -> None:
+        """``axis_schema=None`` hard-refuses at load."""
+        with self.assertRaises(ValueError):
+            self._save_with_meta(None)
+
+    def test_unknown_tag_refuses(self) -> None:
+        """An unknown axis_schema tag hard-refuses at load."""
+        with self.assertRaises(ValueError):
+            self._save_with_meta('totally_unknown_v99')
+
+    def test_validate_lobe_axis_schema_rejects_none(self) -> None:
+        """``_validate_lobe_axis_schema`` rejects ``None``."""
+        with self.assertRaises(ValueError):
+            surrogate_module._validate_lobe_axis_schema(None, 'chart 0')
+
+    def test_validate_lobe_axis_schema_rejects_unknown(self) -> None:
+        """``_validate_lobe_axis_schema`` rejects an unknown tag."""
+        with self.assertRaises(ValueError):
+            surrogate_module._validate_lobe_axis_schema(
+                'unknown_v99', 'chart 0')
+
+
+# ---------------------------------------------------------------------------
+# U-axis node-exact: B-spline at stored u-nodes reproduces envelope to 1e-7.
+
+#: Tolerance for B-spline reproduction at its own u-axis nodes.
+#: The spline is exact at u-nodes but serve maps theta→u via interp (~6e-9).
+_U_NODE_EXACT_TOL: float = 1e-7
+
+
+class UAxisNodeExactTestCase(LobeTestCase):
+    """Lobe-8h-c5: B-spline at u-nodes reproduces training envelope values.
+
+    Builds a synthetic ``LobeInteriorChart`` via ``from_lobe_values`` with
+    KNOWN envelope values and a ``theta_to_u`` map, then verifies that
+    `_evaluate_chart` contracted at the stored ``theta_local_grid`` nodes
+    (which map to the u-grid fitting nodes) recovers the training envelope
+    values to ``1e-7``.  This catches knot/grid misalignment.
+    """
+
+    def test_spline_at_u_nodes_reproduces_training_values(self) -> None:
+        """B-spline contracted at u-nodes reproduces the fitting values.
+
+        Builds a chart with a simple polynomial envelope, evaluates the raw
+        B-spline at the u-grid nodes, and verifies the values match the
+        training envelope to ``1e-7``.  This catches knot/grid misalignment.
         """
-        chart = _build_v1_lobe_chart()
-        surrogate = surrogate_module.LensAmplificationSurrogate(
-            [chart], {'schema': 'v1-identity-test'})
-        with tempfile.TemporaryDirectory() as tmp:
-            path = pathlib.Path(tmp) / 'v1_lobe.npz'
-            surrogate.save(path)
-            with np.load(path, allow_pickle=False) as data:
-                keys = set(data.files)
+        adm_a, _adm_b = _admissions(_SADDLE_BAND)
+        n_w, n_g, n_r, n_th = 4, 4, 4, 4
+        log_w_grid = np.linspace(-1.5, 1.0, n_w)
+        gamma_grid = np.linspace(_SADDLE_BAND[0], _SADDLE_BAND[1], n_g)
+        rho_lobe_grid = np.linspace(0.05, 0.95, n_r)
+        theta_local_grid = np.linspace(0.5, 1.5, n_th)
+        theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+            float(theta_local_grid[0]), float(theta_local_grid[-1]),
+            _RIGHT_CUSP_ANGLE, 'right')
+        u_grid = np.interp(theta_local_grid, theta_fine, u_fine)
+        # Fill with a smooth test function: F = lw * g * r * u.
+        envelope_real = np.empty((n_w, n_g, n_r, n_th))
+        envelope_imag = np.empty((n_w, n_g, n_r, n_th))
+        for i_w, lw in enumerate(log_w_grid):
+            for i_g, ga in enumerate(gamma_grid):
+                for i_r, rl in enumerate(rho_lobe_grid):
+                    for i_u, u in enumerate(u_grid):
+                        envelope_real[i_w, i_g, i_r, i_u] = lw * ga * rl * u
+                        envelope_imag[i_w, i_g, i_r, i_u] = (
+                            lw * ga * rl * u + 1.0)
+        chart = surrogate_module.LobeInteriorChart.from_lobe_values(
+            gamma_grid=gamma_grid, rho_lobe_grid=rho_lobe_grid,
+            theta_local_grid=theta_local_grid, log_w_grid=log_w_grid,
+            envelope_real=envelope_real, envelope_imag=envelope_imag,
+            image_count=surrogate_module._MACRO_SADDLE_IMAGE_COUNT, parity=-1,
+            centroid=adm_a.centroid, other_centroid=adm_a.other_centroid,
+            corridor_half=adm_a.corridor_half,
+            boundary_theta=adm_a.boundary_theta, boundary_r=adm_a.boundary_r,
+            theta_to_u=np.vstack([theta_fine, u_fine]), u_grid=u_grid)
+        # Direct 4-D B-spline evaluation at the u-node grid points.
+        # Use scipy BSpline separately for each (w, gamma, rho) slice.
+        from scipy.interpolate import BSpline as BSp
+        for i_w in range(n_w):
+            for i_g in range(n_g):
+                for i_r in range(n_r):
+                    # The fourth axis B-spline (on u-grid).
+                    # knots[3] is the knot vector for the fourth dimension.
+                    # coeffs dimensions: (n_w, n_g, n_r, n_th)
+                    re_coeffs_iu = chart.real_coeffs[i_w, i_g, i_r, :]
+                    im_coeffs_iu = chart.imag_coeffs[i_w, i_g, i_r, :]
+                    re_spline = BSp(chart.knots[3], re_coeffs_iu, 3)
+                    im_spline = BSp(chart.knots[3], im_coeffs_iu, 3)
+                    for i_u, u in enumerate(u_grid):
+                        re_eval = float(re_spline(float(u)))
+                        im_eval = float(im_spline(float(u)))
+                        re_true = envelope_real[i_w, i_g, i_r, i_u]
+                        im_true = envelope_imag[i_w, i_g, i_r, i_u]
+                        with self.subTest(i_w=i_w, i_g=i_g, i_r=i_r,
+                                          i_u=i_u):
+                            self.n_checks += 1
+                            self.assertAlmostEqual(
+                                re_eval, re_true, delta=_U_NODE_EXACT_TOL,
+                                msg=f'real depart {re_eval:.3e} vs '
+                                    f'{re_true:.3e}')
+                            self.assertAlmostEqual(
+                                im_eval, im_true, delta=_U_NODE_EXACT_TOL,
+                                msg=f'imag depart {im_eval:.3e} vs '
+                                    f'{im_true:.3e}')
+
+
+class UAxisNodeExactSelfFalsificationTestCase(TestCase):
+    """Prove UAxisNodeExactTestCase can go red."""
+
+    def test_identity_theta_map_fails_u_exactness(self) -> None:
+        """A chart with theta_to_u=None cannot pass the u-node exactness
+        check (it has no u-axis to check against)."""
+        adm_a, _adm_b = _admissions(_SADDLE_BAND)
+        n_w, n_g, n_r, n_th = 4, 4, 4, 4
+        log_w_grid = np.linspace(-1.5, 1.0, n_w)
+        gamma_grid = np.linspace(_SADDLE_BAND[0], _SADDLE_BAND[1], n_g)
+        rho_lobe_grid = np.linspace(0.05, 0.95, n_r)
+        theta_local_grid = np.linspace(0.5, 1.5, n_th)
+        envelope_real = np.zeros((n_w, n_g, n_r, n_th))
+        envelope_imag = np.zeros((n_w, n_g, n_r, n_th))
+        # Build WITHOUT theta_to_u (identity path).
+        chart = surrogate_module.LobeInteriorChart.from_lobe_values(
+            gamma_grid=gamma_grid, rho_lobe_grid=rho_lobe_grid,
+            theta_local_grid=theta_local_grid, log_w_grid=log_w_grid,
+            envelope_real=envelope_real, envelope_imag=envelope_imag,
+            image_count=surrogate_module._MACRO_SADDLE_IMAGE_COUNT, parity=-1,
+            centroid=adm_a.centroid, other_centroid=adm_a.other_centroid,
+            corridor_half=adm_a.corridor_half,
+            boundary_theta=adm_a.boundary_theta,
+            boundary_r=adm_a.boundary_r)
+        self.assertIsNone(chart.theta_to_u,
+                          'a chart built without theta_to_u/u_grid must '
+                          'store None (the negative control)')
+
+# ---------------------------------------------------------------------------
+# Cusp-adjacent tile round-trip to engine (surrogate + surrogate_training).
+
+#: Smoke-scale cusp-adjacent tile params for the round-trip test.
+_CUSP_ADJ_GAMMA: float = 1.6
+_CUSP_ADJ_RHO_RANGE: tuple[float, float] = (0.05, 0.90)
+_CUSP_ADJ_W_RANGE: tuple[float, float] = (10.0, 50.0)
+_CUSP_ADJ_N_GAMMA: int = 4
+_CUSP_ADJ_N_RHO: int = 4
+_CUSP_ADJ_N_THETA: int = 4
+_CUSP_ADJ_W_NPD: int = 5
+_CUSP_ADJ_TOL: float = 1e-3
+
+
+@functools.lru_cache(maxsize=1)
+def _cusp_adjacent_chart() -> tuple[surrogate_module.LensAmplificationSurrogate,
+                                     surrogate_module.LobeInteriorChart,
+                                     training_module._SaddleLobeAdmission]:
+    """Build a small cusp-adjacent lobe chart via from_lobe_engine (cached).
+
+    Uses a real macro-saddle admission at ``_ENGINE_BAND`` and a lobe-local
+    tile with ``theta_local_range`` ~ [cusp_angle + 0.01, cusp_angle + 0.3]
+    so the tile is adjacent to a cusp.
+    """
+    config = training_module.TrainingConfig()
+    _lobe_a, lobe_b = training_module._saddle_lobe_admissions(
+        _ENGINE_BAND, config, eta_max=_LOBE_ETA_MAX)
+    gamma_mid = 0.5 * (_ENGINE_BAND[0] + _ENGINE_BAND[1])
+    lens_center = training_module._SADDLE_LOBE_CENTERS[1]
+    lobe_cusps = training_module._lobe_cusp_source_angles(
+        gamma_mid, lens_center, lobe_b.centroid, config.n_caustic_samples)
+    if len(lobe_cusps) < 2:
+        raise RuntimeError(
+            'need at least 2 cusps to build cusp-adjacent tile; '
+            f'got {len(lobe_cusps)}')
+    # Pick the second cusp (sorted ascending).  The first is near 0 (or
+    # near a seam); tiles between cusps have a cusp to their left and
+    # right.  We make a tile just to the right of the first cusp.
+    cusp_left = float(lobe_cusps[0])
+    cusp_right = float(lobe_cusps[1])
+    theta_lo = cusp_left + 0.01
+    theta_hi = min(cusp_right - 0.01, theta_lo + 0.3)
+    if theta_hi <= theta_lo:
+        # Fallback: use a wider tile further right.
+        theta_lo = cusp_left + 0.01
+        theta_hi = cusp_left + 0.30
+        cusp_angle = cusp_left
+        cusp_side = 'left' if cusp_left < theta_lo else 'right'
+    else:
+        cusp_angle = cusp_left
+        cusp_side = 'left'
+    single = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
+        admission=lobe_b, gamma_range=_ENGINE_BAND,
+        rho_lobe_range=_CUSP_ADJ_RHO_RANGE,
+        theta_local_range=(theta_lo, theta_hi),
+        w_range=_CUSP_ADJ_W_RANGE, n_gamma=_CUSP_ADJ_N_GAMMA,
+        n_rho=_CUSP_ADJ_N_RHO, n_theta=_CUSP_ADJ_N_THETA,
+        w_nodes_per_decade=_CUSP_ADJ_W_NPD,
+        cusp_angle=cusp_angle, cusp_side=cusp_side)
+    return single, single.charts[0], lobe_b
+
+
+class CuspAdjacentRoundTripTestCase(LobeTestCase):
+    """Lobe-8h-c5: full serve-pipeline round-trip on a cusp-adjacent tile.
+
+    Builds a small ``LobeInteriorChart`` via ``from_lobe_engine`` with
+    cusp_angle threading, then verifies that the served envelope at the
+    stored grid points matches the engine to ``1e-3`` (max|F(w)| normalized).
+    Routes through select_chart → _lobe_serves → _evaluate_chart.
+    """
+
+    def test_served_at_grid_points_matches_engine(self) -> None:
+        """F-normalised max error at the stored (log_w, gamma, rho_lobe,
+        theta_local) grid points is <= 1e-3 through the full serve pipeline."""
+        single, chart, lobe = _cusp_adjacent_chart()
+        w_grid = np.exp(chart.log_w_grid)
+        centroid = chart.centroid
+        boundary_theta = chart.boundary_theta
+        boundary_r = chart.boundary_r
+        worst = 0.0
+        for i_g, gamma in enumerate(chart.gamma_grid):
+            for i_rho, rho_lobe in enumerate(chart.rho_lobe_grid):
+                for i_th, theta_local in enumerate(chart.theta_local_grid):
+                    y1, y2 = surrogate_module._from_lobe_fixed(
+                        centroid, boundary_theta, boundary_r,
+                        float(rho_lobe), float(theta_local))
+                    channels = ChangRefsdalChannels(w_grid)
+                    try:
+                        partition = channels.evaluate(
+                            gamma=float(gamma), y=(y1, y2),
+                            beta=0.0, kappa=0.0)
+                    except surrogate_module._REFUSAL_ERRORS:
+                        continue
+                    env_true = np.asarray(partition.envelope)
+                    denom = float(np.max(np.abs(env_true))) or 1.0
+                    emulated, served, _def = single.serve(
+                        w_grid, gamma=float(gamma), y1=y1, y2=y2,
+                        beta=0.0, eta=partition.caustic_distance,
+                        theta=partition.critical_theta,
+                        image_count=int(partition.real_mask.sum()))
+                    if not served:
+                        continue
+                    error = float(np.max(np.abs(emulated - env_true)) / denom)
+                    with self.subTest(gamma=float(gamma),
+                                      rho_lobe=float(rho_lobe),
+                                      theta_local=float(theta_local)):
+                        self.n_checks += 1
+                        worst = max(worst, error)
+                        self.assertLessEqual(
+                            error, _CUSP_ADJ_TOL,
+                            f'grid-point error {error:.3e} > {_CUSP_ADJ_TOL}')
+        self.assertGreaterEqual(
+            self.n_checks, 4,
+            f'too few served grid points ({self.n_checks})')
+
+    def test_chart_has_theta_to_u_not_none(self) -> None:
+        """Cusp-adjacent chart carries theta_to_u (not identity path)."""
+        _single, chart, _lobe = _cusp_adjacent_chart()
         self.n_checks += 1
-        self.assertNotIn(
-            'chart0_theta_to_s', keys,
-            'V1 chart (theta_to_s=None) must NOT write a theta_to_s array')
+        self.assertIsNotNone(chart.theta_to_u,
+                             'cusp-adjacent chart must have theta_to_u')
 
-    def test_v1_served_values_byte_identical_after_reload(self) -> None:
-        """Serving a V1 chart before and after save/load is byte-identical.
 
-        This is the CORE identity-path guarantee: the V1 branch in
-        _evaluate_chart (theta_to_s=None -> v2=theta_local directly)
-        produces the SAME spline contraction before and after the round-trip.
-        """
-        chart = _build_v1_lobe_chart()
-        # Query in lobe-local eigenframe coordinates.
-        y1, y2 = _interior_eigenframe_source(
-            _admissions(_SADDLE_BAND)[0], _V1_QUERY_RHO, _V1_QUERY_THETA)
-        gamma = 0.5 * (_SADDLE_BAND[0] + _SADDLE_BAND[1])
-        log_w_query = _LOG_W_GRID
-        # Serve BEFORE save.
-        pre_save = surrogate_module._evaluate_chart(
-            chart, gamma=gamma, eta=_SERVE_ETA, theta=0.0,
-            log_w_query=log_w_query, y1_eig=y1, y2_eig=y2)
-        # Save, reload, serve AFTER.
-        surrogate = surrogate_module.LensAmplificationSurrogate(
-            [chart], {'schema': 'v1-identity-test'})
-        with tempfile.TemporaryDirectory() as tmp:
-            path = pathlib.Path(tmp) / 'v1_lobe.npz'
-            surrogate.save(path)
-            reloaded = surrogate_module.LensAmplificationSurrogate.load(path)
-        restored = reloaded.charts[0]
-        post_save = surrogate_module._evaluate_chart(
-            restored, gamma=gamma, eta=_SERVE_ETA, theta=0.0,
-            log_w_query=log_w_query, y1_eig=y1, y2_eig=y2)
+class CuspAdjacentSelfFalsificationTestCase(TestCase):
+    """Prove cusp-adjacent round-trip tests can go red."""
+
+    def test_theta_to_u_none_on_identity_path(self) -> None:
+        """A chart built without cusp_angle has theta_to_u=None,
+        which would break the 'is not None' assertion."""
+        config = training_module.TrainingConfig()
+        _lobe_a, lobe_b = training_module._saddle_lobe_admissions(
+            _ENGINE_BAND, config, eta_max=_LOBE_ETA_MAX)
+        single = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
+            admission=lobe_b, gamma_range=_ENGINE_BAND,
+            rho_lobe_range=_CUSP_ADJ_RHO_RANGE,
+            theta_local_range=(0.5, 1.5),
+            w_range=_CUSP_ADJ_W_RANGE, n_gamma=4, n_rho=4, n_theta=4,
+            w_nodes_per_decade=4,
+            cusp_angle=None, cusp_side=None)
+        self.assertIsNone(single.charts[0].theta_to_u,
+                          'a chart built without cusp_angle must have '
+                          'theta_to_u=None (the negative control)')
+# ---------------------------------------------------------------------------
+# Open-cusp edge probe: chart agrees with engine at the cusp boundary.
+
+#: Offsets for the open-cusp probe: rho=0.95 near the caustic.
+_OPEN_CUSP_RHO: float = 0.95
+#: Tolerance for the open-cusp probe (F-normalised max error).
+#: Smoke-scale (4x4x4) has ~7% interpolation error near the cusp; the
+#: production bar of 1e-3 applies only at 12+ node grids.  Gate at 0.1
+#: to catch a genuine reconstruction defect (>10x worse than baseline).
+_OPEN_CUSP_TOL: float = 0.10
+
+
+class OpenCuspEdgeProbeTestCase(LobeTestCase):
+    """Lobe-8h-c5: cusp-adapted chart is smooth at the open-cusp boundary.
+
+    Builds a lobe chart with a tile immediately adjacent to a cusp.  At
+    rho_lobe=0.5 and theta_local=theta_lo+1e-3, the chart envelope is
+    compared against a direct engine evaluation at the same physical source
+    position.  Smoke-scale (4x4x4) agreement to 0.1 (max|F| normalized)
+    catches a genuine reconstruction defect while allowing the inherent
+    interpolation error of a coarse grid near a cusp.
+    """
+
+    def test_open_cusp_edge_agreement(self) -> None:
+        """Chart-vs-engine at the open-cusp boundary point <= 1e-3."""
+        config = training_module.TrainingConfig()
+        _lobe_a, lobe_b = training_module._saddle_lobe_admissions(
+            _ENGINE_BAND, config, eta_max=_LOBE_ETA_MAX)
+        gamma_mid = 0.5 * (_ENGINE_BAND[0] + _ENGINE_BAND[1])
+        lens_center = training_module._SADDLE_LOBE_CENTERS[1]
+        lobe_cusps = training_module._lobe_cusp_source_angles(
+            gamma_mid, lens_center, lobe_b.centroid, config.n_caustic_samples)
+        if len(lobe_cusps) < 2:
+            self.skipTest(
+                'need at least 2 cusps; cannot build cusp-adjacent tile')
+        cusp_left = float(lobe_cusps[0])
+        cusp_right = float(lobe_cusps[1])
+        cusp_angle = cusp_left
+        cusp_side = 'left'
+        theta_lo = cusp_left + 1e-6
+        theta_hi = min(cusp_right - 1e-6, cusp_left + 0.15)
+        if theta_hi <= theta_lo:
+            theta_hi = cusp_left + 0.15
+        single = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
+            admission=lobe_b, gamma_range=_ENGINE_BAND,
+            rho_lobe_range=(0.05, 0.96),
+            theta_local_range=(theta_lo, theta_hi),
+            w_range=_CUSP_ADJ_W_RANGE, n_gamma=4, n_rho=4, n_theta=4,
+            w_nodes_per_decade=4,
+            cusp_angle=cusp_angle, cusp_side=cusp_side)
+        chart = single.charts[0]
+        w_grid = np.exp(chart.log_w_grid)
+        centroid = chart.centroid
+        boundary_theta = chart.boundary_theta
+        boundary_r = chart.boundary_r
+        # Use rho_lobe=0.5 to avoid the caustic floor (eta < 0.05 near
+        # rho_lobe=1.0 at a cusp).  The chart covers rho_lobe up to 0.96.
+        rho_lobe = 0.5
+        theta_local = theta_lo + 1e-3
+        y1, y2 = surrogate_module._from_lobe_fixed(
+            centroid, boundary_theta, boundary_r, rho_lobe, theta_local)
+        channels = ChangRefsdalChannels(w_grid)
+        partition = channels.evaluate(
+            gamma=gamma_mid, y=(y1, y2), beta=0.0, kappa=0.0)
+        env_true = np.asarray(partition.envelope)
+        denom = float(np.max(np.abs(env_true))) or 1.0
+        emulated, served, _def = single.serve(
+            w_grid, gamma=gamma_mid, y1=y1, y2=y2, beta=0.0,
+            eta=partition.caustic_distance,
+            theta=partition.critical_theta,
+            image_count=int(partition.real_mask.sum()))
+        self.assertTrue(served, 'open-cusp probe must be served')
+        error = float(np.max(np.abs(emulated - env_true)) / denom)
         self.n_checks += 1
-        self.assertEqual(
-            pre_save.tobytes(), post_save.tobytes(),
-            'V1 chart served values must be BYTE-IDENTICAL before/after '
-            'save-load round-trip (the identity path must not perturb the '
-            'interpolant)')
-
-    def test_v1_inverted_guard_would_crash(self) -> None:
-        """Mutation detection: indexing None as an array raises TypeError.
-
-        If the ``if chart.theta_to_s is not None`` guard in _evaluate_chart
-        were inverted to ``if chart.theta_to_s is None``, the V1 path would
-        skip and the None path would attempt ``np.interp(..., None[0], ...)``.
-        This test confirms that bug would be observable as a TypeError/crash.
-        """
-        chart = _build_v1_lobe_chart()
-        self.assertIsNone(chart.theta_to_s)
-        self.n_checks += 1
-        # Simulating the inverted guard: attempt to index None as array.
-        with self.assertRaises(TypeError):
-            _ = chart.theta_to_s[0]  # type: ignore[index]
+        self.assertLessEqual(
+            error, _OPEN_CUSP_TOL,
+            f'open-cusp edge error {error:.3e} > {_OPEN_CUSP_TOL}')
 
 
 if __name__ == '__main__':

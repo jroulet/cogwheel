@@ -151,9 +151,6 @@ _CUSP_NODE_DEDUP_TOL = 1e-9
 # measured round-trip error at 2001 is ~1e-7 (< the 1e-6 tolerance).
 _FARFIELD_ARC_MAP_SIZE = 2001
 
-# Lobe-interior wedge-edge sqrt-coordinate map density.  Closed-form
-# (no engine calls), so the same 2001-node density is sufficient.
-_LOBE_ARC_MAP_SIZE = 2001
 
 # Fixed medial-axis / near-tied-foot tolerance in caustic-source (``y``)
 # units: a source whose two nearest caustic feet are closer than this in
@@ -260,9 +257,8 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
 _EXTERIOR_POLAR_AXIS_SCHEMA = 'exterior_polar_rho_theta_c'
 _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA})
 _EXTERIOR_POLAR_CARRIER_STEP_MAX = 1.0
-_LOBE_AXIS_SCHEMA_V1 = 'lobe_local_offset_rholobe_thetalocal_framewinv'
-_LOBE_AXIS_SCHEMA = 'lobe_local_offset_rholobe_thetalocal_sqrtedge_framewinv'
-_KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_V1, _LOBE_AXIS_SCHEMA})
+_LOBE_AXIS_SCHEMA_NEW = 'lobe_caustic_relative_v1'
+_KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_NEW})
 
 # Wedge (caustic-relative interior) axis-schema tag.  The caustic-relative
 # interior chart uses (r, theta_wedge) coordinates normalised by the caustic
@@ -611,6 +607,96 @@ def _wedge_cusp_axis_map(theta_lo: float, theta_hi: float, origin: str
         raise ValueError(f"origin must be 'low' or 'high'; got {origin!r}.")
     # Force exact endpoints so the serve-time np.interp never extrapolates
     # (FP round-off in the (2/3)->(3/2) round-trip is ~1e-16 relative).
+    theta_fine[0] = theta_lo
+    theta_fine[-1] = theta_hi
+
+    return theta_fine, u_fine
+
+def _lobe_cusp_axis_map(theta_lo: float, theta_hi: float,
+                        cusp_angle: float, side: str
+                        ) -> tuple[np.ndarray, np.ndarray]:
+    """Build the cusp-adapted angular spline-axis map for one lobe tile.
+
+    Reparametrises the lobe-local angular coordinate by ``u = d**(2/3)``
+    where ``d`` is the angular distance to the nearest deltoid lobe cusp.
+    The ``2/3`` exponent is the exact, gamma-universal caustic-reach cusp
+    scaling (``r_caustic ~ const - c * d**(2/3)``), so charting the lobe
+    interior envelope in ``u`` absorbs that power and keeps the spline
+    coordinate smooth instead of diverging as ``d**(-1/3)`` along the raw
+    ``theta_local`` axis.  The macro-saddle lobe-lobe counterpart of
+    `_wedge_cusp_axis_map`.
+
+    Both per-side forms are monotone INCREASING in ``theta`` and offset so
+    ``u(theta_lo) = 0`` (``np.interp`` is translation-invariant in the
+    tabulated ordinate).  The fine map is built UNIFORM IN ``u`` — its
+    ``theta`` nodes are the inverse images of an evenly spaced ``u`` grid —
+    so serve-time ``np.interp`` error is equidistributed near the cusp,
+    where ``u'' ~ d**(-4/3)`` is largest.
+
+    Parameters
+    ----------
+    theta_lo, theta_hi : float
+        Lobe-local angle tile bounds, radians,
+        ``0 <= theta_lo < theta_hi <= pi``.
+    cusp_angle : float
+        The nearest deltoid lobe cusp angle, radians; must lie strictly
+        outside ``(theta_lo, theta_hi)`` on the side given by ``side``.
+    side : str
+        ``'left'`` (cusp_angle < theta_lo, ``d = theta - cusp_angle``) or
+        ``'right'`` (cusp_angle > theta_hi,
+        ``d = cusp_angle - theta``).
+
+    Returns
+    -------
+    theta_fine : np.ndarray
+        Shape ``(_FARFIELD_ARC_MAP_SIZE,)`` strictly increasing lobe-local
+        angles spanning ``[theta_lo, theta_hi]`` exactly at the endpoints.
+    u_fine : np.ndarray
+        Matching strictly increasing cusp-adapted coordinate with
+        ``u_fine[0] = 0``.
+
+    Raises
+    ------
+    ValueError
+        If ``side`` is not ``'left'`` or ``'right'``, the bounds are
+        malformed, or ``cusp_angle`` is not on the correct side.
+    """
+    theta_lo = float(theta_lo)
+    theta_hi = float(theta_hi)
+    cusp_angle = float(cusp_angle)
+    if not (0.0 <= theta_lo and theta_hi <= np.pi):
+        raise ValueError(
+            f'lobe tile bounds (theta_lo={theta_lo}, theta_hi={theta_hi}) '
+            f'must lie within the lobe-local domain [0, pi].')
+    if not theta_lo < theta_hi:
+        raise ValueError(
+            f'theta_lo ({theta_lo}) must be strictly below theta_hi '
+            f'({theta_hi}).')
+    exponent = 2.0 / 3.0
+    if side == 'left':
+        if not cusp_angle < theta_lo:
+            raise ValueError(
+                f'side={side!r} requires cusp_angle ({cusp_angle}) '
+                f'< theta_lo ({theta_lo}).')
+        d_lo = theta_lo - cusp_angle
+        d_hi = theta_hi - cusp_angle
+        base_lo = d_lo ** exponent
+        u_max = d_hi ** exponent - base_lo
+        u_fine = np.linspace(0.0, u_max, _FARFIELD_ARC_MAP_SIZE)
+        theta_fine = cusp_angle + (u_fine + base_lo) ** 1.5
+    elif side == 'right':
+        if not cusp_angle > theta_hi:
+            raise ValueError(
+                f'side={side!r} requires cusp_angle ({cusp_angle}) '
+                f'> theta_hi ({theta_hi}).')
+        d_lo = cusp_angle - theta_lo
+        d_hi = cusp_angle - theta_hi
+        base_lo = d_lo ** exponent
+        u_max = base_lo - d_hi ** exponent
+        u_fine = np.linspace(0.0, u_max, _FARFIELD_ARC_MAP_SIZE)
+        theta_fine = cusp_angle - np.clip(base_lo - u_fine, 0.0, None) ** 1.5
+    else:
+        raise ValueError(f"side must be 'left' or 'right'; got {side!r}.")
     theta_fine[0] = theta_lo
     theta_fine[-1] = theta_hi
     return theta_fine, u_fine
@@ -1157,7 +1243,8 @@ def _validate_theta_to_u(theta_to_u: np.ndarray,
     Row 0 is ``theta_fine`` (strictly ascending, starting at the tile's
     lower bound ``theta_grid[0]``); row 1 is ``u_fine`` = ``d**(2/3)`` (the
     cusp-adapted coordinate, strictly increasing from ~0).  Used by the
-    wedge-interior chart; delegates to `_validate_axis_map`.  Because ``u``
+    wedge-interior and lobe-interior charts; delegates to `_validate_axis_map`.
+    Because ``u``
     is ``rad**(2/3)`` and NOT a length, no magnitude/length bound applies.
     """
     return _validate_axis_map(theta_to_u, theta_grid, ordinate_name='u')
@@ -1584,7 +1671,7 @@ class LobeInteriorChart:
     physical source at serve time.  The envelope is the ``tau_c``-demodulated
     INTERIOR_SACR_C label (`_INTERIOR_ENVELOPE_DEFINITION`), reconstructed by
     the interior serve mirror; the coordinate convention is stamped as
-    `_LOBE_AXIS_SCHEMA` so a mislabeled artifact hard-refuses at load.
+    `_LOBE_AXIS_SCHEMA_NEW` so a mislabeled artifact hard-refuses at load.
 
     Attributes
     ----------
@@ -1622,12 +1709,13 @@ class LobeInteriorChart:
     boundary_theta, boundary_r : np.ndarray
         Directional lobe boundary nodes normalising ``rho_lobe``
         (`_lobe_boundary_radius`).
-    theta_to_s : np.ndarray or None
-        Optional ``(2, N_map)`` theta→s axis reparametrization map.
+    theta_to_u : np.ndarray or None
+        Optional ``(2, N_map)`` theta→u axis reparametrization map.
         Row 0 is the dense ``theta_local`` grid; row 1 is the corresponding
-        ``s = sqrt(span) - sqrt(theta_max - theta_local)`` coordinate.
+        ``u = d**(2/3)`` cusp-adapted coordinate (the macro-saddle
+        counterpart of the wedge-interior cusp-adapted angular axis).
         When ``None``, the spline is on raw ``theta_local`` (identity,
-        backward-compatible with fixtures not built via the wedge-edge
+        backward-compatible with fixtures not built via the cusp-adapted
         coordinate).
     """
 
@@ -1649,7 +1737,7 @@ class LobeInteriorChart:
     corridor_half: float
     boundary_theta: np.ndarray
     boundary_r: np.ndarray
-    theta_to_s: np.ndarray | None
+    theta_to_u: np.ndarray | None
 
     @classmethod
     def from_lobe_values(cls, *, gamma_grid: np.ndarray,
@@ -1664,8 +1752,8 @@ class LobeInteriorChart:
                          refused_points: np.ndarray | None = None,
                          envelope_definition: str
                          = _INTERIOR_ENVELOPE_DEFINITION,
-                         theta_to_s: np.ndarray | None = None,
-                         s_grid: np.ndarray | None = None
+                         theta_to_u: np.ndarray | None = None,
+                         u_grid: np.ndarray | None = None
                          ) -> 'LobeInteriorChart':
         """Build a lobe-interior chart by fitting splines to a value tensor.
 
@@ -1693,13 +1781,14 @@ class LobeInteriorChart:
         envelope_definition : str, optional
             Tag naming the label the chart's envelope encodes (default the
             interior SACR-C label).
-        theta_to_s : np.ndarray or None, optional
-            ``(2, N_map)`` theta→s axis reparametrization map.  When
-            provided together with ``s_grid``, the spline's fourth axis
-            is ``s`` (not raw ``theta_local``).
-        s_grid : np.ndarray or None, optional
-            1-D strictly increasing s-coordinate nodes (same length as
-            ``theta_local_grid``).  Required when ``theta_to_s`` is given.
+        theta_to_u : np.ndarray or None, optional
+            ``(2, N_map)`` theta→u axis reparametrization map.  When
+            provided together with ``u_grid``, the spline's fourth axis
+            is ``u`` (the cusp-adapted ``d**(2/3)`` coordinate; not raw
+            ``theta_local``).
+        u_grid : np.ndarray or None, optional
+            1-D strictly increasing u-coordinate nodes (same length as
+            ``theta_local_grid``).  Required when ``theta_to_u`` is given.
         """
         gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
         rho_lobe_grid = _validate_axis(rho_lobe_grid, 'rho_lobe_grid')
@@ -1709,23 +1798,24 @@ class LobeInteriorChart:
         expected = (log_w_grid.size, gamma_grid.size, rho_lobe_grid.size,
                     theta_local_grid.size)
         _check_value_shape(envelope_real, envelope_imag, expected)
-        # When both theta_to_s and s_grid are provided, the spline's fourth
-        # axis is s (the wedge-edge coordinate) instead of raw theta_local.
-        if theta_to_s is not None and s_grid is not None:
-            theta_to_s = _validate_theta_to_s(theta_to_s, theta_local_grid)
-            s_grid = _validate_axis(s_grid, 's_grid')
-            if s_grid.size != theta_local_grid.size:
+        # When both theta_to_u and u_grid are provided, the spline's fourth
+        # axis is u (the cusp-adapted d**(2/3) coordinate) instead of raw
+        # theta_local.
+        if theta_to_u is not None and u_grid is not None:
+            theta_to_u = _validate_theta_to_u(theta_to_u, theta_local_grid)
+            u_grid = _validate_axis(u_grid, 'u_grid')
+            if u_grid.size != theta_local_grid.size:
                 raise ValueError(
-                    f's_grid length ({s_grid.size}) must equal '
+                    f'u_grid length ({u_grid.size}) must equal '
                     f'theta_local_grid length ({theta_local_grid.size}).')
-            spline_axes = (log_w_grid, gamma_grid, rho_lobe_grid, s_grid)
-        elif theta_to_s is None and s_grid is None:
+            spline_axes = (log_w_grid, gamma_grid, rho_lobe_grid, u_grid)
+        elif theta_to_u is None and u_grid is None:
             # Identity path: byte-identical to HEAD.
             spline_axes = (log_w_grid, gamma_grid, rho_lobe_grid,
                            theta_local_grid)
         else:
             raise ValueError(
-                'theta_to_s and s_grid must both be None or both provided.')
+                'theta_to_u and u_grid must both be None or both provided.')
         real_c, imag_c, knots = _fit_tensor_spline(
             spline_axes, envelope_real, envelope_imag)
         return cls._assemble(
@@ -1734,7 +1824,7 @@ class LobeInteriorChart:
             refused_points, centroid, other_centroid, corridor_half,
             boundary_theta, boundary_r,
             envelope_definition=envelope_definition,
-            theta_to_s=theta_to_s)
+            theta_to_u=theta_to_u)
 
     @classmethod
     def _assemble(cls, gamma_grid, rho_lobe_grid, theta_local_grid, log_w_grid,
@@ -1742,7 +1832,7 @@ class LobeInteriorChart:
                   eta_overlap_min, refused_points, centroid, other_centroid,
                   corridor_half, boundary_theta, boundary_r,
                   envelope_definition=_INTERIOR_ENVELOPE_DEFINITION,
-                  theta_to_s=None
+                  theta_to_u=None
                   ) -> 'LobeInteriorChart':
         """Assemble a lobe chart from prebuilt coefficient tensors and knots.
 
@@ -1775,8 +1865,8 @@ class LobeInteriorChart:
             corridor_half=float(corridor_half),
             boundary_theta=np.ascontiguousarray(boundary_theta, dtype=float),
             boundary_r=np.ascontiguousarray(boundary_r, dtype=float),
-            theta_to_s=(np.ascontiguousarray(theta_to_s, dtype=float)
-                        if theta_to_s is not None else None))
+            theta_to_u=(np.ascontiguousarray(theta_to_u, dtype=float)
+                        if theta_to_u is not None else None))
 
 
 @dataclass(frozen=True, eq=False)
@@ -2539,12 +2629,12 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
     its caustic-fixed spatial axes ``(rho, theta_c)`` computed from the
     eigenframe source at the query's OWN gamma via `_to_caustic_fixed`; a
     lobe-interior chart contracts on the LOBE-LOCAL ``(rho_lobe, v2)``
-    where ``v2`` is either the raw ``theta_local`` (when ``theta_to_s is
-    None``) or the wedge-edge ``s`` coordinate mapped from ``theta_local``
-    via the chart's stored ``theta_to_s`` map (same pattern as tube
+    where ``v2`` is either the raw ``theta_local`` (when ``theta_to_u is
+    None``) or the cusp-adapted ``u`` coordinate mapped from ``theta_local``
+    via the chart's stored ``theta_to_u`` map (same pattern as tube
     charts); a wedge-interior chart contracts on ``(r, v2)`` where ``v2``
-    is either the raw ``theta_wedge`` or an s-coordinate mapped from
-    ``theta_wedge`` via the chart's stored ``theta_to_s`` map.
+    is either the raw ``theta_wedge`` or the cusp-adapted ``u`` coordinate
+    mapped from ``theta_wedge`` via the chart's stored ``theta_to_u`` map.
     ``y1_eig`` / ``y2_eig`` are the eigenframe source, required for an
     `ExteriorPolarChart`, `LobeInteriorChart`, or `InteriorWedgeChart`
     and ignored for a tube chart.
@@ -2566,12 +2656,12 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
             chart.centroid, chart.boundary_theta, chart.boundary_r,
             abs(y1_eig), abs(y2_eig))
         v1 = rho_lobe
-        if chart.theta_to_s is not None:
-            # Wedge-edge s-coordinate: map theta_local -> s via the stored
+        if chart.theta_to_u is not None:
+            # Cusp-adapted u-coordinate: map theta_local -> u via the stored
             # dense map before contracting the spline (same pattern as the
             # tube chart's arc-length mapping).
-            v2 = float(np.interp(theta_local, chart.theta_to_s[0],
-                                 chart.theta_to_s[1]))
+            v2 = float(np.interp(theta_local, chart.theta_to_u[0],
+                                 chart.theta_to_u[1]))
         else:
             v2 = theta_local
     elif isinstance(chart, InteriorWedgeChart):
@@ -2842,7 +2932,9 @@ class LensAmplificationSurrogate:
                          n_gamma: int = _DEFAULT_PARAM_NODES,
                          n_rho: int = _DEFAULT_PARAM_NODES,
                          n_theta: int = _DEFAULT_PARAM_NODES,
-                         w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE
+                         w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE,
+                         cusp_angle: float | None = None,
+                         cusp_side: str | None = None
                          ) -> 'LensAmplificationSurrogate':
         """Train a macro-saddle lobe-interior surrogate on a dense engine grid.
 
@@ -2890,6 +2982,18 @@ class LensAmplificationSurrogate:
             Nodes per parameter axis (default 7).
         w_nodes_per_decade : int, optional
             Density of the dense log-w training axis (default 15).
+        cusp_angle : float or None, optional
+            The nearest deltoid lobe cusp angle (radians) for the
+            cusp-adapted ``u = d**(2/3)`` angular spline-axis map, where
+            ``d`` is the angular distance to that cusp.  When ``None``
+            (default), falls back to a raw-theta uniform grid on
+            ``theta_local`` (backward compatibly: any caller not yet
+            threading cusp info still builds a valid chart).
+        cusp_side : str or None, optional
+            ``'left'`` (cusp left of the theta-local tile range) or
+            ``'right'``.  Required when ``cusp_angle`` is given; passed
+            through to `_lobe_cusp_axis_map`.  When ``None`` (default),
+            the raw-theta fallback is used.
 
         Returns
         -------
@@ -2918,23 +3022,26 @@ class LensAmplificationSurrogate:
         gamma_grid = _log_reach_gamma_axis(gamma_range, n_gamma, 'gamma')
         rho_lobe_grid = _uniform_axis(rho_lobe_range, n_rho, 'rho_lobe')
 
-        # Wedge-edge s-coordinate: theta_local nodes are placed as images of
-        # a uniform s = sqrt(span) - sqrt(theta_max - theta) grid, which
-        # concentrates nodes near the wedge edge (theta_max) and makes the
-        # cusp a regular point of the interpolation coordinate.
         theta_min, theta_max = theta_local_range
-        span = theta_max - theta_min
-        s_total = float(np.sqrt(span))
-        # Dense theta -> s map for serve-time interpolation.
-        theta_fine = np.linspace(theta_min, theta_max, _LOBE_ARC_MAP_SIZE)
-        s_fine = s_total - np.sqrt(theta_max - theta_fine)
-        theta_to_s = np.vstack([theta_fine, s_fine])
-        # Place theta_local nodes as images of uniform s.
-        s_grid_nodes = np.linspace(0.0, s_total, n_theta)
-        theta_local_grid = theta_max - (s_total - s_grid_nodes) ** 2
-        # Force exact endpoints (guard against FP drift).
-        theta_local_grid[0] = theta_min
-        theta_local_grid[-1] = theta_max
+        if cusp_angle is None:
+            # Raw-theta fallback: uniform grid, no angular reparametrisation.
+            theta_to_u = None
+            u_grid = None
+            theta_local_grid = np.linspace(theta_min, theta_max, n_theta)
+        else:
+            # Cusp-adapted u-coordinate: u = d**(2/3), d = angular distance
+            # to the nearest deltoid lobe cusp.  The 2/3 exponent is the
+            # exact, gamma-universal caustic-reach cusp scaling.
+            theta_fine, u_fine = _lobe_cusp_axis_map(
+                theta_min, theta_max, cusp_angle, cusp_side)
+            theta_to_u = np.vstack([theta_fine, u_fine])
+            # Uniform u grid -> theta_local nodes as images of it.
+            u_grid = np.linspace(u_fine[0], u_fine[-1], n_theta)
+            theta_local_grid = np.interp(
+                u_grid, u_fine, theta_fine)
+            # Force exact endpoints (guard against FP drift).
+            theta_local_grid[0] = theta_min
+            theta_local_grid[-1] = theta_max
 
         w_grid = np.exp(log_w_grid)
 
@@ -3015,7 +3122,7 @@ class LensAmplificationSurrogate:
             boundary_r=boundary_r, eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
             refused_points=refused_points,
             envelope_definition=_INTERIOR_ENVELOPE_DEFINITION,
-            theta_to_s=theta_to_s, s_grid=s_grid_nodes)
+            theta_to_u=theta_to_u, u_grid=u_grid)
         provenance = cls._build_lobe_provenance(
             gamma_range, rho_lobe_range, theta_local_range, w_range, shape,
             envelope_real, envelope_imag, centroid, other_centroid,
@@ -3325,7 +3432,7 @@ class LensAmplificationSurrogate:
                                float(rho_lobe_range[1])],
             'theta_local_range': [float(theta_local_range[0]),
                                   float(theta_local_range[1])],
-            'axis_schema': _LOBE_AXIS_SCHEMA,
+            'axis_schema': _LOBE_AXIS_SCHEMA_NEW,
             'w_range': [float(w_range[0]), float(w_range[1])],
             'resolution': {'n_w': int(n_w), 'n_gamma': int(n_gamma),
                            'n_rho_lobe': int(n_rho),
@@ -3816,19 +3923,17 @@ def _chart_to_npz(chart, index: int) -> dict:
                 chart.theta_grid)
         arrays = {prefix + 'theta_to_s': chart.theta_to_s}
     elif isinstance(chart, LobeInteriorChart):
-        # Additive lobe branch (WP1): the persisted record carries the lobe
+        # Additive lobe branch: the persisted record carries the lobe
         # frame (centroid, other_centroid, boundary_theta/boundary_r as
         # arrays; corridor_half scalar in meta) alongside the interior spline.
         # The lobe axis-schema tag makes a mislabeled/old artifact hard-refuse
         # at load rather than reconstruct a finite-but-wrong F.
-        lobe_schema = (_LOBE_AXIS_SCHEMA if chart.theta_to_s is not None
-                       else _LOBE_AXIS_SCHEMA_V1)
         meta = {'kind': 'lobe', 'image_count': chart.image_count,
                 'parity': chart.parity,
                 'eta_overlap_min': chart.eta_overlap_min,
                 'envelope_definition': chart.envelope_definition,
                 'corridor_half': float(chart.corridor_half),
-                'axis_schema': lobe_schema}
+                'axis_schema': _LOBE_AXIS_SCHEMA_NEW}
         axes = (chart.log_w_grid, chart.gamma_grid, chart.rho_lobe_grid,
                 chart.theta_local_grid)
         arrays = {prefix + 'refused': chart.refused_points,
@@ -3836,8 +3941,8 @@ def _chart_to_npz(chart, index: int) -> dict:
                   prefix + 'other_centroid': chart.other_centroid,
                   prefix + 'boundary_theta': chart.boundary_theta,
                   prefix + 'boundary_r': chart.boundary_r}
-        if chart.theta_to_s is not None:
-            arrays[prefix + 'theta_to_s'] = chart.theta_to_s
+        if chart.theta_to_u is not None:
+            arrays[prefix + 'theta_to_u'] = chart.theta_to_u
     elif isinstance(chart, InteriorWedgeChart):
         # Wedge (caustic-relative interior) branch: the spatial axes are the
         # caustic-normalised radius ``r`` and the wedge angle ``theta_wedge``.
@@ -3898,22 +4003,18 @@ def _chart_from_npz(data, index: int):
             cusp_windows=[tuple(win) for win in meta['cusp_windows']],
             theta_to_s=data[prefix + 'theta_to_s'])
     if meta['kind'] == 'lobe':
-        # Additive lobe branch (WP1): a lobe chart demands the lobe axis
+        # Additive lobe branch: a lobe chart demands the lobe axis
         # schema, so a mislabeled/old artifact hard-refuses here rather than
         # reconstructing at the wrong (origin-centred or far-field) coordinate.
         _validate_lobe_axis_schema(meta.get('axis_schema'), f'chart {index}')
         definition = _validate_farfield_definition(
             meta.get('envelope_definition'), f'chart {index}')
-        # Schema-dependent theta_to_s loading: the V1 schema (raw theta_local
-        # spline) has no map — tolerate absence.  The current schema (sqrt-
-        # edge coordinate) REQUIRES the map; a missing key hard-refuses.
-        schema = meta.get('axis_schema')
-        if schema == _LOBE_AXIS_SCHEMA_V1:
-            # V1 schema (raw theta_local spline) may lack the map.
-            key = prefix + 'theta_to_s'
-            theta_to_s = data[key] if key in data else None
-        else:
-            theta_to_s = data[prefix + 'theta_to_s']
+        # theta_to_u is REQUIRED under the new schema.  A stale V1/sqrt-edge
+        # artifact already hard-refused above at `_validate_lobe_axis_schema`
+        # (its angular map rode under the old ``theta_to_s`` key); a new-schema
+        # artifact missing the cusp-adapted map key hard-refuses here (KeyError)
+        # rather than serving on a wrong angular coordinate.
+        theta_to_u = data[prefix + 'theta_to_u']
         return LobeInteriorChart._assemble(
             gamma_grid=gamma_grid, rho_lobe_grid=p1_grid,
             theta_local_grid=p2_grid, log_w_grid=log_w_grid,
@@ -3927,7 +4028,7 @@ def _chart_from_npz(data, index: int):
             boundary_theta=data[prefix + 'boundary_theta'],
             boundary_r=data[prefix + 'boundary_r'],
             envelope_definition=definition,
-            theta_to_s=theta_to_s)
+            theta_to_u=theta_to_u)
     if meta['kind'] == 'wedge':
         # Wedge (caustic-relative interior) branch: validate axis schema and
         # rebuild the wedge_map from persisted gamma/theta nodes and r_table.

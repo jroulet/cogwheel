@@ -28,7 +28,7 @@ What this suite verifies
 
 3. **Field naming (SHARD C)** — the wedge chart exposes ``theta_to_u``
    (NOT ``theta_to_s``/``s_grid``); the arc-length charts (Tube, Lobe,
-   FarField) are UNTOUCHED — Tube/Lobe still expose ``theta_to_s`` and
+   FarField) are UNTOUCHED — Tube still exposes ``theta_to_s`` and
    FarField still exposes ``s_grid`` + ``arc_map``.  ``FieldExposureTestCase``
    and ``ValidatorContractTestCase`` pin the rename's blast radius.
 
@@ -502,8 +502,8 @@ class FieldExposureTestCase(_WedgeDDTestCase):
     * ``InteriorWedgeChart`` exposes ``theta_to_u`` and NOT ``theta_to_s`` /
       ``s_grid`` / ``u_grid`` (``u_grid`` is a construction kwarg, not a
       stored field).
-    * ``TubeChart`` and ``LobeInteriorChart`` STILL expose ``theta_to_s`` and
-      NOT ``theta_to_u``.
+    * ``TubeChart`` still exposes ``theta_to_s`` and NOT ``theta_to_u``;
+      ``LobeInteriorChart`` exposes ``theta_to_u`` (NOT ``theta_to_s``).
     * ``ExteriorPolarChart`` charts its spatial axes via ``rho_grid`` +
       ``theta_c_grid`` (it has neither ``s_grid`` nor ``arc_map``).
     """
@@ -529,12 +529,12 @@ class FieldExposureTestCase(_WedgeDDTestCase):
         self.assertIn('theta_to_s', names)
         self.assertNotIn('theta_to_u', names)
 
-    def test_lobe_still_exposes_theta_to_s(self):
-        """Lobe chart is untouched: theta_to_s present, theta_to_u absent."""
+    def test_lobe_exposes_theta_to_u(self):
+        """Lobe chart exposes theta_to_u, not theta_to_s."""
         names = self._fields(LobeInteriorChart)
         self._tick()
-        self.assertIn('theta_to_s', names)
-        self.assertNotIn('theta_to_u', names)
+        self.assertIn('theta_to_u', names)
+        self.assertNotIn('theta_to_s', names)
 
     def test_exterior_polar_uses_caustic_fixed_axes(self):
         """Exterior-polar charts use rho_grid + theta_c_grid, not s_grid/arc_map/theta_to_u."""

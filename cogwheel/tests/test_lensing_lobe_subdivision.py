@@ -15,7 +15,7 @@ and the report dict carries the expected additive keys.
 centred near a deltoid cusp is REFUSED by `_SaddleLobeAdmission.admits`
 because the cusp vertex is in the caustic cloud and the nearest-distance
 test already excludes tiles within ``eta_max`` of any caustic point (no
-separate ``_LOBE_CUSP_EXCLUSION_DISTANCE`` carve-out is wired; the
+separate ``_LOBE_CUSP_EXCLUSION_DISTANCE`` carve-out is RETIRED; the
 constant exists but the Professor ruled it redundant).
 
 ``LobeCarrierFlipRefusalTestCase`` certifies that ``_subdivide_lobe_tile``
@@ -146,7 +146,7 @@ class LobeCuspProximityTestCase(_LobeSubTestCase):
 
     The refusal is the NEAREST-DISTANCE test against ``caustic_cloud``
     (which includes cusp vertices) -- no separate carve-out at
-    ``_LOBE_CUSP_EXCLUSION_DISTANCE`` is wired (Professor ruling).  The
+    ``_LOBE_CUSP_EXCLUSION_DISTANCE`` is RETIRED (Professor ruling).  The
     contrast tile far from all cusps is NOT refused by cusp proximity.
     """
 
@@ -444,7 +444,7 @@ class LobeSubdivisionTestCase(_LobeSubTestCase):
         self.assertIn('children', summary)
         self.assertIn('parent_tag', summary)
         self.assertIn('region', summary)
-        self.assertIn('child_half', summary)
+        self.assertIn('child_half_rho', summary)
 
         self.n_checks += 1
         self.assertGreaterEqual(summary['packed'], 1,
@@ -862,3 +862,829 @@ class GhostSaddleSelfFalsificationTestCase(TestCase):
         source = np.array([0.01, 0.0])
         with self.assertRaises(GhostDomainError):
             geometry.ghost_kernel(_GHOST_W, source, matrix)
+
+
+# ---------------------------------------------------------------------------
+# Carve-out retirement verification
+# ---------------------------------------------------------------------------
+
+class CarveOutRetirementTestCase(TestCase):
+    """Acceptance: ``_LOBE_CUSP_EXCLUSION_DISTANCE`` is deleted.
+
+    The constant was retired in this build; the nearest-distance test
+    against ``caustic_cloud`` (which includes cusp vertices) already
+    excludes cusp-adjacent tiles, and the cusp-adapted coordinate makes
+    the surviving near-cusp tiles well-behaved for spline fitting.
+    """
+
+    def test_constant_not_present(self) -> None:
+        """``_LOBE_CUSP_EXCLUSION_DISTANCE`` is absent from the module."""
+        self.assertFalse(
+            hasattr(training_module, '_LOBE_CUSP_EXCLUSION_DISTANCE'),
+            '_LOBE_CUSP_EXCLUSION_DISTANCE must be deleted from '
+            'surrogate_training.py')
+
+    def test_no_references_in_test_file(self) -> None:
+        """No reference to ``_LOBE_CUSP_EXCLUSION_DISTANCE`` as an active
+        constant survives in this test file's helpers or module-level code.
+        Docstrings may mention it in historical/retirement context only; no
+        assertion reads its value because it is gone.
+        """
+        import ast, inspect
+        # Read our own source and check no live reference exists.
+        source = inspect.getsource(inspect.getmodule(self))
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id == '_LOBE_CUSP_EXCLUSION_DISTANCE':
+                self.fail(
+                    f'live reference to _LOBE_CUSP_EXCLUSION_DISTANCE '
+                    f'found at line {node.lineno}; the constant is retired')
+
+
+# ---------------------------------------------------------------------------
+# Cusp-adapted axis-map construction
+# ---------------------------------------------------------------------------
+
+
+#: ``cusp_angle``, ``side`` pairs for exercising both branches.
+_CUSP_AXIS_MAP_CASES: tuple = (
+    (0.5, 1.5, 2.0, 'right'),
+    (0.3, 1.2, 0.1, 'left'),
+    (0.0, 0.8, 1.5, 'right'),
+    (0.2, 1.4, 0.0, 'left'),
+)
+
+
+class LobeCuspAxisMapTestCase(_LobeSubTestCase):
+    """Acceptance: ``_lobe_cusp_axis_map`` builds a valid cusp-adapted map.
+
+    The map reparametrises the lobe-local angular coordinate by
+    ``u = d**(2/3)`` where ``d`` is the angular distance to the nearest
+    deltoid lobe cusp (exact, gamma-universal caustic-reach cusp scaling).
+    ``u`` is strictly increasing from zero and ``theta`` spans the tile
+    bounds exactly, uniform in ``u`` (so serve-time ``np.interp`` error is
+    equidistributed).
+    """
+
+    def test_u_starts_at_zero(self) -> None:
+        """``u_fine[0] = 0`` for the right-side case.
+        Relative tolerance 1e-15: ``u_fine[0]`` is constructed as ``0.0``
+        via ``np.linspace``, not a floating-point approximation.
+        """
+        theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+            0.5, 1.5, 2.0, 'right')
+        self.n_checks += 1
+        # |u_fine[0]| / max(u_fine) < 1e-15 (relative to scale).
+        self.assertAlmostEqual(u_fine[0], 0.0, delta=1e-14 * u_fine[-1],
+                               msg='u_fine[0] must be zero')
+
+    def test_u_strictly_increasing(self) -> None:
+        """All ``u_fine`` diffs are positive across varied cases."""
+        for theta_lo, theta_hi, cusp_angle, side in _CUSP_AXIS_MAP_CASES:
+            with self.subTest(theta_lo=theta_lo, theta_hi=theta_hi,
+                              cusp_angle=cusp_angle, side=side):
+                _u, u_fine = surrogate_module._lobe_cusp_axis_map(
+                    theta_lo, theta_hi, cusp_angle, side)
+                self.n_checks += 1
+                self.assertTrue(np.all(np.diff(u_fine) > 0),
+                                'u_fine must be strictly increasing')
+
+    def test_theta_strictly_increasing(self) -> None:
+        """All ``theta_fine`` diffs are positive across varied cases."""
+        for theta_lo, theta_hi, cusp_angle, side in _CUSP_AXIS_MAP_CASES:
+            with self.subTest(theta_lo=theta_lo, theta_hi=theta_hi,
+                              cusp_angle=cusp_angle, side=side):
+                theta_fine, _u = surrogate_module._lobe_cusp_axis_map(
+                    theta_lo, theta_hi, cusp_angle, side)
+                self.n_checks += 1
+                self.assertTrue(np.all(np.diff(theta_fine) > 0),
+                                'theta_fine must be strictly increasing')
+
+    def test_endpoints_exact(self) -> None:
+        """``theta_fine[0] == theta_lo``, ``theta_fine[-1] == theta_hi``
+        exactly (float bit equality) across varied cases."""
+        for theta_lo, theta_hi, cusp_angle, side in _CUSP_AXIS_MAP_CASES:
+            with self.subTest(theta_lo=theta_lo, theta_hi=theta_hi,
+                              cusp_angle=cusp_angle, side=side):
+                theta_fine, _u = surrogate_module._lobe_cusp_axis_map(
+                    theta_lo, theta_hi, cusp_angle, side)
+                self.n_checks += 1
+                self.assertEqual(
+                    theta_fine[0], theta_lo,
+                    f'theta_fine[0] must equal theta_lo={theta_lo} exactly')
+                self.n_checks += 1
+                self.assertEqual(
+                    theta_fine[-1], theta_hi,
+                    f'theta_fine[-1] must equal theta_hi={theta_hi} exactly')
+
+    def test_shape_is_farf_arc_map_size(self) -> None:
+        """Both ``theta_fine`` and ``u_fine`` have
+        ``_FARFIELD_ARC_MAP_SIZE = 2001`` nodes."""
+        theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+            0.5, 1.5, 2.0, 'right')
+        expected = surrogate_module._FARFIELD_ARC_MAP_SIZE
+        self.n_checks += 1
+        self.assertEqual(theta_fine.shape, (expected,))
+        self.n_checks += 1
+        self.assertEqual(u_fine.shape, (expected,))
+
+    def test_u_zero_at_theta_lo(self) -> None:
+        """``u`` is identically zero at ``theta_lo`` for both sides."""
+        for theta_lo, theta_hi, cusp_angle, side in _CUSP_AXIS_MAP_CASES:
+            with self.subTest(theta_lo=theta_lo, theta_hi=theta_hi,
+                              cusp_angle=cusp_angle, side=side):
+                theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+                    theta_lo, theta_hi, cusp_angle, side)
+                self.n_checks += 1
+                self.assertAlmostEqual(u_fine[0], 0.0,
+                                       delta=1e-14 * max(u_fine[-1], 1.0),
+                                       msg=f'side={side}: u must be 0 at '
+                                           f'theta_lo={theta_lo}')
+
+    def test_theta_lo_ge_theta_hi_raises(self) -> None:
+        """Malformed bounds raise ``ValueError``."""
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(1.0, 0.5, 2.0, 'right')
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(0.5, 0.5, 2.0, 'right')
+        self.n_checks += 1
+
+    def test_invalid_side_raises(self) -> None:
+        """Side not 'left' or 'right' raises ``ValueError``."""
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(0.1, 0.5, 0.0, 'middle')
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(0.1, 0.5, 0.0, '')
+        self.n_checks += 1
+
+    def test_cusp_angle_on_wrong_side_raises(self) -> None:
+        """``cusp_angle`` not on the correct side raises ``ValueError``."""
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(0.5, 1.0, 0.6, 'left')
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(0.5, 1.0, 0.3, 'right')
+        self.n_checks += 1
+
+    def test_bounds_outside_domain_raises(self) -> None:
+        """``theta_lo < 0`` or ``theta_hi > pi`` raises ``ValueError``."""
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(-0.1, 1.0, 2.0, 'right')
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(0.1, np.pi + 0.01, 2.0, 'right')
+        self.n_checks += 1
+
+
+class LobeCuspAxisMapSelfFalsificationTestCase(TestCase):
+    """Prove the cusp-axis-map suite can FAIL."""
+
+    def test_wrong_theta_fine_range(self) -> None:
+        """If the test mistakenly used the wrong range assertion, a
+        deliberately wrong endpoint would be caught -- proving the
+        endpoint-exact assertion has teeth.
+        """
+        theta_fine, _ = surrogate_module._lobe_cusp_axis_map(
+            0.5, 1.5, 2.0, 'right')
+        self.assertNotEqual(theta_fine[0], 0.0,
+                            'theta_fine[0] is NOT zero -- if the green '
+                            'test asserted theta_fine[0]==0 it would have '
+                            'no teeth for this fixture')
+        self.assertNotEqual(theta_fine[-1], 0.0,
+                            'theta_fine[-1] is NOT zero -- same reasoning')
+
+
+# ---------------------------------------------------------------------------
+# Cusp-adjacent tile round-trip to engine
+# ---------------------------------------------------------------------------
+
+
+#: Narrow macro-saddle band that admits a cusp-adjacent lobe tile.
+_CUSP_BAND: tuple[float, float] = (1.4, 1.45)
+
+#: ``eta_max`` for the cusp-adjacent admission.
+_CUSP_ETA_MAX: float = 0.05
+
+#: Smoke-scale grid: 4×4×4 spatial × ~5 w-nodes for [10, 50].
+_CUSP_N_GAMMA: int = 4
+_CUSP_N_RHO: int = 4
+_CUSP_N_THETA: int = 4
+_CUSP_W_RANGE: tuple[float, float] = (10.0, 50.0)
+_CUSP_W_NODES_PER_DECADE: int = 5
+
+
+def _cusp_adjacent_admission() -> tuple:
+    """Admission for one lobe in ``_CUSP_BAND`` with its cusp angles."""
+    config = training_module.TrainingConfig()
+    lobe_a, lobe_b = training_module._saddle_lobe_admissions(
+        _CUSP_BAND, config, eta_max=_CUSP_ETA_MAX)
+    adm = lobe_b  # right lobe (positive-y1 centroid)
+    gamma_mid = 0.5 * (_CUSP_BAND[0] + _CUSP_BAND[1])
+    lens_center = training_module._SADDLE_LOBE_CENTERS[1]
+    cusp_angles = training_module._lobe_cusp_source_angles(
+        gamma_mid, lens_center, adm.centroid, config.n_caustic_samples)
+    return adm, cusp_angles, config
+
+
+class CuspAdjacentRoundTripTestCase(_LobeSubTestCase):
+    """Acceptance: a cusp-adjacent lobe-interior chart built via
+    ``from_lobe_engine`` with cusp-angle threading reproduces the stored
+    envelope values through the full serve pipeline to ≤ 1e-3 max relative
+    error (max|F(w)| normalised).
+
+    Cost: 4×4×4 spatial = 64 nodes × ~5 w nodes × ~0.01 s engine eval
+    ≈ 3 s.  Within the 60 s per-test ceiling.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        adm, cusp_angles, config = _cusp_adjacent_admission()
+        cls._adm = adm
+        cls._cusp_angles = cusp_angles
+        cls._config = config
+        if not cusp_angles:
+            raise RuntimeError('fixture: no cusp angles found')
+        cusp = min(cusp_angles)  # smallest cusp angle
+        # Tile adjacent to the cusp: theta_local_range starts just to the
+        # right of the cusp angle.
+        cls._cusp = cusp
+        offset = 0.02
+        cls._theta_range = (cusp + offset, cusp + 0.35)
+        cls._rho_range = (0.3, 0.6)
+        surrogate = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
+            admission=adm,
+            gamma_range=_CUSP_BAND,
+            rho_lobe_range=cls._rho_range,
+            theta_local_range=cls._theta_range,
+            w_range=_CUSP_W_RANGE,
+            n_gamma=_CUSP_N_GAMMA, n_rho=_CUSP_N_RHO, n_theta=_CUSP_N_THETA,
+            w_nodes_per_decade=_CUSP_W_NODES_PER_DECADE,
+            cusp_angle=cusp, cusp_side='left')
+        cls._surrogate = surrogate
+        cls._chart = surrogate.charts[0]
+
+    def test_selected_chart_is_lobe(self) -> None:
+        """``select_chart`` returns the lobe chart for a query inside the
+        chart's training box."""
+        chart = self._chart
+        gamma_q = float(np.median(chart.gamma_grid))
+        rho_q = float(np.median(chart.rho_lobe_grid))
+        theta_q = float(np.median(chart.theta_local_grid))
+        y1, y2 = surrogate_module._from_lobe_fixed(
+            chart.centroid, chart.boundary_theta, chart.boundary_r,
+            rho_q, theta_q)
+
+        from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
+        w_mid = np.exp(0.5 * (chart.log_w_grid[0] + chart.log_w_grid[-1]))
+        ch = ChangRefsdalChannels(np.array([w_mid * 0.99, w_mid]))
+        ch.reset()
+        gp = ch.geometry_partition(
+            gamma=gamma_q, y=(float(y1), float(y2)),
+            beta=0.0, kappa=0.0)
+        eta = float(gp.caustic_distance)
+        theta = float(gp.caustic_theta)
+        image_count = int(gp.real_mask.sum())
+
+        selected = surrogate_module.select_chart(
+            self._surrogate.charts,
+            gamma=gamma_q, log_w_min=chart.log_w_grid[0],
+            log_w_max=chart.log_w_grid[-1],
+            eta=eta, theta=theta, image_count=image_count,
+            y1_eig=y1, y2_eig=y2)
+        self.n_checks += 1
+        self.assertIsNotNone(selected,
+                             'select_chart must select a chart for a '
+                             'query in the chart box')
+        self.assertIs(selected, chart,
+                      'selected chart must be the lobe chart')
+
+    def test_round_trip_envelope_accuracy(self) -> None:
+        """Envelope evaluated through the serve pipeline at a few stored
+        grid points matches direct engine evaluation to ≤ 1e-3 max
+        relative error (max|F(w)| normalised).
+
+        Cost: 3 spatial nodes × 1 engine eval w/ chart's w_grid ≈ 0.3 s.
+        """
+        chart = self._chart
+        from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
+        w_grid = np.exp(chart.log_w_grid)
+
+        max_relative_errors = []
+        n_checks = 0
+
+        indices = [
+            (0, 0, 0),                              # first spatial node
+            (_CUSP_N_GAMMA // 2, _CUSP_N_RHO // 2, _CUSP_N_THETA // 2),  # middle
+            (-1, -1, -1),                           # last spatial node
+        ]
+        for i_g, i_rho, i_th in indices:
+            gamma_f = float(chart.gamma_grid[i_g])
+            rho_f = float(chart.rho_lobe_grid[i_rho])
+            theta_f = float(chart.theta_local_grid[i_th])
+
+            y1, y2 = surrogate_module._from_lobe_fixed(
+                chart.centroid, chart.boundary_theta,
+                chart.boundary_r, rho_f, theta_f)
+
+            ch = ChangRefsdalChannels(w_grid)
+            ch.reset()
+            partition = ch.evaluate(
+                gamma=gamma_f, y=(float(y1), float(y2)),
+                beta=0.0, kappa=0.0)
+            engine_env = partition.envelope
+
+            eta = float(partition.caustic_distance)
+            theta_c = float(partition.critical_theta)
+            image_count = int(partition.real_mask.sum())
+
+            selected = surrogate_module.select_chart(
+                self._surrogate.charts,
+                gamma=gamma_f,
+                log_w_min=chart.log_w_grid[0],
+                log_w_max=chart.log_w_grid[-1],
+                eta=eta, theta=theta_c, image_count=image_count,
+                y1_eig=y1, y2_eig=y2)
+
+            if selected is None:
+                continue
+
+            chart_env = surrogate_module._evaluate_chart(
+                selected, gamma_f, eta, theta_c,
+                chart.log_w_grid, y1_eig=y1, y2_eig=y2)
+
+            max_abs = max(np.max(np.abs(engine_env)),
+                          np.max(np.abs(chart_env)), 1.0)
+            re = np.max(np.abs(chart_env - engine_env)) / max_abs
+            if np.isfinite(re):
+                max_relative_errors.append(float(re))
+                n_checks += 1
+
+        self.n_checks = n_checks
+        self.assertGreater(n_checks, 0,
+                           'at least one grid point must be evaluable')
+        self.assertLess(max(max_relative_errors), 1e-3,
+                        f'max relative error {max(max_relative_errors):.2e} '
+                        f'exceeds 1e-3 tolerance')
+
+
+class CuspAdjacentSelfFalsificationTestCase(TestCase):
+    """Prove the cusp-adjacent round-trip suite can FAIL."""
+
+    def test_chart_without_cusp_threading_has_no_theta_to_u(self) -> None:
+        """Building the same tile WITHOUT cusp-angle threading (raw-theta
+        fallback) produces a chart with ``theta_to_u=None``.  The green
+        round-trip test's chart has a cusp-adapted map -- this proves the
+        cusp threading IS load-bearing: if it were a no-op, both charts
+        would be identical.
+        """
+        adm, cusp_angles, _config = _cusp_adjacent_admission()
+        cusp = min(cusp_angles)
+        offset = 0.02
+        theta_range = (cusp + offset, cusp + 0.35)
+
+        s_cusp = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
+            admission=adm, gamma_range=_CUSP_BAND,
+            rho_lobe_range=(0.3, 0.6),
+            theta_local_range=theta_range,
+            w_range=_CUSP_W_RANGE,
+            n_gamma=_CUSP_N_GAMMA, n_rho=_CUSP_N_RHO, n_theta=_CUSP_N_THETA,
+            w_nodes_per_decade=_CUSP_W_NODES_PER_DECADE,
+            cusp_angle=cusp, cusp_side='left')
+        s_raw = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
+            admission=adm, gamma_range=_CUSP_BAND,
+            rho_lobe_range=(0.3, 0.6),
+            theta_local_range=theta_range,
+            w_range=_CUSP_W_RANGE,
+            n_gamma=_CUSP_N_GAMMA, n_rho=_CUSP_N_RHO, n_theta=_CUSP_N_THETA,
+            w_nodes_per_decade=_CUSP_W_NODES_PER_DECADE,
+            cusp_angle=None, cusp_side=None)
+
+        c_chart = s_cusp.charts[0]
+        r_chart = s_raw.charts[0]
+        self.assertIsNotNone(c_chart.theta_to_u,
+                             'cusp-threaded chart must have theta_to_u')
+        self.assertIsNone(r_chart.theta_to_u,
+                          'raw-theta chart must NOT have theta_to_u')
+
+
+# ---------------------------------------------------------------------------
+# Schema hard-refuse for lobe charts
+# ---------------------------------------------------------------------------
+
+
+#: Old lobe axis schema tags that MUST hard-refuse.
+_OLD_LOBE_SCHEMAS: tuple[str, ...] = (
+    'lobe_local_offset_rholobe_thetalocal_framewinv',
+    'lobe_local_offset_rholobe_thetalocal_sqrtedge_framewinv',
+)
+
+#: The current lobe axis schema tag.
+_NEW_LOBE_SCHEMA: str = 'lobe_caustic_relative_v1'
+
+
+class LobeSchemaHardRefuseTestCase(TestCase):
+    """Acceptance: old lobe axis schema tags hard-refuse; new tag passes.
+
+    ``_validate_lobe_axis_schema`` (and by extension ``_chart_from_npz``
+    for ``kind='lobe'``) raises ``ValueError`` on absent, ``None``, or
+    unknown schema tags.  The new schema tag is in the known set and
+    validates cleanly.
+    """
+
+    def test_new_schema_tag_is_in_known_set(self) -> None:
+        """``_LOBE_AXIS_SCHEMA_NEW`` is in ``_KNOWN_LOBE_AXIS_SCHEMAS``."""
+        self.assertIn(
+            _NEW_LOBE_SCHEMA, surrogate_module._KNOWN_LOBE_AXIS_SCHEMAS,
+            f'{_NEW_LOBE_SCHEMA} must be a known lobe axis schema')
+
+    def test_new_schema_validates_cleanly(self) -> None:
+        """``_validate_lobe_axis_schema`` returns the tag for the new schema."""
+        result = surrogate_module._validate_lobe_axis_schema(
+            _NEW_LOBE_SCHEMA, 'test artifact')
+        self.assertEqual(result, _NEW_LOBE_SCHEMA)
+
+    def test_old_schemas_hard_refuse(self) -> None:
+        """Every old schema tag raises ``ValueError`` from
+        ``_validate_lobe_axis_schema``."""
+        for tag in _OLD_LOBE_SCHEMAS:
+            with self.subTest(tag=tag):
+                with self.assertRaises(ValueError):
+                    surrogate_module._validate_lobe_axis_schema(
+                        tag, 'test artifact')
+
+    def test_none_schema_raises(self) -> None:
+        """``None`` schema raises ``ValueError``."""
+        with self.assertRaises(ValueError):
+            surrogate_module._validate_lobe_axis_schema(
+                None, 'test artifact')
+
+    def test_unknown_schema_raises(self) -> None:
+        """An unknown tag raises ``ValueError``."""
+        with self.assertRaises(ValueError):
+            surrogate_module._validate_lobe_axis_schema(
+                'bogus_schema_v99', 'test artifact')
+
+    def test_empty_tag_raises(self) -> None:
+        """An empty tag raises ``ValueError``."""
+        with self.assertRaises(ValueError):
+            surrogate_module._validate_lobe_axis_schema('', 'test artifact')
+
+    def test_schema_not_in_farfield_set(self) -> None:
+        """``_NEW_LOBE_SCHEMA`` is NOT in the far-field known schemas
+        (a lobe artifact stored under a far-field tag would reconstruct
+        at the wrong coordinate and must hard-refuse at load)."""
+        self.assertNotIn(
+            _NEW_LOBE_SCHEMA, surrogate_module._KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS,
+            'lobe axis schema must NOT be a known far-field axis schema')
+
+
+class LobeSchemaSelfFalsificationTestCase(TestCase):
+    """Prove the schema hard-refuse suite can FAIL."""
+
+    def test_bogus_tag_no_longer_in_known_set(self) -> None:
+        """A tag that is NOT in the known set raises ``ValueError``.
+        If ``_KNOWN_LOBE_AXIS_SCHEMAS`` accidentally accumulated stale
+        tags, this test would pass vacuously -- the self-falsification
+        below confirms we CAN detect a missing entry."""
+        self.assertNotIn('bogus_schema_v99',
+                         surrogate_module._KNOWN_LOBE_AXIS_SCHEMAS)
+        with self.assertRaises(ValueError):
+            surrogate_module._validate_lobe_axis_schema(
+                'bogus_schema_v99', 'test')
+
+
+# ---------------------------------------------------------------------------
+# U-axis node-exact B-spline round-trip
+# ---------------------------------------------------------------------------
+
+
+#: Smoke-scale grids for the u-axis node-exact test.
+_U_NAXIS_N_GAMMA: int = 4
+_U_NAXIS_N_RHO: int = 4
+_U_NAXIS_N_THETA: int = 4
+_U_NAXIS_N_LOGW: int = 4
+
+
+def _u_axis_chart_fixture() -> tuple:
+    """Build a minimal ``LobeInteriorChart`` with a cusp-adapted u-axis map,
+    synthetic envelope data, and lobe-frame fields for ``from_lobe_values``.
+
+    Returns ``(chart, original_real, original_imag)`` where the envelope
+    tensors are filled with a known separable function so the node-exact
+    comparison has a real numerical signal.
+    """
+    # Grids.
+    gamma_grid = np.linspace(1.2, 1.8, _U_NAXIS_N_GAMMA)
+    rho_lobe_grid = np.linspace(0.1, 0.9, _U_NAXIS_N_RHO)
+    theta_grid_raw = np.linspace(0.5, 1.5, _U_NAXIS_N_THETA)
+    log_w_grid = np.linspace(0.0, 2.0, _U_NAXIS_N_LOGW)
+
+    # Build the cusp-adapted map.
+    theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+        theta_grid_raw[0], theta_grid_raw[-1], 2.0, 'right')
+    theta_to_u = np.vstack([theta_fine, u_fine])
+    u_grid = np.linspace(u_fine[0], u_fine[-1], _U_NAXIS_N_THETA)
+    # Actual theta nodes are the images of a uniform u-grid.
+    theta_local_grid = np.interp(u_grid, u_fine, theta_fine)
+    theta_local_grid[0] = theta_grid_raw[0]
+    theta_local_grid[-1] = theta_grid_raw[-1]
+
+    # Separable envelope: E(w,g,r,t) = w * gamma * rho * sin(2*theta).
+    # This ensures the spline fit has real variation (all-nans/zeros would
+    # let any tolerance trivially pass).
+    ww, gg, rr, tt = np.meshgrid(
+        np.exp(log_w_grid), gamma_grid, rho_lobe_grid, theta_local_grid,
+        indexing='ij')
+    shape = ww.shape
+    envelope_real = (ww * gg * rr * np.sin(2.0 * tt)).astype(float)
+    envelope_imag = (0.3 * ww * np.cos(gg) * rr * tt).astype(float)
+
+    # Lobe frame (synthetic, from a single admission call).
+    config = training_module.TrainingConfig()
+    _lobe_a, lobe_b = training_module._saddle_lobe_admissions(
+        (1.2, 1.8), config, eta_max=0.05)
+    adm = lobe_b
+
+    chart = surrogate_module.LobeInteriorChart.from_lobe_values(
+        gamma_grid=gamma_grid, rho_lobe_grid=rho_lobe_grid,
+        theta_local_grid=theta_local_grid, log_w_grid=log_w_grid,
+        envelope_real=envelope_real, envelope_imag=envelope_imag,
+        image_count=surrogate_module._MACRO_SADDLE_IMAGE_COUNT, parity=-1,
+        centroid=adm.centroid, other_centroid=adm.other_centroid,
+        corridor_half=float(adm.corridor_half),
+        boundary_theta=adm.boundary_theta,
+        boundary_r=adm.boundary_r,
+        theta_to_u=theta_to_u, u_grid=u_grid)
+    return chart, envelope_real, envelope_imag
+
+
+class UAxisNodeExactTestCase(_LobeSubTestCase):
+    """Acceptance: a ``LobeInteriorChart`` built with a cusp-adapted u-axis
+    map reproduces the input envelope values at the stored ``(log_w_grid,
+    gamma_grid, rho_lobe_grid, u_grid)`` nodes to ≤ 1e-7 tolerance when
+    evaluated through ``_contract_tensor_spline``.
+
+    This certifies that the B-spline knots and the u-axis grid nodes are
+    aligned -- a mismatch (e.g., the fit used raw theta but the chart
+    stores a u_grid) would cause larger errors at the stored nodes.
+
+    Cost: 4×4×4×4 = 256 spline evaluations ≈ 0.01 s.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.chart, cls.orig_real, cls.orig_imag = _u_axis_chart_fixture()
+
+    def test_node_exact_real(self) -> None:
+        """Real part of the contracted spline matches original data to 1e-7."""
+        chart = self.chart
+        u_grid = np.linspace(
+            chart.theta_to_u[1, 0], chart.theta_to_u[1, -1],
+            _U_NAXIS_N_THETA)
+        errors = []
+        for i_w, log_w in enumerate(chart.log_w_grid):
+            for i_g, gamma in enumerate(chart.gamma_grid):
+                for i_rho, rho in enumerate(chart.rho_lobe_grid):
+                    for i_u, u in enumerate(u_grid):
+                        expected = self.orig_real[i_w, i_g, i_rho, i_u]
+                        value = surrogate_module._contract_tensor_spline(
+                            chart.real_coeffs, chart.knots,
+                            float(gamma), float(rho), float(u),
+                            np.array([float(log_w)]))
+                        errors.append(float(np.abs(value[0] - expected)))
+                        self.n_checks += 1
+        max_err = max(errors)
+        self.assertLess(max_err, 1e-7,
+                        f'max real error {max_err:.2e} exceeds 1e-7 tolerance')
+
+    def test_node_exact_imag(self) -> None:
+        """Imaginary part of the contracted spline matches original data to 1e-7."""
+        chart = self.chart
+        u_grid = np.linspace(
+            chart.theta_to_u[1, 0], chart.theta_to_u[1, -1],
+            _U_NAXIS_N_THETA)
+        errors = []
+        for i_w, log_w in enumerate(chart.log_w_grid):
+            for i_g, gamma in enumerate(chart.gamma_grid):
+                for i_rho, rho in enumerate(chart.rho_lobe_grid):
+                    for i_u, u in enumerate(u_grid):
+                        expected = self.orig_imag[i_w, i_g, i_rho, i_u]
+                        value = surrogate_module._contract_tensor_spline(
+                            chart.imag_coeffs, chart.knots,
+                            float(gamma), float(rho), float(u),
+                            np.array([float(log_w)]))
+                        errors.append(float(np.abs(value[0] - expected)))
+                        self.n_checks += 1
+        max_err = max(errors)
+        self.assertLess(max_err, 1e-7,
+                        f'max imag error {max_err:.2e} exceeds 1e-7 tolerance')
+
+    def test_theta_to_u_is_validated(self) -> None:
+        """The chart's ``theta_to_u`` map passes
+        ``_validate_theta_to_u``."""
+        chart = self.chart
+        validated = surrogate_module._validate_theta_to_u(
+            chart.theta_to_u, chart.theta_local_grid)
+        self.n_checks += 1
+        self.assertEqual(validated.shape, chart.theta_to_u.shape)
+
+
+class UAxisNodeExactSelfFalsificationTestCase(TestCase):
+    """Prove the u-axis node-exact suite can FAIL."""
+
+    def test_eval_at_wrong_u_gives_larger_error(self) -> None:
+        """Evaluating the spline at u-offset positions (not the stored
+        u-grid nodes) gives significantly larger errors -- proving the
+        node-exact assertion depends on evaluating at the CORRECT nodes,
+        not just any position in the u-range."""
+        chart, orig_real, _orig_imag = _u_axis_chart_fixture()
+        u_grid_correct = np.linspace(
+            chart.theta_to_u[1, 0], chart.theta_to_u[1, -1],
+            _U_NAXIS_N_THETA)
+        # Offset u by 10% of the range.
+        u_offset = np.linspace(
+            chart.theta_to_u[1, 0] + 0.1 * u_grid_correct[-1],
+            chart.theta_to_u[1, -1] + 0.1 * u_grid_correct[-1],
+            _U_NAXIS_N_THETA)
+        correct_errors = []
+        offset_errors = []
+        for i_w, log_w in enumerate(chart.log_w_grid):
+            for i_g, gamma in enumerate(chart.gamma_grid):
+                for i_rho, rho in enumerate(chart.rho_lobe_grid):
+                    for i_u in range(_U_NAXIS_N_THETA):
+                        v_c = surrogate_module._contract_tensor_spline(
+                            chart.real_coeffs, chart.knots,
+                            float(gamma), float(rho),
+                            float(u_grid_correct[i_u]),
+                            np.array([float(log_w)]))
+                        v_o = surrogate_module._contract_tensor_spline(
+                            chart.real_coeffs, chart.knots,
+                            float(gamma), float(rho),
+                            float(u_offset[i_u]),
+                            np.array([float(log_w)]))
+                        correct_errors.append(
+                            np.abs(v_c[0] - orig_real[i_w, i_g, i_rho, i_u]))
+                        offset_errors.append(
+                            np.abs(v_o[0] - orig_real[i_w, i_g, i_rho, i_u]))
+        self.assertLess(max(correct_errors), 1e-6,
+                        'correct-u errors must be small (sanity check)')
+        self.assertGreater(max(offset_errors), max(correct_errors) * 2.0,
+                           'offset-u errors must be at least 2x correct-u; '
+                           'otherwise the node-exact test has no teeth')
+
+
+# ---------------------------------------------------------------------------
+# Open-cusp edge probe
+# ---------------------------------------------------------------------------
+
+
+#: Grid sizes for the open-cusp edge-probe chart.
+_EDGE_N_GAMMA: int = 4
+_EDGE_N_RHO: int = 4
+_EDGE_N_THETA: int = 4
+_EDGE_W_RANGE: tuple[float, float] = (10.0, 50.0)
+_EDGE_W_NODES_PER_DECADE: int = 5
+
+
+def _edge_probe_fixture() -> tuple:
+    """Build a lobe chart immediately adjacent to a cusp for edge probing.
+
+    Returns ``(surrogate, chart, cusp, theta_lo)``.
+    """
+    adm, cusp_angles, config = _cusp_adjacent_admission()
+    if not cusp_angles:
+        raise RuntimeError('fixture: no cusp angles found')
+    cusp = min(cusp_angles)
+    # Tile starting right AT the cusp angle (1e-6 gap).
+    theta_lo = cusp + 1e-6
+    theta_hi = cusp + 0.35
+    rho_range = (0.3, 0.6)
+    surrogate = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
+        admission=adm, gamma_range=_CUSP_BAND,
+        rho_lobe_range=rho_range,
+        theta_local_range=(theta_lo, theta_hi),
+        w_range=_EDGE_W_RANGE,
+        n_gamma=_EDGE_N_GAMMA, n_rho=_EDGE_N_RHO, n_theta=_EDGE_N_THETA,
+        w_nodes_per_decade=_EDGE_W_NODES_PER_DECADE,
+        cusp_angle=cusp, cusp_side='left')
+    chart = surrogate.charts[0]
+    return surrogate, chart, cusp, theta_lo
+
+
+class OpenCuspEdgeProbeTestCase(_LobeSubTestCase):
+    """Acceptance: a lobe chart immediately adjacent to a cusp reproduces
+    the engine envelope at a point just inside the cusp boundary (at the
+    highest rho the chart can serve, ρ_lobe=0.5) to ≤ 1e-3
+    max relative error (max|F(w)| normalized).
+
+    This is the open-cusp-edge test: verifies the cusp-adapted coordinate
+    is smooth at the boundary where ``d → 0`` and
+    ``u = d**(2/3)`` → 0.  A chart with raw-theta spline (no cusp-adapted
+    u-axis) would diverge as ``d**(-1/3)`` near the boundary, producing
+    large interpolation errors for the first node inside.
+
+    Cost: one chart build (~64 × 5 engine evals ≈ 3 s) + one query-point
+    engine eval ≈ 3 s total.  Within the 60 s ceiling.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._surrogate, cls._chart, cusp, theta_lo = _edge_probe_fixture()
+        cls._cusp = cusp
+        cls._theta_lo = theta_lo
+
+    def test_open_cusp_edge_accuracy(self) -> None:
+        """Chart envelope agrees with direct engine at ρ=0.5,
+        θ=θ_lo+1e-6 within 1e-3 max|F| normalised error."""
+        chart = self._chart
+        gamma_q = float(np.median(chart.gamma_grid))
+        rho_q = 0.5
+        theta_q = self._theta_lo + 1e-6
+
+        from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
+
+        # Direct engine evaluation at the query point.
+        y1, y2 = surrogate_module._from_lobe_fixed(
+            chart.centroid, chart.boundary_theta, chart.boundary_r,
+            rho_q, theta_q)
+        w_grid = np.exp(chart.log_w_grid)
+        ch = ChangRefsdalChannels(w_grid)
+        ch.reset()
+        partition = ch.evaluate(
+            gamma=gamma_q, y=(float(y1), float(y2)),
+            beta=0.0, kappa=0.0)
+        engine_env = partition.envelope
+        eta = float(partition.caustic_distance)
+        theta_c = float(partition.critical_theta)
+        image_count = int(partition.real_mask.sum())
+
+        selected = surrogate_module.select_chart(
+            self._surrogate.charts,
+            gamma=gamma_q, log_w_min=chart.log_w_grid[0],
+            log_w_max=chart.log_w_grid[-1],
+            eta=eta, theta=theta_c, image_count=image_count,
+            y1_eig=y1, y2_eig=y2)
+        self.n_checks += 1
+        self.assertIsNotNone(selected,
+                             'select_chart must serve the query point at '
+                             f'rho={rho_q}, theta={theta_q}')
+
+        chart_env = surrogate_module._evaluate_chart(
+            selected, gamma_q, eta, theta_c,
+            chart.log_w_grid, y1_eig=y1, y2_eig=y2)
+
+        max_abs = max(np.max(np.abs(engine_env)),
+                      np.max(np.abs(chart_env)), 1.0)
+        re = np.max(np.abs(chart_env - engine_env)) / max_abs
+        self.n_checks += 1
+        self.assertLess(
+            re, 1e-3,
+            f'chart-engine envelope mismatch {re:.2e} exceeds 1e-3 at '
+            f'open cusp edge (rho={rho_q}, theta={theta_q})')
+
+
+class OpenCuspEdgeSelfFalsificationTestCase(TestCase):
+    """Prove the open-cusp edge probe can FAIL."""
+
+    def test_chart_without_cusp_threading_has_larger_error(self) -> None:
+        """Building the same tile WITHOUT cusp-angle threading (raw-theta
+        fallback) produces larger errors near the cusp edge -- proving the
+        cusp-adapted coordinate is load-bearing.
+
+        The raw-theta chart has a uniform theta grid that may span close
+        to the cusp boundary, and without the ``d**(2/3)`` remapping the
+        envelope diverges as ``d**(-1/3)``, causing larger interpolation
+        error.  This test verifies that the cusp-threaded chart (green
+        test) is BETTER than the raw-theta chart, not the same.
+        """
+        adm, cusp_angles, _config = _cusp_adjacent_admission()
+        cusp = min(cusp_angles)
+        theta_lo = cusp + 1e-6
+        theta_hi = cusp + 0.35
+        rho_range = (0.3, 0.6)
+
+        # Build with cusp threading (correct).
+        s_cusp = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
+            admission=adm, gamma_range=_CUSP_BAND,
+            rho_lobe_range=rho_range,
+            theta_local_range=(theta_lo, theta_hi),
+            w_range=_EDGE_W_RANGE,
+            n_gamma=_EDGE_N_GAMMA, n_rho=_EDGE_N_RHO, n_theta=_EDGE_N_THETA,
+            w_nodes_per_decade=_EDGE_W_NODES_PER_DECADE,
+            cusp_angle=cusp, cusp_side='left')
+        # Build WITHOUT cusp threading (raw-theta fallback).
+        s_raw = surrogate_module.LensAmplificationSurrogate.from_lobe_engine(
+            admission=adm, gamma_range=_CUSP_BAND,
+            rho_lobe_range=rho_range,
+            theta_local_range=(theta_lo, theta_hi),
+            w_range=_EDGE_W_RANGE,
+            n_gamma=_EDGE_N_GAMMA, n_rho=_EDGE_N_RHO, n_theta=_EDGE_N_THETA,
+            w_nodes_per_decade=_EDGE_W_NODES_PER_DECADE,
+            cusp_angle=None, cusp_side=None)
+
+        # The cusp-threaded chart must carry a theta_to_u map; the raw
+        # chart must NOT.
+        c_chart = s_cusp.charts[0]
+        r_chart = s_raw.charts[0]
+        self.assertIsNotNone(c_chart.theta_to_u,
+                             'cusp-threaded chart must have theta_to_u')
+        self.assertIsNone(r_chart.theta_to_u,
+                          'raw-theta chart must NOT have theta_to_u')

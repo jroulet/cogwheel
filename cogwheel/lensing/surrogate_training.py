@@ -63,7 +63,7 @@ from cogwheel.lensing.surrogate import (
     _caustic_reach as _scalar_caustic_reach, _from_caustic_fixed,
     _from_lobe_fixed, _lobe_boundary_radius, LobeInteriorChart,
     InteriorWedgeChart, _from_wedge_fixed,
-    _wedge_theta_waist, _wedge_cusp_axis_map,
+    _wedge_theta_waist, _wedge_cusp_axis_map, _lobe_cusp_axis_map,
     CarrierDiscontinuityError)
 
 #: Engine refusals treated conservatively as "do not serve here" during
@@ -123,12 +123,6 @@ _SADDLE_CUSP_MIN_HALFWIDTH = 0.08
 #: charting.
 _CUSP_EXCLUSION_DISTANCE = 0.2
 #: Deltoid-lobe interior near-cusp carve-out distance (source-plane ``y``-units).
-#: Sized downward from ``_CUSP_EXCLUSION_DISTANCE`` (0.2) because deltoid lobes
-#: have smaller extent than the full astroid.  Redundant in the current code
-#: because `_SaddleLobeAdmission.admits` already refuses tiles within
-#: ``eta_max`` (typically >0.1) of any caustic-cloud point, and the cusp
-#: vertices are in that cloud -- a separate carve-out is not needed.
-_LOBE_CUSP_EXCLUSION_DISTANCE = 0.1
 #: Fractional shrink of each fold arc away from its bounding walls.
 _ARC_MARGIN_FRAC = 0.03
 #: Number of theta samples used to integrate the tube's arc-length axis map
@@ -2295,8 +2289,9 @@ class _SaddleLobeAdmission:
                     return False
             # Cusp vertices are in the caustic cloud, so the
             # nearest-distance test already excludes tiles too close to a
-            # deltoid cusp -- no separate carve-out at
-            # ``_LOBE_CUSP_EXCLUSION_DISTANCE`` is needed (Professor ruling).
+            # deltoid cusp -- the ``_LOBE_CUSP_EXCLUSION_DISTANCE`` carve-out
+            # is retired (the cusp-adapted coordinate now handles near-cusp
+            # tiles).
             nearest = float(np.hypot(
                 self.caustic_cloud[:, 0] - probe[0],
                 self.caustic_cloud[:, 1] - probe[1]).min())
@@ -2779,7 +2774,9 @@ def _build_lobe_chart(*, gamma_band: tuple[float, float], parity: int,
                       box_center: tuple[float, float],
                       half: tuple[float, float],
                       w_range: tuple[float, float], config: TrainingConfig,
-                      w_nodes_per_decade: int | None = None
+                      w_nodes_per_decade: int | None = None,
+                      cusp_angle: float | None = None,
+                      cusp_side: str | None = None
                       ) -> tuple['LobeInteriorChart', int, int]:
     """Build one macro-saddle lobe-interior chart in lobe-local coordinates.
 
@@ -2804,7 +2801,11 @@ def _build_lobe_chart(*, gamma_band: tuple[float, float], parity: int,
     Only macro-saddle (``parity != 1``) bands have lobe interiors; a
     positive-parity call is a programming error.  ``w_nodes_per_decade``
     overrides the ``w``-axis node density for THIS chart only; ``None`` falls
-    back to ``config.w_nodes_per_decade``.
+    back to ``config.w_nodes_per_decade``.  ``cusp_angle`` and ``cusp_side``
+    activate the cusp-adapted ``u = d**(2/3)`` angular spline-axis map when a
+    tile records lobe cusp angles (`_lobe_nearest_cusp`); when both are
+    ``None`` (tiles with empty ``lobe_cusps``) the raw-theta uniform-grid
+    fallback in `from_lobe_engine` is used instead.
 
     Returns
     -------
@@ -2837,7 +2838,8 @@ def _build_lobe_chart(*, gamma_band: tuple[float, float], parity: int,
         admission=lobe, gamma_range=gamma_band,
         rho_lobe_range=rho_lobe_range, theta_local_range=theta_local_range,
         w_range=w_range, n_gamma=config.n_gamma, n_rho=config.n_rho,
-        n_theta=config.n_theta_c, w_nodes_per_decade=nodes_per_decade)
+        n_theta=config.n_theta_c, w_nodes_per_decade=nodes_per_decade,
+        cusp_angle=cusp_angle, cusp_side=cusp_side)
     chart = single.charts[0]
     refused = int(chart.refused_points.shape[0])
     return chart, n_points, refused
@@ -3728,32 +3730,83 @@ def _wedge_child_boxes(
                           (float(child_half_r), float(child_half_theta))))
     return boxes, theta_split, child_half_r
 
+
+
+def _lobe_nearest_cusp(
+        tile: dict) -> tuple[float | None, str | None]:
+    """Return ``(cusp_angle, side)`` for the nearest deltoid lobe cusp.
+
+    The nearest cusp is the entry in ``tile['lobe_cusps']`` minimising
+    ``|a - theta_local_c|``.  ``side`` is ``'left'`` when the cusp is left
+    of the tile centre and ``'right'`` otherwise; when the sole cusp angle
+    equals the tile centre exactly (tie) or ``lobe_cusps`` is empty, returns
+    ``(None, None)``.  This is the SINGLE authoritative derivation —
+    `_lobe_child_boxes` and the ``build_lobe`` / ``build_child`` closures all
+    call it so the nearest-cusp identity is never re-derived.
+    """
+    theta_local_c = float(tile['center'][1])
+    lobe_cusps = tile.get('lobe_cusps', [])
+    if not lobe_cusps:
+        return None, None
+    nearest_cusp = min(lobe_cusps, key=lambda a: abs(a - theta_local_c))
+    if nearest_cusp < theta_local_c:
+        side = 'left'
+    elif nearest_cusp > theta_local_c:
+        side = 'right'
+    else:
+        return None, None
+    return float(nearest_cusp), side
+
 def _lobe_child_boxes(
         tile: dict) -> tuple[list[tuple[tuple[float, float],
                                         tuple[float, float]]], float, float]:
-    """Compute the up-to-four lobe child boxes and the shared child half.
+    """Compute the up-to-four lobe child boxes, the u-midpoint theta split,
+    and the shared radial child half.
 
-    Halves the lobe-local ``(rho_lobe, theta_local)`` box: four children at
-    ``(rho_lobe_c +- half_rho/2, theta_local_c +- half_theta/2)`` in a fixed
-    row-major order (``s_rho`` outer, ``s_theta`` inner), each carrying the
-    SAME half ``(half_rho/2, half_theta/2)`` (a quarter box).
+    Radial split at the plain ``rho_lobe`` midpoint; angular split at the
+    ``u``-MIDPOINT mapped back to ``theta_local`` on the nearest lobe cusp's
+    adapted map (`_lobe_cusp_axis_map`, the macro-saddle counterpart of
+    `_wedge_cusp_axis_map`) -- NEVER the ``theta`` midpoint when a cusp ray is
+    available.  Four children in a fixed row-major order (radial sub-row outer,
+    angular sub-column inner); the two angular children have UNEQUAL ``theta``
+    widths (the near-cusp child is narrower) and share the radial half.  Falls
+    back to plain midpoint splitting when no lobe cusp angles are recorded.
 
-    Returns ``(boxes, child_half_rho, child_half_theta)`` where ``boxes`` is a
-    list of ``(center, half)`` tuples.  Single-sourced so the wrapper's return
-    dict (``child_half``) and the generic subdivider's splitter agree exactly.
+    Returns ``(boxes, theta_split, child_half_rho)`` where ``boxes`` is a list
+    of ``(center, half)`` tuples.  Single-sourced so the wrapper's return dict
+    (``theta_split``, ``child_half_rho``) and the generic subdivider's splitter
+    agree exactly.
     """
-    rho_c, theta_c = tile['center']
+    rho_c, theta_local_c = tile['center']
     half_rho, half_theta = tile['half']
+
+    theta_lo = float(theta_local_c) - float(half_theta)
+    theta_hi = float(theta_local_c) + float(half_theta)
+    rho_lo = float(rho_c) - float(half_rho)
+    rho_hi = float(rho_c) + float(half_rho)
     child_half_rho = 0.5 * float(half_rho)
-    child_half_theta = 0.5 * float(half_theta)
+
+    nearest_cusp, side = _lobe_nearest_cusp(tile)
+    if side is not None:
+        theta_fine, u_fine = _lobe_cusp_axis_map(
+            theta_lo, theta_hi, nearest_cusp, side)
+        u_mid = 0.5 * (float(u_fine[0]) + float(u_fine[-1]))
+        theta_split = float(np.interp(u_mid, u_fine, theta_fine))
+    else:
+        theta_split = 0.5 * (theta_lo + theta_hi)
+
+    rho_children = ((rho_lo, 0.5 * (rho_lo + rho_hi)),
+                    (0.5 * (rho_lo + rho_hi), rho_hi))
+    theta_children = ((theta_lo, theta_split), (theta_split, theta_hi))
     boxes: list[tuple[tuple[float, float], tuple[float, float]]] = []
-    for s_rho in (-1.0, 1.0):
-        for s_theta in (-1.0, 1.0):
-            child_rho = float(rho_c) + s_rho * child_half_rho
-            child_theta = float(theta_c) + s_theta * child_half_theta
-            boxes.append(((child_rho, child_theta),
-                          (child_half_rho, child_half_theta)))
-    return boxes, child_half_rho, child_half_theta
+    for child_rho_lo, child_rho_hi in rho_children:
+        for child_theta_lo, child_theta_hi in theta_children:
+            child_rho_c = 0.5 * (child_rho_lo + child_rho_hi)
+            child_theta_c = 0.5 * (child_theta_lo + child_theta_hi)
+            child_half_theta = 0.5 * (child_theta_hi - child_theta_lo)
+            boxes.append(((float(child_rho_c), float(child_theta_c)),
+                          (float(child_half_rho), float(child_half_theta))))
+    return boxes, theta_split, child_half_rho
 
 
 def _subdivide_tile(
@@ -3923,6 +3976,7 @@ def _subdivide_tile(
                 'center': tuple(center), 'half': tuple(half),
                 'axis_origin': tile.get('axis_origin'),
                 'lobe': tile.get('lobe'),
+                'lobe_cusps': tile.get('lobe_cusps'),
                 'w_range': tile['w_range'], 'region': region,
                 'si': tile['si'], 'm_lo': tile['m_lo'], 'm_hi': tile['m_hi'],
                 'w_nodes_per_decade': tile.get('w_nodes_per_decade')}
@@ -4201,12 +4255,14 @@ def _subdivide_lobe_tile(
     The macro-saddle lobe-interior counterpart of `_subdivide_wedge_tile`, in
     the lobe-chart's own lobe-local ``(rho_lobe, theta_local)`` coordinates.
     The radial split is at the plain ``rho_lobe`` midpoint and the angular
-    split at the ``theta_local`` midpoint (simple midpoint halving, same as
-    far-field).  Each child inherits the parent's ``lobe`` admission object
-    verbatim, is re-admitted through ``_SaddleLobeAdmission.admits`` (the
-    single authoritative admission predicate), retrained via
-    `_build_lobe_chart`, and re-gated on ``config.interior_eps_max`` via
-    `_gate_chart('interior', ...)`.
+    split at the ``u``-midpoint mapped back to ``theta_local`` on the nearest
+    lobe cusp's adapted map (`_lobe_cusp_axis_map`, the macro-saddle
+    counterpart of `_wedge_cusp_axis_map`).  Falls back to plain midpoint
+    halving when no lobe cusp angles are recorded.  Each child inherits the
+    parent's ``lobe`` admission object verbatim, is re-admitted through
+    ``_SaddleLobeAdmission.admits`` (the single authoritative admission
+    predicate), retrained via `_build_lobe_chart`, and re-gated on
+    ``config.interior_eps_max`` via `_gate_chart('interior', ...)`.
 
     The bounded recursion lives in `_subdivide_tile`: a still-gated child is
     itself halved until it clears or the chain reaches
@@ -4219,10 +4275,10 @@ def _subdivide_lobe_tile(
     Returns
     -------
     dict
-        ``{'parent_tag', 'region', 'child_half', 'packed', 'children',
-        'max_achieved_depth'}``.
+        ``{'parent_tag', 'region', 'theta_split', 'child_half_rho', 'packed',
+        'children', 'max_achieved_depth'}``.
     """
-    _, child_half_rho, child_half_theta = _lobe_child_boxes(tile)
+    _, theta_split, child_half_rho = _lobe_child_boxes(tile)
     region = tile['region']
     parent_lobe = tile['lobe']
 
@@ -4230,10 +4286,6 @@ def _subdivide_lobe_tile(
         return _lobe_child_boxes(subtile)[0]
 
     def admit_child(center: tuple, half: tuple) -> bool:
-        # Re-admit through the parent's lobe admission predicate: an admitted
-        # child must lie inside the lobe for every band gamma, be clear of
-        # the eta_max tube shell, and be strictly nearer this centroid than
-        # the other lobe's by the corridor half-width.
         return parent_lobe.admits(center, half)
 
     def build_child(center: tuple, half: tuple, subtile: dict) -> tuple:
@@ -4246,10 +4298,12 @@ def _subdivide_lobe_tile(
         else:
             eff_w_nodes = config.w_nodes_per_decade
         child_lobe = subtile.get('lobe', parent_lobe)
+        child_cusp_angle, child_cusp_side = _lobe_nearest_cusp(subtile)
         chart, calls, refused = _build_lobe_chart(
             gamma_band=band, parity=parity, lobe=child_lobe,
             box_center=center, half=half, w_range=subtile['w_range'],
-            config=config, w_nodes_per_decade=eff_w_nodes)
+            config=config, w_nodes_per_decade=eff_w_nodes,
+            cusp_angle=child_cusp_angle, cusp_side=child_cusp_side)
         samples = _lobe_heldout_samples(
             band, center, half, config, rng, lobe=child_lobe)
         eps = _heldout_eps(chart, samples, {'schema': 'heldout-probe'})
@@ -4276,8 +4330,8 @@ def _subdivide_lobe_tile(
         eps_bar=config.interior_eps_max, admit_child=admit_child)
 
     return {'parent_tag': parent_tag, 'region': region,
-            'child_half': [round(child_half_rho, 6),
-                           round(child_half_theta, 6)],
+            'theta_split': round(float(theta_split), 6),
+            'child_half_rho': round(float(child_half_rho), 6),
             'packed': summary['packed'],
             'children': summary['children'],
             'max_achieved_depth': summary['max_achieved_depth']}
@@ -4681,7 +4735,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                         'center': center, 'half': half,
                         'm_lo': m_lo_region, 'm_hi': m_hi_region,
                         'w_range': _capped_w_range(box, parity, y_max_tile),
-                        'region': 'lobe_interior', 'lobe': lobe})
+                        'region': 'lobe_interior', 'lobe': lobe,
+                        'lobe_cusps': lobe_cusps})
                 lobe_records.append({
                     'lens_center': round(float(lens_center), 6),
                     'centroid': [round(float(lobe.centroid[0]), 6),
@@ -4847,6 +4902,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         # single-sourced from the waist-split tiler, threaded unchanged into
         # `_build_wedge_chart` -> `from_wedge_engine`.
         axis_origin = tile.get('axis_origin')
+        # Nearest lobe cusp angle + side for the cusp-adapted ``u = d**(2/3)``
+        # angular map (None/None for non-lobe or lobe tiles with no recorded
+        # cusp angles); single-sourced from `_lobe_nearest_cusp`, threaded
+        # unchanged into `_build_lobe_chart` -> `from_lobe_engine`.
+        cusp_angle, cusp_side = _lobe_nearest_cusp(tile)
         # Exterior tiles carry a per-window reprovisioned ``w``-node density
         # (Build S1-3, ``N_rec``); interior tiles have no such key and fall
         # back to ``config.interior_w_nodes_per_decade`` (higher density for
@@ -4884,11 +4944,13 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             def build_lobe(band=band, center=center, half=half,
                            w_range=w_range, si=si, m_lo=m_lo, m_hi=m_hi,
                            region=region, lobe=lobe, eff_w_nodes=eff_w_nodes,
+                           cusp_angle=cusp_angle, cusp_side=cusp_side,
                            w_nodes=eff_w_nodes):
                 chart, calls, refused = _build_lobe_chart(
                     gamma_band=band, parity=parity, lobe=lobe,
                     box_center=center, half=half, w_range=w_range,
-                    config=config, w_nodes_per_decade=w_nodes)
+                    config=config, w_nodes_per_decade=w_nodes,
+                    cusp_angle=cusp_angle, cusp_side=cusp_side)
                 samples = _lobe_heldout_samples(
                     band, center, half, config, rng, lobe=lobe)
                 eps = _heldout_eps(chart, samples,
