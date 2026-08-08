@@ -167,7 +167,9 @@
   time is no longer proportionate — the next librarian session that sees
   this exact warning should escalate to the contract owner directly
   (e.g. via a dedicated TODO fragment) rather than adding a fifth
-  passive mention to this memory.
+  passive mention to this memory. STATUS 2026-08-08: the escalation fragment
+  `todo.d/surrogate_contract_test_consumer_warning.md` now EXISTS (still
+  open) — do NOT create a duplicate; re-verify it is open and move on.
 - SPEC STATUS SENTENCE STALE SILENTLY — RENAME-PRESERVED VARIANT (polar
   re-chart, 337ac15): a doc sync that RENAMES a symbol (FarFieldChart →
   ExteriorPolarChart) can preserve the stale sentence BESIDE the new name

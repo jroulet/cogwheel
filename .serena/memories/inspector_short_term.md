@@ -1,17 +1,18 @@
-Build: exterior_followup WP4 ppGO above-ceiling (brief_exterior_followup_four_items, 2026-08-08)
-Working tree: cogwheel/lensing/likelihood.py (+87 lines), test_lensing_ppgo_above_ceiling.py (new, untracked, 15/15 PASS)
+Build: saddle_forensics re-review (brief_saddle_forensics, 2026-08-08, pass 2)
+Working tree: cogwheel/lensing/surrogate_training.py (+150/-15), test_lensing_lobe_subdivision.py (new, 19/19 PASS)
 
-Verified:
-- Production: _ppgo_above_ceiling gate order correct (w_max>150, >=2 real, min_dt>0, w_lo*min_dt>=RHO_END)
-- Reconstruction pattern matches existing fold-ppGO interior in _surrogate_coefficients: fold_ppgo_correction → f_minrel → ppgo_sum subtraction → envelope → reconstruct_farfield(FARFIELD_KERNEL_SUM)
-- Phase convention: fold_ppgo_correction returns absolute-frame F, demodulates by exp(-1j*w*t_min), envelope re-modulates by exp(+1j*w*t_min), reconstruct_farfield de-tilts by exp(-1j*_frame_phase(w,t_min)) — round-trip correct
-- NaN guard: np.where(isfinite, f_total, 0.0) — belt-and-braces, more conservative than existing fold-ppGO interior (no NaN guard)
-- Lazy import of fold_ppgo_correction from _airy_fold — correct pattern (circular import avoidance)
-- Intercept placement in _amplification_coefficients: after surrogate + lens/dense_w, before engine seed eval — correct
-- Import of W_CEILING_SCHWINGER_QD (150.0) and RHO_END (4.0) correct
-- Tests: 15/15 pass, 7 test classes, comprehensive coverage (boundary continuity, error decay, gate borders, self-falsification, fallthrough, no-surrogate, telescoping identity)
-- Pre-existing test failure: test_fop_refuses_uncertifiable_contractions (confirmed by stash+run — NOT caused by this change)
-- No regressions: test_lensing_likelihood.py (17P/12S/1X), test_lensing_surrogate.py (66P)
-- All callers of _amplification_coefficients forward-compatible (return shape unchanged)
+Previously open findings re-checked:
+- INS-1-001 RESOLVED: _subdivide_lobe_tile build_child computes eff_w_nodes with 3-way resolve (tile override -> interior_w_nodes_per_decade -> w_nodes_per_decade), passes to _build_lobe_chart. Matches wedge subdivider pattern.
+- INS-1-002 RESOLVED: Stale comment at line ~4918 replaced. Now reads "The tile straddles a critical-basin flip; subdivision cannot fix phase discontinuities, so the tile is recorded as a ladder-served gap."
 
-No bugs or design issues found. Verdict: PASS.
+Test results:
+- test_lensing_lobe_subdivision.py: 19/19 PASS
+- test_lensing_surrogate_training.py: 64P/49S, no failures
+- test_lensing_surrogate.py: 66/66 PASS
+- Import probe clean
+
+No new issues introduced.
+
+Pre-existing (carried forward):
+- _subdivide_tile docstring (~line 3788) still says "A future lobe subdivider..." — stale since lobe subdivision now exists. Not touched by this diff.
+- _LOBE_CUSP_EXCLUSION_DISTANCE=0.1 intentionally dead code (Professor ruling), documented with rationale.

@@ -122,6 +122,13 @@ _SADDLE_CUSP_MIN_HALFWIDTH = 0.08
 #: astroid cusp vertex below which the tile is excluded from exterior
 #: charting.
 _CUSP_EXCLUSION_DISTANCE = 0.2
+#: Deltoid-lobe interior near-cusp carve-out distance (source-plane ``y``-units).
+#: Sized downward from ``_CUSP_EXCLUSION_DISTANCE`` (0.2) because deltoid lobes
+#: have smaller extent than the full astroid.  Redundant in the current code
+#: because `_SaddleLobeAdmission.admits` already refuses tiles within
+#: ``eta_max`` (typically >0.1) of any caustic-cloud point, and the cusp
+#: vertices are in that cloud -- a separate carve-out is not needed.
+_LOBE_CUSP_EXCLUSION_DISTANCE = 0.1
 #: Fractional shrink of each fold arc away from its bounding walls.
 _ARC_MARGIN_FRAC = 0.03
 #: Number of theta samples used to integrate the tube's arc-length axis map
@@ -2286,6 +2293,10 @@ class _SaddleLobeAdmission:
                 if loop.shape[0] < 3 \
                         or abs(_winding_number(loop - probe)) < 0.5:
                     return False
+            # Cusp vertices are in the caustic cloud, so the
+            # nearest-distance test already excludes tiles too close to a
+            # deltoid cusp -- no separate carve-out at
+            # ``_LOBE_CUSP_EXCLUSION_DISTANCE`` is needed (Professor ruling).
             nearest = float(np.hypot(
                 self.caustic_cloud[:, 0] - probe[0],
                 self.caustic_cloud[:, 1] - probe[1]).min())
@@ -3717,6 +3728,33 @@ def _wedge_child_boxes(
                           (float(child_half_r), float(child_half_theta))))
     return boxes, theta_split, child_half_r
 
+def _lobe_child_boxes(
+        tile: dict) -> tuple[list[tuple[tuple[float, float],
+                                        tuple[float, float]]], float, float]:
+    """Compute the up-to-four lobe child boxes and the shared child half.
+
+    Halves the lobe-local ``(rho_lobe, theta_local)`` box: four children at
+    ``(rho_lobe_c +- half_rho/2, theta_local_c +- half_theta/2)`` in a fixed
+    row-major order (``s_rho`` outer, ``s_theta`` inner), each carrying the
+    SAME half ``(half_rho/2, half_theta/2)`` (a quarter box).
+
+    Returns ``(boxes, child_half_rho, child_half_theta)`` where ``boxes`` is a
+    list of ``(center, half)`` tuples.  Single-sourced so the wrapper's return
+    dict (``child_half``) and the generic subdivider's splitter agree exactly.
+    """
+    rho_c, theta_c = tile['center']
+    half_rho, half_theta = tile['half']
+    child_half_rho = 0.5 * float(half_rho)
+    child_half_theta = 0.5 * float(half_theta)
+    boxes: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for s_rho in (-1.0, 1.0):
+        for s_theta in (-1.0, 1.0):
+            child_rho = float(rho_c) + s_rho * child_half_rho
+            child_theta = float(theta_c) + s_theta * child_half_theta
+            boxes.append(((child_rho, child_theta),
+                          (child_half_rho, child_half_theta)))
+    return boxes, child_half_rho, child_half_theta
+
 
 def _subdivide_tile(
         *, tile: dict, parent_tag: str, band: tuple[float, float],
@@ -3884,6 +3922,7 @@ def _subdivide_tile(
             child_tile = {
                 'center': tuple(center), 'half': tuple(half),
                 'axis_origin': tile.get('axis_origin'),
+                'lobe': tile.get('lobe'),
                 'w_range': tile['w_range'], 'region': region,
                 'si': tile['si'], 'm_lo': tile['m_lo'], 'm_hi': tile['m_hi'],
                 'w_nodes_per_decade': tile.get('w_nodes_per_decade')}
@@ -4150,6 +4189,97 @@ def _subdivide_wedge_tile(
             'theta_split': round(theta_split, 6),
             'child_half_r': round(child_half_r, 6),
             'packed': summary['packed'], 'children': summary['children'],
+            'max_achieved_depth': summary['max_achieved_depth']}
+
+def _subdivide_lobe_tile(
+        *, tile: dict, parent_tag: str, band: tuple[float, float],
+        parity: int, config: TrainingConfig, rng: np.random.Generator,
+        outdir: Path, charts: list, chart_reports: list[dict]) -> dict:
+    """Halve one eps-gated lobe-interior tile into up to four children (WP-1),
+    a thin wrapper over the shared `_subdivide_tile` skeleton.
+
+    The macro-saddle lobe-interior counterpart of `_subdivide_wedge_tile`, in
+    the lobe-chart's own lobe-local ``(rho_lobe, theta_local)`` coordinates.
+    The radial split is at the plain ``rho_lobe`` midpoint and the angular
+    split at the ``theta_local`` midpoint (simple midpoint halving, same as
+    far-field).  Each child inherits the parent's ``lobe`` admission object
+    verbatim, is re-admitted through ``_SaddleLobeAdmission.admits`` (the
+    single authoritative admission predicate), retrained via
+    `_build_lobe_chart`, and re-gated on ``config.interior_eps_max`` via
+    `_gate_chart('interior', ...)`.
+
+    The bounded recursion lives in `_subdivide_tile`: a still-gated child is
+    itself halved until it clears or the chain reaches
+    `MAX_SUBDIVISION_DEPTH`, then recorded as a ladder-served gap.  A carrier-
+    flip (`CarrierDiscontinuityError`) child is recorded as a ladder-served
+    gap and NEVER recursed.
+
+    Parameters mirror the wedge wrapper signature (call site analogous).
+
+    Returns
+    -------
+    dict
+        ``{'parent_tag', 'region', 'child_half', 'packed', 'children',
+        'max_achieved_depth'}``.
+    """
+    _, child_half_rho, child_half_theta = _lobe_child_boxes(tile)
+    region = tile['region']
+    parent_lobe = tile['lobe']
+
+    def split_children(subtile: dict) -> list:
+        return _lobe_child_boxes(subtile)[0]
+
+    def admit_child(center: tuple, half: tuple) -> bool:
+        # Re-admit through the parent's lobe admission predicate: an admitted
+        # child must lie inside the lobe for every band gamma, be clear of
+        # the eta_max tube shell, and be strictly nearer this centroid than
+        # the other lobe's by the corridor half-width.
+        return parent_lobe.admits(center, half)
+
+    def build_child(center: tuple, half: tuple, subtile: dict) -> tuple:
+        w_nodes = subtile.get('w_nodes_per_decade')
+        region_t = subtile['region']
+        if w_nodes is not None:
+            eff_w_nodes = int(w_nodes)
+        elif region_t in ('interior', 'lobe_interior', 'wedge_interior'):
+            eff_w_nodes = config.interior_w_nodes_per_decade
+        else:
+            eff_w_nodes = config.w_nodes_per_decade
+        child_lobe = subtile.get('lobe', parent_lobe)
+        chart, calls, refused = _build_lobe_chart(
+            gamma_band=band, parity=parity, lobe=child_lobe,
+            box_center=center, half=half, w_range=subtile['w_range'],
+            config=config, w_nodes_per_decade=eff_w_nodes)
+        samples = _lobe_heldout_samples(
+            band, center, half, config, rng, lobe=child_lobe)
+        eps = _heldout_eps(chart, samples, {'schema': 'heldout-probe'})
+        return chart, calls, refused, {
+            'kind': 'interior', 'region': region_t,
+            'image_count': chart.image_count,
+            'stratum_index': subtile['si'],
+            'stratum_mass_range': [round(subtile['m_lo'], 3),
+                                   round(subtile['m_hi'], 3)],
+            'rho_theta_box': [list(center), list(half)],
+            'w_range': [round(subtile['w_range'][0], 6),
+                        round(subtile['w_range'][1], 6)],
+            'node_counts': {'n_gamma': config.n_gamma,
+                            'n_rho': config.n_rho,
+                            'n_theta_c': config.n_theta_c,
+                            'n_w_per_decade': int(eff_w_nodes)},
+            'heldout_eps': eps}
+
+    summary = _subdivide_tile(
+        tile=tile, parent_tag=parent_tag, band=band, parity=parity,
+        config=config, rng=rng, outdir=outdir, charts=charts,
+        chart_reports=chart_reports, split_children=split_children,
+        build_child=build_child, gate_kind='interior',
+        eps_bar=config.interior_eps_max, admit_child=admit_child)
+
+    return {'parent_tag': parent_tag, 'region': region,
+            'child_half': [round(child_half_rho, 6),
+                           round(child_half_theta, 6)],
+            'packed': summary['packed'],
+            'children': summary['children'],
             'max_achieved_depth': summary['max_achieved_depth']}
 
 
@@ -4781,12 +4911,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     lobe_path, build_lobe,
                     {'schema': 'build8c-chart', 'parity': parity})
             except CarrierDiscontinuityError as exc:
-                # The lobe tile straddles a critical-basin (``tau_c``) flip.
-                # The far-field subdivider is origin-centred (scalar
-                # ``exclusion_rho`` + ``_from_caustic_fixed`` samples) and
-                # CANNOT resubdivide a lobe-local box, so the tile is recorded
-                # as a ladder-served gap (not subdivided); lobe-aware
-                # subdivision is owed follow-on work.
+                # The tile straddles a critical-basin flip; subdivision cannot fix phase
+                # discontinuities, so the tile is recorded as a ladder-served gap.
                 chart_reports.append({
                     'name': lobe_tag, 'parity': parity,
                     'file': str(lobe_path), 'region': region,
@@ -4797,14 +4923,16 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             chart_report = {'name': lobe_tag, 'parity': parity,
                             'file': str(lobe_path), 'reused': reused, **report}
             if gated:
-                # A gated lobe tile is a ladder-served gap: the far-field
-                # subdivider cannot halve a lobe-local box (see above), so the
-                # window is served by the ladder, never numerical quadrature.
                 chart_report['gated'] = True
                 chart_report['gate_reason'] = gate_reason
-                chart_report['subdivided'] = False
-                chart_report['ladder_served_gap'] = True
+                chart_report['subdivided'] = True
                 chart_reports.append(chart_report)
+                subdivision = _subdivide_lobe_tile(
+                    tile=tile, parent_tag=lobe_tag, band=band, parity=parity,
+                    config=config, rng=rng, outdir=outdir,
+                    charts=charts, chart_reports=chart_reports)
+                chart_report['subdivision'] = subdivision
+                chart_report['ladder_served_gap'] = subdivision['packed'] == 0
                 continue
             charts.append(chart)
             chart_reports.append(chart_report)

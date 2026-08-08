@@ -11,9 +11,15 @@ section: Backlog
   2026-08-07 build unified them into one generic `_subdivide_tile`
   parameterised by `(split_children, build_child, gate_kind, eps_bar,
   admit_child)`, with the two names kept as thin wrappers. That was the right
-  move and it is HALF DONE: `LobeInteriorChart` still has NO subdivider at all
-  (see [[lensing_saddle_forensics]] item b), and `TubeChart` has none either.
-  A gated lobe or tube tile becomes a ladder-served gap with no recourse.
+  move and it remains OPEN for `TubeChart`: `LobeInteriorChart` gained its
+  subdivider on 2026-08-08 (`_subdivide_lobe_tile`, a thin wrapper over the
+  shared `_subdivide_tile` — the intended shape, not a third copy — wired into
+  the gated-lobe branch of `_train_band_charts`, see
+  [[2026-08-08_lobe-subdivision-cusp-carveout]]); `TubeChart` still has none.
+  A gated lobe tile is now recursively halved in lobe-local `(rho_lobe,
+  theta_local)`; a carrier-flip (`CarrierDiscontinuityError`) child is recorded
+  as a ladder-served gap and never recursed. A gated tube tile still becomes a
+  ladder-served gap with no recourse.
 
   Adding lobe support must NOT mean a third copy — it is now a
   splitter/builder/gate triple. The general shape wants OOP: a chart kind

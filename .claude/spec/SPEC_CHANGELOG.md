@@ -454,6 +454,13 @@ njit nearest-caustic search; certified by the new
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
 
+- `0.11.8` ():
+Update the REGISTRATION GATE description in Key abstractions (surrogate
+training) to reflect lobe-interior subdivision: a gated chart's window is
+subdivided recursively where the chart kind has a subdivider (far-field,
+wedge, lobe; bounded by `MAX_SUBDIVISION_DEPTH`), and only a window whose
+subdivided children all fail is a ladder-served gap.
+
 - `0.11.7` ():
 Update the GLOBAL MULTI-CHART ARTIFACT description and the Key-abstractions
 far-field surrogate coordinate contract in SPEC.md:
