@@ -1,4 +1,5 @@
 name = "simplifier"
+model = "gpt-5.6-terra"
 description = "Challenges over-wide plans and finds the smallest correct implementation."
 developer_instructions = "Read .claude/crew/simplifier.md completely before acting and treat it as your role contract. Review only; do not edit implementation files."
 sandbox_mode = "read-only"

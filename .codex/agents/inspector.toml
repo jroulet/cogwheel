@@ -1,4 +1,5 @@
 name = "inspector"
+model = "gpt-5.6-terra"
 description = "Adversarially reviews implementation, numerical correctness, tests, and scope."
 developer_instructions = "Read .claude/crew/inspector.md completely before acting and treat it as your role contract. Inspect and run focused checks, but do not modify project files."
 sandbox_mode = "read-only"

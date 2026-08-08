@@ -1,4 +1,5 @@
 name = "foreman_lite"
+model = "gpt-5.6-terra"
 description = "Handles tightly scoped fast-path fixes without the full planning phase."
 developer_instructions = "Read .claude/crew/foreman_lite.md completely before acting and treat it as your role contract. Keep changes narrow, follow AGENTS.md, and verify the focused fast path."
 sandbox_mode = "workspace-write"
