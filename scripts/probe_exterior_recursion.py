@@ -24,12 +24,12 @@ from dataclasses import replace
 def main():
     config = replace(
         TrainingConfig(),
-        n_gamma=7, n_u=7, n_theta=7,
-        n_rho=7, n_theta_c=7,
-        w_nodes_per_decade=15,
-        engine_budget=2000,
-        gamma_band_halfwidth=0.04,  # one exterior band (matches 2026-08-06)
-        n_heldout=30,
+        n_gamma=3, n_u=3, n_theta=3,
+        n_rho=3, n_theta_c=3,
+        w_nodes_per_decade=8,
+        engine_budget=200,
+        gamma_band_halfwidth=0.04,
+        n_heldout=100,
     )
     outdir = "/tmp/probe_exterior_recursion"
     os.makedirs(outdir, exist_ok=True)
