@@ -32,8 +32,29 @@
   hint can reference a not-yet-imported class as a lazy string — widening
   a `Union` type hint needs no new import; verify via `ast.parse` alone.
 - When the working tree already has unrelated uncommitted changes (e.g.
-  from parallel sessions), confirm your fix touched ONLY the intended
-  lines via `git diff` before considering the finding resolved.
+  from parallel sessions), confirm your fix touched ONLY the intended lines
+  via `git diff` before considering the finding resolved.
+- DIFF TRAP (parallel-build variant, 2026-08-08): when your target lines sit
+  INSIDE a parallel build's uncommitted block, `git diff` shows the whole
+  block as `+` and cannot isolate your edit — verify via targeted source-
+  string asserts instead of diff-based isolation. git stash is equally
+  unusable (it also reverts the parallel build's production edits and changes
+  test skip-vs-fail behavior).
+- TARGETED-REVERT PROOF PATTERN (2026-08-08, INS-3-004): to prove a failure
+  is independent of a specific edit when the tree has unrelated uncommitted
+  changes, revert ONLY the edit in-memory (read file, remove the exact new
+  lines, write, run the test, restore from a backup copy) — never git stash.
+- SENTINEL THREE-CASE CONTRACT FIX (2026-08-08, `_synthetic_exterior_polar_
+  chart`): a helper accepting optional (theta_to_u, u_grid) pairs must
+  rewrite its sentinel block as `if both _SENTINEL: build identity-like map /
+  elif either is None: force BOTH to None (raw-theta fallback) / else pass
+  through` — leaking one _SENTINEL to from_values raises a confusing
+  ValueError/TypeError. Note: ExteriorPolarChart stores ONLY `theta_to_u`
+  (`u_grid` is consumed by from_values to build knots) — verify a raw-theta
+  chart via `c.theta_to_u is None`, not a `u_grid` attribute. From_values
+  validation traps for smoke fixtures: map row 0 must start at
+  `theta_c_grid[0]`, `u_grid` length must equal `theta_c_grid` length, and
+  n=3 violates the production >=4 nodes/axis constraint — use n=4.
 - When verifying a fix that adds negative-angle entries to a min-over-angles
   ceiling: confirm each added angle's w_star exceeds the wall constant to
   prove the minimum is unaffected; if _w_star uses raw (non-abs) angle,

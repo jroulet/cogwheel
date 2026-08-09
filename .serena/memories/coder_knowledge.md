@@ -441,6 +441,31 @@
   axis edges NOT aligned (deltoid off-axis). `_KNOWN_ENVELOPE_DEFINITIONS`
   widened so the loader accepts the union of far-field AND interior
   envelope tags.
+- EXTERIOR POLAR CUSP-ADAPTED U COORDINATE IMPLEMENTATION (Build
+  exterior_polar_cusp_coordinate, 1a97bbd, 2026-08-08): added optional
+  `theta_to_u: np.ndarray | None` field to ExteriorPolarChart, mirroring
+  the lobe/wedge pattern: from_values/from_engine/_assemble all accept
+  optional theta_to_u/u_grid; when provided the spline is fit on a UNIFORM
+  u_grid; `_evaluate_chart` remaps theta_c->u via np.interp before spline
+  contraction; `_chart_to_npz` writes conditionally (only when not None),
+  `_chart_from_npz` reads via `data.get(...)` (returns None on a missing
+  key, matching the field's own type annotation — the OPPOSITE of the
+  wedge/lobe REQUIRED-key convention, where the field is read
+  unconditionally and absence hard-refuses). Axis schema bumped
+  'exterior_polar_rho_theta_c' -> 'exterior_polar_rho_u_v1'. BOTH
+  `_build_farfield_chart` (parity==1 tiles) and `_subdivide_tile`
+  children pass the cusp-adapted map via `_wedge_cusp_axis_map`; the
+  macro-saddle exterior (parity==-1) passes None (raw-theta fallback).
+  Added `_uniform_axis` to surrogate_training.py imports. FIX INS-1-001:
+  `data.get(prefix+'theta_to_u')` in ALL THREE `_chart_from_npz` branches
+  (lobe, wedge, exterior-polar) so theta_to_u=None charts survive an NPZ
+  round-trip. FIX INS-2-001: schema test renamed to
+  test_new_schema_without_theta_to_u_loads_with_none (asserts None-load,
+  not KeyError). NOTE (INS-4-001, inspector): the WEDGE loader must NOT
+  use `.get()` — wedge v3 requires theta_to_u (from_wedge_engine always
+  builds it, `_chart_to_npz` always writes it); the hard KeyError on a
+  corrupt artifact is the required contract. Change wedge line back to
+  `data[prefix + 'theta_to_u']` (exterior-polar + lobe keep `.get()`).
 - REGIONS FILTER (same day, remeasure_v3 WP1): `_train_band_charts` gains
   `regions: tuple[str, ...] | None = None` (None → full tuple ('tube',
   'exterior', 'wedge_interior', 'lobe_interior')); each section is
@@ -505,3 +530,10 @@
   writes it when not None — a theta_to_u=None chart builds but cannot
   survive an NPZ round-trip (latent trap for external callers; not hit by
   the current pipeline).
+- SIBLING-INSERTION CLOBBER (INS-4-003, lobe_cusp_coordinate build):
+  inserting `_lobe_cusp_axis_map` adjacent to `_wedge_cusp_axis_map`
+  accidentally DELETED the neighbor's `return theta_fine, u_fine` (caught
+  by the Inspector at line 702, reinserted). After inserting a new
+  function next to an existing one, verify the neighbor's body is
+  byte-unchanged — same failure family as the replace_symbol_body
+  signature-line gotcha.

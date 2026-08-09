@@ -32,3 +32,12 @@ Positive parity (astroid, gamma < 1) only. Saddle exterior uses scalar rho witho
 - Macro-saddle exterior unchanged
 - `rho` stays as-is (`drho/d|y| = 1`, well-behaved)
 - Mirror the wedge v3 pattern exactly — reuse helpers, same serialization
+
+## Plan-gate requirement (rejected once: 2026-08-08)
+The plan verification gate enforces DISJOINT test-suite write ownership:
+each `domain_test_descriptions` spec names exactly ONE `test_*.py` primary
+file (its owning suite), and a spec must NEVER reference another spec's
+primary file. A prior plan was rejected because a shard owning
+`test_lensing_surrogate.py` also named `test_lensing_exterior_windows.py`
+(another shard's suite). Split the test work so each test file is listed in
+exactly one spec — do not cross-reference suites between specs.

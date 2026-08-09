@@ -310,3 +310,39 @@
   normal build packs children. (5) ppGO above-ceiling suite extension:
   test_lensing_ppgo_above_ceiling.py (15 tests) exercising the w>150
   engine-intercept rung.
+- EXTERIOR-POLAR CUSP-ADAPTED U COORDINATE TEST PATTERNS (Build
+  exterior_polar_cusp_coordinate, 1a97bbd, 2026-08-08): added 6 classes/
+  22 tests in test_lensing_surrogate_training.py — BuildFarfieldPositive
+  ParityCuspAdapted (5: theta_to_u shape/monotonicity/endpoint-exactness),
+  BuildFarfieldHighSideCuspAdapted (4: high-side origin, monotone,
+  zero-start, endpoints), BuildFarfieldCuspOriginSelfFalsification (4:
+  correct vs wrong theta_to_u differ, coefficients differ),
+  BuildFarfieldSaddleExteriorUnchanged (2: parity=-1 -> theta_to_u=None),
+  SubdividedChildrenCuspAdapted (2: parity pass-through to children),
+  BuildFarfieldCuspAdaptedSelfFalsification (5: domain raises, non-uniform
+  spacing, identity not byte-identical). Flipped
+  FieldExposureTestCase.test_exterior_polar_uses_caustic_fixed_axes
+  assertNotIn->assertIn: ExteriorPolarChart now has optional
+  theta_to_u (nn.Array | None) — an assertNotIn on an optional field is a
+  stale negative; flip to assertIn and update the docstring. INS-3-003 fix:
+  `_train_tile`/`_train_exterior_chart` hardcoded origin='low' -> shared
+  `_exterior_cusp_axis_map(theta_c_grid, gamma_band, n_gamma)` that MIRRORS
+  production `_build_farfield_chart` origin (waist at median log-spaced
+  rep_gamma; falls back to (None,None) raw-theta when theta_c range is
+  outside [0,pi/2] or degenerate, so the domain guard never fires from a
+  fixture). STRADDLING stays low (0.7698<0.7766), EXTERIOR/OVERSIZED now
+  high (0.7854>0.7766).
+- MIRROR-PRODUCTION-ORIGIN TEST HELPER PATTERN (INS-3-003, same build):
+  when a test fixture must reproduce a production coordinate/origin
+  decision (waist-based origin, median rep_gamma, null fallback for
+  unrepresentable tiles), copy the PRODUCTION rule into a shared test
+  helper — a hardcoded origin (e.g. 'low') is the defect; the shared
+  helper is callable from EVERY fixture entry point (_train_tile AND
+  _train_exterior_chart) so no path diverges.
+- CLASS-DELETION DROPS TEST CLASSES SILENTLY (2026-08-08): the 0a31fcf
+  polar re-chart deletion ALSO dropped `DefinitionTagLoaderRefusalTestCase`
+  — its 8 loader tests were silently absorbed into `_legacy_single_box_
+  arrays` dead code. When a chart-class deletion commit lands, grep for
+  dropped TEST classes whose coverage silently migrated into dead helpers;
+  restore the class, and retire tests for paths production now hard-refuses
+  unconditionally (e.g. every legacy single-box tag at surrogate.py:3849).

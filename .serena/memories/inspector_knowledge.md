@@ -310,3 +310,31 @@
   Lesson: a quota-killed build's salvage commit is UNVERIFIED — a green
   partial pass from before the death does not certify it; re-audit the
   whole changed surface from scratch. See `mem:lobe_interior_chart`.
+- EXTERIOR-POLAR CUSP-ADAPTED U COORDINATE REVIEW (2026-08-08, Build
+  exterior_polar_cusp_coordinate, 1a97bbd): all 8 test files fast-tier
+  green except two defects. RESOLVED carry-overs: INS-3-003
+  (`_train_tile`/`_train_exterior_chart` hardcoded origin='low' -> shared
+  `_exterior_cusp_axis_map` mirroring production waist-origin, null
+  fallback for unrepresentable tiles) and INS-3-004 (sentinel block
+  rewritten as explicit 3-case contract). NEW BUG INS-4-001: the wedge
+  branch of `_chart_from_npz` was changed to `data.get(prefix+
+  'theta_to_u')` (soft None fallback) but InteriorWedgeChart V3 REQUIRES
+  theta_to_u — the soft read silently loads a corrupt V3 artifact with
+  None and breaks `test_v3_missing_theta_to_u_raises_keyerror`. The
+  `.get()` fallback is correct for the exterior-polar loader (optional
+  field) and acceptable for the lobe loader (pre-existing latent trap),
+  but WRONG for the wedge loader — per-kind required-vs-optional
+  decision, not blanket-applied. NEW BUG INS-4-002: three test classes
+  unskipped from the polar re-chart skip use
+  `definition=ch.INTERIOR_SACR_C` with from_engine, which validates the
+  tag against `KNOWN_FARFIELD_DEFINITIONS` — the interior tag is not in
+  the far-field set, so every test raises ValueError; the unskip was
+  premature (re-apply the skip or add non-farfield definition support to
+  from_engine). DESIGN INS-4-003/004 (Librarian scope): SPEC.md +
+  DATA_CONTRACTS.yaml still cite the OLD 'exterior_polar_rho_theta_c'
+  tag and lack theta_to_u — carried to the doc-sync phase.
+- TEST-CLASS-UNSKIP VALIDATES DEFINITION TAGS: when re-enabling test
+  classes that were skipped during a chart migration, verify every
+  `definition=` tag they pass to from_engine is still in the production
+  KNOWN_*_DEFINITIONS set — a migration that removes a tag makes the
+  unskipped class raise ValueError at construction (INS-4-002 pattern).

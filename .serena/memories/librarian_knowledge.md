@@ -127,6 +127,18 @@
 - Constant names cited in SPEC.md and DATA_CONTRACTS.yaml become fragile
   cross-references: if `_LOBE_AXIS_SCHEMA*` or any schema constant is
   renamed in code, BOTH doc surfaces need updating simultaneously.
+  (2026-08-08: `_EXTERIOR_POLAR_AXIS_SCHEMA` is a THIRD instance cited in
+  both surfaces — same rule.)
+- REQUIRED-vs-OPTIONAL SCHEMA CONTRACT VARIES PER CHART KIND (2026-08-08,
+  exterior-polar cusp-adapted u build): the exterior-polar `theta_to_u`
+  is OPTIONAL (parity==-1 charts are raw-theta, written conditionally,
+  loaded as None) — NOT REQUIRED like wedge v3 / lobe v1. When syncing a
+  cusp-adapted contract sentence, verify required-vs-optional per chart
+  kind before writing it: a mechanical copy of the wedge/lobe "REQUIRED,
+  read unconditionally, KeyError on absence" phrasing would be WRONG for
+  exterior-polar. The retained sentence "No arc-length map is needed" is
+  now paired with the cusp-adapted u map in both surfaces — a future build
+  adding an arc-length or s-map to exterior-polar breaks that sentence.
 - PENDING (2026-08-08, lobe cusp-adapted build 98c4e7f): the data-product
   contract still describes the OLD lobe axis schemas (raw-theta V1 and
   sqrt-edge); the production code now ships the SINGLE tag
@@ -208,3 +220,10 @@
   fragment lensing_farfield_name_spans_three_regimes stays open too).
   Do not mark a superseded fragment DONE on the strength of its
   superseder's closure.
+- BULK-TRAINING ACCEPTANCE ITEMS ARE DRIVER POST-BUILD, NOT IN-BUILD
+  (2026-08-08): when a completed TODO fragment's stated acceptance is a
+  bulk-training sweep (e.g. "4x4x4 probe ~70 charts not 500", "cusp-
+  vertex tile clears eps bar"), it is never measured in-build (AGENTS.md);
+  close the TODO but record the training-scale items as driver post-build
+  verification in the completed.d fragment. Don't let a closed fragment
+  imply in-build proof of a training-scale number.

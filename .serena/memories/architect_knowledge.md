@@ -158,7 +158,7 @@
   must be planned as ONE merged WP with it; landing it alone is unsound
   (Build 8h-b6).
 - NAMING HAZARD: don't overload an established term when adding a regime
-  (here "far-field" = a trained chart GAUGE, NOT weak deflection) — pick a
+  (here "far-field" = a trained chart a GAUGE, NOT weak deflection) — pick a
   distinct name in the brief or the WPs inherit the ambiguity.
 - FRAME-INVARIANT RELABELING: when a trained/interpolated label carries a
   per-node reference-frame phase (e.g. min-relative time delay) that varies
@@ -346,3 +346,25 @@
   last green partial pass — salvage the commit, then re-audit from scratch.
   Distinct failure mode from the stranded-build pattern (agent error); both
   need a driver/Inspector completion pass.
+
+## Exterior polar cusp-adapted u coordinate build (2026-08-08)
+
+- DESIGN (Build exterior_polar_cusp_coordinate, 1a97bbd): ExteriorPolarChart
+  gains an OPTIONAL cusp-adapted `u=d**(2/3)` axis (`theta_to_u`) — parity==1
+  (astroid) tiles train with cusp-adapted u via `_wedge_cusp_axis_map`; the
+  macro-saddle exterior (parity==-1) stays raw-theta (None). Schema tag bump
+  'exterior_polar_rho_theta_c' -> 'exterior_polar_rho_u_v1' (old tag
+  hard-refuses). Simplifier: 1 main Coder WP + 1 small sequential WP; origin
+  derived from box_center; waist split at `_wedge_theta_waist`; retire the
+  carve-out; 5e-2 heldout bar. Files: surrogate.py + surrogate_training.py +
+  8 test files.
+- DESIGN-TRIAGE ROUTING (INS-3-001..004, same build): doc-staleness findings
+  naming BOTH SPEC.md and DATA_CONTRACTS.yaml (INS-3-001/002, stale exterior-
+  polar tag) -> Librarian/doc-sync override, NOT a Coder WP (recurring rule).
+  TEST-code defects -> Test-Dev scope, never Coder: INS-3-003
+  (`_train_tile`/`_train_exterior_chart` hardcoded origin='low') and INS-3-004
+  (`_synthetic_exterior_polar_chart` sentinel leak). CRASH-CLAIM TRIAGE
+  LESSON: an Inspector finding claiming a crash at theta_hi=1.7 misread
+  y=1.7 for theta_c — the fixtures' theta_c max ~0.92 rad, so there is NO
+  current crash; verify the claimed value is inside the fixture's actual
+  domain before routing a crash finding to a defect fix.

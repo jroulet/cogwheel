@@ -280,6 +280,28 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   Not triggered in the current training pipeline (all tiles carry cusp
   angles). Mitigation: tolerate missing theta_to_u in `_chart_from_npz`, or
   raise a clear error in `_chart_to_npz` when saving a theta_to_u=None chart.
+- EXTERIOR-POLAR CUSP-ADAPTED COORDINATE PHYSICS (Build
+  exterior_polar_cusp_coordinate, 1a97bbd, 2026-08-08, verdict PASS):
+  ExteriorPolarChart gains an OPTIONAL cusp-adapted u = d**(2/3) axis
+  (`theta_to_u`), applied on parity==1 (astroid) tiles via `_wedge_cusp_
+  axis_map` and integrated via np.interp in `_evaluate_chart` (mirrors the
+  wedge pattern); the macro-saddle exterior (parity==-1) keeps raw-theta
+  (None). Served values agree with raw-theta charts within tolerance — the
+  coordinate change is an ACCURACY improvement, not a model change.
+  Mutation-falsification tests confirm the remap is load-bearing (not dead
+  code). theta_to_u=None falls through to the raw theta_c_grid — all
+  existing tests byte-identical (backward compat). NPZ round-trip preserves
+  theta_to_u bitwise (max|diff|=0). Schema 'exterior_polar_rho_theta_c'
+  hard-refused; new tag 'exterior_polar_rho_u_v1' loads with optional
+  theta_to_u. Grid-node served values match training within 1e-7. Census
+  classification handles theta_to_u-bearing charts; subdivided children
+  propagate theta_to_u; edge-case rejection (bounds, monotonicity)
+  operational. NOTE: unlike the wedge v3 / lobe v1 charts (theta_to_u
+  REQUIRED, read unconditionally), the exterior-polar field is OPTIONAL —
+  a mechanical "REQUIRED" copy would be wrong. Deferred to operator
+  post-build: the train-tier cusp-adapted test classes
+  (BuildFarfieldPositiveParityCuspAdaptedTestCase & siblings) and the
+  training accuracy sweeps (COGWHEEL_TRAIN_TIER=1).
 - `surrogate_training.py` C6 (Build 3, 2026-08-01): `TrainingConfig.eta_max`
   and `TrainingConfig.eta_floor` fields were REMOVED; tube-shell exclusion
   geometry is now controlled by explicit kwargs `eta_max` and `eta_floor`
