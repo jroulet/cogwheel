@@ -227,3 +227,20 @@
   close the TODO but record the training-scale items as driver post-build
   verification in the completed.d fragment. Don't let a closed fragment
   imply in-build proof of a training-scale number.
+- `depends_on` REPOINTING IS MANDATORY ON COMPLETION (2026-08-09): a
+  dependent open fragment's `depends_on: [<old todo stem>]` dangles the
+  moment the fragment moves to `completed.d` under a date-prefixed name —
+  the renderer's validator warns. Repoint `depends_on` to the NEW
+  date-prefixed completed stem (convention confirmed against
+  2026-08-07_polar_rechart, 2026-08-07_subdivision-recursion-wedge-v3-r-
+  caustic). I missed this at first; the dangling-dep warning caught it.
+- `delete_lines` EMPTIES A FILE BUT DOES NOT DELETE IT (2026-08-09):
+  `rm` the now-empty todo fragment afterwards.
+- SPEC CARRIES MECHANISM, NOT PROVISIONAL VALUES (2026-08-09): when a
+  completed fragment records a constant as PROVISIONAL (post-build driver
+  measurement owed), write the SPEC sentence for the MECHANISM/gate only —
+  a later tightening of the constant then keeps the SPEC valid and only
+  the completed record ages. New fragile cross-ref family: SPEC naming
+  `_R_PPGO_ERROR_CONST`/`_W_PPGO_FLOOR`/`_PPGO_BAR_DIVISOR` + the phrase
+  "returns before any table or quadrature lookup" breaks if a future build
+  moves the rung after the table consult.

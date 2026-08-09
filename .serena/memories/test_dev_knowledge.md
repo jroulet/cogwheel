@@ -346,3 +346,17 @@
   dropped TEST classes whose coverage silently migrated into dead helpers;
   restore the class, and retire tests for paths production now hard-refuses
   unconditionally (e.g. every legacy single-box tag at surrogate.py:3849).
+- CUSP PPGO FAST RUNG TEST PATTERNS (test_lensing_airy_fold.py, 2026-08-08,
+  cusp_ppgo_high_w WP1, 5 classes / 13 tests): do NOT assert golden
+  agreement of the ppGO rung against the Pearcey uniform form — the rung
+  delegates to `fold_ppgo_correction` (an Airy FOLD correction applied in a
+  cusp context), so the rung value is NOT the asymptotic limit of the
+  Pearcey form (measured 12-36% difference where both paths serve; the
+  approximation is asymptotically sound only via the shared geometric-image-
+  sum limit at large R). Assert the CONTRACTED properties instead:
+  structural rung firing, finite/deterministic output, small-R refusal,
+  w-floor gate, finiteness guard (all NaN/Inf variants), saddle parity,
+  self-falsification. Document the fold-vs-cusp design gap in the class
+  docstring. Fixture measurements: rung fires at w>=500 for astroid
+  (radius=98 > r_ppgo_min=54 at the provisional const), w>=200 for saddle
+  (radius=29 at w=100).

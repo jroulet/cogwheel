@@ -368,3 +368,18 @@
   y=1.7 for theta_c — the fixtures' theta_c max ~0.92 rad, so there is NO
   current crash; verify the claimed value is inside the fixture's actual
   domain before routing a crash finding to a defect fix.
+
+## Cusp ppGO fast rung build (2026-08-08/09)
+
+- CUSP PPGO FAST RUNG DESIGN (Build cusp_ppgo_high_w): gate on control
+  radius R (not w) per Simplifier — R is the correct asymptotic parameter,
+  composable with envelope_bar, source-independent. Dual gate: R >=
+  r_ppgo_min AND w >= w_floor (kernel-truncation guard).
+  r_ppgo_min = (_R_PPGO_ERROR_CONST * _UNIFORM_ERROR_CONST / bar_ppgo)^(2/3)
+  with bar_ppgo = envelope_bar/10 (calibration target). SHIPPED constants:
+  _R_PPGO_ERROR_CONST=50.0 (PROVISIONAL — post-build driver measurement
+  owed to tighten), _W_PPGO_FLOOR=50.0, _PPGO_BAR_DIVISOR=10.
+  DO-NOTHING: fold_ppgo_correction already has internal guards;
+  LensDomainError caught -> fall through to the Pearcey path. Professor
+  confirms: Pearcey -> geometric image sum as (x,y)->inf; fold_ppgo_correction
+  converges to the same limit; both branches (astroid+saddle) valid.

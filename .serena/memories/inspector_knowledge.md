@@ -338,3 +338,18 @@
   `definition=` tag they pass to from_engine is still in the production
   KNOWN_*_DEFINITIONS set — a migration that removes a tag makes the
   unskipped class raise ValueError at construction (INS-4-002 pattern).
+- CUSP PPGO FAST RUNG REVIEW (2026-08-09, Build cusp_ppgo_high_w): all 13
+  ppGO tests pass, INS-6-001/002 resolved. Verified: r_ppgo_min formula
+  (50*1/(0.05/10))^(2/3) ~ 464.16 consistent with test comments;
+  fold_ppgo_correction signature matches the call; LensDomainError caught,
+  non-finite guarded, falls through to Pearcey; rung positioned BEFORE the
+  existing Pearcey uniform path (correct — ppGO is faster); _W_PPGO_FLOOR
+  prevents ppGO at low w; existing tests unaffected (control radii << 464);
+  all new tests increment n_checks (anti-vacuity); mock patching on the
+  same module object; self-falsification verifies guard teeth.
+  PRE-EXISTING (not actionable, not ppGO-induced): the two slow tests
+  `test_moving_error_const_threshold_flips_a_fixed_node` and
+  `test_served_node_is_bit_identical_to_the_cusp_arm` time out via
+  `_grid_served` -> `F_op_grid` -> mpmath quadrature at w=80 (Professor
+  confirmed the ppGO gate fails these configs on both branches —
+  r_ppgo_min ~25x the radius at the low-const setting). Note, don't chase.

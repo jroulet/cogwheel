@@ -537,3 +537,12 @@
   function next to an existing one, verify the neighbor's body is
   byte-unchanged — same failure family as the replace_symbol_body
   signature-line gotcha.
+- CUSP PPGO FAST RUNG IMPLEMENTATION (Build cusp_ppgo_high_w, 2026-08-08):
+  the ppGO fast rung lives in `_pearcey_cusp.cusp_amplification`, positioned
+  AFTER `radius = math.hypot(x, y)`, calling `fold_ppgo_correction` (via a
+  lazy `_airy_fold` import) with a LensDomainError guard -> falls through to
+  the Pearcey path. `_R_PPGO_ERROR_CONST=50.0` coordinated with
+  `_UNIFORM_ERROR_CONST` (moves r_ppgo_min 54.3 -> 464.16). INS-5/INS-6
+  fixes: raised `_PPGO_SERVE_W` to 20000.0, saddle-parity test fixtures to
+  w in [5000, 20000], corrected stale comments. OWED: post-build driver
+  measurement to tighten `_R_PPGO_ERROR_CONST`.

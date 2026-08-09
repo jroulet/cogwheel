@@ -97,3 +97,14 @@
   When a doc finding is carried across reviews, grep the EXACT docstring
   sentence from the finding, never a paraphrase — and confirm BOTH callers
   by search before editing.
+- STALE-VALUE GREP + EXACT-STRING VERIFY (2026-08-09, INS-6-002): after a
+  constant's value change (e.g. `_R_PPGO_ERROR_CONST` 2.0->50.0 moving
+  r_ppgo_min 54.3->464.16), grep the WHOLE file for the old VALUE STRING
+  ('54.3'), not the finding's stated line range — it missed 2 of 4 stale
+  sites (a comment + a test docstring). PROBE BEFORE ASSERTING the claimed
+  threshold (finding said ppGO fires at w>=5000 but measured control-radius
+  crossing is w~3980; use the measured value in comments). Verify a
+  comment-only fix via EXACT-STRING asserts (old value absent, new value
+  present) when git diff shows the whole block as '+' (DIFF TRAP,
+  parallel-build variant) — diff-based isolation is unusable there.
+  ast.parse is the syntax check when pyflakes is absent.

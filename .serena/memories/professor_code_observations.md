@@ -406,3 +406,27 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   reconstruct_farfield(FARFIELD_KERNEL_SUM). Error scale measured: ~1e-2 at
   w=150, ~1e-3 at w=500, decreasing trend; boundary-continuity is the
   primary gate. All-image serve (fold_ppgo_correction handles all 4 images).
+- CUSP PPGO FAST RUNG (Build cusp_ppgo_high_w, 2026-08-08/09, verdict
+  CONCERN — structural guards PASS, numerical calibration owed): a fast rung
+  inside `_pearcey_cusp.cusp_amplification` (after radius=math.hypot(x,y))
+  that serves via fold_ppgo_correction once R >= r_ppgo_min AND w >=
+  _W_PPGO_FLOOR. Gate math: r_ppgo_min = (_R_PPGO_ERROR_CONST *
+  _UNIFORM_ERROR_CONST / bar_ppgo)^(2/3) with exponent 2/3 correctly
+  inverting the R^(-3/2) cusp-proximity error scaling; _R_PPGO_ERROR_CONST
+  = 50.0 (PROVISIONAL — post-build driver calibration owed), _PPGO_BAR_
+  DIVISOR = 10 -> bar_ppgo = 0.005, r_ppgo_min ~ 464.2. _W_PPGO_FLOOR=50
+  independently gates kernel-truncation error O(1/w^3). Finiteness guard
+  np.isfinite(abs(result)) catches all 4 NaN/Inf variants; do-nothing
+  control byte-identical at intermediate R; self-falsification corrupts
+  both gate directions. Asymptotic soundness: the rung is FOLD-corrected
+  (Airy, fold catastrophe) NOT cusp-corrected (Pearcey, cusp catastrophe) —
+  sound because at large R Airy -> geometric image sum matches
+  Pearcey -> geometric image sum, and the conservative R gate ensures the
+  rung is deep enough. CONCERN: |ppGO - pearcey|/|pearcey| < 0.005 agreement
+  is NOT asserted in tests (docstring records the delegation). OWED post-
+  build calibration: sweep R at fixed w, measure |ppGO-pearcey|/|pearcey|
+  at the worst-case direction, fit the exponent, tighten
+  _R_PPGO_ERROR_CONST. Pre-existing (NOT ppGO-induced): the ppGO gate fails
+  `test_moving_error_const_threshold_flips_a_fixed_node`'s config on both
+  branches (r_ppgo_min ~25x the radius at the low-const setting) — the
+  timeout is a broader-suite performance issue.
