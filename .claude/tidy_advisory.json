@@ -1,12 +1,13 @@
 {
   "trigger": "post-commit",
-  "commit": "1a97bbdda57e3a166026ced93f16c64afe4f5d36",
-  "timestamp": "2026-08-09T02:21:30Z",
+  "commit": "c00899ec4e8add0610de1869041b9e9ccb9f9fd1",
+  "timestamp": "2026-08-09T05:45:30Z",
   "touched_files": [
     "cogwheel/lensing/born_residual_chart.py",
     "cogwheel/lensing/chang_refsdal/__init__.py",
     "cogwheel/lensing/chang_refsdal/_airy_fold.py",
     "cogwheel/lensing/chang_refsdal/_born.py",
+    "cogwheel/lensing/chang_refsdal/_pearcey_cusp.py",
     "cogwheel/lensing/chang_refsdal/channels.py",
     "cogwheel/lensing/chang_refsdal/geometry.py",
     "cogwheel/lensing/likelihood.py",
@@ -15,6 +16,7 @@
     "cogwheel/lensing/surrogate_census.py",
     "cogwheel/lensing/surrogate_training.py",
     "cogwheel/tests/conftest.py",
+    "cogwheel/tests/test_lensing_airy_fold.py",
     "cogwheel/tests/test_lensing_born.py",
     "cogwheel/tests/test_lensing_born_residual_wiring.py",
     "cogwheel/tests/test_lensing_caustic_cusps.py",
