@@ -122,7 +122,7 @@ import subprocess
 import sys
 import tempfile
 from functools import lru_cache
-from unittest import TestCase, expectedFailure, main, mock, skipUnless
+from unittest import TestCase, expectedFailure, mock, skipUnless
 
 import mpmath
 import numpy as np
