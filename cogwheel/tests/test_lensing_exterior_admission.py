@@ -1797,5 +1797,211 @@ class CuspAlignmentSelfFalsificationTestCase(ExteriorAdmissionTestCase):
         self.record_comparison()
 
 
+
+# --------------------------------------------------------------------------- #
+#  WP3 (exterior-cusp-exclusion): _exclude_near_cusp band-edge,              #
+#  _deltoid_cusp_source_angles, _farfield_tiles cusp-filter certification.    #
+# --------------------------------------------------------------------------- #
+
+_EC_CTR_RHO = 1.15
+_EC_CTR_THETA_DEG = 20.0
+_EC_HALF = 0.04
+_EC_D_EXCLUDE = 0.15
+_EC_GAMMA_MID = 0.30
+_EC_GAMMA_BAND = (0.25, 0.35)
+
+
+class ExcludeNearCuspBandEdgeTestCase(ExteriorAdmissionTestCase):
+    """``_exclude_near_cusp`` with ``gamma_band``: band-edge checking is
+    load-bearing.
+
+    The tile at ``(rho=1.15, theta=20°)`` with half-width ``0.04`` has a
+    corner at ``(1.11, ~17.7°)`` whose source-plane distance from the
+    on-axis astroid cusp vertex is ``~0.140`` at ``gamma=0.25`` (below
+    ``d_exclude=0.15``) but ``~0.169`` at ``gamma=0.30`` (above it) and
+    ``~0.197`` at ``gamma=0.35`` (farther still).  The corner is excluded
+    at gamma_lo because ``r_caustic`` is SMALLER there, pulling the
+    corner proportionally closer to the cusp vertex.  ``gamma_band=None``
+    (single-gamma check at 0.30) finds no exclusion, proving that the
+    three-point band check catches the worst edge.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.center = (float(_EC_CTR_RHO),
+                       float(math.radians(_EC_CTR_THETA_DEG)))
+        self.half = (float(_EC_HALF), float(_EC_HALF))
+
+    def test_band_edge_excludes_at_gamma_lo_but_not_mid(self) -> None:
+        result = st._exclude_near_cusp(
+            _EC_GAMMA_MID, self.center, self.half,
+            cusp_angles=[0.0], d_exclude=_EC_D_EXCLUDE,
+            gamma_band=_EC_GAMMA_BAND)
+        self.assertTrue(result)
+        self.record_comparison()
+
+    def test_gamma_band_none_returns_false(self) -> None:
+        result = st._exclude_near_cusp(
+            _EC_GAMMA_MID, self.center, self.half,
+            cusp_angles=[0.0], d_exclude=_EC_D_EXCLUDE,
+            gamma_band=None)
+        self.assertFalse(result)
+        self.record_comparison()
+
+
+_DELTOID_GAMMA = 1.5
+_DELTOID_N = 2000
+
+
+class DeltoidCuspSourceAnglesTestCase(ExteriorAdmissionTestCase):
+    """``_deltoid_cusp_source_angles``: D₂-folded saddle cusp angles.
+
+    The deltoid caustic has 3 cusps per lobe and 2 lobes (6 raw cusps).
+    After D₂ folding into ``[0, π/2]`` and deduplication, 2--3 distinct
+    angles remain (the on-axis cusp at 0 merges with its reflections;
+    the off-axis cusps fold to a single non-zero angle).  ``_cusp_source_angles``
+    (positive-parity astroid only) returns DIFFERENT angles at the same gamma,
+    proving ``_deltoid_cusp_source_angles`` is NOT a trivial delegation.
+    """
+
+    def test_saddle_returns_d2_folded_angles(self) -> None:
+        angles = st._deltoid_cusp_source_angles(_DELTOID_GAMMA, _DELTOID_N)
+        distinct = sorted(set(round(a, 12) for a in angles))
+        self.assertGreater(len(distinct), 0, 'no cusp angles found')
+        self.assertLessEqual(len(distinct), 3,
+                             'unexpectedly many distinct folded angles')
+        self.assertTrue(all(0.0 <= a <= 0.5 * math.pi for a in distinct),
+                        'angles outside [0, π/2]')
+        self.record_comparison()
+
+    def test_off_axis_angle_present(self) -> None:
+        angles = st._deltoid_cusp_source_angles(_DELTOID_GAMMA, _DELTOID_N)
+        distinct = sorted(set(angles))
+        self.assertTrue(
+            any(abs(a) > 1e-12 and abs(a - 0.5 * math.pi) > 1e-12
+                for a in distinct),
+            'no off-axis cusp angle found (all are 0 or π/2)')
+        self.record_comparison()
+
+    def test_deltoid_differs_from_cusp_source_angles(self) -> None:
+        """At saddle parity the deltoid angles are NOT the astroid angles."""
+        deltoid = sorted(set(
+            st._deltoid_cusp_source_angles(_DELTOID_GAMMA, _DELTOID_N)))
+        astroid = sorted(set(
+            _folded_cusp_angles(st._cusp_source_angles(_DELTOID_GAMMA, _DELTOID_N))))
+        self.assertNotEqual(deltoid, astroid,
+                            'deltoid angles equal astroid angles -- '
+                            'no independent information added')
+        self.record_comparison()
+
+    def test_empty_for_positive_parity(self) -> None:
+        """Structural property: positive parity produces no deltoid cusps."""
+        angles = st._deltoid_cusp_source_angles(0.5, _DELTOID_N)
+        self.assertEqual(angles, [])
+        self.record_comparison()
+
+
+_FT_RHO_INNER = 1.1
+_FT_RHO_OUTER = 1.8
+_FT_N = 2
+_FT_CUSP_ANGLES = [0.0, 0.5 * math.pi]
+_FT_GAMMA = 0.5
+_FT_GAMMA_BAND = (0.45, 0.55)
+
+
+class FarfieldTilesCuspExclusionTestCase(ExteriorAdmissionTestCase):
+    """``_farfield_tiles`` with cusp-exclusion kwargs filters tiles correctly.
+
+    At ``rho=1.1..1.8`` with ``n_per_side=2``, the 2 inner tiles (corners on
+    the cusp rays) are within ``_CUSP_EXCLUSION_DISTANCE=0.35`` of the on-axis
+    astroid vertices at ``gamma=0.45``; the 2 outer tiles (rho=1.625) are
+    safely beyond.  The filtered list is a strict subset, and every excluded
+    tile demonstrably has at least one corner within the exclusion distance
+    of a cusp vertex at one of the band gammas.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.unfiltered = st._farfield_tiles(
+            _FT_RHO_INNER, _FT_RHO_OUTER, _FT_N)
+        self.filtered = st._farfield_tiles(
+            _FT_RHO_INNER, _FT_RHO_OUTER, _FT_N,
+            cusp_angles=_FT_CUSP_ANGLES, gamma=_FT_GAMMA,
+            gamma_band=_FT_GAMMA_BAND)
+
+    def test_cusp_exclusion_filters_tiles(self) -> None:
+        self.assertGreater(len(self.unfiltered), 0)
+        self.assertGreater(len(self.filtered), 0)
+        self.assertLess(len(self.filtered), len(self.unfiltered))
+        self.record_comparison()
+
+    def test_excluded_tiles_are_near_cusp_rays(self) -> None:
+        excluded = [t for t in self.unfiltered if t not in self.filtered]
+        self.assertGreater(len(excluded), 0,
+                           'no tiles were excluded; the filter is inert')
+        for center, half, _, _ in excluded:
+            found = False
+            for g in _FT_GAMMA_BAND:
+                if found:
+                    break
+                for cr in (center[0] - half[0], center[0] + half[0]):
+                    for ct in (center[1] - half[1], center[1] + half[1]):
+                        y1, y2 = sg._from_caustic_fixed(g, cr, ct)
+                        for cusp_angle in _FT_CUSP_ANGLES:
+                            r = geometry.r_caustic(g, float(cusp_angle))
+                            cx = r * math.cos(cusp_angle)
+                            cy = r * math.sin(cusp_angle)
+                            if math.hypot(y1 - cx, y2 - cy) < st._CUSP_EXCLUSION_DISTANCE:
+                                found = True
+                                break
+            self.assertTrue(
+                found,
+                f'excluded tile {center} has no corner within '
+                f'{st._CUSP_EXCLUSION_DISTANCE} of a cusp at any band gamma '
+                '-- the exclusion is physically unmotivated')
+            self.record_comparison()
+
+    def test_no_cusp_kwargs_returns_unfiltered(self) -> None:
+        """Backward-compat: omitting cusp kwargs preserves unfiltered behavior."""
+        compat = st._farfield_tiles(
+            _FT_RHO_INNER, _FT_RHO_OUTER, _FT_N)
+        self.assertEqual(compat, self.unfiltered)
+        self.record_comparison()
+
+
+class ExteriorCuspExclusionSelfFalsificationTestCase(ExteriorAdmissionTestCase):
+    """Prove the three new WP3 detectors can go RED."""
+
+    def test_exclude_near_cusp_detector_is_not_vacuously_true(self) -> None:
+        """Explicit ``d_exclude=0.0`` clears a tile the default excludes."""
+        center = (float(_EC_CTR_RHO),
+                  float(math.radians(_EC_CTR_THETA_DEG)))
+        half = (float(_EC_HALF), float(_EC_HALF))
+        result = st._exclude_near_cusp(
+            _EC_GAMMA_MID, center, half, cusp_angles=[0.0],
+            d_exclude=0.0, gamma_band=_EC_GAMMA_BAND)
+        self.assertFalse(result)
+        self.record_comparison()
+
+    def test_farfield_tiles_detector_is_not_vacuously_filtering(self) -> None:
+        """Mock ``_exclude_near_cusp`` -> False: filtered == unfiltered."""
+        with mock.patch.object(st, '_exclude_near_cusp', return_value=False):
+            filtered_none = st._farfield_tiles(
+                _FT_RHO_INNER, _FT_RHO_OUTER, _FT_N,
+                cusp_angles=_FT_CUSP_ANGLES, gamma=_FT_GAMMA,
+                gamma_band=_FT_GAMMA_BAND)
+        unfiltered = st._farfield_tiles(
+            _FT_RHO_INNER, _FT_RHO_OUTER, _FT_N)
+        self.assertEqual(filtered_none, unfiltered)
+        self.record_comparison()
+
+    def test_deltoid_cusp_empty_on_wrong_parity(self) -> None:
+        """At positive parity the deltoid function returns empty, proving
+        it relies on the structural sweep NOT producing cusps."""
+        angles = st._deltoid_cusp_source_angles(0.5, _DELTOID_N)
+        self.assertEqual(angles, [])
+        self.record_comparison()
+
+
 if __name__ == '__main__':
     unittest.main()

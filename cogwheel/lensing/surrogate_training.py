@@ -118,11 +118,11 @@ _CUSP_BRACKET_EPS = 1e-9
 #: above verbatim so its charts stay byte-identical.
 _SADDLE_CUSP_WIDTH_SAFETY = 2.5
 _SADDLE_CUSP_MIN_HALFWIDTH = 0.08
-#: Minimum distance (physical source-plane units) from a tile corner to an
-#: astroid cusp vertex below which the tile is excluded from exterior
-#: charting.
-_CUSP_EXCLUSION_DISTANCE = 0.2
-#: Deltoid-lobe interior near-cusp carve-out distance (source-plane ``y``-units).
+#: Minimum distance (physical source-plane units) from a tile corner to a
+#: cusp vertex below which the tile is excluded from exterior charting for
+#: BOTH astroid and deltoid/saddle cusps.  Calibrated from the measured
+#: FARFIELD_KERNEL_SUM envelope turn-on distance (scripts/measure_cusp_exclusion.py).
+_CUSP_EXCLUSION_DISTANCE = 0.35
 #: Fractional shrink of each fold arc away from its bounding walls.
 _ARC_MARGIN_FRAC = 0.03
 #: Number of theta samples used to integrate the tube's arc-length axis map
@@ -1180,7 +1180,11 @@ def _coordinate_radius_bounds(
     return radius_min, reach_max
 
 
-def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int
+def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int,
+                    *,
+                    cusp_angles: list[float] | None = None,
+                    gamma: float | None = None,
+                    gamma_band: tuple[float, float] | None = None
                     ) -> list[tuple[tuple[float, float],
                                     tuple[float, float], int, int]]:
     """Rectangular exterior tiles of a caustic-fixed ``(rho, theta_c)``
@@ -1205,6 +1209,21 @@ def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int
         Outer prior-support radius in chart-rho units.
     n_per_side : int
         Number of tiles along each axis (``rho`` and ``theta_c``).
+    cusp_angles : list of float, optional
+        D₂-folded source-plane cusp-ray angles in ``[0, π/2]``.
+        When ``None``/empty no cusp-exclusion filtering is performed
+        (backward-compatible).
+    gamma : float, optional
+        Representative shear magnitude for the cusp-exclusion check.
+        When ``None`` the cusp-exclusion step is skipped
+        (backward-compatible).
+    gamma_band : tuple[float, float], optional
+        If provided together with ``cusp_angles`` and ``gamma``, the cusp-
+        exclusion check evaluates at ``(gamma_band[0], gamma,
+        gamma_band[1])`` so a tile is dropped when ANY band-edge gamma
+        places a corner within ``_CUSP_EXCLUSION_DISTANCE`` of a cusp
+        vertex.  When ``None`` the check uses only the single ``gamma``
+        (backward-compatible single-gamma behaviour).
 
     Returns
     -------
@@ -1225,8 +1244,14 @@ def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int
     tiles: list[tuple[tuple[float, float], tuple[float, float], int, int]] = []
     for i, rho_c in enumerate(rho_centers):
         for j, theta_c in enumerate(theta_centers):
-            tiles.append(((float(rho_c), float(theta_c)),
-                          (float(half_rho), float(half_theta)), i, j))
+            center = (float(rho_c), float(theta_c))
+            half = (float(half_rho), float(half_theta))
+            if (gamma is not None and cusp_angles
+                    and _exclude_near_cusp(gamma, center, half,
+                                           cusp_angles,
+                                           gamma_band=gamma_band)):
+                continue
+            tiles.append((center, half, i, j))
     return tiles
 
 
@@ -1641,6 +1666,50 @@ def _cusp_source_angles(gamma: float, n: int) -> list[float]:
         angles.append(float(np.arctan2(src[1], src[0])))
     return sorted(angles)
 
+def _deltoid_cusp_source_angles(gamma: float, n: int) -> list[float]:
+    """Source-plane polar angles (rad, D₂-folded into ``[0, π/2]``, sorted) of
+    the deltoid/saddle cusps measured from the origin.
+
+    The six saddle deltoid cusps (3 per lobe × 2 lobes) are the
+    caustic-speed minima of the two square-root branch sweeps around lens-
+    plane centres 0 and π (``_find_cusps`` -- the SAME detector the fold-arc
+    tiler and `_lobe_cusp_source_angles` use, with the wider saddle
+    windows).  Each cusp's lens-plane angle is mapped through
+    `critical_point(gamma, theta_lens, 0, 0, branch)` to its SOURCE-plane
+    image and reported as an ``atan2`` direction measured FROM THE ORIGIN.
+    The angles are D₂-folded (``abs(angle)``, mirror ``π - angle`` if
+    ``> π/2``) so the exterior polar chart's ``theta_c`` in ``[0, π/2]``
+    can exclude tiles near folded cusp vertices.
+
+    Returns an empty list when the sweep resolves no cusp (a degenerate
+    band); the caller treats the result conservatively.
+    """
+    theta_max = 0.5 * np.arcsin(1.0 / abs(gamma))
+    angles: list[float] = []
+    for lens_center in (0.0, math.pi):
+        for branch in (1, -1):
+            lo = lens_center - theta_max
+            hi = lens_center + theta_max
+            thetas, speed = _branch_speed_profile(
+                gamma, branch, lo, hi, n, periodic=False)
+            for theta_lens, _delta in _find_cusps(
+                    thetas, speed, periodic=False, gamma=gamma, branch=branch,
+                    width_safety=_SADDLE_CUSP_WIDTH_SAFETY,
+                    min_halfwidth=_SADDLE_CUSP_MIN_HALFWIDTH):
+                try:
+                    src = geometry.critical_point(
+                        gamma, float(theta_lens), 0.0, 0.0, branch).source
+                except geometry.LensDomainError:
+                    continue
+                angles.append(float(np.arctan2(src[1], src[0])))
+    folded: list[float] = []
+    for a in angles:
+        a = abs(a)
+        if a > 0.5 * math.pi:
+            a = math.pi - a
+        folded.append(a)
+    return sorted(set(folded))
+
 
 def _cusp_aligned_theta_tiles(cusp_angles: list[float], n_per_side: int,
                               theta_range: tuple[float, float] = (
@@ -1676,52 +1745,65 @@ def _cusp_aligned_theta_tiles(cusp_angles: list[float], n_per_side: int,
 def _exclude_near_cusp(gamma: float, center: tuple[float, float],
                        half: tuple[float, float],
                        cusp_angles: list[float],
-                       d_exclude: float = _CUSP_EXCLUSION_DISTANCE) -> bool:
-    """Return True if any tile corner is within ``d_exclude`` of an
-    astroid cusp.
+                       d_exclude: float = _CUSP_EXCLUSION_DISTANCE,
+                       gamma_band: tuple[float, float] | None = None
+                       ) -> bool:
+    """Return True if any tile corner is within ``d_exclude`` of a cusp vertex.
 
-    The four positive-parity astroid cusps are the caustic-speed minima
-    whose source-plane directions ``cusp_angles`` come from
-    `_cusp_source_angles`.  Each cusp's source-plane position is
-    reconstructed as ``(r_caustic * cos(phi), r_caustic * sin(phi))``
-    because the cusp lies ON the caustic and the directional caustic
-    radius `geometry.r_caustic(gamma, phi)` is the outward magnitude.
-    The tile's four corners are mapped to eigenframe source coordinates
-    via `_from_caustic_fixed`.  The exclusion distance ``d_exclude`` is
-    the minimum Euclidean source-plane separation below which the tile
-    is considered too close to a near-cusp singularity for a smooth
-    polar chart.
+    Supports both astroid (positive-parity, ``gamma < 1``) and deltoid
+    (saddle, ``gamma >= 1``) cusp vertices.  Each cusp's source-plane
+    position is reconstructed as ``(r_caustic * cos(phi), r_caustic *
+    sin(phi))`` because the cusp lies ON the caustic.  The tile's four
+    corners are mapped to eigenframe source coordinates via
+    `_from_caustic_fixed`.  The exclusion distance ``d_exclude`` is the
+    minimum Euclidean source-plane separation below which the tile is
+    considered too close to a near-cusp singularity for a smooth polar
+    chart.
 
-    Only astroid (positive-parity, ``gamma < 1``) cusps are checked;
-    saddle (``gamma >= 1``) deltoid cusps are off-axis and not relevant
-    for the caustic-centre-fixed exterior polar tiling.  A domain
-    refusal from `geometry.r_caustic` (e.g. a cusp-angle drift at a
-    band edge) is treated conservatively as excluded.
+    When ``gamma_band`` is ``None`` the check uses only the single
+    ``gamma`` (backward-compatible single-gamma behaviour).  When provided
+    as ``(gamma_lo, gamma_hi)`` the check is repeated at gamma_lo,
+    gamma_mid (= ``gamma``), and gamma_hi; the tile is excluded if ANY
+    corner is within ``d_exclude`` of ANY cusp at ANY of the three gammas.
+    For astroid cusps (angles fixed at multiples of π/2) this captures the
+    ``r_caustic`` drift across the band; the tightest exclusion edge is
+    configuration-dependent and the three-point check covers both band
+    edges.  For deltoid cusps (angles also drift) the
+    three-point check is a conservative proxy.  A domain refusal from
+    `geometry.r_caustic` is treated conservatively as excluded.
     """
     if not cusp_angles:
         return False
     rho_c, theta_c = center
     half_rho, half_theta = half
-    rho_corners = (rho_c - half_rho, rho_c + half_rho)
-    theta_corners = (theta_c - half_theta, theta_c + half_theta)
-    corner_points = np.array([
-        _from_caustic_fixed(gamma, cr, ct)
-        for cr in rho_corners for ct in theta_corners
-    ], dtype=float)
-    cusp_positions: list[tuple[float, float]] = []
-    for angle in cusp_angles:
-        try:
-            r = geometry.r_caustic(gamma, float(angle))
-        except geometry.LensDomainError:
+    gammas: tuple[float, ...]
+    if gamma_band is not None:
+        gammas = (gamma_band[0], gamma, gamma_band[1])
+    else:
+        gammas = (gamma,)
+    for g in gammas:
+        rho_corners = (rho_c - half_rho, rho_c + half_rho)
+        theta_corners = (theta_c - half_theta, theta_c + half_theta)
+        corner_points = np.array([
+            _from_caustic_fixed(g, cr, ct)
+            for cr in rho_corners for ct in theta_corners
+        ], dtype=float)
+        cusp_positions: list[tuple[float, float]] = []
+        for angle in cusp_angles:
+            try:
+                r = geometry.r_caustic(g, float(angle))
+            except geometry.LensDomainError:
+                continue
+            cusp_positions.append((float(r * math.cos(angle)),
+                                   float(r * math.sin(angle))))
+        if not cusp_positions:
             continue
-        cusp_positions.append((float(r * math.cos(angle)),
-                               float(r * math.sin(angle))))
-    if not cusp_positions:
-        return False
-    cusp_points = np.array(cusp_positions, dtype=float)
-    delta = corner_points[:, None, :] - cusp_points[None, :, :]
-    min_dist = float(np.sqrt((delta * delta).sum(axis=2)).min())
-    return min_dist < d_exclude
+        cusp_points = np.array(cusp_positions, dtype=float)
+        delta = corner_points[:, None, :] - cusp_points[None, :, :]
+        min_dist = float(np.sqrt((delta * delta).sum(axis=2)).min())
+        if min_dist < d_exclude:
+            return True
+    return False
 
 
 @dataclass(frozen=True, eq=False)
@@ -4527,6 +4609,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 if exterior_tiles else exclusion_rho)
         else:
             region_exclusion_rho = exclusion_rho
+            # Deltoid cusp exclusion for saddle exterior: cusp-aligned
+            # cusp_angles in D₂-folded [0, π/2] passed to _farfield_tiles
+            # so near-cusp tiles are dropped from the scalar-reach tiling.
+            cusp_angles = _deltoid_cusp_source_angles(
+                gamma_mid, config.n_caustic_samples)
         # caustic-relative inner edge (WP1 defect 1).  Derive it from the NARROWED
         # served region ``region_exclusion_rho`` -- NOT the pre-narrowing outer
         # rho-band -- so the certified-ppGO trim below reads ``w_trust`` /
@@ -4627,10 +4714,13 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     # lies inside the prior box for its direction.
                     tiles = exterior_tiles
                 else:
-                    # Macro saddle: unchanged scalar-reach exterior tiler.
+                    # Macro saddle: scalar-reach exterior tiler with
+                    # deltoid cusp-exclusion filtering.
                     tiles = _farfield_tiles(
                         exclusion_rho, rho_outer_region,
-                        config.n_farfield_tiles_per_side)
+                        config.n_farfield_tiles_per_side,
+                        cusp_angles=cusp_angles, gamma=gamma_mid,
+                        gamma_band=band)
                 # Per-window node reprovision (w-axis ONLY): probe the innermost
                 # tile (largest w_floor, hardest fit) for the minimal w-node
                 # density N_rec still clearing the eps bar; the rho/theta_c tiling

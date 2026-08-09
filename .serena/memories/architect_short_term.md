@@ -1,3 +1,3 @@
 # Architect Short-Term Observations
 
-(empty — last consolidated by Dreamer on 2026-08-09)
+Build cusp_exclusion_cut (2026-08-09): exterior tile-count ~500 → ~70 by fixing cusp exclusion. Root causes: (1) `_CUSP_EXCLUSION_DISTANCE=0.2` too tight — tiles at 0.206 from cusps fail (median eps 0.0039); (2) `_exclude_near_cusp` only checks astroid cusps; (3) saddle exterior path has no cusp exclusion. Professor: use 1e-4 threshold for turn-on measurement, check at band edges (not just gamma_mid), same A3 physics for both astroid + deltoid cusps. Simplifier: keep single constant; wire saddle via `_farfield_tiles` kwargs, not by switching to `_farfield_exterior_tiles`.
