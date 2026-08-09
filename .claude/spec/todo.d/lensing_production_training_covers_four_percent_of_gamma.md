@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [lensing_cusp_ppgo_at_high_w]
+depends_on: [2026-08-09_cusp_ppgo_high_w]
 ---
 
 - **`train()` COVERS ONE 0.04-WIDE GAMMA BAND PER PARITY — about 4% of the

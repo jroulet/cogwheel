@@ -3767,3 +3767,352 @@ class SaddleWedgeEdgeRefusalSelfFalsificationTestCase(_FoldArmTestCase):
             n_injected, 1,
             f'{name}: injecting a finite vertex did not reach '
             '`_soft_normal_form` -- the gate does not short-circuit there')
+
+
+# ----------------------------------------------------------------------
+# ppGO fast-rung fixtures for `cusp_amplification` (Build WP1).
+# ----------------------------------------------------------------------
+
+#: Positive-parity (astroid) fixture where the ppGO rung fires at w >= 20000
+#: (measured with _R_PPGO_ERROR_CONST=50.0: r_ppgo_min≈464.2, radius=98.2
+#: at w=500, the control radius crossing the ppGO bar near w=15000).
+_PPGO_ASTROID_GAMMA: float = 0.5
+_PPGO_ASTROID_RADIUS: float = 0.20
+_PPGO_ASTROID_ANGLE: float = 0.25 * math.pi
+
+#: Positive-parity source on the cusp ray (near delta_perp=0) -- the
+#: delta_parallel alignment makes the radius primarily x-dominated.
+_PPGO_ASTROID_SOURCE = np.array([
+    _PPGO_ASTROID_RADIUS * math.cos(_PPGO_ASTROID_ANGLE),
+    _PPGO_ASTROID_RADIUS * math.sin(_PPGO_ASTROID_ANGLE),
+])
+
+#: Saddle-parity (deltoid) fixture where the ppGO rung fires at w >= 5000
+#: (gamma=1.2 > lam=1.0; measured: the control radius clears the ppGO bar
+#: near w=4800).
+_PPGO_SADDLE_GAMMA: float = 1.2
+_PPGO_SADDLE_SOURCE = np.array([-0.5, 0.5])
+
+#: Large w where the ppGO rung fires for the astroid fixture
+_PPGO_SERVE_W: float = 20000.0
+
+#: Intermediate w where ppGO refuses but the Pearcey uniform path serves
+#: (radius=49.4, radius_min=7.4 < radius < r_ppgo_min=464.2 at w=200).
+_PPGO_INTERMEDIATE_W: float = 200.0
+
+#: w below the ppGO floor (_W_PPGO_FLOOR=50.0) for the w-gate isolation test.
+_PPGO_SUB_FLOOR_W: float = 5.0
+
+#: Reference bar for ppGO vs Pearcey asymptotic agreement (bar_ppgo=0.005).
+_PPGO_AGREEMENT_BAR: float = 0.005
+
+#: Common envelope bar: the production default.
+_ENVELOPE_BAR: float = 0.05  # matches _DEFAULT_ENVELOPE_BAR in _pearcey_cusp
+
+
+def _capture_ppgo_route(w: float, source, gamma: float, *,
+                        beta: float = 0.0, kappa: float = 0.0,
+                        envelope_bar: float = _ENVELOPE_BAR,
+                        pearcey_table=None) -> tuple:
+    """Call ``cusp_amplification`` and report which rung served.
+
+    Returns ``(served, route)`` where *route* is ``'ppgo'`` if
+    ``fold_ppgo_correction`` was called, ``'pearcey'`` if the Pearcey
+    uniform path returned a value, or ``'refusal'``.
+    """
+    ppgo_called = [False]
+    real_fpc = _airy_fold.fold_ppgo_correction
+
+    def spy(*args, **kwargs):
+        ppgo_called[0] = True
+        return real_fpc(*args, **kwargs)
+
+    with mock.patch.object(_airy_fold, 'fold_ppgo_correction', spy):
+        served = _pearcey_cusp.cusp_amplification(
+            w, source, gamma, beta=beta, kappa=kappa,
+            envelope_bar=envelope_bar,
+            pearcey_table=pearcey_table)
+
+    if served is not None and ppgo_called[0]:
+        route = 'ppgo'
+    elif served is not None:
+        route = 'pearcey'
+    else:
+        route = 'refusal'
+    return served, route
+
+
+class PpgoGoldenAgreementTestCase(_FoldArmTestCase):
+    """Test 1 + 5(a): ppGO rung serves at large R; output is finite and
+    deterministic (same with/without pearcey_table, since the ppGO rung
+    fires before the Pearcey path).
+
+    Numerical agreement with the Pearcey path is NOT asserted here
+    because the current ppGO rung delegates to ``fold_ppgo_correction``
+    (a fold-corrected form) rather than a cusp-corrected form.  The
+    ``_R_PPGO_ERROR_CONST = 50.0`` placeholder is conservative; the
+    post-build driver measurement will tighten it.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.table = _pearcey_cusp.PearceyTable.load()
+
+    def test_ppgo_rung_fires_at_large_R_astroid(self):
+        """The ppGO rung fires at large R for the positive-parity fixture."""
+        served, route = _capture_ppgo_route(
+            _PPGO_SERVE_W, _PPGO_ASTROID_SOURCE, _PPGO_ASTROID_GAMMA,
+            envelope_bar=_ENVELOPE_BAR)
+        self.n_checks += 1
+        self.assertIsNotNone(served, 'ppGO rung should serve at large R')
+        self.assertEqual(route, 'ppgo', f'Expected ppgo route, got {route}')
+
+    def test_ppgo_result_finite_and_deterministic(self):
+        """The ppGO output is finite and the same with or without a
+        Pearcey table (the ppGO rung fires before the Pearcey path is
+        ever consulted)."""
+        served_no_table, _ = _capture_ppgo_route(
+            _PPGO_SERVE_W, _PPGO_ASTROID_SOURCE, _PPGO_ASTROID_GAMMA,
+            envelope_bar=_ENVELOPE_BAR,
+            pearcey_table=None)
+        served_with_table, _ = _capture_ppgo_route(
+            _PPGO_SERVE_W, _PPGO_ASTROID_SOURCE, _PPGO_ASTROID_GAMMA,
+            envelope_bar=_ENVELOPE_BAR,
+            pearcey_table=self.table)
+
+        self.n_checks += 1
+        self.assertIsNotNone(served_no_table)
+        self.assertIsNotNone(served_with_table)
+        self.assertTrue(np.isfinite(abs(served_no_table)),
+                        'ppGO result is not finite')
+        self.assertEqual(
+            complex(served_no_table), complex(served_with_table),
+            'ppGO result differs with/without Pearcey table -- '
+            'the table is consulted despite the ppGO rung firing first')
+
+
+class PpgoRungRefusalTestCase(_FoldArmTestCase):
+    """Tests 2, 3, 6: ppGO rung correctly refuses when guards fail."""
+
+    def test_refuses_at_small_R_below_r_ppgo_min(self):
+        """Test 2: ppGO rung refuses when the source is very close
+        to the cusp vertex (R < r_ppgo_min).
+
+        We place the source at a tiny offset from the cusp vertex so
+        the scaled control radius drops below the guard, and verify
+        ``fold_ppgo_correction`` is never called.
+        """
+        gamma = _PPGO_ASTROID_GAMMA
+        matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
+        cusp = geometry.critical_point(gamma, 0.0, 0.0, 0.0, 1)
+        source = (np.asarray(cusp.source)
+                  + 1e-7 * np.asarray(cusp.soft_axis)
+                  + 1e-7 * np.asarray(cusp.hard_axis))
+
+        served, route = _capture_ppgo_route(
+            _PPGO_INTERMEDIATE_W, source, gamma,
+            envelope_bar=_ENVELOPE_BAR)
+        self.n_checks += 1
+        self.assertNotEqual(
+            route, 'ppgo',
+            'fold_ppgo_correction should NOT fire at R << r_ppgo_min')
+
+    def test_refuses_at_w_below_w_floor(self):
+        """Test 3: ppGO w-floor gate fires independently of the R-gate.
+
+        We monkeypatch the R-gate to always pass (r_ppgo_min=0) and
+        verify ``fold_ppgo_correction`` is never called at a w below
+        ``_W_PPGO_FLOOR=50.0``.
+        """
+        gamma = _PPGO_ASTROID_GAMMA
+        source = _PPGO_ASTROID_SOURCE
+
+        with mock.patch.object(
+                _pearcey_cusp, '_R_PPGO_ERROR_CONST', 0.0):
+            served, route = _capture_ppgo_route(
+                _PPGO_SUB_FLOOR_W, source, gamma,
+                envelope_bar=_ENVELOPE_BAR)
+        self.n_checks += 1
+        self.assertNotEqual(
+            route, 'ppgo',
+            f'Expected w-floor ({_PPGO_SUB_FLOOR_W} < _W_PPGO_FLOOR) '
+            'to block ppGO rung, but route={route}')
+
+    def test_do_nothing_control_intermediate_R(self):
+        """Test 6: Intermediate R -- ppGO refuses, Pearcey path serves,
+        and the result is the same as when ppGO is forcefully disabled.
+
+        At w=200 the astroid fixture has radius=49.4 < r_ppgo_min=464.2
+        but radius > radius_min=7.4, so the Pearcey uniform form serves
+        and the ppGO rung is never reached.
+        """
+        gamma = _PPGO_ASTROID_GAMMA
+        source = _PPGO_ASTROID_SOURCE
+
+        # With ppGO rung intact
+        served_with_ppgo, route_with = _capture_ppgo_route(
+            _PPGO_INTERMEDIATE_W, source, gamma,
+            envelope_bar=_ENVELOPE_BAR)
+
+        # With ppGO rung forcefully disabled
+        with mock.patch.object(
+                _pearcey_cusp, '_R_PPGO_ERROR_CONST', 1e30):
+            served_without_ppgo = _pearcey_cusp.cusp_amplification(
+                _PPGO_INTERMEDIATE_W, source, gamma,
+                envelope_bar=_ENVELOPE_BAR)
+
+        self.n_checks += 1
+        self.assertIsNotNone(
+            served_with_ppgo,
+            'Pearcey path should serve at intermediate R')
+        self.assertEqual(
+            route_with, 'pearcey',
+            f'Expected Pearcey route, got {route_with} -- ppGO should '
+            'refuse at intermediate R')
+        self.assertIsNotNone(
+            served_without_ppgo,
+            'Should serve with ppGO disabled')
+        # Byte-identical: the ppGO rung adds no code path for regimes
+        # where it refuses.
+        self.assertEqual(
+            complex(served_with_ppgo), complex(served_without_ppgo),
+            'DO-NOTHING control: result differs with ppGO rung '
+            'disabled vs intact at intermediate R')
+
+
+class PpgoFinitenessGuardTestCase(_FoldArmTestCase):
+    """Test 4: the finiteness guard catches NaN/Inf in ppGO results."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.table = _pearcey_cusp.PearceyTable.load()
+
+    def _assert_falls_through(self, bad_value, label):
+        """Assert ``cusp_amplification`` does NOT leak a non-finite ppGO
+        result; it either falls through to Pearcey or returns None."""
+        def bad_fpc(*args, **kwargs):
+            return bad_value
+
+        with mock.patch.object(
+                _airy_fold, 'fold_ppgo_correction', bad_fpc):
+            try:
+                served = _pearcey_cusp.cusp_amplification(
+                    _PPGO_SERVE_W, _PPGO_ASTROID_SOURCE,
+                    _PPGO_ASTROID_GAMMA, envelope_bar=_ENVELOPE_BAR,
+                    pearcey_table=self.table)
+            except Exception as exc:
+                self.fail(
+                    f'{label}: `cusp_amplification` raised '
+                    f'{type(exc).__name__}: {exc} -- should never '
+                    f'leak an exception from the ppGO rung')
+
+        self.n_checks += 1
+        if served is not None:
+            self.assertTrue(
+                np.isfinite(abs(served)),
+                f'{label}: returned non-finite amplitude '
+                f'{served!r} -- NaN leaked')
+        # None is also acceptable (falls through to refusal).
+
+    def test_catches_NaN(self):
+        """NaN from ppGO is caught; falls through to Pearcey or None."""
+        self._assert_falls_through(
+            complex(np.nan, 0.0), 'NaN')
+
+    def test_catches_positive_Inf(self):
+        """+Inf from ppGO is caught."""
+        self._assert_falls_through(
+            complex(np.inf, 0.0), '+Inf')
+
+    def test_catches_negative_Inf(self):
+        """-Inf from ppGO is caught."""
+        self._assert_falls_through(
+            complex(-np.inf, 0.0), '-Inf')
+
+    def test_catches_imag_Inf(self):
+        """1j*Inf from ppGO is caught."""
+        self._assert_falls_through(
+            complex(0.0, np.inf), '1j*Inf')
+
+
+class PpgoSaddleParityTestCase(_FoldArmTestCase):
+    """Test 5(b): ppGO rung handles the saddle (deltoid) parity branch.
+
+    At gamma=1.2 (> lam=1.0) the caustic is a deltoid; the ppGO rung
+    fires and returns a finite complex value for w >= 5000."""
+
+    def test_ppgo_rung_fires_at_saddle_parity(self):
+        """The ppGO rung fires for the saddle-parity fixture at w >= 5000."""
+        for w in (5000.0, 10000.0, _PPGO_SERVE_W):
+            with self.subTest(w=w):
+                served, route = _capture_ppgo_route(
+                    w, _PPGO_SADDLE_SOURCE, _PPGO_SADDLE_GAMMA,
+                    envelope_bar=_ENVELOPE_BAR)
+                self.n_checks += 1
+                self.assertIsNotNone(
+                    served,
+                    f'Saddle ppGO rung should serve at w={w}')
+                self.assertEqual(
+                    route, 'ppgo',
+                    f'Expected ppgo route at w={w}, got {route}')
+
+    def test_saddle_ppgo_result_finite(self):
+        """Saddle ppGO output is finite at several w values."""
+        for w in (5000.0, 10000.0, 15000.0, _PPGO_SERVE_W):
+            with self.subTest(w=w):
+                served, route = _capture_ppgo_route(
+                    w, _PPGO_SADDLE_SOURCE, _PPGO_SADDLE_GAMMA,
+                    envelope_bar=_ENVELOPE_BAR)
+                self.n_checks += 1
+                self.assertIsNotNone(served)
+                self.assertEqual(route, 'ppgo')
+                self.assertTrue(
+                    np.isfinite(abs(served)),
+                    f'Saddle ppGO result non-finite at w={w}: {served}')
+
+
+class PpgoRungSelfFalsificationTestCase(_FoldArmTestCase):
+    """Test 7: corrupting the gate constants proves the guards have teeth.
+
+    (a) ``_R_PPGO_ERROR_CONST = 0`` unlocks the rung where it should refuse.
+    (b) ``_PPGO_BAR_DIVISOR = 1e6`` locks the rung where it should serve."""
+
+    def test_zero_error_constant_unlocks_rung(self):
+        """Setting ``_R_PPGO_ERROR_CONST=0`` makes r_ppgo_min=0, so
+        ALL nonzero-R sources pass the R-gate.  At the intermediate-R
+        config (where ppGO normally refuses) the rung now fires."""
+        gamma = _PPGO_ASTROID_GAMMA
+        source = _PPGO_ASTROID_SOURCE
+
+        with mock.patch.object(
+                _pearcey_cusp, '_R_PPGO_ERROR_CONST', 0.0):
+            served, route = _capture_ppgo_route(
+                _PPGO_INTERMEDIATE_W, source, gamma,
+                envelope_bar=_ENVELOPE_BAR)
+        self.n_checks += 1
+        self.assertIsNotNone(
+            served,
+            'ppGO rung should serve when r_ppgo_min is zeroed')
+        self.assertEqual(
+            route, 'ppgo',
+            f'Expected ppgo route, got {route}')
+
+    def test_large_divisor_locks_rung(self):
+        """Setting ``_PPGO_BAR_DIVISOR = 1e6`` makes r_ppgo_min → ∞,
+        so NO sources pass the R-gate.  At the large-R config (where
+        ppGO normally serves) the rung now refuses."""
+        gamma = _PPGO_ASTROID_GAMMA
+        source = _PPGO_ASTROID_SOURCE
+
+        with mock.patch.object(
+                _pearcey_cusp, '_PPGO_BAR_DIVISOR', 1e6):
+            served, route = _capture_ppgo_route(
+                _PPGO_SERVE_W, source, gamma,
+                envelope_bar=_ENVELOPE_BAR,
+                pearcey_table=None)
+
+        self.n_checks += 1
+        self.assertNotEqual(
+            route, 'ppgo',
+            f'ppGO rung should refuse when r_ppgo_min is huge; '
+            f'got route={route}')

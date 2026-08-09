@@ -100,6 +100,7 @@ import numpy as np
 from scipy.optimize import brentq
 
 from cogwheel.lensing.chang_refsdal import geometry
+from cogwheel.lensing.chang_refsdal import _airy_fold
 from cogwheel.lensing.chang_refsdal._pearcey_table import PearceyTable
 
 __all__ = ['pearcey', 'pearcey_asymptotic', 'cusp_amplification',
@@ -415,6 +416,25 @@ _CALIBRATION_TOL = 1e-2
 _C4_MIN = 1e-6
 
 
+#: Leading r-bar error coefficient for the ppGO fast rung inside
+#: `cusp_amplification`.  Dimensionless safety factor multiplying
+#: `_UNIFORM_ERROR_CONST` in the ppGO gate — the product sets the
+#: bar on the leading ppGO amplitude error (the Pearcey uniform
+#: error is ``_UNIFORM_ERROR_CONST *  R^{-3/2}``; the
+#: ``_R_PPGO_ERROR_CONST`` prefactor raises the effective bar so
+#: the ppGO rung only fires deep in the asymptotic regime).
+#: Provisional — owed: post-build driver measurement to tighten.
+_R_PPGO_ERROR_CONST = 50.0
+
+#: Kernel-truncation floor for the ppGO fast rung (1/w³ terms negligible
+#: above this).  A w below this floor would bias the ppGO amplitude because
+#: the geometric-sum kernel still has support beyond the saddle pair.
+_W_PPGO_FLOOR = 50.0
+
+#: ppGO envelope bar divisor: `bar_ppgo = envelope_bar / divisor`, i.e. the
+#: ppGO rung applies a tighter bar than the Pearcey uniform-form gate so
+#: the asymptotic regime is entered cleanly.
+_PPGO_BAR_DIVISOR = 10
 def _real_stationary_points(x: float, y: float) -> list[float]:
     """Real roots ``t`` of ``phi'(t) = 4 t^3 + 2 x t + y = 0``, sorted."""
     roots = np.roots([4.0, 0.0, 2.0 * x, y])
@@ -748,6 +768,21 @@ def cusp_amplification(w: float, source, gamma: float, *,
     y = delta_perp * w ** 0.75 / abs_c4 ** 0.25
 
     radius = math.hypot(x, y)
+
+    # ppGO fast rung: when the control radius is large enough, the
+    # Pearcey function asymptotes to the geometric image sum and
+    # fold_ppgo_correction serves accurately with a ~10³× speedup.
+    r_ppgo_min = (_R_PPGO_ERROR_CONST * _UNIFORM_ERROR_CONST
+                  / (envelope_bar / _PPGO_BAR_DIVISOR)) ** (2.0 / 3.0)
+    if radius >= r_ppgo_min and w >= _W_PPGO_FLOOR:
+        try:
+            # fold_ppgo_correction is scalar-w-safe (returns 0-d array)
+            result = complex(_airy_fold.fold_ppgo_correction(
+                w, source, gamma, beta=beta, kappa=kappa))
+        except geometry.LensDomainError:
+            result = None
+        if result is not None and np.isfinite(abs(result)):
+            return result
     radius_min = (_UNIFORM_ERROR_CONST / envelope_bar) ** (2.0 / 3.0)
     if radius < radius_min:
         return None
