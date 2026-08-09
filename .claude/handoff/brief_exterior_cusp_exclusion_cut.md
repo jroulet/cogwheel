@@ -13,6 +13,7 @@ A 4x4x4 exterior probe with recursion live was killed at 477 charts (tracking to
 - The tiler's `_exclude_near_cusp` uses `_CUSP_EXCLUSION_DISTANCE = 0.2` source-plane units from a cusp vertex. Measured failing π/2-cusp tiles have nearest-corner distances **as low as 0.132** (corner 0.206 admitted and fails). The exclusion radius is too tight for the envelope's structure.
 - Failure concentration: near_0_cusp 41/100 fail, mid-theta 8/44 fail, near_π/2_cusp **123/179 fail** (median eps 0.0039, max 274).
 - `_exclude_near_cusp` (surrogate_training.py:1676) checks **astroid cusps only** — saddle deltoid cusps are explicitly skipped ("not relevant for the caustic-centre-fixed exterior polar tiling").
+- Saddle exterior charts are equally broken: **91/154 fail the 1e-3 bar** (median eps 0.0015, max 11.67), **80 at depth 3** (the cap). The saddle exterior uses the legacy scalar `_farfield_tiles(exclusion_rho, ...)` path (surrogate_training.py:4506 `else` branch) — it does NOT run `_farfield_exterior_tiles`, so `_exclude_near_cusp` is never invoked for parity -1 and there is NO cusp-aligned tiling or near-cusp exclusion on the saddle at all. The scalar `coordinate_radius_min` (band-minimum deltoid reach) does not prevent tiles from straddling deltoid cusp cancellation bands.
 
 ## Work
 
@@ -20,7 +21,7 @@ A 4x4x4 exterior probe with recursion live was killed at 477 charts (tracking to
 
 2. **Set the correct exclusion cut**: update `_CUSP_EXCLUSION_DISTANCE` (or make it gamma-dependent) so no admitted tile's nearest corner falls inside the cancellation band. Verify the failing probe tiles (nearest corners 0.132–0.206) would now be excluded.
 
-3. **Cover saddle cusps**: extend the near-cusp exclusion to the macro-saddle deltoid cusps. The saddle exterior uses a scalar `rho` (no directional r_caustic); determine the correct source-plane exclusion for the deltoid cusp geometry. Also check the deltoid-lobe interior path (the retired `_LOBE_CUSP_EXCLUSION_DISTANCE` case) — confirm the cusp-adapted u-coordinate there means no carve-out is needed, or add the correct cut if it is.
+3. **Cover saddle cusps**: the saddle exterior NEVER runs the cusp-aligned tiler or `_exclude_near_cusp` (parity==1 only; the saddle uses the legacy scalar `_farfield_tiles(exclusion_rho, ...)` path). This is the root cause of 91/154 saddle charts failing. Extend the near-cusp exclusion to the macro-saddle deltoid cusps: either wire `_farfield_exterior_tiles` (or a deltoid-aware cusp-exclusion check) into the saddle path, or add the correct source-plane exclusion for the deltoid cusp geometry. The deltoid lobes are off-axis (scalar rho, no directional r_caustic) — the exclusion must be computed from the actual deltoid cusp source-plane positions, not an origin-centred disk. Also check the deltoid-lobe interior path (the retired `_LOBE_CUSP_EXCLUSION_DISTANCE` case) — confirm the cusp-adapted u-coordinate there means no carve-out is needed, or add the correct cut if it is.
 
 4. **Verify tile count collapses**: run the same 4x4x4 exterior probe (one band, recursion live) and confirm it produces ~70 charts (not 500+), with no tile straddling a cusp window and all held-out eps under the 1e-3 bar.
 
