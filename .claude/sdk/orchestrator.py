@@ -1336,6 +1336,9 @@ class BuildOrchestrator:
 
         write_state(self.project_root, "foreman_lite", last_commit=commit_sha, status="fast_path_complete")
 
+        self._log("Post-build tidier")
+        await self._run_post_build_tidier()
+
         report = BuildReport(
             mode=BuildMode.FAST_PATH,
             work_packages_completed=1,
@@ -1382,6 +1385,9 @@ class BuildOrchestrator:
         commit_sha = self._git_commit_safe(commit_msg)
 
         write_state(self.project_root, "foreman_lite", last_commit=commit_sha, status="fast_path_complete")
+
+        self._log("Post-build tidier")
+        await self._run_post_build_tidier()
 
         report = BuildReport(
             mode=BuildMode.FAST_PATH,
@@ -1567,6 +1573,9 @@ class BuildOrchestrator:
         # deterministic instead of a promise: a build that defers and does NOT
         # clear says so, loudly, in its own report.
         self._check_doc_debt_cleared(report)
+
+        self._log("Step 5c: post-build tidier")
+        await self._run_post_build_tidier()
 
         return report
 
@@ -1852,6 +1861,86 @@ class BuildOrchestrator:
         self._collect_change_report(result)
         write_state(self.project_root, "tidy", status="completed")
         return result
+
+    async def _run_post_build_tidier(self) -> None:
+        """Run the post-build tidier on this build's changed Python files.
+
+        Runs AFTER all commits are done, at the shallowest transcript, scoped
+        to this build's touched .py files.  Non-fatal by design: style must
+        never fail a build whose code is committed and green.
+        """
+        # Hard override: SDK_SKIP_TIDIER skips everything tidier-related.
+        if os.environ.get("SDK_SKIP_TIDIER") == "1":
+            self._log("  Post-build tidier SKIPPED (SDK_SKIP_TIDIER=1)")
+            return
+
+        try:
+            py_files = [f for f in self._git_changed_files()
+                        if f.endswith(".py")]
+            if not py_files:
+                self._log("  Post-build tidier: no Python files in "
+                          "working tree, nothing to tidy")
+                write_state(self.project_root, "tidy", status="completed",
+                            extra={"tidied_in": "post-build", "files": 0})
+                return
+
+            # Mechanical pass: deterministic, AST-verified, under a second.
+            mech = self._run_mechanical_tidy(py_files)
+            self._log(f"  Post-build mechanical: {mech}")
+            mechanical_changed = "file(s) normalised" in mech
+
+            # Judgment agent: run only if the file list is manageable
+            # and either the mechanical pass found something or the list
+            # is non-empty and short enough for a shallow-turn agent.
+            if len(py_files) > 25:
+                self._log("  Post-build tidier: >25 .py files — "
+                          "skipping agent judgment (advisory only)")
+            elif mechanical_changed or py_files:
+                task = (
+                    "Structural style review of the files changed by "
+                    "this build.\n"
+                    "The MECHANICAL rubric has ALREADY been applied "
+                    "deterministically by scripts/tidy_mechanical.py "
+                    "(whitespace-only lines, runs of 3+ blank lines, "
+                    "trailing whitespace, final newline). Do NOT redo "
+                    "it, and do NOT reflow blank lines.\n"
+                    "Judge only what a script cannot:\n"
+                    "  - public API before private helpers within a "
+                    "module;\n"
+                    "  - imports grouped in the right LAYER (stdlib / "
+                    "third-party / cogwheel layer paths), which is "
+                    "about layering, not sorting;\n"
+                    "  - imports that are genuinely unused (verify by "
+                    "reading — a name may be referenced only inside an "
+                    "njit body or a docstring example);\n"
+                    "  - module organisation that no longer matches "
+                    "what the module does;\n"
+                    "  - long lines >79 columns: REPORT them, do NOT "
+                    "wrap.\n"
+                    "If none of those apply, say so and change nothing."
+                    "\n"
+                    f"Files to check: {py_files}"
+                    + CHANGE_REPORT_INSTRUCTION
+                )
+                await self._run_skill("tidier", task, max_turns=30)
+            else:
+                self._log("  Post-build tidier: mechanical clean, "
+                          "nothing needing judgment")
+
+            write_state(self.project_root, "tidy", status="completed",
+                        extra={"tidied_in": "post-build",
+                               "files": len(py_files)})
+
+            # Commit any tidier changes as a style: commit.
+            if self._has_uncommitted_changes():
+                style_sha = self._git_commit_safe(
+                    "style: post-build tidier pass")
+                if style_sha:
+                    self._log(f"  Post-build tidier: committed "
+                              f"{style_sha[:12]}")
+        except Exception as exc:
+            self._log(f"  Post-build tidier: non-fatal failure "
+                      f"({type(exc).__name__}: {exc})")
 
     @staticmethod
     def _is_universal_requirement(spec: str) -> bool:

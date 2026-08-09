@@ -207,7 +207,7 @@ approval loop for routine plans.
 ### SDK scripts — the driver's whole toolbox
 Nothing here needs re-deriving per run. If you are about to hand-roll a launch, a
 gate command, or a watch loop, one of these already does it.
-- `launch_build.sh <slug> <prompt_file> [stale_s]` — the ONLY sanctioned build launch. Starts the orchestrator, attaches the watchdog, verifies it attached, prints the log path and the post-build sequence.
+- `launch_build.sh <slug> <prompt_file> [stale_s]` — the ONLY sanctioned build launch. Starts the orchestrator, attaches the watchdog, verifies it attached, prints the log path and the post-build sequence (including a default-on scoped post-build tidier; skip with `SDK_SKIP_TIDIER=1`).
 - `watchdog.sh <log> [stale_s] [pid]` — auto-attached by the launcher; kills the orchestrator subtree when the log stops advancing. Logs to `<log>.watchdog.log`. Do NOT invoke by hand for a launcher-started build.
 - `verify_watchdog.sh` — ~12 s probe proving the watchdog actually kills a stalled build and that its fallback pattern still matches the launcher's entrypoint. Run it after touching either script (F055: it failed open for three days while the launcher reported it armed).
 - `stale_alarm.sh <log> [stale_s]` — exits when the log goes quiet, converting silence into a task notification. Use when you want an alert but NOT a kill.

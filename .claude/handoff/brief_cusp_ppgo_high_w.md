@@ -14,10 +14,10 @@ At high `w`, the Pearcey function asymptotes to the geometric image sum — `fol
 
 4. **Retire live quadrature for high w**: when the ppGO rung certifies, never fall through to live quadrature. The live path remains for `w < CROSS_OVER_W_CUSP_PPGO`.
 
-## Measured facts (SHA 9597a4e)
-- `cusp_amplification` at `_pearcey_cusp.py:638` — table first, live quad fallback
-- `fold_ppgo_correction` at `_airy_fold.py` — existing, includes Airy ghost
-- `_uniform_arm_value` at `operator.py:405` — fold Airy then cusp Pearcey
+## Measured facts (SHA 9597a4e; paths re-probed at HEAD f32cc40 — the modules moved under chang_refsdal/)
+- `cusp_amplification` at `cogwheel/lensing/chang_refsdal/_pearcey_cusp.py:638` — table first, live quad fallback
+- `fold_ppgo_correction` at `cogwheel/lensing/chang_refsdal/_airy_fold.py:475` — existing, includes Airy ghost
+- `_uniform_arm_value` at `cogwheel/lensing/chang_refsdal/operator.py:402` — fold Airy then cusp Pearcey
 - Pearcey controls: `x = c_x * w^(1/2) * d_parallel`, `y = c_y * w^(3/4) * d_perp`
 - Asymptotics: as `(x,y) → ∞`, Pearcey → sum of geometric-image contributions, error ~ `R^(-3/2)` where `R² = x² + y²`
 
@@ -27,3 +27,9 @@ At high `w`, the Pearcey function asymptotes to the geometric image sum — `fol
 - Cross-over `w` must be measured, not guessed
 - `cusp_amplification` already serves both astroid and saddle cusp branches — the ppGO rung applies to both
 - Live quadrature remains for `w < CROSS_OVER_W_CUSP_PPGO`
+
+## Plan-gate requirement (enforced, rejected twice before on other builds)
+The plan verification gate requires DISJOINT test-suite write ownership:
+each `domain_test_descriptions` spec names exactly ONE primary `test_*.py`
+file, and no spec may reference another spec's primary file. Split test
+work so each test file appears in exactly one spec.

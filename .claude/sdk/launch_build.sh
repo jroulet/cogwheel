@@ -264,10 +264,13 @@ POST-BUILD SEQUENCE (driver steps -- the DAG does NOT run these):
   2. commit the build's work
   3. slow sweeps        .claude/sdk/post_build_sweeps.sh   # slow tiers NEVER in-build
   4. /tidy              then: python scripts/update_agent_state.py tidy
-                        (in-DAG tidier is opt-in, SDK_RUN_TIDIER=1, default OFF --
-                         it tore down the DAG group on 2026-07-18, so style is a
-                         post-commit advisory role and this step is the ONLY one
-                         that consumes .claude/tidy_advisory.json)
+                         (in-DAG tidier is opt-in, SDK_RUN_TIDIER=1, default OFF --
+                          it tore down the DAG group on 2026-07-18, so style is a
+                          post-commit advisory role and this step is the ONLY one
+                          that consumes .claude/tidy_advisory.json)
+                         NOTE: a SCOPED post-build tidier now runs by default
+                         after commit (mechanical + judgment on the build's changed
+                         .py files). Skip it with SDK_SKIP_TIDIER=1.
 
 IN-DAG (the build runs these itself -- do NOT re-run on a clean build):
   Librarian, Dreamer.
