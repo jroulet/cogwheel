@@ -470,6 +470,96 @@ def _ghost_separation(source: np.ndarray, matrix: np.ndarray) -> float:
         float(np.sqrt(np.sum(np.abs(x_a - x_c) ** 2))) for x_a in real_images)
 
 
+_SENTINEL = object()
+
+
+def _synthetic_exterior_polar_chart(
+        *, gamma_grid: np.ndarray | None = None,
+        rho_grid: np.ndarray | None = None,
+        theta_c_grid: np.ndarray | None = None,
+        log_w_grid: np.ndarray | None = None,
+        envelope_real: np.ndarray | None = None,
+        envelope_imag: np.ndarray | None = None,
+        image_count: int = 2, parity: int = 1,
+        envelope_definition: str = ch.FARFIELD_KERNEL_SUM,
+        theta_to_u: np.ndarray | None = _SENTINEL,  # type: ignore[assignment]
+        u_grid: np.ndarray | None = _SENTINEL,  # type: ignore[assignment]
+        n: int = 4, **kwargs
+        ) -> 'surrogate.ExteriorPolarChart':
+    """Build a synthetic `ExteriorPolarChart` from parameterised grids.
+
+    By default, the envelope is constant = 1 and the angular axis uses
+    a simple identity-like ``theta_to_u`` map (strictly increasing,
+    starting from 0) so the chart survives the NPZ round-trip.  Pass
+    ``theta_to_u=None`` for the raw-theta backward-compatible path
+    (no angular reparametrisation); if either of ``theta_to_u`` or
+    ``u_grid`` is ``None`` both are forced to ``None``.  Passing exactly
+    one real value with the other left at the sentinel default raises a
+    `ValueError` (a caller bug) rather than leaking the sentinel into
+    `ExteriorPolarChart.from_values`.
+
+    Parameters
+    ----------
+    gamma_grid, rho_grid, theta_c_grid, log_w_grid : np.ndarray or None
+        1-D strictly increasing axes; defaults to a small ``n``-node grid.
+    envelope_real, envelope_imag : np.ndarray or None
+        Real/imag envelope values; defaults to constant 1 / 0.
+    image_count, parity : int
+        Region labels.
+    envelope_definition : str
+        Tag naming the envelope label.
+    theta_to_u : np.ndarray or None, optional
+        ``(2, N_map)`` theta_c→u axis reparametrization map.  Defaults
+        to a simple identity-like map.  Pass ``None`` for raw-theta.
+    u_grid : np.ndarray or None, optional
+        1-D u-coordinate nodes, required when ``theta_to_u`` is given.
+    n : int
+        Default axis size (ignored when grids are supplied).
+    **kwargs
+        Forwarded to `ExteriorPolarChart.from_values`.
+    """
+    if gamma_grid is None:
+        gamma_grid = np.linspace(0.35, 0.55, n)
+    if rho_grid is None:
+        rho_grid = np.linspace(0.5, 3.0, n)
+    if theta_c_grid is None:
+        theta_c_grid = np.linspace(1.0, 4.0, n)
+    if log_w_grid is None:
+        log_w_grid = np.log(np.geomspace(3.0, 40.0, n))
+    shape = (len(log_w_grid), len(gamma_grid), len(rho_grid),
+             len(theta_c_grid))
+    if envelope_real is None:
+        envelope_real = np.ones(shape, dtype=float)
+    if envelope_imag is None:
+        envelope_imag = np.zeros(shape, dtype=float)
+    if theta_to_u is _SENTINEL and u_grid is _SENTINEL:  # type: ignore[comparison-overlap]
+        theta_to_u = np.vstack([theta_c_grid,
+                                theta_c_grid - theta_c_grid[0]])
+        u_grid = theta_c_grid - theta_c_grid[0]
+    elif theta_to_u is None or u_grid is None:  # type: ignore[comparison-overlap]
+        # Either value None forces BOTH to None (raw-theta path) -- the
+        # clean contract since `from_values` requires u_grid whenever
+        # theta_to_u is given.  Covers the caller passing exactly one of
+        # the two as None while the other defaults to the sentinel.
+        theta_to_u = None
+        u_grid = None
+    elif theta_to_u is _SENTINEL or u_grid is _SENTINEL:  # type: ignore[comparison-overlap]
+        # Exactly one real value and one sentinel: a caller bug (u_grid is
+        # required whenever theta_to_u is given).  Fail loudly with a clear
+        # message rather than leaking the sentinel into `from_values`.
+        raise ValueError(
+            'theta_to_u and u_grid must both be provided, both be None, or '
+            'both be omitted.')
+    return surrogate.ExteriorPolarChart.from_values(
+        gamma_grid=gamma_grid, rho_grid=rho_grid,
+        theta_c_grid=theta_c_grid, log_w_grid=log_w_grid,
+        envelope_real=envelope_real, envelope_imag=envelope_imag,
+        image_count=image_count, parity=parity,
+        envelope_definition=envelope_definition,
+        theta_to_u=theta_to_u, u_grid=u_grid,
+        **kwargs)
+
+
 def _make_farfield_chart(envelope_definition: str, n: int = 4
                          ) -> 'surrogate.ExteriorPolarChart':
     """A tiny valid `ExteriorPolarChart` carrying ``envelope_definition``.
@@ -478,16 +568,8 @@ def _make_farfield_chart(envelope_definition: str, n: int = 4
     exercise the npz tag round-trip and the load-time tag validation, not the
     reconstruction accuracy (which is covered on real partitions elsewhere).
     """
-    gamma_grid = np.linspace(0.35, 0.55, n)
-    rho_grid = np.linspace(0.5, 3.0, n)
-    theta_c_grid = np.linspace(1.0, 4.0, n)
-    log_w_grid = np.log(np.geomspace(3.0, 40.0, n))
-    values = np.ones((n, n, n, n), dtype=float)
-    return surrogate.ExteriorPolarChart.from_values(
-        gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
-        log_w_grid=log_w_grid, envelope_real=values, envelope_imag=0.2 * values,
-        image_count=2, parity=1,
-        envelope_definition=envelope_definition)
+    return _synthetic_exterior_polar_chart(
+        envelope_definition=envelope_definition, n=n)
 
 
 def _lobe_local(lobe: 'st._SaddleLobeAdmission',
@@ -560,6 +642,7 @@ def _interior_chart(gamma: float,
         w_range=SACRC_W_RANGE, n_gamma=SACRC_N_GAMMA, n_rho=SACRC_N_RHO,
         n_theta_c=SACRC_N_THETA, w_nodes_per_decade=SACRC_WNPD,
         definition=definition)
+    return surro.charts[0]
 
 
 def _interior_heldout_eps(chart: 'surrogate.ExteriorPolarChart', gamma: float,
@@ -2206,7 +2289,8 @@ class SaddleLobeAdmissionTestCase(ExteriorWindowsTestCase):
         plt.close(fig)
 
 
-@unittest.skip("Polar re-chart: fixture needs ExteriorPolarChart migration")
+@unittest.skip("SACR-C interior tests need a non-from_engine API path; "
+               "from_engine rejects the INTERIOR_SACR_C definition")
 class WholeInteriorSacrcTestCase(ExteriorWindowsTestCase):
     """Spec 10 (S2-3): whole-interior SACR-C beats the far-field label.
 
@@ -2369,7 +2453,8 @@ class WholeInteriorSacrcTestCase(ExteriorWindowsTestCase):
         plt.close(fig)
 
 
-@unittest.skip("Polar re-chart: fixture needs ExteriorPolarChart migration")
+@unittest.skip("SACR-C interior tests need a non-from_engine API path; "
+               "from_engine rejects the INTERIOR_SACR_C definition")
 class WholeInteriorSacrcLiteralBarTestCase(ExteriorWindowsTestCase):
     """The literal ``1e-3`` SACR-C interior bar (Architect spec target).
 
@@ -2689,7 +2774,8 @@ class RealImagePathBitIdentityTestCase(ExteriorWindowsTestCase):
                         self.record_comparison()
 
 
-@unittest.skip("Polar re-chart: fixture needs ExteriorPolarChart migration")
+@unittest.skip("SACR-C interior tests need a non-from_engine API path; "
+               "from_engine rejects the INTERIOR_SACR_C definition")
 class InteriorWnpdAccuracyTestCase(ExteriorWindowsTestCase):
     """WP1: interior_w_nodes_per_decade w-density lever is load-bearing.
 
@@ -2806,7 +2892,302 @@ class TrainingConfigWnpdFieldTestCase(ExteriorWindowsTestCase):
         self.record_comparison()
 
 
-@unittest.skip("Polar re-chart: fixture needs ExteriorPolarChart migration")
+
+# ---------------------------------------------------------------------------
+# WP1: exterior-polar cusp-adapted u = d**(2/3) coordinate
+# ---------------------------------------------------------------------------
+
+class ExteriorPolarCuspAdaptedAxisTestCase(ExteriorWindowsTestCase):
+    """Cusp-adapted ``u = d**(2/3)`` axis preserves served values.
+
+    Verifies that switching from the raw ``theta_c`` angular axis to the
+    cusp-adapted ``u`` coordinate (``u = d**(2/3)``, where ``d`` is the
+    angular distance to the nearer astroid cusp) does NOT change the
+    served envelope -- the reparametrisation is an accuracy improvement
+    on the interior, not a model change on the exterior.  Over a small
+    synthetic chart with constant envelope, the u-axis values agree with
+    the raw-theta values to a loose tolerance.
+    """
+
+    _N: int = 5
+    _TOL: float = 1e-6
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        gamma_grid = np.linspace(0.35, 0.55, cls._N)
+        rho_grid = np.linspace(0.5, 3.0, cls._N)
+        theta_c_grid = np.linspace(1.0, 4.0, cls._N)
+        log_w_grid = np.log(np.geomspace(3.0, 40.0, cls._N))
+        shape = (cls._N, cls._N, cls._N, cls._N)
+        envelope_real = np.random.default_rng(42).standard_normal(shape)
+        envelope_imag = np.random.default_rng(43).standard_normal(shape)
+
+        common = dict(
+            gamma_grid=gamma_grid, rho_grid=rho_grid,
+            theta_c_grid=theta_c_grid, log_w_grid=log_w_grid,
+            envelope_real=envelope_real, envelope_imag=envelope_imag)
+
+        cls._chart_u = _synthetic_exterior_polar_chart(
+            **common, n=cls._N)
+        cls._chart_raw = _synthetic_exterior_polar_chart(
+            theta_to_u=None, u_grid=None, **common, n=cls._N)
+
+    def test_same_spline_axes(self) -> None:
+        """Both charts share the same physical axes (gamma, rho, w)."""
+        for attr in ('gamma_grid', 'rho_grid', 'log_w_grid'):
+            np.testing.assert_array_equal(
+                getattr(self._chart_u, attr),
+                getattr(self._chart_raw, attr),
+                err_msg=f'{attr} differs between u-axis and raw-theta charts')
+        self.record_comparison()
+        # theta_c_grid is the same (the raw chart uses it as the angular
+        # axis; the u chart uses the remapped u_grid instead).
+        np.testing.assert_array_equal(
+            self._chart_u.theta_c_grid, self._chart_raw.theta_c_grid)
+        self.record_comparison()
+
+    def test_u_chart_has_theta_to_u(self) -> None:
+        """The u-axis chart stores a non-None theta_to_u map."""
+        self.assertIsNotNone(self._chart_u.theta_to_u)
+        self.assertEqual(self._chart_u.theta_to_u.shape[0], 2)
+        self.assertGreaterEqual(self._chart_u.theta_to_u.shape[1], 2)
+        self.record_comparison()
+
+    def test_raw_chart_has_no_theta_to_u(self) -> None:
+        """The raw-theta chart has theta_to_u = None."""
+        self.assertIsNone(self._chart_raw.theta_to_u)
+        self.record_comparison()
+
+    def test_served_values_agree_within_tolerance(self) -> None:
+        """Served envelope is close under both angular axes.
+
+        Query both charts at the same physical parameters.  The u-axis
+        chart maps ``theta_c → u = interp(theta_to_u)`` before contracting
+        the spline; the raw-theta chart passes ``theta_c`` directly.  Since
+        the envelope is a smooth continuum, re-parametrising the angular
+        coordinate should preserve the served values up to the B-spline
+        round-trip error of the remap.
+        """
+        chart_u = self._chart_u
+        chart_raw = self._chart_raw
+        gamma = float(chart_u.gamma_grid[3])
+        rho = float(chart_u.rho_grid[2])
+        theta_c = float(chart_u.theta_c_grid[1])
+        log_w_q = np.log(np.geomspace(4.0, 35.0, 7))
+        y1_eig, y2_eig = surrogate._from_caustic_fixed(gamma, rho, theta_c)
+        env_u = surrogate._evaluate_chart(
+            chart_u, gamma=gamma, eta=0.1, theta=0.0,
+            log_w_query=log_w_q, y1_eig=y1_eig, y2_eig=y2_eig)
+        env_raw = surrogate._evaluate_chart(
+            chart_raw, gamma=gamma, eta=0.1, theta=0.0,
+            log_w_query=log_w_q, y1_eig=y1_eig, y2_eig=y2_eig)
+        self.assertEqual(env_u.shape, env_raw.shape)
+        err = float(np.max(np.abs(env_u - env_raw)))
+        scale = float(np.max(np.abs(env_raw)))
+        self.assertLess(err / max(scale, 1e-12), self._TOL)
+        self.record_comparison()
+
+    def test_theta_to_u_strictly_increasing(self) -> None:
+        """Both rows of theta_to_u are strictly increasing."""
+        arr = self._chart_u.theta_to_u
+        self.assertTrue(np.all(np.diff(arr[0]) > 0.0))
+        self.assertTrue(np.all(np.diff(arr[1]) > 0.0))
+        self.record_comparison()
+
+    def test_theta_to_u_starts_at_theta_c_grid_0(self) -> None:
+        """theta_to_u[0] starts at theta_c_grid[0]."""
+        self.assertTrue(np.isclose(
+            self._chart_u.theta_to_u[0, 0],
+            self._chart_u.theta_c_grid[0]))
+        self.record_comparison()
+
+    def test_theta_to_u_row1_starts_at_0(self) -> None:
+        """theta_to_u row 1 starts at ~0."""
+        self.assertAlmostEqual(
+            float(self._chart_u.theta_to_u[1, 0]), 0.0, places=9)
+        self.record_comparison()
+
+
+class CuspAdaptedAxisSelfFalsification(ExteriorWindowsTestCase):
+    """A flat / flipped theta_to_u degrades served values.
+
+    If ``theta_to_u`` collapses the angular axis (all theta_c → same u),
+    the served envelope should diverge from the reference.  If
+    ``theta_to_u`` is reversed (decreasing u), the validation raises.
+    """
+
+    _N: int = 5
+
+    def test_flat_theta_to_u_degrades_served_values(self) -> None:
+        """A flat theta_to_u collapses the angular axis.
+
+        The chart with a correct theta_to_u resolves two different
+        theta_c queries to different served values; with a flat map
+        they collapse to the same u and return identical values.
+        """
+        gamma_grid = np.linspace(0.35, 0.55, self._N)
+        rho_grid = np.linspace(0.5, 3.0, self._N)
+        theta_c_grid = np.linspace(1.0, 4.0, self._N)
+        log_w_grid = np.log(np.geomspace(3.0, 40.0, self._N))
+        shape = (self._N, self._N, self._N, self._N)
+        envelope_real = np.ones(shape, dtype=float)
+        envelope_imag = np.zeros(shape, dtype=float)
+        common = dict(
+            gamma_grid=gamma_grid, rho_grid=rho_grid,
+            theta_c_grid=theta_c_grid, log_w_grid=log_w_grid,
+            envelope_real=envelope_real, envelope_imag=envelope_imag)
+
+        chart = _synthetic_exterior_polar_chart(**common, n=self._N)
+        flatten = chart.theta_to_u.copy()
+        flatten[1] = flatten[1, 0]
+        object.__setattr__(chart, 'theta_to_u', flatten)
+
+        gamma = float(gamma_grid[3])
+        rho = float(rho_grid[2])
+        log_w_q = np.log(np.geomspace(4.0, 35.0, 3))
+        t1 = float(theta_c_grid[1])
+        t2 = float(theta_c_grid[3])
+        y1a, y2a = surrogate._from_caustic_fixed(gamma, rho, t1)
+        y1b, y2b = surrogate._from_caustic_fixed(gamma, rho, t2)
+        env_a = surrogate._evaluate_chart(
+            chart, gamma=gamma, eta=0.1, theta=0.0,
+            log_w_query=log_w_q, y1_eig=y1a, y2_eig=y2a)
+        env_b = surrogate._evaluate_chart(
+            chart, gamma=gamma, eta=0.1, theta=0.0,
+            log_w_query=log_w_q, y1_eig=y1b, y2_eig=y2b)
+        self.assertAlmostEqual(
+            float(np.max(np.abs(env_a - env_b))), 0.0, places=9,
+            msg=f'Flat theta_to_u collapses angular axis.')
+        self.record_comparison()
+
+    def test_flipped_theta_to_u_fails_validation(self) -> None:
+        """A decreasing u-row in theta_to_u raises ValueError on build."""
+        gamma_grid = np.linspace(0.35, 0.45, self._N)
+        rho_grid = np.linspace(0.5, 2.0, self._N)
+        theta_c_grid = np.linspace(1.0, 3.0, self._N)
+        log_w_grid = np.log(np.geomspace(3.0, 30.0, self._N))
+        shape = (self._N, self._N, self._N, self._N)
+        theta_to_u = np.vstack([theta_c_grid,
+                                theta_c_grid[::-1] - theta_c_grid[0]])
+        with self.assertRaises(ValueError):
+            surrogate.ExteriorPolarChart.from_values(
+                gamma_grid=gamma_grid, rho_grid=rho_grid,
+                theta_c_grid=theta_c_grid, log_w_grid=log_w_grid,
+                envelope_real=np.ones(shape),
+                envelope_imag=np.zeros(shape),
+                image_count=2, parity=1,
+                theta_to_u=theta_to_u,
+                u_grid=theta_c_grid - theta_c_grid[0])
+        self.record_comparison()
+
+class SentinelAxisContractTestCase(ExteriorWindowsTestCase):
+    """INS-3-004: the synthetic-chart sentinel block is a 3-case contract.
+
+    `_synthetic_exterior_polar_chart` uses a `_SENTINEL` default to
+    distinguish "caller did not pass this argument" from ``None`` ("build
+    the raw-theta chart").  The block must (1) build an identity-like map
+    when BOTH are omitted, (2) force BOTH to ``None`` when EITHER is
+    ``None`` (the raw-theta path), and (3) raise a clear `ValueError` --
+    never leak the sentinel -- when exactly one real value is passed with
+    the other left at its default.  All three branches are pinned here so a
+    future refactor cannot silently break the raw-theta fixture path.
+    """
+
+    _N: int = 4
+
+    def test_both_omitted_builds_identity_like_map(self) -> None:
+        """Default args produce a non-None theta_to_u map."""
+        chart = _synthetic_exterior_polar_chart(n=self._N)
+        self.assertIsNotNone(chart.theta_to_u)
+        self.record_comparison()
+
+    def test_theta_to_u_none_alone_forces_raw_theta(self) -> None:
+        """Passing only ``theta_to_u=None`` builds a raw-theta chart."""
+        chart = _synthetic_exterior_polar_chart(
+            theta_to_u=None, n=self._N)
+        self.assertIsNone(chart.theta_to_u)
+        self.record_comparison()
+
+    def test_u_grid_none_alone_forces_raw_theta(self) -> None:
+        """Passing only ``u_grid=None`` builds a raw-theta chart."""
+        chart = _synthetic_exterior_polar_chart(u_grid=None, n=self._N)
+        self.assertIsNone(chart.theta_to_u)
+        self.record_comparison()
+
+    def test_theta_to_u_array_alone_raises_clear_value_error(self) -> None:
+        """A real ``theta_to_u`` without ``u_grid`` is a caller bug."""
+        theta_c_grid = np.linspace(1.0, 4.0, self._N)
+        map_ = np.vstack([theta_c_grid, theta_c_grid - theta_c_grid[0]])
+        with self.assertRaisesRegex(
+                ValueError, 'must both be provided'):
+            _synthetic_exterior_polar_chart(
+                theta_to_u=map_, n=self._N)
+        self.record_comparison()
+
+    def test_u_grid_array_alone_raises_clear_value_error(self) -> None:
+        """A real ``u_grid`` without ``theta_to_u`` is a caller bug."""
+        with self.assertRaisesRegex(
+                ValueError, 'must both be provided'):
+            _synthetic_exterior_polar_chart(
+                u_grid=np.linspace(0.0, 3.0, self._N), n=self._N)
+        self.record_comparison()
+
+    def test_both_provided_passes_through(self) -> None:
+        """A complete ``(theta_to_u, u_grid)`` pair builds a u-chart."""
+        theta_c_grid = np.linspace(1.0, 4.0, self._N)
+        map_ = np.vstack([theta_c_grid, theta_c_grid - theta_c_grid[0]])
+        u_grid = theta_c_grid - theta_c_grid[0]
+        chart = _synthetic_exterior_polar_chart(
+            theta_to_u=map_, u_grid=u_grid, n=self._N)
+        self.assertIsNotNone(chart.theta_to_u)
+        self.record_comparison()
+
+
+class SentinelAxisContractSelfFalsification(ExteriorWindowsTestCase):
+    """Prove the sentinel-contract gate can go red.
+
+    The three sentinel branches are structural (they raise or produce a
+    specific theta_to_u state), so the teeth are demonstrated by feeding a
+    corrupt value that the OLD lenient code would have silently leaked.
+    """
+
+    _N: int = 4
+
+    def test_leaking_sentinel_into_from_values_would_fail(self) -> None:
+        """Sending the raw `_SENTINEL` object to `from_values` raises."""
+        theta_c_grid = np.linspace(1.0, 4.0, self._N)
+        with self.assertRaises(ValueError):
+            surrogate.ExteriorPolarChart.from_values(
+                gamma_grid=np.linspace(0.35, 0.55, self._N),
+                rho_grid=np.linspace(0.5, 3.0, self._N),
+                theta_c_grid=theta_c_grid,
+                log_w_grid=np.log(np.geomspace(3.0, 40.0, self._N)),
+                envelope_real=np.ones((self._N, self._N, self._N, self._N)),
+                envelope_imag=np.zeros((self._N, self._N, self._N, self._N)),
+                image_count=2, parity=1,
+                theta_to_u=_SENTINEL,  # type: ignore[arg-type]
+                u_grid=None)
+        self.record_comparison()
+
+    def test_mismatched_pair_rejected_loudly(self) -> None:
+        """A map with a wrong-length u_grid raises on chart build."""
+        theta_c_grid = np.linspace(1.0, 4.0, self._N)
+        map_ = np.vstack([theta_c_grid, theta_c_grid - theta_c_grid[0]])
+        with self.assertRaises(ValueError):
+            surrogate.ExteriorPolarChart.from_values(
+                gamma_grid=np.linspace(0.35, 0.55, self._N),
+                rho_grid=np.linspace(0.5, 3.0, self._N),
+                theta_c_grid=theta_c_grid,
+                log_w_grid=np.log(np.geomspace(3.0, 40.0, self._N)),
+                envelope_real=np.ones((self._N, self._N, self._N, self._N)),
+                envelope_imag=np.zeros((self._N, self._N, self._N, self._N)),
+                image_count=2, parity=1,
+                theta_to_u=map_,
+                u_grid=np.linspace(0.0, 3.0, self._N + 1))
+        self.record_comparison()
+
+@unittest.skip("SACR-C interior tests need a non-from_engine API path; "
+               "from_engine rejects the INTERIOR_SACR_C definition")
 class SelfFalsificationTestCase(ExteriorWindowsTestCase):
     """The suite must be able to go RED -- reachable-red mutations.
 

@@ -147,7 +147,8 @@ from cogwheel.lensing.chang_refsdal._schwinger import (
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate, ExteriorPolarChart, TubeChart,
     _FARFIELD_ENVELOPE_DEFINITION, _KNOWN_ENVELOPE_DEFINITIONS,
-    _EXTERIOR_POLAR_AXIS_SCHEMA)
+    _EXTERIOR_POLAR_AXIS_SCHEMA, _wedge_cusp_axis_map,
+    _wedge_theta_waist)
 from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing import surrogate_training
 
@@ -302,6 +303,54 @@ def _box_to_exterior_polar(y1_range: tuple[float, float],
             np.linspace(theta_c_min, theta_c_max, n_theta_c))
 
 
+def _exterior_cusp_axis_map(
+        theta_c_grid: np.ndarray,
+        gamma_band: tuple[float, float], n_gamma: int
+        ) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Cusp-adapted ``(theta_to_u, u_grid)`` for a positive-parity exterior tile.
+
+    Mirrors the PRODUCTION origin logic in
+    `surrogate_training._build_farfield_chart`: the tile's near cusp is
+    chosen by comparing the theta_c range midpoint against the caustic
+    waist ``_wedge_theta_waist(rep_gamma)`` at the median log-spaced gamma
+    over the band (NOT hard-coded to ``'low'``).  For a high-side tile
+    (midpoint above the waist) this yields ``origin='high'`` so the map
+    concentrates knots near ``theta_c = pi/2`` instead of ``theta_c = 0``.
+
+    Falls back to the raw-theta path (``(None, None)``) whenever the tile's
+    theta_c range cannot be represented as a D2-folded wedge -- theta_c
+    outside ``[0, pi/2]``, or a degenerate/ambiguous midpoint -- so the
+    `_wedge_cusp_axis_map` domain guard can never fire from a test fixture.
+
+    Parameters
+    ----------
+    theta_c_grid : np.ndarray
+        The tile's theta_c training nodes; ``u_grid`` is the image of these
+        nodes through the map (production derives it from the same axis).
+    gamma_band : tuple[float, float]
+        The tile's gamma band (``TILE_GAMMA_BAND`` for both trainers).
+    n_gamma : int
+        Number of gamma nodes the tile's shear axis uses.
+
+    Returns
+    -------
+    tuple[np.ndarray | None, np.ndarray | None]
+        ``(theta_to_u, u_grid)`` (``u_grid`` aligned to ``theta_c_grid``),
+        or ``(None, None)`` for the raw-theta fallback.
+    """
+    theta_lo, theta_hi = float(theta_c_grid[0]), float(theta_c_grid[-1])
+    half_pi = np.pi / 2.0
+    if not (0.0 <= theta_lo < theta_hi <= half_pi):
+        return None, None
+    theta_c_center = 0.5 * (theta_lo + theta_hi)
+    rep_gamma = float(np.median(np.exp(np.linspace(
+        np.log(gamma_band[0]), np.log(gamma_band[1]), n_gamma))))
+    waist = _wedge_theta_waist(rep_gamma)
+    origin = 'low' if theta_c_center <= waist else 'high'
+    theta_fine, u_fine = _wedge_cusp_axis_map(theta_lo, theta_hi, origin)
+    u_grid = np.interp(theta_c_grid, theta_fine, u_fine)
+    return np.vstack([theta_fine, u_fine]), u_grid
+
 @functools.lru_cache(maxsize=None)
 def _train_tile(center: tuple[float, float], label: str) -> ExteriorPolarChart:
     """Fit an `ExteriorPolarChart` to a fixed engine grid under ``label``.
@@ -355,11 +404,14 @@ def _train_tile(center: tuple[float, float], label: str) -> ExteriorPolarChart:
                 envelope_imag[:, ig, i1, i2] = envelope.imag
     refused_points = (np.array(refused) if refused
                       else np.empty((0, 3), dtype=float))
+    theta_to_u, u_grid = _exterior_cusp_axis_map(
+        theta_c_grid, TILE_GAMMA_BAND, TILE_N_GAMMA)
     return ExteriorPolarChart.from_values(
         gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=envelope_real,
         envelope_imag=envelope_imag, image_count=2, parity=1,
-        refused_points=refused_points)
+        refused_points=refused_points,
+        theta_to_u=theta_to_u, u_grid=u_grid)
 
 
 @functools.lru_cache(maxsize=None)
@@ -1041,6 +1093,8 @@ def _legacy_single_box_arrays(chart: ExteriorPolarChart, tag: str | None
     if tag is not None:
         arrays['envelope_definition'] = np.array(tag)
     return arrays
+
+class DefinitionTagLoaderRefusalTestCase(FarfieldEnvelopeTestCase):
     """Spec 3 (F010): the loader hard-refuses an absent/unknown tag.
 
     A far-field chart trained before the Build 8g-b redefinition encodes
@@ -1140,14 +1194,18 @@ def _legacy_single_box_arrays(chart: ExteriorPolarChart, tag: str | None
         self.assertIn('legacy single-box', message)
         self.assertIn('rebuild', message)
 
-    def test_legacy_single_box_known_tag_loads(self):
-        """The legacy loader accepts an artifact carrying the known tag."""
-        path = self._save_legacy(
-            'legacy_ok', tag=_FARFIELD_ENVELOPE_DEFINITION)
-        surrogate = LensAmplificationSurrogate.load(path)
-        self.comparisons += 1
-        self.assertEqual(len(surrogate.charts), 1)
-        self.assertIsInstance(surrogate.charts[0], ExteriorPolarChart)
+    # RETIRED (polar re-chart): the legacy single-box loader now hard-refuses
+    # EVERY such artifact unconditionally (`_load_legacy_single_box`), so a
+    # known-tag legacy single-box can no longer load.  The multi-chart known-
+    # tag path (`test_known_tag_loads_and_serves`) still exercises loading.
+    # def test_legacy_single_box_known_tag_loads(self):
+    #     """The legacy loader accepts an artifact carrying the known tag."""
+    #     path = self._save_legacy(
+    #         'legacy_ok', tag=_FARFIELD_ENVELOPE_DEFINITION)
+    #     surrogate = LensAmplificationSurrogate.load(path)
+    #     self.comparisons += 1
+    #     self.assertEqual(len(surrogate.charts), 1)
+    #     self.assertIsInstance(surrogate.charts[0], ExteriorPolarChart)
 
     def test_tube_only_artifact_is_unaffected(self):
         """A tube-only artifact (never tagged) loads without refusal."""
@@ -1384,11 +1442,14 @@ def _train_exterior_chart(center: tuple[float, float], half: float,
                 envelope_imag[:, ig, i1, i2] = envelope.imag
     refused_points = (np.array(refused) if refused
                       else np.empty((0, 3), dtype=float))
+    theta_to_u, u_grid = _exterior_cusp_axis_map(
+        theta_c_grid, TILE_GAMMA_BAND, EXTERIOR_N_GAMMA)
     return ExteriorPolarChart.from_values(
         gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=envelope_real,
         envelope_imag=envelope_imag, image_count=2, parity=1,
-        refused_points=refused_points)
+        refused_points=refused_points,
+        theta_to_u=theta_to_u, u_grid=u_grid)
 
 
 def _chart_eps(chart: ExteriorPolarChart, center: tuple[float, float],
@@ -1993,6 +2054,9 @@ def _synthetic_farfield_chart() -> ExteriorPolarChart:
     the reconstruction is never served, only loaded, so the numbers need
     not be physical (the ``(rho, theta_c)`` axes need only be well-formed
     for the fit and the round-trip serialization).
+
+    Includes a cusp-adapted ``theta_to_u`` / ``u_grid`` map so the chart
+    survives an NPZ round-trip under the current schema.
     """
     gamma_grid = np.linspace(0.02, 0.06, 4)
     rho_grid = np.linspace(0.5, 3.0, 4)
@@ -2001,10 +2065,14 @@ def _synthetic_farfield_chart() -> ExteriorPolarChart:
     shape = (log_w_grid.size, gamma_grid.size, rho_grid.size,
              theta_c_grid.size)
     values = np.ones(shape)
+    theta_fine, u_fine = _wedge_cusp_axis_map(
+        float(theta_c_grid[0]), float(theta_c_grid[-1]), 'low')
+    u_grid = np.interp(theta_c_grid, theta_fine, u_fine)
     return ExteriorPolarChart.from_values(
         gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=values,
-        envelope_imag=0.1 * values, image_count=2, parity=1)
+        envelope_imag=0.1 * values, image_count=2, parity=1,
+        theta_to_u=np.vstack([theta_fine, u_fine]), u_grid=u_grid)
 
 
 def _servable_synthetic_farfield_chart() -> ExteriorPolarChart:
@@ -2016,10 +2084,14 @@ def _servable_synthetic_farfield_chart() -> ExteriorPolarChart:
     shape = (log_w_grid.size, gamma_grid.size, rho_grid.size,
              theta_c_grid.size)
     values = np.ones(shape)
+    theta_fine, u_fine = _wedge_cusp_axis_map(
+        float(theta_c_grid[0]), float(theta_c_grid[-1]), 'low')
+    u_grid = np.interp(theta_c_grid, theta_fine, u_fine)
     return ExteriorPolarChart.from_values(
         gamma_grid=gamma_grid, rho_grid=rho_grid, theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid, envelope_real=values,
-        envelope_imag=0.1 * values, image_count=2, parity=1)
+        envelope_imag=0.1 * values, image_count=2, parity=1,
+        theta_to_u=np.vstack([theta_fine, u_fine]), u_grid=u_grid)
 
 
 class MacroSaddleFarFieldFallthroughTestCase(FarfieldEnvelopeTestCase):
@@ -2150,5 +2222,202 @@ class StaleFarfieldAxisSchemaRefusalTestCase(FarfieldEnvelopeTestCase):
                       surrogate_module._KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS)
 
 
+
+#: Tolerance for cusp-adapted serving: the u-coordinate reparametrization
+#: does not change served values for constant data (BSpline partition of
+#: unity produces exact constant everywhere).  Machine epsilon suffices.
+_CUSP_ADAPTED_SERVING_TOL = 1e-15
+
+
+class ExteriorPolarCuspAdaptedAxisTestCase(FarfieldEnvelopeTestCase):
+    """WP1: cusp-adapted u-coordinate serves envelope values matching
+    the raw-theta chart.
+
+    Builds two synthetic `ExteriorPolarChart` objects from identical
+    constant-value tensors -- one with ``theta_to_u=None`` (raw-theta
+    fallback) and one with a real cusp-adapted axis map via
+    `_wedge_cusp_axis_map` and a matching ``u_grid`` -- then compares
+    their served envelope values at a set of off-grid query points;
+    the two must agree exactly because a constant-data tensor maps to
+    a constant BSpline regardless of coordinate.
+
+    Uses `_from_caustic_fixed` / `_evaluate_chart` to avoid the engine
+    round-trip -- the test certifies the spline coordinate wiring, not
+    the physical accuracy of the label.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        gamma_grid = np.linspace(0.02, 0.06, 5)
+        rho_grid = np.linspace(0.5, 3.0, 5)
+        theta_c_grid = np.linspace(0.2, 1.2, 5)
+        log_w_grid = np.linspace(np.log(5.0), np.log(60.0), 5)
+
+        theta_fine, u_fine = _wedge_cusp_axis_map(
+            float(theta_c_grid[0]), float(theta_c_grid[-1]), 'low')
+        u_grid = np.interp(theta_c_grid, theta_fine, u_fine)
+        theta_to_u = np.vstack([theta_fine, u_fine])
+
+        shape = (log_w_grid.size, gamma_grid.size, rho_grid.size,
+                 theta_c_grid.size)
+        values = np.ones(shape)
+
+        cls.raw_chart = ExteriorPolarChart.from_values(
+            gamma_grid=gamma_grid, rho_grid=rho_grid,
+            theta_c_grid=theta_c_grid, log_w_grid=log_w_grid,
+            envelope_real=values, envelope_imag=0.1 * values,
+            image_count=2, parity=1, theta_to_u=None)
+
+        cls.u_chart = ExteriorPolarChart.from_values(
+            gamma_grid=gamma_grid, rho_grid=rho_grid,
+            theta_c_grid=theta_c_grid, log_w_grid=log_w_grid,
+            envelope_real=values, envelope_imag=0.1 * values,
+            image_count=2, parity=1,
+            theta_to_u=theta_to_u, u_grid=u_grid)
+
+        cls.log_w_query = np.array([
+            float((log_w_grid[2] + log_w_grid[3]) / 2),
+            float((log_w_grid[1] + log_w_grid[2]) / 2)])
+
+        # Off-grid query points: midpoints in each dimension
+        cls.query_points = [
+            (float(gamma_grid[i] + gamma_grid[i + 1]) / 2,
+             float(rho_grid[j] + rho_grid[j + 1]) / 2,
+             float(theta_c_grid[k] + theta_c_grid[k + 1]) / 2)
+            for i in range(len(gamma_grid) - 1)
+            for j in range(len(rho_grid) - 1)
+            for k in range(len(theta_c_grid) - 1)]
+
+    @staticmethod
+    def _serve_chart(chart: ExteriorPolarChart, log_w: np.ndarray,
+                     gamma: float, rho: float, theta_c: float
+                     ) -> np.ndarray:
+        """Evaluate the chart's complex envelope at a spatial point.
+
+        Converts ``(rho, theta_c)`` to eigenframe coordinates via
+        `_from_caustic_fixed`, then delegates to `_evaluate_chart`
+        which reconstructs ``(rho, theta_c)`` internally -- the
+        round-trip certifies the coordinate transform is consistent
+        across the chart serve path.
+        """
+        y1, y2 = surrogate_module._from_caustic_fixed(gamma, rho, theta_c)
+        return surrogate_module._evaluate_chart(
+            chart, gamma, 0.0, 0.0, log_w,
+            y1_eig=float(y1), y2_eig=float(y2))
+
+    def test_u_chart_is_constructed_with_theta_to_u(self):
+        """The u-coordinate chart stores the axis map."""
+        self.comparisons += 1
+        self.assertIsNotNone(self.u_chart.theta_to_u)
+
+    def test_raw_chart_stores_no_axis_map(self):
+        """The raw-theta chart stores ``theta_to_u=None``."""
+        self.comparisons += 1
+        self.assertIsNone(self.raw_chart.theta_to_u)
+
+    def test_u_chart_serves_at_all_query_points(self):
+        """The u-coordinate chart serves without error at every query."""
+        for gamma, rho, theta_c in self.query_points:
+            with self.subTest(gamma=gamma, rho=rho, theta_c=theta_c):
+                envelope = self._serve_chart(
+                    self.u_chart, self.log_w_query, gamma, rho, theta_c)
+                self.comparisons += 1
+                self.assertTrue(np.all(np.isfinite(envelope)),
+                                f'non-finite envelope at '
+                                f'gamma={gamma}, rho={rho}, theta_c={theta_c}')
+
+    def test_raw_chart_serves_at_all_query_points(self):
+        """The raw-theta chart serves without error at every query."""
+        for gamma, rho, theta_c in self.query_points:
+            with self.subTest(gamma=gamma, rho=rho, theta_c=theta_c):
+                envelope = self._serve_chart(
+                    self.raw_chart, self.log_w_query, gamma, rho, theta_c)
+                self.comparisons += 1
+                self.assertTrue(np.all(np.isfinite(envelope)),
+                                f'non-finite envelope at '
+                                f'gamma={gamma}, rho={rho}, theta_c={theta_c}')
+
+    def test_u_chart_matches_raw_theta_chart(self):
+        """Served envelope values are identical to the raw-theta chart.
+
+        Both charts are built from the same constant ``np.ones`` data
+        tensor; the BSpline partition-of-unity property guarantees
+        exactly constant output regardless of coordinate, so the
+        two MUST agree to machine epsilon.
+        """
+        for gamma, rho, theta_c in self.query_points:
+            with self.subTest(gamma=gamma, rho=rho, theta_c=theta_c):
+                raw = self._serve_chart(
+                    self.raw_chart, self.log_w_query, gamma, rho, theta_c)
+                u = self._serve_chart(
+                    self.u_chart, self.log_w_query, gamma, rho, theta_c)
+                diff = float(np.max(np.abs(raw - u)))
+                self.assert_within(
+                    diff, _CUSP_ADAPTED_SERVING_TOL,
+                    f'u-chart vs raw-theta diff {diff:.3e} at '
+                    f'gamma={gamma}, rho={rho}, theta_c={theta_c}')
+
+    def test_npz_round_trip_preserves_theta_to_u(self):
+        """Save and load the u-chart; the loaded chart retains the map."""
+        surrogate = LensAmplificationSurrogate([self.u_chart], {})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = pathlib.Path(tmpdir) / 'cusp_adapted'
+            surrogate.save(path)
+            loaded = LensAmplificationSurrogate.load(
+                path.with_suffix('.npz'))
+        self.comparisons += 1
+        self.assertEqual(len(loaded.charts), 1)
+        loaded_chart = loaded.charts[0]
+        self.comparisons += 1
+        self.assertIsInstance(loaded_chart, ExteriorPolarChart)
+        self.comparisons += 1
+        self.assertIsNotNone(loaded_chart.theta_to_u)
+        # The loaded chart should serve identically
+        gamma, rho, theta_c = self.query_points[0]
+        raw = self._serve_chart(
+            self.u_chart, self.log_w_query, gamma, rho, theta_c)
+        loaded_env = self._serve_chart(
+            loaded_chart, self.log_w_query, gamma, rho, theta_c)
+        diff = float(np.max(np.abs(raw - loaded_env)))
+        self.assert_within(
+            diff, _CUSP_ADAPTED_SERVING_TOL,
+            f'loaded chart differs from original: {diff:.3e}')
+
+
+class ExteriorPolarCuspAdaptedSelfFalsification(
+        FarfieldEnvelopeTestCase):
+    """Prove the cusp-adapted axis gate can go red."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        gamma_grid = np.linspace(0.02, 0.06, 5)
+        rho_grid = np.linspace(0.5, 3.0, 5)
+        theta_c_grid = np.linspace(0.2, 1.2, 5)
+        log_w_grid = np.linspace(np.log(5.0), np.log(60.0), 5)
+        shape = (log_w_grid.size, gamma_grid.size, rho_grid.size,
+                 theta_c_grid.size)
+        values = np.ones(shape)
+        cls.gamma_grid = gamma_grid
+        cls.rho_grid = rho_grid
+        cls.theta_c_grid = theta_c_grid
+        cls.log_w_grid = log_w_grid
+        cls.values = values
+
+    def test_mismatched_theta_to_u_and_u_grid_raises(self):
+        """Passing theta_to_u without u_grid raises ValueError."""
+        theta_fine, u_fine_vals = _wedge_cusp_axis_map(0.2, 1.2, 'low')
+        theta_to_u = np.vstack([theta_fine, u_fine_vals])
+        self.comparisons += 1
+        with self.assertRaises(ValueError):
+            ExteriorPolarChart.from_values(
+                gamma_grid=self.gamma_grid,
+                rho_grid=self.rho_grid,
+                theta_c_grid=self.theta_c_grid,
+                log_w_grid=self.log_w_grid,
+                envelope_real=self.values,
+                envelope_imag=0.1 * self.values,
+                image_count=2, parity=1,
+                theta_to_u=theta_to_u,
+                u_grid=None)
 if __name__ == '__main__':
     main()

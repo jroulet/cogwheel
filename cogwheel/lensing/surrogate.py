@@ -253,7 +253,7 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
 # ``exp(+1j w t_min)``); the tag carries a ``_framewinv`` suffix and the loader
 # hard-refuses any frame-dependent-label artifact rather than serving a
 # finite-but-wrong reconstruction.
-_EXTERIOR_POLAR_AXIS_SCHEMA = 'exterior_polar_rho_theta_c'
+_EXTERIOR_POLAR_AXIS_SCHEMA = 'exterior_polar_rho_u_v1'
 _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA})
 _EXTERIOR_POLAR_CARRIER_STEP_MAX = 1.0
 _LOBE_AXIS_SCHEMA_NEW = 'lobe_caustic_relative_v1'
@@ -1530,7 +1530,7 @@ class ExteriorPolarChart:
     caustic-fixed radial coordinate and ``theta_c`` the caustic-fixed
     polar angle ``atan2(y2_eig, y1_eig)``.  The polar coordinate is
     cusp-safe by construction -- tile edges are ON cusp rays so no tile
-    ever straddles one; there is no arc-length map and no foot-tie guard.
+    ever straddles one.
 
     Attributes
     ----------
@@ -1564,6 +1564,14 @@ class ExteriorPolarChart:
         Tag naming the label the chart's envelope encodes (Build 8g-b).
         Persisted in the npz meta and checked on load; the serving side
         dispatches the reconstruction on it.
+    theta_to_u : np.ndarray or None
+        Optional ``(2, N_map)`` theta_c→u axis reparametrization map.
+        Row 0 is the dense ``theta_c`` grid; row 1 is the corresponding
+        ``u = d**(2/3)`` cusp-adapted coordinate where ``d`` is the
+        angular distance to the nearer cusp (``0`` or ``pi/2`` in the
+        D₂-folded quadrant).  When ``None``, the spline axis is raw
+        ``theta_c`` (backward-compatible with fixtures not built via the
+        cusp-adapted coordinate).
     """
 
     gamma_grid: np.ndarray
@@ -1579,6 +1587,7 @@ class ExteriorPolarChart:
     refused_points: np.ndarray
     param_spacing: np.ndarray
     envelope_definition: str
+    theta_to_u: np.ndarray | None
 
     @classmethod
     def from_values(cls, *, gamma_grid: np.ndarray, rho_grid: np.ndarray,
@@ -1587,7 +1596,9 @@ class ExteriorPolarChart:
                     image_count: int | None, parity: int | None,
                     eta_overlap_min: float = _DEFAULT_CAUSTIC_FLOOR,
                     refused_points: np.ndarray | None = None,
-                    envelope_definition: str = _FARFIELD_ENVELOPE_DEFINITION
+                    envelope_definition: str = _FARFIELD_ENVELOPE_DEFINITION,
+                    theta_to_u: np.ndarray | None = None,
+                    u_grid: np.ndarray | None = None
                     ) -> 'ExteriorPolarChart':
         """Build an exterior-polar chart by fitting splines to a value tensor.
 
@@ -1607,6 +1618,14 @@ class ExteriorPolarChart:
             Refused caustic-fixed ``(gamma, rho, theta_c)`` training points.
         envelope_definition : str, optional
             Tag naming the label the chart's envelope encodes.
+        theta_to_u : np.ndarray or None, optional
+            ``(2, N_map)`` theta_c→u axis reparametrization map.  When
+            provided together with ``u_grid``, the spline's fourth axis is
+            ``u`` (the cusp-adapted ``d**(2/3)`` coordinate; not raw
+            ``theta_c``).
+        u_grid : np.ndarray or None, optional
+            1-D strictly increasing u-coordinate nodes (same length as
+            ``theta_c_grid``).  Required when ``theta_to_u`` is given.
         """
         gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
         rho_grid = _validate_axis(rho_grid, 'rho_grid')
@@ -1615,21 +1634,39 @@ class ExteriorPolarChart:
         expected = (log_w_grid.size, gamma_grid.size, rho_grid.size,
                     theta_c_grid.size)
         _check_value_shape(envelope_real, envelope_imag, expected)
+        if theta_to_u is not None and u_grid is not None:
+            theta_to_u = _validate_theta_to_u(theta_to_u, theta_c_grid)
+            u_grid = _validate_axis(u_grid, 'u_grid')
+            if u_grid.size != theta_c_grid.size:
+                raise ValueError(
+                    f'u_grid length ({u_grid.size}) must equal '
+                    f'theta_c_grid length ({theta_c_grid.size}).')
+            spline_axes = (log_w_grid, gamma_grid, rho_grid, u_grid)
+        elif theta_to_u is None and u_grid is None:
+            spline_axes = (log_w_grid, gamma_grid, rho_grid, theta_c_grid)
+        else:
+            raise ValueError(
+                'theta_to_u and u_grid must both be None or both provided.')
         real_c, imag_c, knots = _fit_tensor_spline(
-            (log_w_grid, gamma_grid, rho_grid, theta_c_grid),
-            envelope_real, envelope_imag)
+            spline_axes, envelope_real, envelope_imag)
         return cls._assemble(
             gamma_grid, rho_grid, theta_c_grid, log_w_grid, real_c, imag_c,
             knots, image_count, parity, eta_overlap_min, refused_points,
-            envelope_definition=envelope_definition)
+            envelope_definition=envelope_definition,
+            theta_to_u=theta_to_u)
 
     @classmethod
     def _assemble(cls, gamma_grid, rho_grid, theta_c_grid, log_w_grid,
                   real_coeffs, imag_coeffs, knots, image_count, parity,
                   eta_overlap_min, refused_points,
-                  envelope_definition=_FARFIELD_ENVELOPE_DEFINITION
+                  envelope_definition=_FARFIELD_ENVELOPE_DEFINITION,
+                  theta_to_u=None
                   ) -> 'ExteriorPolarChart':
-        """Assemble a chart from prebuilt coefficient tensors and knots."""
+        """Assemble a chart from prebuilt coefficient tensors and knots.
+
+        Load-bearing for `_chart_from_npz`: rebuilds the frozen chart from
+        the persisted axes, coefficients and knots without re-fitting.
+        """
         gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
         rho_grid = _validate_axis(rho_grid, 'rho_grid')
         theta_c_grid = _validate_axis(theta_c_grid, 'theta_c_grid')
@@ -1651,7 +1688,9 @@ class ExteriorPolarChart:
             eta_overlap_min=float(eta_overlap_min),
             refused_points=_normalize_refused(refused_points),
             param_spacing=param_spacing,
-            envelope_definition=str(envelope_definition))
+            envelope_definition=str(envelope_definition),
+            theta_to_u=(np.ascontiguousarray(theta_to_u, dtype=float)
+                        if theta_to_u is not None else None))
 
 
 @dataclass(frozen=True, eq=False)
@@ -2678,9 +2717,13 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
         else:
             v2 = theta_wedge
     elif isinstance(chart, ExteriorPolarChart):
-        # Exterior-polar chart: folded exterior (rho, theta_c) at the
-        # query's own gamma via D₂ quadrant folding.
-        v1, v2 = _to_exterior_fixed(gamma, y1_eig, y2_eig)
+        rho, theta_c = _to_exterior_fixed(gamma, y1_eig, y2_eig)
+        v1 = rho
+        if chart.theta_to_u is not None:
+            v2 = float(np.interp(theta_c, chart.theta_to_u[0],
+                                 chart.theta_to_u[1]))
+        else:
+            v2 = theta_c
     else:
         raise TypeError(
             f'Unknown chart type: {type(chart).__name__}.')
@@ -2791,7 +2834,9 @@ class LensAmplificationSurrogate:
                     n_rho: int = _DEFAULT_PARAM_NODES,
                     n_theta_c: int = _DEFAULT_PARAM_NODES,
                     w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE,
-                    definition: str = _FARFIELD_ENVELOPE_DEFINITION
+                    definition: str = _FARFIELD_ENVELOPE_DEFINITION,
+                    theta_to_u: np.ndarray | None = None,
+                    u_grid: np.ndarray | None = None
                     ) -> 'LensAmplificationSurrogate':
         """Train a single-box exterior-polar surrogate on a dense engine grid.
 
@@ -2843,6 +2888,14 @@ class LensAmplificationSurrogate:
         definition : str, optional
             Envelope-definition tag the chart is trained on (default the
             far-field kernel-sum label).
+        theta_to_u : np.ndarray or None, optional
+            ``(2, N_map)`` theta_c→u axis reparametrization map.  When
+            provided together with ``u_grid``, the spline's fourth axis is
+            ``u`` (the cusp-adapted ``d**(2/3)`` coordinate) instead of
+            raw ``theta_c``.
+        u_grid : np.ndarray or None, optional
+            1-D u-coordinate grid nodes (same length as ``theta_c_grid``).
+            Required when ``theta_to_u`` is given.
 
         Returns
         -------
@@ -2916,7 +2969,8 @@ class LensAmplificationSurrogate:
             image_count=image_count, parity=parity,
             eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
             refused_points=refused_points,
-            envelope_definition=definition)
+            envelope_definition=definition,
+            theta_to_u=theta_to_u, u_grid=u_grid)
         provenance = cls._build_provenance(
             gamma_range, rho_range, theta_c_range, w_range, shape,
             envelope_real, envelope_imag)
@@ -3888,8 +3942,9 @@ def _validate_exterior_polar_axis_schema(tag, artifact_label: str) -> str:
 
     Thin wrapper over `_validate_axis_schema` binding the exterior-polar
     known set.  Exterior-polar charts require the self-contained caustic-fixed
-    ``(rho, theta_c)`` coordinate and must not serve under the retired
-    far-field-smooth ``(s, d)`` convention.
+    ``(rho, u)`` coordinate (angular axis ``u = d**(2/3)`` where ``d`` is
+    the distance to the nearer cusp) and must not serve under the retired
+    ``exterior_polar_rho_theta_c`` schema.
     """
     return _validate_axis_schema(
         tag, _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS,
@@ -3963,9 +4018,10 @@ def _chart_to_npz(chart, index: int) -> dict:
             arrays[prefix + 'theta_to_u'] = chart.theta_to_u
     else:
         # Exterior-polar branch: the spatial axes are the caustic-fixed
-        # ``(rho, theta_c)`` -- self-contained, single-valued coordinates
-        # with no arc-length map needed.  The axis-schema tag hard-refuses
-        # a stale far-field-smooth artifact at load.
+        # ``(rho, theta_c)`` -- self-contained, single-valued coordinates.
+        # The optional theta_to_u map (cusp-adapted ``u = d**(2/3)``
+        # angular axis reparametrisation) is conditionally persisted.
+        # The axis-schema tag hard-refuses a stale artifact at load.
         meta = {'kind': 'exterior_polar', 'image_count': chart.image_count,
                 'parity': chart.parity,
                 'eta_overlap_min': chart.eta_overlap_min,
@@ -3974,6 +4030,8 @@ def _chart_to_npz(chart, index: int) -> dict:
         axes = (chart.log_w_grid, chart.gamma_grid, chart.rho_grid,
                 chart.theta_c_grid)
         arrays = {prefix + 'refused': chart.refused_points}
+        if chart.theta_to_u is not None:
+            arrays[prefix + 'theta_to_u'] = chart.theta_to_u
     arrays[prefix + 'meta'] = np.array(json.dumps(meta))
     arrays[prefix + 're_coeffs'] = chart.real_coeffs
     arrays[prefix + 'im_coeffs'] = chart.imag_coeffs
@@ -4008,12 +4066,12 @@ def _chart_from_npz(data, index: int):
         _validate_lobe_axis_schema(meta.get('axis_schema'), f'chart {index}')
         definition = _validate_farfield_definition(
             meta.get('envelope_definition'), f'chart {index}')
-        # theta_to_u is REQUIRED under the new schema.  A stale V1/sqrt-edge
-        # artifact already hard-refused above at `_validate_lobe_axis_schema`
-        # (its angular map rode under the old ``theta_to_s`` key); a new-schema
-        # artifact missing the cusp-adapted map key hard-refuses here (KeyError)
-        # rather than serving on a wrong angular coordinate.
-        theta_to_u = data[prefix + 'theta_to_u']
+        # theta_to_u is the cusp-adapted u-coordinate map.  When absent from
+        # the persisted arrays the loader treats it as None (raw-theta
+        # fallback) — this preserves NPZ round-trip for a
+        # theta_to_u=None chart built via from_lobe_engine with
+        # cusp_angle=None.
+        theta_to_u = data.get(prefix + 'theta_to_u')
         return LobeInteriorChart._assemble(
             gamma_grid=gamma_grid, rho_lobe_grid=p1_grid,
             theta_local_grid=p2_grid, log_w_grid=log_w_grid,
@@ -4036,11 +4094,10 @@ def _chart_from_npz(data, index: int):
             f'Wedge-interior chart {index}')
         definition = _validate_farfield_definition(
             meta.get('envelope_definition'), f'chart {index}')
-        # theta_to_u is REQUIRED under the v3 schema.  A stale v2/v1 artifact
-        # already hard-refused above at `_validate_axis_schema` (its wedge map
-        # rode under the old ``theta_to_s`` key); a v3 artifact missing the
-        # cusp-adapted map key hard-refuses here (KeyError) rather than serving
-        # on a wrong angular coordinate.
+        # theta_to_u is REQUIRED under the wedge V3 schema: from_wedge_engine
+        # always builds it and _chart_to_npz always writes it, so an absent
+        # map is a corrupt artifact and MUST hard-refuse (KeyError) rather
+        # than silently falling back to a raw-theta spline on wrong axes.
         theta_to_u = data[prefix + 'theta_to_u']
         wedge_map = _WedgeCausticMap(
             gamma_nodes=np.ascontiguousarray(
@@ -4063,6 +4120,11 @@ def _chart_from_npz(data, index: int):
         meta.get('envelope_definition'), f'chart {index}')
     _validate_exterior_polar_axis_schema(
         meta.get('axis_schema'), f'chart {index}')
+    # theta_to_u is the cusp-adapted u-coordinate map.  When absent from
+    # the persisted arrays (e.g. a saddle exterior chart with
+    # parity=-1, or any chart built with the raw-theta fallback), the
+    # loader treats it as None — `_assemble` already handles None.
+    theta_to_u = data.get(prefix + 'theta_to_u')
     return ExteriorPolarChart._assemble(
         gamma_grid=gamma_grid, rho_grid=p1_grid, theta_c_grid=p2_grid,
         log_w_grid=log_w_grid, real_coeffs=real_coeffs,
@@ -4070,4 +4132,5 @@ def _chart_from_npz(data, index: int):
         image_count=meta['image_count'], parity=meta['parity'],
         eta_overlap_min=meta['eta_overlap_min'],
         refused_points=data[prefix + 'refused'],
-        envelope_definition=definition)
+        envelope_definition=definition,
+        theta_to_u=theta_to_u)

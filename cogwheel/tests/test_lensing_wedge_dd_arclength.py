@@ -534,14 +534,14 @@ class FieldExposureTestCase(_WedgeDDTestCase):
         self.assertNotIn('theta_to_s', names)
 
     def test_exterior_polar_uses_caustic_fixed_axes(self):
-        """Exterior-polar charts use rho_grid + theta_c_grid, not s_grid/arc_map/theta_to_u."""
+        """Exterior-polar charts expose rho_grid + theta_c_grid + theta_to_u (optional field)."""
         names = self._fields(ExteriorPolarChart)
         self._tick()
         self.assertIn('rho_grid', names)
         self.assertIn('theta_c_grid', names)
         self.assertNotIn('s_grid', names)
         self.assertNotIn('arc_map', names)
-        self.assertNotIn('theta_to_u', names)
+        self.assertIn('theta_to_u', names)
 
 
 # ===========================================================================

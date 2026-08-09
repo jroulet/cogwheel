@@ -64,7 +64,7 @@ from cogwheel.lensing.surrogate import (
     _from_lobe_fixed, _lobe_boundary_radius, LobeInteriorChart,
     InteriorWedgeChart, _from_wedge_fixed,
     _wedge_theta_waist, _wedge_cusp_axis_map, _lobe_cusp_axis_map,
-    CarrierDiscontinuityError)
+    _uniform_axis, CarrierDiscontinuityError)
 
 #: Engine refusals treated conservatively as "do not serve here" during
 #: training.  Extends the 8a surrogate refusal vocabulary with the point-mass
@@ -2744,7 +2744,8 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
     nodes_per_decade = (config.w_nodes_per_decade
                         if w_nodes_per_decade is None
                         else int(w_nodes_per_decade))
-    n_points = config.n_gamma * config.n_rho * config.n_theta_c
+    n_gamma = config.n_gamma
+    n_points = n_gamma * config.n_rho * config.n_theta_c
     _budget_check(n_points, config.engine_budget, 'farfield')
     rho_center, theta_c_center = box_center
     half_rho, half_theta_c = half
@@ -2752,14 +2753,33 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
                  float(rho_center + half_rho))
     theta_c_range = (float(theta_c_center - half_theta_c),
                      float(theta_c_center + half_theta_c))
+    # For positive-parity exterior tiles (astroid, gamma < 1): build the
+    # cusp-adapted u = d**(2/3) angular map so the spline absorbs the
+    # d**(-1/3) near-cusp divergence in dE/dtheta_c.  Macro-saddle exterior
+    # (parity == -1) uses raw-theta (theta_to_u=None, u_grid=None).
+    if parity == 1:
+        waist = _wedge_theta_waist(
+            np.median(np.exp(np.linspace(
+                np.log(gamma_band[0]), np.log(gamma_band[1]), n_gamma))))
+        origin = 'low' if theta_c_center <= waist else 'high'
+        theta_lo, theta_hi = theta_c_range
+        theta_fine, u_fine = _wedge_cusp_axis_map(theta_lo, theta_hi, origin)
+        theta_to_u = np.vstack([theta_fine, u_fine])
+        u_grid = np.interp(
+            _uniform_axis(theta_c_range, config.n_rho, 'theta_c'),
+            theta_fine, u_fine)
+    else:
+        theta_to_u = None
+        u_grid = None
     try:
         single = LensAmplificationSurrogate.from_engine(
             gamma_range=gamma_band, rho_range=rho_range,
             theta_c_range=theta_c_range, w_range=w_range,
-            n_gamma=config.n_gamma, n_rho=config.n_theta_c,
+            n_gamma=n_gamma, n_rho=config.n_theta_c,
             n_theta_c=config.n_rho,
             w_nodes_per_decade=nodes_per_decade,
-            definition=FARFIELD_KERNEL_SUM)
+            definition=FARFIELD_KERNEL_SUM,
+            theta_to_u=theta_to_u, u_grid=u_grid)
     except CarrierDiscontinuityError as exc:
         raise CarrierDiscontinuityError(
             'Exterior-polar tile label winds faster than the Nyquist '

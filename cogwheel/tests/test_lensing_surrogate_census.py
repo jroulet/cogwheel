@@ -221,7 +221,8 @@ def _synthetic_surrogate():
         gamma_grid=pos_gamma, rho_grid=pos_rho, theta_c_grid=pos_theta_c,
         log_w_grid=SYN_LOG_W, envelope_real=real, envelope_imag=imag,
         image_count=2, parity=1,
-        eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR, refused_points=pos_refused)
+        eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR, refused_points=pos_refused,
+        theta_to_u=None, u_grid=None)
     sad_gamma = np.linspace(1.1, 1.4, 4)
     sad_theta = np.linspace(-0.39, -0.09, 4)
     real, imag = _smooth_tensor(sad_gamma, u_grid, sad_theta, SYN_LOG_W, 1.0)
@@ -243,7 +244,8 @@ def _synthetic_surrogate():
         gamma_grid=sad_gamma, rho_grid=sad_rho, theta_c_grid=sad_theta_c,
         log_w_grid=SYN_LOG_W, envelope_real=real, envelope_imag=imag,
         image_count=4, parity=-1,
-        eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR, refused_points=sad_refused)
+        eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR, refused_points=sad_refused,
+        theta_to_u=None, u_grid=None)
     provenance = {'chart_count': 4,
                   'chart_types': ['tube', 'farfield', 'tube', 'farfield'],
                   'dropped_gamma_slivers': [list(SYN_DROPPED[0])]}
@@ -1282,6 +1284,182 @@ class MutationFalsificationTestCase(CensusTestCase):
             f'admitted far-field eps {raw_eps:.3e} not worse than the tube '
             f'in-domain eps {tube_eps:.3e}')
 
+
+# ==========================================================================
+# Section H -- cusp-adapted theta_to_u exterior-polar chart in census
+# ==========================================================================
+
+@functools.lru_cache(maxsize=1)
+def _cusp_adapted_exterior_polar_chart():
+    """An ExteriorPolarChart with a real non-identity ``theta_to_u``
+    cusp-adapted map built via `_wedge_cusp_axis_map`.
+
+    Shares axes with the raw-theta sibling created in
+    `ExteriorPolarCuspAdaptedCensusTestCase.setUpClass`; both use the
+    same ``_smooth_tensor`` envelope values, so the only difference is
+    the theta_to_u parametrization.
+    """
+    gamma_grid = np.linspace(0.30, 0.50, 4)
+    rho_grid = np.linspace(0.02, 0.08, 4)
+    theta_c_grid = np.linspace(0.05, 0.20, 4)
+    theta_lo, theta_hi = float(theta_c_grid[0]), float(theta_c_grid[-1])
+    theta_fine, u_fine = surrogate_module._wedge_cusp_axis_map(
+        theta_lo, theta_hi, 'low')
+    theta_to_u = np.vstack([theta_fine, u_fine])
+    u_grid = np.interp(theta_c_grid, theta_fine, u_fine)
+    real, imag = _smooth_tensor(gamma_grid, rho_grid, theta_c_grid,
+                                SYN_LOG_W, 2.0)
+    return ExteriorPolarChart.from_values(
+        gamma_grid=gamma_grid, rho_grid=rho_grid,
+        theta_c_grid=theta_c_grid, log_w_grid=SYN_LOG_W,
+        envelope_real=real, envelope_imag=imag,
+        image_count=2, parity=1,
+        eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
+        theta_to_u=theta_to_u, u_grid=u_grid)
+
+
+class ExteriorPolarCuspAdaptedCensusTestCase(CensusTestCase):
+    """Census correctly classifies draws served by a theta_to_u-bearing
+    exterior-polar chart as ``served=True`` (via the standard
+    ``chart_index`` path), and fallthrough categories are unchanged
+    relative to the raw-theta sibling."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.chart_cusp = _cusp_adapted_exterior_polar_chart()
+        real_vals, imag_vals = _smooth_tensor(
+            np.linspace(0.30, 0.50, 4), np.linspace(0.02, 0.08, 4),
+            np.linspace(0.05, 0.20, 4), SYN_LOG_W, 2.0)
+        cls.chart_raw = ExteriorPolarChart.from_values(
+            gamma_grid=np.linspace(0.30, 0.50, 4),
+            rho_grid=np.linspace(0.02, 0.08, 4),
+            theta_c_grid=np.linspace(0.05, 0.20, 4),
+            log_w_grid=SYN_LOG_W,
+            envelope_real=real_vals, envelope_imag=imag_vals,
+            image_count=2, parity=1,
+            eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
+            theta_to_u=None, u_grid=None)
+        cls.gamma = 0.4
+        cls.rho_mid = 0.05
+        cls.theta_c_mid = 0.125
+        cls.y1_eig, cls.y2_eig = surrogate_module._from_caustic_fixed(
+            cls.gamma, cls.rho_mid, cls.theta_c_mid)
+
+    def setUp(self):
+        super().setUp()
+
+    def test_exterior_polar_serves_identical_for_both(self):
+        """``_exterior_polar_serves`` does not read ``theta_to_u``; both
+        charts make the same admit/refuse decision for the same query."""
+        kwargs = dict(gamma=self.gamma, log_w_min=SYN_LWMIN,
+                      log_w_max=SYN_LWMAX, eta=0.10, image_count=2,
+                      y1_eig=self.y1_eig, y2_eig=self.y2_eig)
+        raw_serves = surrogate_module._exterior_polar_serves(
+            self.chart_raw, **kwargs)
+        cusp_serves = surrogate_module._exterior_polar_serves(
+            self.chart_cusp, **kwargs)
+        self.n_checks += 1
+        self.assertEqual(raw_serves, cusp_serves,
+                         '_exterior_polar_serves must not depend on '
+                         'theta_to_u')
+        self.n_checks += 1
+        self.assertTrue(raw_serves,
+                        'mid-axis query must be served by both charts')
+
+    def test_select_chart_returns_cusp_chart(self):
+        """``select_chart`` returns the theta_to_u-bearing chart for a
+        query inside its box -- census records ``served=True`` via
+        ``chart_index``."""
+        sur = LensAmplificationSurrogate([self.chart_cusp], {})
+        chart = select_chart(sur.charts, gamma=self.gamma,
+                             log_w_min=SYN_LWMIN, log_w_max=SYN_LWMAX,
+                             eta=0.10, theta=float('nan'),
+                             image_count=2,
+                             y1_eig=self.y1_eig, y2_eig=self.y2_eig)
+        self.n_checks += 1
+        self.assertIsNotNone(chart,
+                             'select_chart must return the chart for an '
+                             'in-box query')
+        self.n_checks += 1
+        self.assertIs(chart, self.chart_cusp)
+
+    def test_evaluate_chart_finite_with_theta_to_u(self):
+        """``_evaluate_chart`` returns finite complex values when
+        ``theta_to_u`` is present -- the census heldout-envelope-eps
+        path is exercised."""
+        log_w_query = SYN_LOG_W.copy()
+        result = _evaluate_chart(
+            self.chart_cusp, gamma=self.gamma, eta=float('nan'),
+            theta=float('nan'), log_w_query=log_w_query,
+            y1_eig=self.y1_eig, y2_eig=self.y2_eig)
+        self.n_checks += 1
+        self.assertTrue(np.all(np.isfinite(result)),
+                        '_evaluate_chart must return finite values')
+        self.n_checks += 1
+        self.assertEqual(result.shape, log_w_query.shape)
+
+    def test_classify_fallthrough_same_for_both(self):
+        """``classify_fallthrough`` returns the same category for both
+        the raw-theta and cusp-adapted charts -- census fallthrough
+        categorization is theta_to_u-independent."""
+        for gamma, expected_category in [
+            (1.0 + 0.5 * _GAMMA_GUARD_BAND, 'gamma-guard'),
+            (0.92, 'dropped-sliver'),
+            (5.0, 'out-of-box'),
+        ]:
+            for chart, label in [(self.chart_raw, 'raw'),
+                                 (self.chart_cusp, 'cusp')]:
+                sur = LensAmplificationSurrogate([chart], {})
+                result = census.classify_fallthrough(
+                    sur, gamma=gamma, log_w_min=SYN_LWMIN,
+                    log_w_max=SYN_LWMAX, eta=0.03, theta=0.7,
+                    image_count=2, y1_eig=self.y1_eig,
+                    y2_eig=self.y2_eig,
+                    dropped_slivers=SYN_DROPPED)
+                with self.subTest(gamma=gamma, chart=label):
+                    self.n_checks += 1
+                    self.assertEqual(
+                        result, expected_category,
+                        f'{expected_category} mismatch for {label}')
+
+
+class ExteriorPolarCuspAdaptedSelfFalsification(CensusTestCase):
+    """Self-falsification: the ``theta_to_u``<->``u_grid`` pairing is
+    load-bearing -- providing one without the other raises at chart
+    construction."""
+
+    def setUp(self):
+        super().setUp()
+        self.real, self.imag = _smooth_tensor(
+            np.linspace(0.3, 0.5, 4), np.linspace(0.02, 0.08, 4),
+            np.linspace(0.05, 0.20, 4), SYN_LOG_W, 2.0)
+        self.kwargs = dict(
+            gamma_grid=np.linspace(0.30, 0.50, 4),
+            rho_grid=np.linspace(0.02, 0.08, 4),
+            theta_c_grid=np.linspace(0.05, 0.20, 4),
+            log_w_grid=SYN_LOG_W,
+            image_count=2, parity=1,
+            eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR)
+
+    def test_theta_to_u_without_u_grid_raises(self):
+        """Providing ``theta_to_u`` without ``u_grid`` raises ValueError
+        -- the census cannot silently serve a misconfigured chart."""
+        self.n_checks += 1
+        with self.assertRaises(ValueError):
+            ExteriorPolarChart.from_values(
+                envelope_real=self.real, envelope_imag=self.imag,
+                theta_to_u=np.array([[0.05, 0.20], [0.0, 1.0]]),
+                u_grid=None, **self.kwargs)
+
+    def test_u_grid_without_theta_to_u_raises(self):
+        """Providing ``u_grid`` without ``theta_to_u`` raises ValueError."""
+        self.n_checks += 1
+        with self.assertRaises(ValueError):
+            ExteriorPolarChart.from_values(
+                envelope_real=self.real, envelope_imag=self.imag,
+                theta_to_u=None,
+                u_grid=np.array([0.0, 1.0]),
+                **self.kwargs)
 
 if __name__ == '__main__':
     unittest.main()

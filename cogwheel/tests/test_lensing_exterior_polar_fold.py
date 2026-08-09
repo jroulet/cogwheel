@@ -34,7 +34,8 @@ from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate,
     _evaluate_chart, _to_caustic_fixed, select_chart, ExteriorPolarChart,
-    LobeInteriorChart, _lobe_serves)
+    LobeInteriorChart, _lobe_serves,
+    _from_caustic_fixed, _wedge_cusp_axis_map)
 
 
 # ---------------------------------------------------------------------------
@@ -107,25 +108,36 @@ def _build_chart(*, gamma_grid: np.ndarray = _CHART_GAMMA_GRID,
                  theta_c_grid: np.ndarray = _CHART_THETA_C_GRID,
                  log_w_grid: np.ndarray = _CHART_LOG_W_GRID,
                  image_count: int = 2, parity: int = 1,
+                 theta_to_u: np.ndarray | None = None,
+                 u_grid: np.ndarray | None = None,
+                 envelope_real: np.ndarray | None = None,
+                 envelope_imag: np.ndarray | None = None,
                  **kwargs) -> ExteriorPolarChart:
-    """Build a synthetic ExteriorPolarChart with constant envelope = 1.
+    """Build a synthetic ExteriorPolarChart.
 
-    The constant envelope is a valid interpolation target for cubic
-    B-splines; identity across the D₂ fold is thus detectable only if the
-    fold correctly maps all four quadrants to the same ``(rho, theta_c)``.
+    By default the envelope is constant = 1 (valid B-spline interpolation
+    target).  Pass ``theta_to_u + u_grid`` for a cusp-adapted angular axis
+    (``u = d**(2/3)``); pass custom ``envelope_real`` / ``envelope_imag``
+    to exercise a non-uniform angular axis.
     """
     shape = (len(log_w_grid), len(gamma_grid), len(rho_grid),
              len(theta_c_grid))
+    if envelope_real is None:
+        envelope_real = np.ones(shape)
+    if envelope_imag is None:
+        envelope_imag = np.zeros(shape)
     return ExteriorPolarChart.from_values(
         gamma_grid=gamma_grid,
         rho_grid=rho_grid,
         theta_c_grid=theta_c_grid,
         log_w_grid=log_w_grid,
-        envelope_real=np.ones(shape),
-        envelope_imag=np.zeros(shape),
+        envelope_real=envelope_real,
+        envelope_imag=envelope_imag,
         image_count=image_count,
         parity=parity,
         envelope_definition=FARFIELD_KERNEL_SUM,
+        theta_to_u=theta_to_u,
+        u_grid=u_grid,
         **kwargs)
 
 
@@ -900,3 +912,412 @@ class D2FoldRegressionTestCase(unittest.TestCase):
             f'Wedge chart suite FAILED:\n'
             f'STDOUT:\n{result.stdout[-2000:]}\n'
             f'STDERR:\n{result.stderr[-2000:]}')
+
+# ===========================================================================
+# Exterior-polar Cusp-Adapted Axis — fixtures
+# ===========================================================================
+
+#: Tile bounds for a low-origin (theta_c near 0 cusp) chart.
+_CUSP_LOW_THETA_LO: float = 0.02
+_CUSP_LOW_THETA_HI: float = 0.55
+
+#: Tile bounds for a high-origin (theta_c near pi/2 cusp) chart.
+_CUSP_HIGH_THETA_LO: float = 1.02  # pi/2 − 0.55
+_CUSP_HIGH_THETA_HI: float = np.pi / 2.0 - 0.02
+
+#: Gamma probe value for cusp-adapted axis queries.
+_CUSP_GAMMA: float = 0.30
+
+#: Rho mid-tile probe coordinate.
+_CUSP_RHO: float = 3.0
+
+#: Theta-c grid size for the cusp-adapted test charts.
+#  Odd count preserves an exact symmetry point.
+_CUSP_N_THETA_C: int = 7
+
+#: Log-w query band (scalar band, one log-w point).
+_CUSP_LOG_W: np.ndarray = np.log(np.array([10.0]))
+
+#: Eta for the exterior query (must be > caustic floor).
+_CUSP_ETA: float = 0.1
+
+#: Tolerance for B-spline node-exact reproduction.
+#  Budget: ~6e-9 interp error at 2001 nodes (mem:test_dev_knowledge).
+_CUSP_NODE_EXACT_TOL: float = 1e-7
+
+#: Tolerance for off-grid interp vs exact u(theta_c).
+#  Relaxed: the spline axis is u, not theta_c; the query theta_c
+#  maps to a u-coordinate that may be between spline nodes.
+_CUSP_OFFGRID_TOL: float = 2e-2
+
+
+def _angular_envelope(log_w_size: int, gamma_size: int,
+                      rho_size: int, angular_size: int,
+                      angular_values: np.ndarray) -> np.ndarray:
+    """Create a (n_w, n_gamma, n_rho, n_theta_c) envelope
+    varying only along the angular (4th) axis."""
+    return np.broadcast_to(
+        angular_values.reshape(1, 1, 1, -1),
+        (log_w_size, gamma_size, rho_size, angular_size)).copy()
+
+
+def _eigenframe_source(gamma: float, rho: float,
+                       theta_c: float) -> tuple[float, float]:
+    """Convenience wrapper: (y1_eig, y2_eig) for a caustic-fixed point."""
+    return _from_caustic_fixed(gamma, rho, theta_c)
+
+
+# ===========================================================================
+# Exterior-polar Cusp-Adapted Axis — test classes
+# ===========================================================================
+
+class ExteriorPolarCuspAdaptedAxisTestCase(unittest.TestCase):
+    """ExteriorPolarChart ``theta_to_u`` remap resolves correctly.
+
+    Builds two synthetic exterior-polar charts with a cusp-adapted
+    ``u = d**(2/3)`` angular axis via ``_wedge_cusp_axis_map``:
+    one nearest the ``theta_c = 0`` cusp (origin ``'low'``) and one
+    nearest the ``theta_c = π/2`` cusp (origin ``'high'``).
+
+    The envelope is set to the ``u_grid`` ordinate values, so the
+    served envelope magnitude carries the angular-coordinate
+    information.  A correct theta_to_u remap means: querying at a
+    theta_c value returns an envelope ≈ u(theta_c), where u is the
+    cusp-adapted coordinate computed via np.interp.
+    """
+
+    _low_chart: ExteriorPolarChart | None = None
+    _high_chart: ExteriorPolarChart | None = None
+    _low_theta_map: np.ndarray | None = None  # (2, N) theta_to_u
+    _high_theta_map: np.ndarray | None = None
+    _n_compared: int = 0
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # --- low-origin chart (theta_c near 0) ---
+        theta_lo_low = _CUSP_LOW_THETA_LO
+        theta_hi_low = _CUSP_LOW_THETA_HI
+        theta_c_grid_low = np.linspace(theta_lo_low, theta_hi_low,
+                                       _CUSP_N_THETA_C)
+        theta_fine_low, u_fine_low = _wedge_cusp_axis_map(
+            theta_lo_low, theta_hi_low, 'low')
+        theta_to_u_low = np.vstack([theta_fine_low, u_fine_low])
+        u_grid_low = np.interp(theta_c_grid_low, theta_fine_low, u_fine_low)
+
+        ni = len(_CHART_LOG_W_GRID)
+        ng = len(_CHART_GAMMA_GRID)
+        nr = len(_CHART_RHO_GRID)
+        nc = _CUSP_N_THETA_C
+        env_low = _angular_envelope(ni, ng, nr, nc, u_grid_low)
+
+        cls._low_chart = _build_chart(
+            theta_c_grid=theta_c_grid_low,
+            theta_to_u=theta_to_u_low,
+            u_grid=u_grid_low,
+            envelope_real=env_low)
+        cls._low_theta_map = theta_to_u_low
+
+        # --- high-origin chart (theta_c near pi/2) ---
+        theta_lo_high = _CUSP_HIGH_THETA_LO
+        theta_hi_high = _CUSP_HIGH_THETA_HI
+        theta_c_grid_high = np.linspace(theta_lo_high, theta_hi_high,
+                                        _CUSP_N_THETA_C)
+        theta_fine_high, u_fine_high = _wedge_cusp_axis_map(
+            theta_lo_high, theta_hi_high, 'high')
+        theta_to_u_high = np.vstack([theta_fine_high, u_fine_high])
+        u_grid_high = np.interp(theta_c_grid_high,
+                                theta_fine_high, u_fine_high)
+
+        env_high = _angular_envelope(ni, ng, nr, nc, u_grid_high)
+
+        cls._high_chart = _build_chart(
+            theta_c_grid=theta_c_grid_high,
+            theta_to_u=theta_to_u_high,
+            u_grid=u_grid_high,
+            envelope_real=env_high)
+        cls._high_theta_map = theta_to_u_high
+
+    def tearDown(self) -> None:
+        if self._n_compared == 0:
+            self.fail(f'no comparisons executed in {self._testMethodName}; '
+                      f'test is vacuous')
+
+    def _evaluate_at_theta_c(self, chart: ExteriorPolarChart,
+                             theta_c: float) -> float:
+        """Evaluate the chart envelope at one (rho, theta_c)."""
+        y1, y2 = _eigenframe_source(_CUSP_GAMMA, _CUSP_RHO, theta_c)
+        env = _evaluate_chart(chart, gamma=_CUSP_GAMMA, eta=_CUSP_ETA,
+                              theta=0.0, log_w_query=_CUSP_LOG_W,
+                              y1_eig=y1, y2_eig=y2)
+        return float(env[0].real)
+
+    def test_low_cusp_on_grid_nodes_reproduce(self) -> None:
+        """On-grid theta_c nodes reproduce u_grid values to ~1e-7.
+
+        7 queries, budgeted at ~1 ms each (< 1 s total).
+        """
+        chart = self._low_chart
+        theta_c_grid = chart.theta_c_grid
+        for tc in theta_c_grid:
+            with self.subTest(theta_c=tc):
+                served = self._evaluate_at_theta_c(chart, tc)
+                expected_u = float(np.interp(
+                    tc, self._low_theta_map[0], self._low_theta_map[1]))
+                self._n_compared += 1
+                self.assertLessEqual(
+                    abs(served - expected_u), _CUSP_NODE_EXACT_TOL,
+                    f'served={served:.6e} != expected_u={expected_u:.6e} '
+                    f'at theta_c={tc:.4f}')
+
+    def test_low_cusp_off_grid_remaps_correctly(self) -> None:
+        """Off-grid theta_c queries map correctly via np.interp.
+
+        3 comparisons, budgeted at ~1 ms each (< 1 s total).
+        """
+        chart = self._low_chart
+        lo, hi = chart.theta_c_grid[0], chart.theta_c_grid[-1]
+        test_tc = np.linspace(lo * 1.3, hi * 0.7, 3)
+        for tc in test_tc:
+            with self.subTest(theta_c=tc):
+                served = self._evaluate_at_theta_c(chart, tc)
+                expected_u = float(np.interp(
+                    tc, self._low_theta_map[0], self._low_theta_map[1]))
+                self._n_compared += 1
+                self.assertLessEqual(
+                    abs(served - expected_u), _CUSP_OFFGRID_TOL,
+                    f'served={served:.6e} != expected_u={expected_u:.6e} '
+                    f'at theta_c={tc:.4f}')
+
+    def test_high_cusp_on_grid_nodes_reproduce(self) -> None:
+        """On-grid theta_c nodes reproduce u_grid values to ~1e-7
+        for the high-origin (theta_c near pi/2) tile.
+
+        7 queries, budgeted at ~1 ms each (< 1 s total).
+        """
+        chart = self._high_chart
+        theta_c_grid = chart.theta_c_grid
+        for tc in theta_c_grid:
+            with self.subTest(theta_c=tc):
+                served = self._evaluate_at_theta_c(chart, tc)
+                expected_u = float(np.interp(
+                    tc, self._high_theta_map[0], self._high_theta_map[1]))
+                self._n_compared += 1
+                self.assertLessEqual(
+                    abs(served - expected_u), _CUSP_NODE_EXACT_TOL,
+                    f'served={served:.6e} != expected_u={expected_u:.6e} '
+                    f'at theta_c={tc:.4f}')
+
+    def test_high_cusp_off_grid_remaps_correctly(self) -> None:
+        """Off-grid theta_c queries map correctly via np.interp
+        for the high-origin (theta_c near pi/2) tile.
+
+        3 comparisons, budgeted at ~1 ms each (< 1 s total).
+        """
+        chart = self._high_chart
+        lo, hi = chart.theta_c_grid[0], chart.theta_c_grid[-1]
+        test_tc = np.linspace(lo * 1.05, hi * 0.95, 3)
+        for tc in test_tc:
+            with self.subTest(theta_c=tc):
+                served = self._evaluate_at_theta_c(chart, tc)
+                expected_u = float(np.interp(
+                    tc, self._high_theta_map[0], self._high_theta_map[1]))
+                self._n_compared += 1
+                self.assertLessEqual(
+                    abs(served - expected_u), _CUSP_OFFGRID_TOL,
+                    f'served={served:.6e} != expected_u={expected_u:.6e} '
+                    f'at theta_c={tc:.4f}')
+
+    def test_theta_to_u_is_strictly_increasing(self) -> None:
+        """Both rows of theta_to_u are strictly increasing."""
+        for label, ttu in [('low', self._low_theta_map),
+                           ('high', self._high_theta_map)]:
+            with self.subTest(origin=label):
+                self._n_compared += 1
+                self.assertTrue(np.all(np.diff(ttu[0]) > 0),
+                                f'{label}: theta row not increasing')
+                self.assertTrue(np.all(np.diff(ttu[1]) > 0),
+                                f'{label}: u row not increasing')
+
+    def test_theta_to_u_starts_at_zero(self) -> None:
+        """u_row[0] ≈ 0 for both origins."""
+        for label, ttu in [('low', self._low_theta_map),
+                           ('high', self._high_theta_map)]:
+            with self.subTest(origin=label):
+                self._n_compared += 1
+                self.assertLessEqual(
+                    abs(float(ttu[1, 0])), 1e-15,
+                    f'{label}: u_row[0]={ttu[1,0]:.2e} != 0')
+
+    def test_theta_row_matches_chart_tile_bounds(self) -> None:
+        """theta_to_u[0] starts at the chart's theta_c_grid[0]."""
+        for label, chart, ttu in [
+                ('low', self._low_chart, self._low_theta_map),
+                ('high', self._high_chart, self._high_theta_map)]:
+            with self.subTest(origin=label):
+                self._n_compared += 1
+                self.assertEqual(float(ttu[0, 0]),
+                                 float(chart.theta_c_grid[0]))
+
+
+# ===========================================================================
+# Self-falsification: flat theta_to_u
+# ===========================================================================
+
+class ExteriorPolarCuspAdaptedSelfFalsification(unittest.TestCase):
+    """Replacing theta_to_u with a flat map degrades served values.
+
+    If ``theta_to_u`` maps all theta_c to the same u value,
+    the served envelope loses all angular-coordinate dependence.
+    This proves the cusp-adapted axis is load-bearing: a neutered
+    map gives a vacuously constant output regardless of theta_c.
+    """
+
+    _chart: ExteriorPolarChart | None = None
+    _theta_to_u: np.ndarray | None = None
+    _n_compared: int = 0
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        theta_lo = _CUSP_LOW_THETA_LO
+        theta_hi = _CUSP_LOW_THETA_HI
+        theta_c_grid = np.linspace(theta_lo, theta_hi, _CUSP_N_THETA_C)
+        theta_fine, u_fine = _wedge_cusp_axis_map(
+            theta_lo, theta_hi, 'low')
+        theta_to_u = np.vstack([theta_fine, u_fine])
+        u_grid = np.interp(theta_c_grid, theta_fine, u_fine)
+
+        ni = len(_CHART_LOG_W_GRID)
+        ng = len(_CHART_GAMMA_GRID)
+        nr = len(_CHART_RHO_GRID)
+        nc = _CUSP_N_THETA_C
+        env = _angular_envelope(ni, ng, nr, nc, u_grid)
+
+        cls._chart = _build_chart(
+            theta_c_grid=theta_c_grid,
+            theta_to_u=theta_to_u,
+            u_grid=u_grid,
+            envelope_real=env)
+        cls._theta_to_u = theta_to_u
+
+    def tearDown(self) -> None:
+        if self._n_compared == 0:
+            self.fail(f'no comparisons executed in {self._testMethodName}; '
+                      f'test is vacuous')
+
+    def _eval(self, chart: ExteriorPolarChart, theta_c: float) -> float:
+        y1, y2 = _eigenframe_source(_CUSP_GAMMA, _CUSP_RHO, theta_c)
+        env = _evaluate_chart(chart, gamma=_CUSP_GAMMA, eta=_CUSP_ETA,
+                              theta=0.0, log_w_query=_CUSP_LOG_W,
+                              y1_eig=y1, y2_eig=y2)
+        return float(env[0].real)
+
+    def test_correct_map_spread_exceeds_flat_map_spread(self) -> None:
+        """The angular spread with the correct map >> flat-map spread.
+
+        Query two theta_c values far apart within the tile.  With the
+        correct theta_to_u the two queries resolve to different u
+        values → different envelope magnitudes.  With a flat map both
+        queries resolve to the same u → nearly identical envelopes.
+
+        2+2 comparisons, budgeted at ~1 ms each (< 1 s total).
+        """
+        chart = self._chart
+        tc_lo = float(chart.theta_c_grid[1])   # near low edge
+        tc_hi = float(chart.theta_c_grid[-2])  # near high edge
+
+        spread_correct = abs(self._eval(chart, tc_hi)
+                             - self._eval(chart, tc_lo))
+
+        # Build a flat theta_to_u: all theta -> u_min.
+        flat_map = chart.theta_to_u.copy()
+        flat_map[1, :] = flat_map[1, 0]  # all u = u_min
+
+        # Mutate the frozen dataclass to inject the flat map.
+        object.__setattr__(chart, 'theta_to_u', flat_map)
+
+        spread_flat = abs(self._eval(chart, tc_hi)
+                          - self._eval(chart, tc_lo))
+
+        # Restore correct map for any subsequent tests.
+        object.__setattr__(chart, 'theta_to_u', self._theta_to_u)
+
+        self._n_compared = 2
+        self.assertGreater(
+            spread_correct, 0.01,
+            f'correct map spread = {spread_correct:.6e}; expected > 0.01. '
+            f'The test fixture does not exercise the angular axis.')
+        self.assertLess(
+            spread_flat, 0.01,
+            f'flat map spread = {spread_flat:.6e}; expected < 0.01. '
+            f'A flat theta_to_u should collapse the angular axis.')
+        self.assertGreater(
+            spread_correct / max(spread_flat, 1e-30), 10.0,
+            f'correct/flat spread ratio = '
+            f'{spread_correct / max(spread_flat, 1e-30):.1f}; '
+            f'expected > 10.  The theta_to_u remap is not load-bearing.')
+
+
+# ===========================================================================
+# Self-falsification: the cusp-adapted suite goes red when it should
+# ===========================================================================
+
+class CuspAdaptedAxisSelfFalsification(unittest.TestCase):
+    """Prove ``ExteriorPolarCuspAdaptedAxisTestCase`` has teeth.
+
+    If the correct-map tests could pass vacuously (e.g. envelope
+    constant), this class demonstrates that flipping theta_to_u
+    rows MAKES the suite go red — the assertions above are not
+    trivially satisfied.
+    """
+
+    def test_flipped_theta_to_u_breaks_node_exact(self) -> None:
+        """With u-row replaced by theta-row, on-grid assertion breaks.
+
+        Swapping the u-row for the theta-row yields an envelope
+        that varies as theta_c (not u), so the served value at a
+        theta_c node no longer matches the expected u(theta_c).
+        """
+        theta_lo = _CUSP_LOW_THETA_LO
+        theta_hi = _CUSP_LOW_THETA_HI
+        theta_c_grid = np.linspace(theta_lo, theta_hi, _CUSP_N_THETA_C)
+        theta_fine, u_fine = _wedge_cusp_axis_map(theta_lo, theta_hi, 'low')
+        theta_to_u = np.vstack([theta_fine, u_fine])
+        u_grid = np.interp(theta_c_grid, theta_fine, u_fine)
+
+        ni = len(_CHART_LOG_W_GRID)
+        ng = len(_CHART_GAMMA_GRID)
+        nr = len(_CHART_RHO_GRID)
+        nc = _CUSP_N_THETA_C
+        env = _angular_envelope(ni, ng, nr, nc, u_grid)
+
+        chart = _build_chart(
+            theta_c_grid=theta_c_grid,
+            theta_to_u=theta_to_u,
+            u_grid=u_grid,
+            envelope_real=env)
+
+        # Replace u-row with theta-row: now u ≈ theta_c (wrong).
+        bad_map = theta_to_u.copy()
+        bad_map[1] = bad_map[0].copy()
+        object.__setattr__(chart, 'theta_to_u', bad_map)
+
+        # Pick a mid-grid node where theta_c ≠ u(theta_c).
+        tc = float(theta_c_grid[_CUSP_N_THETA_C // 2])
+        y1, y2 = _eigenframe_source(_CUSP_GAMMA, _CUSP_RHO, tc)
+        env_val = _evaluate_chart(chart, gamma=_CUSP_GAMMA, eta=_CUSP_ETA,
+                                  theta=0.0, log_w_query=_CUSP_LOG_W,
+                                  y1_eig=y1, y2_eig=y2)
+        served = float(env_val[0].real)
+        expected_u = float(np.interp(tc, theta_fine, u_fine))
+
+        # With correct map: served ≈ expected_u (within tolerance).
+        # With flipped map (u ← theta): served ≈ tc, which is NOT ≈
+        # expected_u unless the power law happens to agree (it doesn't
+        # for this tile: tc=0.285 whereas u(tc)=0.285**(2/3)≈0.35).
+        err = abs(served - expected_u)
+        self.assertGreater(
+            err, _CUSP_NODE_EXACT_TOL,
+            f'flipped theta_to_u error = {err:.6e} ≤ '
+            f'{_CUSP_NODE_EXACT_TOL}; the suite would pass vacuously.')
+
+

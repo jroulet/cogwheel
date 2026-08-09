@@ -185,6 +185,7 @@ from cogwheel.lensing import prior as lens_prior
 from cogwheel.lensing.waveform import dimensionless_frequency
 from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing.surrogate import ExteriorPolarChart, select_chart
+from cogwheel.lensing.surrogate import _wedge_cusp_axis_map, _uniform_axis
 from cogwheel.lensing.surrogate import LensAmplificationSurrogate
 from cogwheel.lensing import surrogate_training as training
 from cogwheel.lensing.chang_refsdal import geometry
@@ -3737,6 +3738,44 @@ _TERMINAL_RESULTS = frozenset(
     {'packed', 'recorded_gated', 'carrier_flip', 'disk_excluded'})
 
 
+
+# ---------------------------------------------------------------------------
+# Build 8h-b-cusp  WP1: ExteriorPolarChart cusp-adapted u = d**(2/3) coordinate
+# ---------------------------------------------------------------------------
+
+#: Minimal training config for cusp-adapted far-field chart tests.
+#: n_gamma=4, n_rho=4, n_theta_c=4, w_nodes_per_decade=2 keeps the engine
+#: budget under ~90 evals per chart (~5 s on a modern core).
+_WP1E_MINIMAL_CONFIG = TrainingConfig(
+    n_gamma=4, n_rho=4, n_theta_c=4, w_nodes_per_decade=2, n_heldout=2,
+    farfield_eps_max=1e9)
+
+#: Positive-parity gamma band for cusp-adapted far-field tests.
+_WP1E_GAMMA_BAND = (0.2, 0.3)
+
+#: w_range keeping one decade (3 log-w nodes with w_nodes_per_decade=2).
+_WP1E_W_RANGE = (10.0, 20.0)
+
+#: Low-side tile: theta_c_center well below the waist (~0.785 at gamma=0.25),
+#: so ``_build_farfield_chart`` chooses origin='low'.  rho=2.5 far exterior.
+_WP1E_LOW_CENTER = (2.5, 0.35)
+_WP1E_LOW_HALF = (0.3, 0.15)
+
+#: High-side tile: theta_c_center well above the waist, origin='high'.
+_WP1E_HIGH_CENTER = (2.5, 1.25)
+_WP1E_HIGH_HALF = (0.3, 0.15)
+
+#: Saddle-parity (gamma > 1) tile for the theta_to_u=None contract test.
+_WP1E_SADDLE_GAMMA_BAND = (1.1, 1.2)
+_WP1E_SADDLE_CENTER = (2.5, 0.5)
+_WP1E_SADDLE_HALF = (0.3, 0.15)
+
+#: Node-exact endpoint tolerance.  Theta-to-u endpoint values are forced
+#: exactly in ``_wedge_cusp_axis_map``; 1e-12 absorbs float64 round-off.
+_WP1E_ENDPOINT_TOL = 1e-12
+
+#: Minimum theta_fine node count for the (2, _FARFIELD_ARC_MAP_SIZE) map.
+_WP1E_MIN_MAP_NODES = 100
 def _ff_tile(*, center, half, region='exterior', w_range=(5.0, 40.0),
              si=0, m_lo=10.0, m_hi=20.0) -> dict:
     """Build a minimal gated far-field parent tile record for the subdivider."""
@@ -3844,6 +3883,393 @@ def _terminal_leaves(summary, chart_reports, parent_tag='ROOT'):
                                                   chart_reports)
             if entry['result'] in _TERMINAL_RESULTS]
 
+
+
+# ---------------------------------------------------------------------------
+# WP1: ExteriorPolarChart cusp-adapted u-coordinate — training pipeline tests
+# ---------------------------------------------------------------------------
+
+
+@_TRAIN_TIER_SKIP
+class BuildFarfieldPositiveParityCuspAdaptedTestCase(_CountingTestCase):
+    """WP1 (1)+(2): ``_build_farfield_chart`` positive parity → theta_to_u.
+
+    Calls ``_build_farfield_chart`` with ``parity=1`` on a small astroid
+    exterior tile and verifies the returned chart's cusp-adapted angular
+    map invariants: not None, shape ``(2, >=100)``, row 0 strictly
+    increasing, row 1 starts at ~0 and is strictly increasing, and
+    endpoints match ``theta_c_range`` to within 1e-12.
+
+    ENGINE-BACKED: gated on ``COGWHEEL_TRAIN_TIER=1`` (~3 s per fixture).
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.chart, cls.n_points, cls.refused = _build_farfield_chart(
+            gamma_band=_WP1E_GAMMA_BAND, parity=1,
+            box_center=_WP1E_LOW_CENTER, half=_WP1E_LOW_HALF,
+            w_range=_WP1E_W_RANGE, config=_WP1E_MINIMAL_CONFIG)
+
+    def test_theta_to_u_is_not_none(self) -> None:
+        self.assertIsNotNone(self.chart.theta_to_u)
+        self.comparisons += 1
+
+    def test_theta_to_u_shape_and_min_nodes(self) -> None:
+        self.assertEqual(self.chart.theta_to_u.shape[0], 2)
+        self.assertGreaterEqual(
+            self.chart.theta_to_u.shape[1], _WP1E_MIN_MAP_NODES,
+            'theta_fine must have >= 100 nodes')
+        self.comparisons += 2
+
+    def test_row0_strictly_increasing_theta_fine(self) -> None:
+        theta_fine = self.chart.theta_to_u[0]
+        self.assertTrue(np.all(np.diff(theta_fine) > 0),
+                        'theta_fine must be strictly increasing')
+        self.comparisons += 1
+
+    def test_row1_starts_near_zero_and_strictly_increasing(self) -> None:
+        u_fine = self.chart.theta_to_u[1]
+        self.assertAlmostEqual(u_fine[0], 0.0, places=12,
+                               msg='u_fine[0] must be ~0')
+        self.assertTrue(np.all(np.diff(u_fine) > 0),
+                        'u_fine must be strictly increasing')
+        self.comparisons += 2
+
+    def test_endpoints_match_theta_c_range(self) -> None:
+        theta_lo, theta_hi = (
+            _WP1E_LOW_CENTER[1] - _WP1E_LOW_HALF[1],
+            _WP1E_LOW_CENTER[1] + _WP1E_LOW_HALF[1])
+        theta_fine = self.chart.theta_to_u[0]
+        self.assertAlmostEqual(theta_fine[0], theta_lo,
+                               delta=_WP1E_ENDPOINT_TOL)
+        self.assertAlmostEqual(theta_fine[-1], theta_hi,
+                               delta=_WP1E_ENDPOINT_TOL)
+        self.comparisons += 2
+
+
+@_TRAIN_TIER_SKIP
+class BuildFarfieldHighSideCuspAdaptedTestCase(_CountingTestCase):
+    """WP1 (3): high-side tile → origin='high' → u monotone with theta.
+
+    The waist at gamma=0.25 is ~0.75-0.80 rad, so a tile centred at
+    theta_c=1.25 is on the HIGH-cusp side (d = pi/2 - theta); the
+    cusp-adapted map ``u = d**(2/3)`` is INCREASING with theta because
+    u = const - (pi/2 - theta)**(2/3).  This class verifies the map is
+    present and has the correct monotonicity and endpoints.
+
+    ENGINE-BACKED: gated on ``COGWHEEL_TRAIN_TIER=1``.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.chart, cls.n_points, cls.refused = _build_farfield_chart(
+            gamma_band=_WP1E_GAMMA_BAND, parity=1,
+            box_center=_WP1E_HIGH_CENTER, half=_WP1E_HIGH_HALF,
+            w_range=_WP1E_W_RANGE, config=_WP1E_MINIMAL_CONFIG)
+
+    def test_theta_to_u_is_not_none(self) -> None:
+        self.assertIsNotNone(self.chart.theta_to_u)
+        self.comparisons += 1
+
+    def test_u_increases_monotonically_with_theta(self) -> None:
+        theta_fine = self.chart.theta_to_u[0]
+        u_fine = self.chart.theta_to_u[1]
+        self.assertTrue(np.all(np.diff(theta_fine) > 0))
+        self.assertTrue(np.all(np.diff(u_fine) > 0))
+        self.comparisons += 2
+
+    def test_u_starts_at_zero(self) -> None:
+        u_fine = self.chart.theta_to_u[1]
+        self.assertAlmostEqual(u_fine[0], 0.0, places=12)
+        self.comparisons += 1
+
+    def test_endpoints_match_theta_c_range(self) -> None:
+        theta_lo, theta_hi = (
+            _WP1E_HIGH_CENTER[1] - _WP1E_HIGH_HALF[1],
+            _WP1E_HIGH_CENTER[1] + _WP1E_HIGH_HALF[1])
+        theta_fine = self.chart.theta_to_u[0]
+        self.assertAlmostEqual(theta_fine[0], theta_lo,
+                               delta=_WP1E_ENDPOINT_TOL)
+        self.assertAlmostEqual(theta_fine[-1], theta_hi,
+                               delta=_WP1E_ENDPOINT_TOL)
+        self.comparisons += 2
+
+
+@_TRAIN_TIER_SKIP
+class BuildFarfieldCuspOriginSelfFalsificationTestCase(_CountingTestCase):
+    """WP1 (3) self-falsification: flipped origin → chart differs structurally.
+
+    Builds the correct-origin chart (origin='low' for a clearly low-side
+    tile) and a wrong-origin chart with ``origin='high'``.  Verifies that
+    the spline coefficients differ measurably — the origin choice determines
+    how the angular axis is resampled, which changes the fitted coefficients
+    even though both charts cover the same tile with the SAME physical
+    evaluation points.  A chart built with the wrong origin encodes a
+    systematically different interpolation.
+
+    ENGINE-BACKED: ~2 charts × 3 s each; gated on ``COGWHEEL_TRAIN_TIER=1``.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        gamma_band = _WP1E_GAMMA_BAND
+        w_range = _WP1E_W_RANGE
+        config = _WP1E_MINIMAL_CONFIG
+        center_rho, center_theta = _WP1E_LOW_CENTER
+        half_rho, half_theta = _WP1E_LOW_HALF
+        rho_range = (center_rho - half_rho, center_rho + half_rho)
+        theta_c_range = (center_theta - half_theta, center_theta + half_theta)
+
+        # Correct chart: _build_farfield_chart picks origin='low' internally.
+        cls.correct_chart, _np, _rf = _build_farfield_chart(
+            gamma_band=gamma_band, parity=1,
+            box_center=_WP1E_LOW_CENTER, half=_WP1E_LOW_HALF,
+            w_range=w_range, config=config)
+
+        # Wrong chart: flip the origin to 'high' and build manually.
+        theta_fine_wrong, u_fine_wrong = _wedge_cusp_axis_map(
+            theta_c_range[0], theta_c_range[1], 'high')
+        theta_to_u_wrong = np.vstack([theta_fine_wrong, u_fine_wrong])
+        u_grid_wrong = np.interp(
+            _uniform_axis(theta_c_range, config.n_theta_c, 'theta_c'),
+            theta_fine_wrong, u_fine_wrong)
+        wrong_surrogate = LensAmplificationSurrogate.from_engine(
+            gamma_range=gamma_band, rho_range=rho_range,
+            theta_c_range=theta_c_range, w_range=w_range,
+            n_gamma=config.n_gamma, n_rho=config.n_theta_c,
+            n_theta_c=config.n_rho,
+            w_nodes_per_decade=config.w_nodes_per_decade,
+            theta_to_u=theta_to_u_wrong, u_grid=u_grid_wrong)
+        cls.wrong_chart = wrong_surrogate.charts[0]
+
+    def test_correct_chart_has_theta_to_u(self) -> None:
+        self.assertIsNotNone(self.correct_chart.theta_to_u)
+        self.comparisons += 1
+
+    def test_wrong_chart_has_theta_to_u(self) -> None:
+        self.assertIsNotNone(self.wrong_chart.theta_to_u)
+        self.comparisons += 1
+
+    def test_correct_and_wrong_theta_to_u_differ(self) -> None:
+        # The two origin maps are measurably different (low vs high cusp).
+        c_u = self.correct_chart.theta_to_u[1]
+        w_u = self.wrong_chart.theta_to_u[1]
+        delta = np.max(np.abs(c_u - w_u))
+        self.assertGreater(
+            delta, 1e-4,
+            f'Self-falsification failed: correct and wrong theta_to_u '
+            f'are nearly identical (max|delta| = {delta:.2e}).')
+        self.comparisons += 1
+
+    def test_correct_and_wrong_coefficients_differ(self) -> None:
+        delta_real = np.max(np.abs(
+            self.correct_chart.real_coeffs - self.wrong_chart.real_coeffs))
+        delta_imag = np.max(np.abs(
+            self.correct_chart.imag_coeffs - self.wrong_chart.imag_coeffs))
+        self.assertGreater(
+            max(delta_real, delta_imag), 1e-10,
+            'Self-falsification failed: correct and wrong-origin charts '
+            'have identical spline coefficients. '
+            'The origin choice is NOT load-bearing.')
+        self.comparisons += 1
+
+
+@_TRAIN_TIER_SKIP
+class BuildFarfieldSaddleExteriorUnchangedTestCase(_CountingTestCase):
+    """WP1 (4): parity=-1 → theta_to_u is None, raw theta_c_grid used.
+
+    Macro-saddle exterior tiles (``gamma >= 1``, ``parity = -1``) have
+    deltoid (not astroid) caustics.  The cusp-adapted ``u = d**(2/3)``
+    map has no meaning there — the chart is trained on raw theta_c with
+    theta_to_u=None, byte-identical to pre-WP1 behaviour.
+
+    ENGINE-BACKED: gated on ``COGWHEEL_TRAIN_TIER=1``.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.chart, cls.n_points, cls.refused = _build_farfield_chart(
+            gamma_band=_WP1E_SADDLE_GAMMA_BAND, parity=-1,
+            box_center=_WP1E_SADDLE_CENTER, half=_WP1E_SADDLE_HALF,
+            w_range=_WP1E_W_RANGE, config=_WP1E_MINIMAL_CONFIG)
+
+    def test_theta_to_u_is_none(self) -> None:
+        self.assertIsNone(self.chart.theta_to_u)
+        self.comparisons += 1
+
+    def test_chart_uses_raw_theta_c_grid(self) -> None:
+        self.assertGreaterEqual(len(self.chart.theta_c_grid), 2)
+        self.assertTrue(np.all(np.isfinite(self.chart.theta_c_grid)))
+        self.assertTrue(np.all(np.diff(self.chart.theta_c_grid) > 0))
+        self.comparisons += 3
+
+
+class SubdividedChildrenCuspAdaptedTestCase(_CountingTestCase):
+    """WP1 (5): ``_subdivide_farfield_tile.build_child`` → children theta_to_u.
+
+    The ``build_child`` closure in ``_subdivide_farfield_tile`` captures
+    ``parity`` from the outer scope and passes it verbatim to
+    ``_build_farfield_chart``.  A parent tile subdivided at ``parity=1``
+    must produce children whose charts carry ``theta_to_u`` (the cusp-
+    adapted angular map).  This class mocks ``_build_farfield_chart`` to
+    intercept each child's call and verify the parity and returned map,
+    without invoking the engine.
+
+    NOT engine-backed; runs in the fast tier.
+    """
+
+    _CENTER = (3.0, 0.8)
+    _HALF = (0.4, 0.2)
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.tile = _ff_tile(center=self._CENTER, half=self._HALF)
+
+    def test_build_child_calls_with_parity_one(self) -> None:
+        build_calls: list[dict] = []
+
+        def fake_build(**kwargs) -> tuple:
+            build_calls.append(kwargs)
+            fake_chart = types.SimpleNamespace(
+                image_count=4,
+                theta_to_u=np.vstack(
+                    [np.linspace(kwargs['box_center'][1]
+                                 - kwargs['half'][1],
+                                 kwargs['box_center'][1]
+                                 + kwargs['half'][1], 10),
+                     np.linspace(0, 1, 10)]),
+                refused_points=np.empty((0, 3)))
+            return fake_chart, 0, 0
+
+        def fake_load_or_build(path, build_fn, provenance):
+            chart, calls, refused, report_extra = build_fn()
+            eps = float(report_extra.get('heldout_eps', _EPS_PASS))
+            report = {'heldout_eps': eps, 'image_count': 4,
+                      'engine_calls': int(calls),
+                      'refused_points': int(refused),
+                      'build_seconds': 0.0, **report_extra}
+            return chart, report, False
+
+        with mock.patch.object(training, '_build_farfield_chart',
+                               side_effect=fake_build), \
+             mock.patch.object(training, '_farfield_heldout_samples',
+                               return_value=[]), \
+             mock.patch.object(training, '_heldout_eps',
+                               return_value=_EPS_PASS), \
+             mock.patch.object(training, '_load_or_build',
+                               side_effect=fake_load_or_build), \
+             tempfile.TemporaryDirectory() as tmpdir:
+            charts: list = []
+            chart_reports: list = []
+            summary = training._subdivide_farfield_tile(
+                tile=self.tile, parent_tag='ROOT', band=_SUBDIV_BAND,
+                parity=1, config=_SUBDIV_CONFIG,
+                rng=np.random.default_rng(0), outdir=Path(tmpdir),
+                exclusion_rho=_SUBDIV_EXCLUSION,
+                interior_admission=None, charts=charts,
+                chart_reports=chart_reports)
+
+        for kwargs in build_calls:
+            self.assertEqual(kwargs['parity'], 1,
+                             'Every child must receive parity=1 from '
+                             'the subdivide-farfield-tile closure.')
+            self.comparisons += 1
+        self.assertGreater(len(build_calls), 0,
+                           'At least one child must be built.')
+        self.comparisons += 1
+
+        for chart in charts:
+            self.assertIsNotNone(chart.theta_to_u)
+            self.comparisons += 1
+
+    def test_build_child_saddle_parity_theta_to_u_none(self) -> None:
+        build_calls: list[dict] = []
+
+        def fake_build(**kwargs) -> tuple:
+            build_calls.append(kwargs)
+            fake_chart = types.SimpleNamespace(
+                image_count=4, theta_to_u=None,
+                refused_points=np.empty((0, 3)))
+            return fake_chart, 0, 0
+
+        def fake_load_or_build(path, build_fn, provenance):
+            chart, calls, refused, report_extra = build_fn()
+            eps = float(report_extra.get('heldout_eps', _EPS_PASS))
+            report = {'heldout_eps': eps, 'image_count': 4,
+                      'engine_calls': int(calls),
+                      'refused_points': int(refused),
+                      'build_seconds': 0.0, **report_extra}
+            return chart, report, False
+
+        with mock.patch.object(training, '_build_farfield_chart',
+                               side_effect=fake_build), \
+             mock.patch.object(training, '_farfield_heldout_samples',
+                               return_value=[]), \
+             mock.patch.object(training, '_heldout_eps',
+                               return_value=_EPS_PASS), \
+             mock.patch.object(training, '_load_or_build',
+                               side_effect=fake_load_or_build), \
+             tempfile.TemporaryDirectory() as tmpdir:
+            charts: list = []
+            chart_reports: list = []
+            summary = training._subdivide_farfield_tile(
+                tile=self.tile, parent_tag='ROOT', band=_WP1E_SADDLE_GAMMA_BAND,
+                parity=-1, config=_SUBDIV_CONFIG,
+                rng=np.random.default_rng(0), outdir=Path(tmpdir),
+                exclusion_rho=_SUBDIV_EXCLUSION,
+                interior_admission=None, charts=charts,
+                chart_reports=chart_reports)
+
+        for kwargs in build_calls:
+            self.assertEqual(kwargs['parity'], -1)
+            self.comparisons += 1
+        for chart in charts:
+            self.assertIsNone(chart.theta_to_u)
+            self.comparisons += 1
+        self.assertGreater(len(build_calls), 0)
+        self.comparisons += 1
+
+
+class BuildFarfieldCuspAdaptedSelfFalsificationTestCase(TestCase):
+    """Teeth: prove the cusp-adapted WP1 pins can go red.
+
+    Independent of the engine: directly calls ``_wedge_cusp_axis_map`` and
+    verifies that:
+    - A tile bound that straddles the fundamental domain raises ValueError.
+    - Theta_fine is not uniformly spaced (the grid is nonlinear, proving
+      the remapping is active).
+    - Identity substitution (theta_raw / u_raw) is NOT byte-identical
+      to the true d**(2/3) map, confirming the map is non-trivial.
+    """
+
+    def test_theta_lo_negative_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            _wedge_cusp_axis_map(-0.1, 0.5, 'low')
+
+    def test_theta_hi_above_pi_half_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            _wedge_cusp_axis_map(0.2, np.pi / 2 + 0.1, 'low')
+
+    def test_theta_lo_not_less_than_theta_hi_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            _wedge_cusp_axis_map(0.5, 0.2, 'low')
+
+    def test_theta_fine_is_not_uniformly_spaced(self) -> None:
+        theta_fine, u_fine = _wedge_cusp_axis_map(0.2, 0.5, 'low')
+        spacings = np.diff(theta_fine)
+        max_spacing = np.max(spacings)
+        min_spacing = np.min(spacings)
+        self.assertGreater(max_spacing / min_spacing, 1.01,
+                           'theta_fine spacings must be non-uniform '
+                           '(the u-mapping distributes nodes nonlinearly)')
+
+    def test_identity_substitution_not_byte_identical(self) -> None:
+        theta_lo, theta_hi = 0.2, 0.5
+        theta_fine, u_fine = _wedge_cusp_axis_map(theta_lo, theta_hi, 'low')
+        u_identity = theta_fine - theta_lo
+        self.assertFalse(
+            np.allclose(u_fine, u_identity, atol=1e-14),
+            'cusp-adapted u must differ from identity: d**(2/3) is NOT linear')
 
 class FarfieldDepthOneUnchangedTestCase(_CountingTestCase):
     """WP1 pin: an all-passing far-field parent halves once and stops.

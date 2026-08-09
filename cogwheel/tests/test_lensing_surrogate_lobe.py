@@ -1415,7 +1415,8 @@ class EngineLobeSelfFalsificationTestCase(TestCase):
 # oracle, and touches no engine -- so it stays meaningful across every future
 # refactor: a change in the exterior-polar spline fit, the caustic-fixed
 # coordinate maps (`_to_caustic_fixed` / `_from_caustic_fixed`), the
-# reconstruction, or the npz record shape flips it RED with a frozen witness.
+# cusp-adapted angular axis map (`theta_to_u`), the reconstruction, or the
+# npz record shape flips it RED with a frozen witness.
 #
 # The npz digest is taken over the LOADED array contents in sorted-key order
 # (name + dtype + shape + bytes), NOT the raw ``.npz`` bytes: numpy's
@@ -1473,9 +1474,9 @@ _POS_W_ARRAY: np.ndarray = np.array([0.6, 1.0, 1.7])
 #: :meth:`test_served_value_tracks_unchanged_physical_oracle` first, and
 #: re-freeze only with the perturbation measured.
 #:
-#: Last re-frozen 2026-08-07 for the ``r_caustic`` positive-parity bracket
-#: reduction (720 -> 48, a 10.6x speedup).  **Stale after migration to
-#: ExteriorPolarChart -- needs re-freeze with new (rho, theta_c) axes.**
+#: Last re-frozen 2026-08-08 for the cusp-adapted ExteriorPolarChart
+#: (``theta_to_u`` coordinate); the freeze is finalized — these bits
+#: include the ``theta_to_u`` field and the ``u_grid`` axis knots.
 _POS_GOLDEN_ENVELOPE_HEX: tuple[tuple[str, str], ...] = (
     ('0x1.11863b3a8f20bp-2', '-0x1.a344ce6e63c11p-3'),
     ('0x1.edf027978afc6p-3', '-0x1.8e63e50ea2764p-3'),

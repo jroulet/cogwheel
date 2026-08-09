@@ -3586,5 +3586,612 @@ class Wp1SelfFalsificationTestCase(SurrogateTestCase):
         self.n_checks += 1
 
 
+# ==========================================================================
+# WP1: ExteriorPolarChart cusp-adapted u = d^(2/3) coordinate
+#
+# The exterior-polar chart gained an optional theta_to_u / u_grid
+# angular-axis reparametrisation.  A positive-parity (gamma < 1) exterior
+# tile near a cusp builds the cusp-adapted ``u = d**(2/3)`` coordinate
+# via `_wedge_cusp_axis_map`; macro-saddle exterior (parity == -1) passes
+# None (raw-theta fallback).  The cusp-adapted map is REQUIRED for an NPZ
+# round-trip under the new ``exterior_polar_rho_u_v1`` axis schema.
+#
+# Node-exact tolerance budget: the B-spline reproduces stored axis nodes
+# exactly; the serve-time np.interp through a 2001-node fine map carries
+# ~6e-9 interpolation error (test_dev_knowledge: InteriorWedgeChart
+# _NODE_EXACT_TOL).  The 1e-7 gate here provides one decade of margin.
+# ==========================================================================
+
+#: Smoketest cusp-adapted axis map: mid-panel theta_c range, low-origin cusp.
+_CUSP_ADAPTED_THETA_RANGE = (0.10, 0.55)
+
+#: Cusp-adapted map built via the production `_wedge_cusp_axis_map`.
+_CUSP_THETA_FINE, _CUSP_U_FINE = surrogate_module._wedge_cusp_axis_map(
+    *_CUSP_ADAPTED_THETA_RANGE, 'low')
+
+#: Full theta_to_u table (2, _FARFIELD_ARC_MAP_SIZE) from the fixture range.
+_CUSP_THETA_TO_U = np.vstack([_CUSP_THETA_FINE, _CUSP_U_FINE])
+
+#: Synthetic chart nodes per axis (4 = minimum per `_validate_axis`).
+_CUSP_N_NODES = 4
+
+#: Uniform theta_c axis for the synthetic fixture chart.
+_CUSP_THETA_C_AXIS = surrogate_module._uniform_axis(
+    _CUSP_ADAPTED_THETA_RANGE, _CUSP_N_NODES, 'theta_c')
+
+#: u_grid derived by interpolating the cusp-adapted map at theta_c nodes.
+_CUSP_U_AXIS = np.interp(_CUSP_THETA_C_AXIS,
+                         _CUSP_THETA_FINE, _CUSP_U_FINE)
+
+#: Tiny gamma axis for fixture charts.
+_CUSP_GAMMA_AXIS = surrogate_module._log_reach_gamma_axis(
+    (0.40, 0.50), _CUSP_N_NODES, 'gamma')
+
+#: Tiny rho axis well outside the caustic (genuine exterior).
+_CUSP_RHO_AXIS = surrogate_module._uniform_axis(
+    (1.60, 2.10), _CUSP_N_NODES, 'rho')
+
+#: Log-w axis for synthetic charts (the node-exact test also queries here).
+_CUSP_LOG_W_AXIS = np.linspace(np.log(10.0), np.log(100.0), _CUSP_N_NODES)
+
+#: Maximum absolute difference allowed in bitwise comparisons.
+_BITWISE_TOL = 0.0
+
+#: Node-exact tolerance: served vs training value at grid nodes.
+_NODE_EXACT_TOL = 1e-7
+
+#: Mutation perturbation factor for the falsification test.
+_CUSP_MUTATION_FACTOR = 1.05
+
+
+def _cusp_synthetic_envelope_real(gamma_grid, rho_grid, theta_c_grid,
+                                   log_w_grid):
+    """Deterministic smooth real envelope for cusp-adapted fixture charts."""
+    w, g, r, t = np.meshgrid(log_w_grid, gamma_grid, rho_grid, theta_c_grid,
+                             indexing='ij')
+    return (np.cos(0.6 * w) * (1.0 + 0.2 * g)
+            * np.exp(-0.3 * r) * (1.0 + 0.15 * t))
+
+
+def _cusp_synthetic_envelope_imag(gamma_grid, rho_grid, theta_c_grid,
+                                   log_w_grid):
+    """Deterministic smooth imag envelope for cusp-adapted fixture charts."""
+    w, g, r, t = np.meshgrid(log_w_grid, gamma_grid, rho_grid, theta_c_grid,
+                             indexing='ij')
+    return (np.sin(0.6 * w) * (1.0 - 0.1 * g)
+            * (1.0 + 0.1 * r) * np.cos(0.25 * t))
+
+
+class ExteriorPolarCuspAdaptedFromValuesTestCase(SurrogateTestCase):
+    """Wiring: `from_values` with and without the cusp-adapted angular map."""
+
+    def setUp(self):
+        super().setUp()
+        real = _cusp_synthetic_envelope_real(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        imag = _cusp_synthetic_envelope_imag(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        self.chart_with_map = surrogate_module.ExteriorPolarChart.from_values(
+            gamma_grid=_CUSP_GAMMA_AXIS, rho_grid=_CUSP_RHO_AXIS,
+            theta_c_grid=_CUSP_THETA_C_AXIS, log_w_grid=_CUSP_LOG_W_AXIS,
+            envelope_real=real, envelope_imag=imag,
+            image_count=2, parity=1,
+            theta_to_u=_CUSP_THETA_TO_U, u_grid=_CUSP_U_AXIS)
+        self.chart_without_map = (
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_CUSP_GAMMA_AXIS, rho_grid=_CUSP_RHO_AXIS,
+                theta_c_grid=_CUSP_THETA_C_AXIS, log_w_grid=_CUSP_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                theta_to_u=None, u_grid=None))
+
+    def test_knots_bounds_match_u_grid_when_map_provided(self):
+        # B-spline knots are padded (not-a-knot): for n nodes the knot vector
+        # has n+4 entries with replicated boundaries.  Verify the endpoint
+        # values match u_grid, not theta_c_grid.
+        knot_4 = self.chart_with_map.knots[3]
+        self.n_checks += 1
+        self.assertAlmostEqual(
+            float(np.min(knot_4)), float(_CUSP_U_AXIS[0]),
+            msg='4th-axis knot lower bound does not match u_grid lower bound')
+        self.n_checks += 1
+        self.assertAlmostEqual(
+            float(np.max(knot_4)), float(_CUSP_U_AXIS[-1]),
+            msg='4th-axis knot upper bound does not match u_grid upper bound')
+        self.assertNotAlmostEqual(
+            float(np.max(knot_4)), float(_CUSP_THETA_C_AXIS[-1]),
+            places=2,
+            msg='4th-axis knot upper bound matches raw theta_c -- the '
+                'cusp-adapted map is not wired')
+
+    def test_knots_bounds_match_theta_c_grid_when_no_map(self):
+        knot_4 = self.chart_without_map.knots[3]
+        self.n_checks += 1
+        self.assertAlmostEqual(
+            float(np.min(knot_4)), float(_CUSP_THETA_C_AXIS[0]),
+            msg='4th-axis knot lower bound does not match theta_c_grid')
+        self.n_checks += 1
+        self.assertAlmostEqual(
+            float(np.max(knot_4)), float(_CUSP_THETA_C_AXIS[-1]),
+            msg='4th-axis knot upper bound does not match theta_c_grid')
+
+    def test_theta_to_u_stored_when_provided(self):
+        self.assertIsNotNone(self.chart_with_map.theta_to_u)
+        self.n_checks += 1
+        self.assertTrue(
+            np.array_equal(self.chart_with_map.theta_to_u, _CUSP_THETA_TO_U),
+            'theta_to_u field does not match the input map')
+
+    def test_theta_to_u_is_none_when_not_provided(self):
+        self.n_checks += 1
+        self.assertIsNone(self.chart_without_map.theta_to_u,
+                          'theta_to_u must be None when not provided')
+
+    def test_only_one_of_theta_to_u_and_u_grid_provided_raises_valueerror(self):
+        real = _cusp_synthetic_envelope_real(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        imag = _cusp_synthetic_envelope_imag(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        with self.assertRaises(ValueError):
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_CUSP_GAMMA_AXIS, rho_grid=_CUSP_RHO_AXIS,
+                theta_c_grid=_CUSP_THETA_C_AXIS, log_w_grid=_CUSP_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                theta_to_u=_CUSP_THETA_TO_U, u_grid=None)
+        self.n_checks += 1
+
+
+class ExteriorPolarCuspAdaptedSerializationTestCase(SurrogateTestCase):
+    """NPZ write/read cycles preserve theta_to_u and the full chart bitwise."""
+
+    def setUp(self):
+        super().setUp()
+        real = _cusp_synthetic_envelope_real(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        imag = _cusp_synthetic_envelope_imag(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        self.chart = surrogate_module.ExteriorPolarChart.from_values(
+            gamma_grid=_CUSP_GAMMA_AXIS, rho_grid=_CUSP_RHO_AXIS,
+            theta_c_grid=_CUSP_THETA_C_AXIS, log_w_grid=_CUSP_LOG_W_AXIS,
+            envelope_real=real, envelope_imag=imag,
+            image_count=2, parity=1,
+            theta_to_u=_CUSP_THETA_TO_U, u_grid=_CUSP_U_AXIS)
+
+    def _roundtrip_npz(self):
+        """Write chart to npz and read back via the production load path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'chart.npz'
+            sur = LensAmplificationSurrogate(
+                [self.chart], {'engine_version': 'test'})
+            sur.save(path)
+            reloaded = LensAmplificationSurrogate.load(path)
+        return reloaded.charts[0]
+
+    def test_theta_to_u_preserved_bitwise_through_npz_roundtrip(self):
+        reloaded = self._roundtrip_npz()
+        self.assertIsNotNone(reloaded.theta_to_u)
+        self.n_checks += 1
+        np.testing.assert_array_equal(
+            reloaded.theta_to_u, self.chart.theta_to_u,
+            err_msg='theta_to_u changed after npz round-trip')
+
+    def test_envelope_fields_preserved_bitwise_through_npz(self):
+        reloaded = self._roundtrip_npz()
+        for field_name in ('knots', 'real_coeffs', 'imag_coeffs',
+                           'image_count', 'parity', 'eta_overlap_min',
+                           'envelope_definition'):
+            with self.subTest(field=field_name):
+                original = getattr(self.chart, field_name)
+                reloaded_val = getattr(reloaded, field_name)
+                self.n_checks += 1
+                if isinstance(original, np.ndarray):
+                    np.testing.assert_array_equal(
+                        reloaded_val, original,
+                        err_msg=f'{field_name} changed after npz round-trip')
+                elif isinstance(original, tuple):
+                    for i, (o, r) in enumerate(zip(original, reloaded_val)):
+                        np.testing.assert_array_equal(
+                            r, o,
+                            err_msg=f'{field_name}[{i}] changed after '
+                                    f'npz round-trip')
+                else:
+                    self.assertEqual(
+                        reloaded_val, original,
+                        f'{field_name} changed after npz round-trip')
+        self.n_checks += 1
+
+
+
+class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
+    """Old (retired) schema hard-refuses; missing theta_to_u loads as None.
+
+    The old ``exterior_polar_rho_theta_c`` axis-schema tag (retired in
+    WP1) is NOT in `_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS`, so `_chart_from_npz`
+    raises ``ValueError`` before it ever reaches the ``theta_to_u`` key
+    access.  A new-schema artifact that OMITS the ``theta_to_u`` key
+    (e.g. a synthetic chart built without the cusp-adapted map, or a
+    saddle-exterior chart) passes the schema gate and loads with
+    ``theta_to_u=None`` via ``data.get()``.
+    """
+
+    def _build_minimal_npz(self, axis_schema, include_theta_to_u=True):
+        """Build a minimal npz dict for one exterior-polar chart.
+
+        Returns a writable dict that `_chart_from_npz` can read.  The
+        axes, coefficients, and labels are minimal but valid -- the test
+        cares only about the schema/theta_to_u gate, not numerical
+        correctness.
+        """
+        n = 4
+        gamma = surrogate_module._uniform_axis((0.4, 0.5), n, 'gamma')
+        rho = surrogate_module._uniform_axis((1.6, 2.1), n, 'rho')
+        theta_c = surrogate_module._uniform_axis((0.1, 0.3), n, 'theta_c')
+        log_w = np.linspace(np.log(10), np.log(20), n)
+        shape = (n, n, n, n)
+        meta = {'kind': 'exterior_polar', 'image_count': 2, 'parity': 1,
+                'eta_overlap_min': 0.05,
+                'envelope_definition': 'farfield_full_kernel_sum',
+                'axis_schema': axis_schema}
+        # Build a proper tensor spline so knots are valid.
+        real = np.ones(shape, dtype=float)
+        imag = np.zeros(shape, dtype=float)
+        real_c, imag_c, knots = surrogate_module._fit_tensor_spline(
+            (log_w, gamma, rho, theta_c), real, imag)
+        data: dict[str, np.ndarray] = {}
+        data['chart0_meta'] = np.array(json.dumps(meta))
+        data['chart0_re_coeffs'] = real_c
+        data['chart0_im_coeffs'] = imag_c
+        for j, (axis, knot) in enumerate(zip(
+                (log_w, gamma, rho, theta_c), knots)):
+            data[f'chart0_axis{j}'] = axis
+            data[f'chart0_knots_{j}'] = knot
+        data['chart0_refused'] = np.empty((0, 3), dtype=float)
+        if include_theta_to_u:
+            theta_fine = np.linspace(theta_c[0], theta_c[-1], 2001)
+            data['chart0_theta_to_u'] = np.vstack(
+                [theta_fine, theta_fine - theta_fine[0]])
+        return data
+
+    def _write_and_load(self, data):
+        """Write ``data`` to a temp npz and try to load chart 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'chart.npz'
+            np.savez_compressed(path, **data)
+            return surrogate_module._chart_from_npz(np.load(path), 0)
+
+    def test_old_schema_raises_valueerror(self):
+
+        """A chart stamped with the retired schema hard-refuses."""
+        data = self._build_minimal_npz(
+            'exterior_polar_rho_theta_c', include_theta_to_u=True)
+        with self.assertRaises(ValueError) as ctx:
+            self._write_and_load(data)
+        self.assertIn('axis-schema tag', str(ctx.exception))
+        self.n_checks += 1
+
+    def test_new_schema_without_theta_to_u_loads_with_none(self):
+        """A new-schema chart missing theta_to_u loads with theta_to_u=None."""
+        data = self._build_minimal_npz(
+            'exterior_polar_rho_u_v1', include_theta_to_u=False)
+        chart = self._write_and_load(data)
+        self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
+        self.assertIsNone(chart.theta_to_u)
+        self.n_checks += 1
+
+    def test_valid_schema_with_theta_to_u_loads_successfully(self):
+        """A valid new-schema chart with theta_to_u loads without error."""
+        data = self._build_minimal_npz(
+            'exterior_polar_rho_u_v1', include_theta_to_u=True)
+        chart = self._write_and_load(data)
+        self.assertIsNotNone(chart)
+        self.assertIsNotNone(chart.theta_to_u)
+        self.n_checks += 1
+
+
+class ExteriorPolarCuspAdaptedServingTestCase(SurrogateTestCase):
+    """Serve-time theta_c→u remap produces correct values.
+
+    Contracts the tensor spline directly to test the remap logic
+    independent of the ``y1_eig``/``y2_eig`` coordinate transform.
+    An identity map serves byte-identical values to the no-map branch.
+    The real cusp-adapted map produces measurably different values.
+    """
+
+    def setUp(self):
+        super().setUp()
+        real = _cusp_synthetic_envelope_real(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        imag = _cusp_synthetic_envelope_imag(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        # Identity map: u(theta_c) = theta_c - theta_c[0].
+        identity_fine = np.linspace(_CUSP_THETA_C_AXIS[0],
+                                    _CUSP_THETA_C_AXIS[-1], 2001)
+        self.identity_map = np.vstack(
+            [identity_fine, identity_fine - identity_fine[0]])
+        identity_u = np.interp(_CUSP_THETA_C_AXIS,
+                               identity_fine, identity_fine - identity_fine[0])
+        self.chart_identity = (
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_CUSP_GAMMA_AXIS, rho_grid=_CUSP_RHO_AXIS,
+                theta_c_grid=_CUSP_THETA_C_AXIS, log_w_grid=_CUSP_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                theta_to_u=self.identity_map, u_grid=identity_u))
+        self.chart_no_map = (
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_CUSP_GAMMA_AXIS, rho_grid=_CUSP_RHO_AXIS,
+                theta_c_grid=_CUSP_THETA_C_AXIS, log_w_grid=_CUSP_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                theta_to_u=None, u_grid=None))
+        self.chart_cusp = (
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_CUSP_GAMMA_AXIS, rho_grid=_CUSP_RHO_AXIS,
+                theta_c_grid=_CUSP_THETA_C_AXIS, log_w_grid=_CUSP_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                theta_to_u=_CUSP_THETA_TO_U, u_grid=_CUSP_U_AXIS))
+        self.gamma_q = float(np.median(_CUSP_GAMMA_AXIS))
+        self.rho_q = float(np.median(_CUSP_RHO_AXIS))
+
+    def _contract_set(self, chart, theta_c_q):
+        """Contract the chart's tensor spline for one theta_c query.
+
+        When chart.theta_to_u is provided, remaps theta_c→u before
+        contracting -- the SAME serve-time logic ``_evaluate_chart``
+        uses for the exterior-polar branch.
+        """
+        if chart.theta_to_u is not None:
+            v2 = float(np.interp(theta_c_q, chart.theta_to_u[0],
+                                 chart.theta_to_u[1]))
+        else:
+            v2 = float(theta_c_q)
+        result = (surrogate_module._contract_tensor_spline(
+            chart.real_coeffs, chart.knots, self.gamma_q,
+            self.rho_q, v2, _CUSP_LOG_W_AXIS)
+            + 1j * surrogate_module._contract_tensor_spline(
+                chart.imag_coeffs, chart.knots, self.gamma_q,
+                self.rho_q, v2, _CUSP_LOG_W_AXIS))
+        return np.asarray(result)
+
+    def test_identity_map_yields_byte_identical_serve_vs_raw_theta(self):
+        """An identity u-map serves byte-identical values to no-map.
+
+        B-spline evaluation is translation-invariant in the ordinate
+        (identity u = theta_c - offset, knots shift by the same offset,
+        so the interpolant is identical).
+        """
+        for i in range(_CUSP_N_NODES - 1):
+            theta_q = 0.5 * (_CUSP_THETA_C_AXIS[i] + _CUSP_THETA_C_AXIS[i+1])
+            with self.subTest(theta_q=theta_q):
+                served_id = self._contract_set(self.chart_identity, theta_q)
+                served_raw = self._contract_set(self.chart_no_map, theta_q)
+                self.n_checks += 1
+                np.testing.assert_allclose(
+                    served_id, served_raw, atol=1e-14,
+                    err_msg=f'identity map served value differs from '
+                            f'raw-theta at theta_q={theta_q}')
+        self.n_checks += 1
+
+    def test_cusp_adapted_map_produces_different_values_from_raw_theta(self):
+        """The real cusp-adapted map shifts served values vs raw theta.
+
+        The cusp-adapted u coord compresses near-cusp cells, so the
+        4th axis of the fitted spline has a different knot distribution,
+        producing a different interpolant from the same envelope tensor.
+        """
+        delta = 0.0
+        for i in range(_CUSP_N_NODES - 1):
+            theta_q = 0.5 * (_CUSP_THETA_C_AXIS[i] + _CUSP_THETA_C_AXIS[i+1])
+            with self.subTest(theta_q=theta_q):
+                served_cusp = self._contract_set(self.chart_cusp, theta_q)
+                served_raw = self._contract_set(self.chart_no_map, theta_q)
+                diff = float(np.max(np.abs(served_cusp - served_raw)))
+                delta = max(delta, diff)
+        self.n_checks += 1
+        self.assertGreater(
+            delta, 1e-12,
+            msg=f'cusp-adapted map produced no measurable delta '
+                f'({delta:.2e}) vs raw theta -- the map is not '
+                f'load-bearing')
+
+    def test_no_map_uses_raw_theta_c_directly(self):
+        """A None theta_to_u evaluates at raw theta_c via the spline."""
+        theta_q = float(np.median(_CUSP_THETA_C_AXIS))
+        served = self._contract_set(self.chart_no_map, theta_q)
+        self.n_checks += 1
+        self.assertTrue(np.all(np.isfinite(served)),
+                        'no-map serve produced non-finite values')
+
+
+
+
+class ExteriorPolarCuspAdaptedFromEngineTestCase(SurrogateTestCase):
+    """``from_engine`` wires theta_to_u through training and returns it.
+
+    Trains a tiny single-box surrogate (4 nodes/axis) with a cusp-adapted
+    angular map and verifies the chart stores theta_to_u and the spline
+    axes use u_grid.
+    """
+
+    ENGINE_GAMMA_RANGE: tuple[float, float] = (0.43, 0.48)
+    ENGINE_RHO_RANGE: tuple[float, float] = (1.70, 1.90)
+    ENGINE_THETA_C_RANGE: tuple[float, float] = (0.20, 0.40)
+    ENGINE_W_RANGE: tuple[float, float] = (10.0, 25.0)
+    ENGINE_N_NODES: int = 4
+    ENGINE_W_NPD: int = 4
+
+    @classmethod
+    def setUpClass(cls):
+        cls._engine_map, cls._engine_u_fine = (
+            surrogate_module._wedge_cusp_axis_map(
+                cls.ENGINE_THETA_C_RANGE[0],
+                cls.ENGINE_THETA_C_RANGE[1], 'low'))
+        cls.theta_to_u = np.vstack([cls._engine_map, cls._engine_u_fine])
+        theta_c_grid = surrogate_module._uniform_axis(
+            cls.ENGINE_THETA_C_RANGE, cls.ENGINE_N_NODES, 'theta_c')
+        cls.u_grid = np.interp(
+            theta_c_grid, cls._engine_map, cls._engine_u_fine)
+        sur = LensAmplificationSurrogate.from_engine(
+            gamma_range=cls.ENGINE_GAMMA_RANGE,
+            rho_range=cls.ENGINE_RHO_RANGE,
+            theta_c_range=cls.ENGINE_THETA_C_RANGE,
+            w_range=cls.ENGINE_W_RANGE,
+            n_gamma=cls.ENGINE_N_NODES,
+            n_rho=cls.ENGINE_N_NODES,
+            n_theta_c=cls.ENGINE_N_NODES,
+            w_nodes_per_decade=cls.ENGINE_W_NPD,
+            theta_to_u=cls.theta_to_u, u_grid=cls.u_grid)
+        cls.chart = sur.charts[0]
+
+    def setUp(self):
+        super().setUp()
+
+    def test_chart_has_theta_to_u_stored(self):
+        self.assertIsNotNone(self.chart.theta_to_u)
+        self.n_checks += 1
+        self.assertGreater(
+            self.chart.theta_to_u.shape[1], self.ENGINE_N_NODES,
+            'theta_to_u has too few fine-grid points')
+
+    def test_spline_knots_use_u_grid_not_theta_c_grid(self):
+        """The 4th-axis knot bounds match u_grid, not theta_c_grid."""
+        knot_4 = self.chart.knots[3]
+        u_min = float(self.u_grid[0])
+        u_max = float(self.u_grid[-1])
+        tc_max = float(surrogate_module._uniform_axis(
+            self.ENGINE_THETA_C_RANGE, self.ENGINE_N_NODES,
+            'theta_c')[-1])
+        self.n_checks += 1
+        self.assertAlmostEqual(float(np.min(knot_4)), u_min,
+                               msg='knot[3] lower bound != u_grid lower bound')
+        self.n_checks += 1
+        self.assertAlmostEqual(float(np.max(knot_4)), u_max,
+                               msg='knot[3] upper bound != u_grid upper bound')
+        self.n_checks += 1
+        self.assertNotAlmostEqual(
+            float(np.max(knot_4)), tc_max, places=2,
+            msg='4th-axis knot matches raw theta_c -- u_grid not wired in '
+                'from_engine')
+
+    def test_served_values_finite(self):
+        """Served values at the chart centre are finite and non-trivial."""
+        gamma_mid = float(np.median(self.chart.gamma_grid))
+        rho_mid = float(np.median(self.chart.rho_grid))
+        theta_mid = float(np.median(self.chart.theta_c_grid))
+        if self.chart.theta_to_u is not None:
+            v2 = float(np.interp(theta_mid, self.chart.theta_to_u[0],
+                                 self.chart.theta_to_u[1]))
+        else:
+            v2 = theta_mid
+        served = np.asarray(
+            surrogate_module._contract_tensor_spline(
+                self.chart.real_coeffs, self.chart.knots,
+                gamma_mid, rho_mid, v2, self.chart.log_w_grid)
+            + 1j * surrogate_module._contract_tensor_spline(
+                self.chart.imag_coeffs, self.chart.knots,
+                gamma_mid, rho_mid, v2, self.chart.log_w_grid))
+        self.n_checks += 1
+        self.assertTrue(np.all(np.isfinite(served)),
+                        'engine-trained chart produced non-finite values')
+        self.n_checks += 1
+        self.assertGreater(
+            float(np.max(np.abs(served))), 1e-15,
+            'served values are trivially zero -- the engine output may '
+            'have all-refused, leaving a zero-filled spline')
+
+class ExteriorPolarCuspAdaptedNodeExactTestCase(SurrogateTestCase):
+    """Served values at stored grid nodes match training values to 1e-7.
+
+    The B-spline reproduces stored axis nodes exactly; the serve-time
+    ``np.interp`` through a 2001-node fine map carries ~6e-9
+    interpolation error.  The 1e-7 gate provides one decade of margin.
+    The cusp-adapted-vs-raw-theta delta measured by
+    ``ExteriorPolarCuspAdaptedServingTestCase`` proves the remap is
+    load-bearing (not dead code).
+    """
+
+    def setUp(self):
+        super().setUp()
+        real = _cusp_synthetic_envelope_real(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        imag = _cusp_synthetic_envelope_imag(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        self.chart = surrogate_module.ExteriorPolarChart.from_values(
+            gamma_grid=_CUSP_GAMMA_AXIS, rho_grid=_CUSP_RHO_AXIS,
+            theta_c_grid=_CUSP_THETA_C_AXIS, log_w_grid=_CUSP_LOG_W_AXIS,
+            envelope_real=real, envelope_imag=imag,
+            image_count=2, parity=1,
+            theta_to_u=_CUSP_THETA_TO_U, u_grid=_CUSP_U_AXIS)
+        self.training = np.asarray(real + 1j * imag)
+
+    def test_served_values_match_training_at_grid_nodes(self):
+        """Served F reproduces training values at every grid node to 1e-7."""
+        max_relerr = 0.0
+        for i_w in range(_CUSP_LOG_W_AXIS.size):
+            for i_g in range(_CUSP_GAMMA_AXIS.size):
+                for i_r in range(_CUSP_RHO_AXIS.size):
+                    for i_tc in range(_CUSP_THETA_C_AXIS.size):
+                        gamma_q = float(_CUSP_GAMMA_AXIS[i_g])
+                        rho_q = float(_CUSP_RHO_AXIS[i_r])
+                        theta_q = float(_CUSP_THETA_C_AXIS[i_tc])
+                        v2 = float(np.interp(
+                            theta_q, _CUSP_THETA_TO_U[0],
+                            _CUSP_THETA_TO_U[1]))
+                        served = np.asarray(
+                            surrogate_module._contract_tensor_spline(
+                                self.chart.real_coeffs,
+                                self.chart.knots,
+                                gamma_q, rho_q,
+                                v2, _CUSP_LOG_W_AXIS[i_w:i_w+1])
+                            + 1j * surrogate_module._contract_tensor_spline(
+                                self.chart.imag_coeffs,
+                                self.chart.knots,
+                                gamma_q, rho_q,
+                                v2, _CUSP_LOG_W_AXIS[i_w:i_w+1]))
+                        want = self.training[i_w, i_g, i_r, i_tc]
+                        err = float(np.abs(served[0] - want))
+                        scale = float(max(np.abs(want), 1e-15))
+                        relerr = err / scale
+                        max_relerr = max(max_relerr, relerr)
+                        self.n_checks += 1
+        self.n_checks += 1  # guard against empty loop
+        self.assertLess(
+            max_relerr, _NODE_EXACT_TOL,
+            msg=f'max relative error {max_relerr:.2e} exceeds '
+                f'node-exact tolerance {_NODE_EXACT_TOL}')
+class ExteriorPolarCuspAdaptedSelfFalsificationTestCase(SurrogateTestCase):
+    """Teeth: a deliberately wrong map raises or breaks invariants."""
+
+    def test_mismatched_theta_to_u_and_u_grid_raises(self):
+        """theta_to_u provided without u_grid raises ValueError."""
+        real = _cusp_synthetic_envelope_real(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        imag = _cusp_synthetic_envelope_imag(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        with self.assertRaises(ValueError):
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_CUSP_GAMMA_AXIS, rho_grid=_CUSP_RHO_AXIS,
+                theta_c_grid=_CUSP_THETA_C_AXIS, log_w_grid=_CUSP_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                theta_to_u=_CUSP_THETA_TO_U, u_grid=None)
+        self.n_checks += 1
+
+
 if __name__ == '__main__':
     unittest.main()
+
