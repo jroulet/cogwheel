@@ -36,5 +36,16 @@ Probe 3 (all prior fixes: cusp exclusion, w-carrier, log(rho-1)) killed at 56 ch
 - Keep the shipped fixes (cusp exclusion, w-carrier, log-rho); they are correct and remain.
 - Plan-gate requirement: each `domain_test_descriptions` spec names exactly ONE primary `test_*.py`; no spec may reference another spec's primary file.
 
-## Why not the rho-phase-carrier / log-rho approach
-The rho-phase winding is the ghost's phase. A coordinate/carrier transform tries to spline a dominant oscillatory ghost — fighting physics. The correct engineering is admission: don't chart what the label can't represent, serve it by the exact engine. This also collapses the tile count (the original ~500 -> ~70 goal) by not tiling the ghost-dominated region at all.
+## ANALYTIC FOLD-CARRIER DEMODULATION (driver-validated 2026-08-10) — preferred over pure exclusion
+The user proposed the clean physical picture: once the merged image pair has moved off the real axis, the ghost is a SINGLE Fresnel/Airy blob centered at the real fold point where the images merged. So demodulate w.r.t. the FOLD-MERGE delay, not a fitted carrier. VALIDATED:
+- `geom.ghost_kernel(w, source, matrix)` returns the complex delay tau_c whose REAL PART IS the fold-merge-point delay (measured: ghost Re(tau_c) sits at ~half the real-image delay, i.e. the point where the two real images coalesce — 1.44/2.29/3.43 at rho=1.3/1.7/2.1 vs real-image delays 2.68/4.06/5.67). This is the exact analog of the interior SACR-C tau_c demodulation (nearest-caustic-point carrier, channels.py:47-55), extended to the exterior residual.
+- Computable from the geometric-optics roots REGARDLESS of the decay gate (tau_c is well-defined even where Im tau_c < 0.4).
+- Demodulating E_ks by exp(-1j*w*tau_c) (the fold-merge delay) reduces the rho-phase span from 16.7 rad to ~3.2 rad over rho in [1.3, 2.1] (full-complex and Re-only demod give identical phase flattening since Im tau_c enters only the magnitude).
+
+PREFERRED DESIGN: (1) analytic fold-carrier demodulation — E *= exp(-1j*w*tau_c(rho)) per node before fitting (using the fold-merge delay from the ghost roots), re-modulate at serve. This removes the dominant oscillation WITHOUT needing the decay gate and IS the interior SACR-C tau_c demodulation pattern applied to the exterior. (2) Keep the ghost-region tile exclusion as the safety net for the residual ~16% winding. (3) Optionally correct log(rho-1) -> log(rho) for the magnitude. Verify whether (1) alone suffices at 4 nodes/axis.
+
+## Why not pure exclusion alone
+Exclusion is necessary but wasteful: the ghost-dominated region is a large part of the exterior, and excluding it all would hand much of the prior box to the exact engine (slow). The analytic carrier recovers most of it at surrogate speed. Use exclusion only for the residual that even the analytic demodulation cannot flatten.
+
+## Why not the fitted-constant rho-carrier / log-rho approach
+A fitted constant k_rho is crude (rho-dependent winding needs a rho-dependent carrier). log-rho fixes magnitude only. The analytic Re(tau_c(rho)) carrier is exact physics, rho-dependent, and computable where the gate refuses — the right tool.
