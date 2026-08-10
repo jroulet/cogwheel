@@ -182,7 +182,6 @@ from unittest import TestCase, main, mock
 import numpy as np
 
 from cogwheel.lensing import prior as lens_prior
-from cogwheel.lensing.waveform import dimensionless_frequency
 from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing.surrogate import ExteriorPolarChart, select_chart
 from cogwheel.lensing.surrogate import _wedge_cusp_axis_map, _uniform_axis
