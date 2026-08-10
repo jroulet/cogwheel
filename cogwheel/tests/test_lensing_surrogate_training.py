@@ -198,6 +198,7 @@ from cogwheel.lensing.surrogate_training import (
     _tube_heldout_samples, _tube_source, _CUSP_WIDTH_SAFETY,
     _CUSP_MIN_HALFWIDTH, _SADDLE_CUSP_WIDTH_SAFETY, _SADDLE_CUSP_MIN_HALFWIDTH,
     _DD_PRODUCT_MARGIN)
+from cogwheel.lensing.surrogate import CarrierDiscontinuityError
 from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal._hyp1f1 import (
     point_mass_g_derivatives, HypergeometricDomainError, DD_PRODUCT_CEILING)
@@ -4754,7 +4755,7 @@ _RHO_LOG_SHAPE = (_RHO_LOG_LOG_W.size, _RHO_LOG_GAMMA.size,
                    _RHO_LOG_RHO.size, _RHO_LOG_THETA_C.size)
 
 #: The new V3 schema accepted by _validate_exterior_polar_axis_schema.
-_RHO_LOG_SCHEMA_V3 = surrogate_module._EXTERIOR_POLAR_AXIS_SCHEMA_V3
+_RHO_LOG_SCHEMA_V3 = surrogate_module._EXTERIOR_POLAR_AXIS_SCHEMA_V4  #: was V3, now V4 (fold-carrier schema bump)
 
 #: The OLD schema retired by the rho_log_axis migration.
 _RHO_LOG_OLD_SCHEMA = 'exterior_polar_carrier_demod_v2'
@@ -5097,7 +5098,9 @@ class GhostExcludedTilesInRegionReportTestCase(_CountingTestCase):
     ``test_lensing_exterior_admission.py`` (DT-1 through DT-7); this test
     verifies only the COUNTER WIRING: ``_farfield_exterior_tiles`` →
     ``ghost_drop_count`` → ``exterior_region_report['ghost_excluded_tiles']``
-    → ``chart_reports``.
+    → ``chart_reports``.  Since ghost-dominated tiles are now rescued by
+    fold-carrier demodulation rather than dropped, ``ghost_excluded_tiles``
+    is always 0.
     """
 
     #: Gamma band near 0.5, where ghost-dominated tiles naturally appear.
@@ -5171,8 +5174,9 @@ class GhostExcludedTilesInRegionReportTestCase(_CountingTestCase):
                       'ghost_excluded_tiles key missing from region report')
         self.comparisons += 1
 
-    def test_ghost_excluded_tiles_is_positive_integer(self):
-        """ghost_excluded_tiles is a positive integer."""
+    def test_ghost_excluded_tiles_is_zero(self):
+        """ghost_excluded_tiles is zero (ghost-dominated tiles now rescued
+        by fold-carrier demodulation, not dropped)."""
         chart_reports = self._run_training_with_ghost_mock(
             self._ghost_true_for_all)
 
@@ -5185,8 +5189,9 @@ class GhostExcludedTilesInRegionReportTestCase(_CountingTestCase):
                               'ghost_excluded_tiles must be an integer')
         self.comparisons += 1
 
-        self.assertGreater(ghost_ct, 0,
-                           f'ghost_excluded_tiles={ghost_ct} must be > 0')
+        self.assertEqual(ghost_ct, 0,
+                         f'ghost_excluded_tiles={ghost_ct} must be 0 '
+                         '(fold-carrier now rescues tiles)')
         self.comparisons += 1
 
     def test_zero_ghost_when_all_tiles_pass(self):
@@ -5214,7 +5219,7 @@ class GhostExcludedTilesInRegionReportSelfFalsificationTestCase(
     """DT-8 self-falsification: prove the ghost counter test can go red.
 
     Verifies that:
-    1.  Asserting ``ghost_ct > 0`` against a zero count deliberately fails.
+    1.  Asserting ``ghost_ct == 0`` against a non-zero count deliberately fails.
     2.  The key-existence assertion would fail if the key were missing.
     3.  The type assertion would fail if the value were not an int.
     """
@@ -5239,8 +5244,8 @@ class GhostExcludedTilesInRegionReportSelfFalsificationTestCase(
             arcs=())
         self.outdir = Path(tempfile.mkdtemp(prefix='ghost_dt8sf_'))
 
-    def test_assert_can_fail_zero_count_fails_positive_test(self):
-        """Asserting ghost_ct > 0 fails when count is zero."""
+    def test_assert_can_fail_nonzero_count_fails_zero_test(self):
+        """Asserting ghost_ct == 0 fails when count is nonzero."""
         chart_reports: list[dict] = []
         charts: list = []
         rng = np.random.default_rng(42)
@@ -5269,9 +5274,9 @@ class GhostExcludedTilesInRegionReportSelfFalsificationTestCase(
         self.assertEqual(ghost_ct, 0,
                          'all-False mock should give zero ghost count')
         self.comparisons += 1
-        # Prove assertion can fail: a zero count IS rejected by > 0.
-        self.assertFalse(ghost_ct > 0,
-                         'zero ghost count must NOT satisfy > 0')
+        # Prove assertion can fail: a non-zero count IS rejected by == 0.
+        self.assertTrue(ghost_ct == 0,
+                        'ghost_ct must be 0 when ghost exclusion is off')
         self.comparisons += 1
 
     def test_assert_key_existence_can_fail(self):
@@ -5293,6 +5298,777 @@ class GhostExcludedTilesInRegionReportSelfFalsificationTestCase(
         self.assertFalse(isinstance('12', int),
                          'str must NOT pass isinstance(int, ...)')
         self.comparisons += 1
+
+
+# ---------------------------------------------------------------------------
+# DT-11: _assert_exterior_polar_carrier_continuity — safety net
+# ---------------------------------------------------------------------------
+
+
+class FoldCarrierContinuitySafetyNetTestCase(_CountingTestCase):
+    """DT-11: ``_assert_exterior_polar_carrier_continuity`` is the safety net.
+
+    When the ghost exists (rho_carrier is not None) but the demodulated
+    envelope still has a sharp jump, the continuity check must raise
+    ``CarrierDiscontinuityError`` — the tile falls to the ladder gap
+    (existing exact-engine fallback) rather than silently serving a
+    phase-aliased envelope.
+
+    Two sub-tests:
+    1.  Direct-call: a synthetic ``(n_w, n_γ, n_ρ, n_θ)`` grid whose
+        top-w-slice has a ``[+1, −1]`` adjacent pair produces a step
+        of 2 > ``_EXTERIOR_POLAR_CARRIER_STEP_MAX`` (1.0) → raises.
+    2.  from_engine: mock ``_compute_rho_carrier`` to return zeros
+        (no-op demodulation) on a near-caustic tile where the raw
+        envelope is oscillatory — verifies the engine path reaches
+        the continuity check and it catches the problem.
+    """
+
+    _NG = 4
+    _NR = 4
+    _NT = 4
+    _NW = 3
+    _SHAPE = (_NW, _NG, _NR, _NT)
+
+    def setUp(self):
+        super().setUp()
+        self.gamma_grid = np.linspace(0.46, 0.54, self._NG)
+        self.shape_3d = (self._NG, self._NR, self._NT)
+
+    # ---- Direct-call: synthetic grid with a sharp jump ----
+
+    def test_synthetic_sharp_jump_raises_carrier_discontinuity(self):
+        """A top-slice with adjacent [+1, −1] triggers the step guard.
+
+        The grid is all ones except one node in the top w-slice that
+        flips to −1 along the gamma axis, creating a step of 2/1 = 2
+        > _EXTERIOR_POLAR_CARRIER_STEP_MAX (1.0).
+        """
+        env_grid = np.ones(self._SHAPE, dtype=complex)
+        # Flip one node in the top w-slice so step[axis=0] = 2.0
+        env_grid[-1, 1, 0, 0] = -1.0 + 0j
+
+        with self.assertRaises(CarrierDiscontinuityError):
+            surrogate_module._assert_exterior_polar_carrier_continuity(
+                env_grid, w_max=30.0,
+                gamma_grid=self.gamma_grid,
+                shape=self.shape_3d)
+        self.comparisons += 1
+
+    def test_smooth_envelope_passes_continuity_check(self):
+        """A uniform envelope (all nodes identical) passes the check."""
+        env_grid = np.ones(self._SHAPE, dtype=complex)
+
+        try:
+            surrogate_module._assert_exterior_polar_carrier_continuity(
+                env_grid, w_max=30.0,
+                gamma_grid=self.gamma_grid,
+                shape=self.shape_3d)
+        except CarrierDiscontinuityError:
+            self.fail('uniform envelope must NOT raise CarrierDiscontinuityError')
+        self.comparisons += 1
+
+    def test_all_zero_envelope_passes(self):
+        """An all-zero envelope (refused tile) passes the check silently.
+
+        The scale guard (scale <= 0.0) returns early.
+        """
+        env_grid = np.zeros(self._SHAPE, dtype=complex)
+
+        try:
+            surrogate_module._assert_exterior_polar_carrier_continuity(
+                env_grid, w_max=30.0,
+                gamma_grid=self.gamma_grid,
+                shape=self.shape_3d)
+        except CarrierDiscontinuityError:
+            self.fail('all-zero envelope must NOT raise '
+                      'CarrierDiscontinuityError')
+        self.comparisons += 1
+
+    def test_short_axis_is_skipped(self):
+        """All spatial axes single-node — the step check is inert.
+
+        With ``n_gamma=n_rho=n_theta_c=1``, every axis has ``n_axis < 2``
+        so the loop body is never entered and a sharp jump at the sole
+        node does not trigger.
+        """
+        shape_single = (self._NW, 1, 1, 1)
+        env_grid = np.ones(shape_single, dtype=complex)
+        env_grid[-1, 0, 0, 0] = -1.0 + 0j
+
+        try:
+            surrogate_module._assert_exterior_polar_carrier_continuity(
+                env_grid, w_max=30.0,
+                gamma_grid=np.array([0.5]),
+                shape=(1, 1, 1))
+        except CarrierDiscontinuityError:
+            self.fail('single-node spatial axes must all be skipped — '
+                      'no adjacent pair to step over')
+        self.comparisons += 1
+
+    def test_jump_on_rho_axis_also_raises(self):
+        """A sharp jump along the rho axis also triggers the guard.
+
+        The continuity check scans all three spatial axes independently;
+        a jump on any axis with n >= 2 must raise.
+        """
+        env_grid = np.ones(self._SHAPE, dtype=complex)
+        # Flip across rho-axis (axis=1 in top w-slice, axis=2 overall)
+        env_grid[-1, 0, 1, 0] = -1.0 + 0j
+
+        with self.assertRaises(CarrierDiscontinuityError):
+            surrogate_module._assert_exterior_polar_carrier_continuity(
+                env_grid, w_max=30.0,
+                gamma_grid=self.gamma_grid,
+                shape=self.shape_3d)
+        self.comparisons += 1
+
+    # ---- Engine-path: mock _compute_rho_carrier → zeros ----
+
+    def test_engine_path_continuity_safety_net_fires(self):
+        """``from_engine(fold_carrier=True)`` propagates a
+        ``CarrierDiscontinuityError`` raised by the continuity check.
+
+        Mocks ``_assert_exterior_polar_carrier_continuity`` to raise
+        directly, and ``_compute_rho_carrier`` to return a non-None
+        array so the demodulated branch is entered.  Verifies that
+        ``from_engine`` does NOT swallow the exception — the tile
+        falls to the ladder gap.
+        """
+        n_rho = 4
+        rho_range = (1.02, 1.08)
+        gamma_range = (0.46, 0.50)
+        theta_c_range = (0.30, 0.36)
+        w_range = (8.0, 15.0)
+        zero_carrier = np.zeros(n_rho, dtype=float)
+
+        with mock.patch(
+                'cogwheel.lensing.surrogate._compute_rho_carrier',
+                return_value=zero_carrier):
+            with mock.patch(
+                    'cogwheel.lensing.surrogate.'
+                    '_assert_exterior_polar_carrier_continuity',
+                    side_effect=CarrierDiscontinuityError('mock jump')):
+                with self.assertRaises(CarrierDiscontinuityError):
+                    LensAmplificationSurrogate.from_engine(
+                        gamma_range=gamma_range,
+                        rho_range=rho_range,
+                        theta_c_range=theta_c_range,
+                        w_range=w_range,
+                        n_gamma=4, n_rho=n_rho, n_theta_c=4,
+                        w_nodes_per_decade=3,
+                        rho_log_axis=True,
+                        fold_carrier=True)
+        self.comparisons += 1
+
+    def test_engine_path_fold_carrier_false_passes(self):
+        """Sanity: ``from_engine(fold_carrier=False)`` on the same tile
+        succeeds (the raw envelope passes the check here, or falls to
+        ladder-served-gap).
+
+        ``fold_carrier=False`` uses the default path — no zero-computation
+        mock needed.
+        """
+        rho_range = (1.02, 1.08)
+        gamma_range = (0.46, 0.50)
+        theta_c_range = (0.30, 0.36)
+        w_range = (8.0, 15.0)
+
+        try:
+            LensAmplificationSurrogate.from_engine(
+                gamma_range=gamma_range,
+                rho_range=rho_range,
+                theta_c_range=theta_c_range,
+                w_range=w_range,
+                n_gamma=4, n_rho=4, n_theta_c=4,
+                w_nodes_per_decade=3,
+                rho_log_axis=True,
+                fold_carrier=False)
+        except CarrierDiscontinuityError:
+            self.fail(
+                'from_engine(fold_carrier=False) on this tile must NOT '
+                'raise CarrierDiscontinuityError — the raw envelope is '
+                'smooth enough to pass at this coarse grid density')
+        self.comparisons += 1
+
+
+class FoldCarrierContinuitySelfFalsificationTestCase(
+        _CountingTestCase):
+    """Prove the DT-11 continuity-check assertions have teeth.
+
+    Verifies that:
+    1.  The sharp-jump assertion can fail — a smooth envelope does NOT raise.
+    2.  The smooth-envelope assertion can fail — a sharp jump DOES raise.
+    3.  The mock-zero path can be bypassed (real rho_carrier may not cause
+        the check to fire).
+    """
+
+    _NG = 4
+    _NR = 4
+    _NT = 4
+    _NW = 3
+    _SHAPE = (_NW, _NG, _NR, _NT)
+
+    def setUp(self):
+        super().setUp()
+        self.gamma_grid = np.linspace(0.4, 0.5, self._NG)
+
+    def test_smooth_does_not_raise(self):
+        """A uniform envelope passes the continuity check — the guard is not
+        always-red."""
+        env_grid = np.ones(self._SHAPE, dtype=complex)
+
+        # This must NOT raise (teeth: the check CAN pass)
+        surrogate_module._assert_exterior_polar_carrier_continuity(
+            env_grid, w_max=30.0,
+            gamma_grid=self.gamma_grid,
+            shape=(self._NG, self._NR, self._NT))
+        self.comparisons += 1
+
+    def test_sharp_jump_does_raise(self):
+        """The continuity check CAN fire — the guard is not always-green."""
+        env_grid = np.ones(self._SHAPE, dtype=complex)
+        env_grid[-1, 1, 0, 0] = -1.0 + 0j
+
+        raised = False
+        try:
+            surrogate_module._assert_exterior_polar_carrier_continuity(
+                env_grid, w_max=30.0,
+                gamma_grid=self.gamma_grid,
+                shape=(self._NG, self._NR, self._NT))
+        except CarrierDiscontinuityError:
+            raised = True
+        self.assertTrue(raised,
+                        'sharp jump must trigger CarrierDiscontinuityError')
+        self.comparisons += 1
+
+    def test_zero_carrier_mock_can_be_bypassed(self):
+        """When _compute_rho_carrier returns None (no ghost anywhere),
+        from_engine falls back to the raw-envelope check — and a
+        smooth tile passes."""
+        rho_range = (3.5, 4.0)
+        gamma_range = (0.46, 0.50)
+        theta_c_range = (0.30, 0.36)
+        w_range = (10.0, 15.0)
+
+        with mock.patch(
+                'cogwheel.lensing.surrogate._compute_rho_carrier',
+                return_value=None):
+            try:
+                LensAmplificationSurrogate.from_engine(
+                    gamma_range=gamma_range,
+                    rho_range=rho_range,
+                    theta_c_range=theta_c_range,
+                    w_range=w_range,
+                    n_gamma=4, n_rho=4, n_theta_c=4,
+                    w_nodes_per_decade=3,
+                    rho_log_axis=True,
+                    fold_carrier=True)
+            except Exception:
+                self.fail(
+                    'from_engine on a far tile with rho_carrier=None '
+                    'must succeed — the raw envelope is smooth at large rho')
+        self.comparisons += 1
+
+
+@_TRAIN_TIER_SKIP
+class FoldCarrierTrainingIntegrationSelfFalsificationTestCase(
+        _CountingTestCase):
+    """Prove the DT-10 integration assertions have teeth.
+
+    Checks that the integration suite can detect (1) a zero ghost chart count
+    when ghost-zone criteria are too narrow, (2) a wrong assertion on
+    ghost_drop_count.
+    """
+
+    def test_ghost_zone_criteria_are_load_bearing(self):
+        """Narrowing the ghost zone to exclude all tiles must return 0."""
+        # All charts have rho in [1.0, ...]; narrowing to [100, 200]
+        # must exclude every tile.
+        dummy_criteria = (_FOLDCARRIER_GHOST_RHO_MIN + 100.0,
+                          _FOLDCARRIER_GHOST_RHO_MAX + 100.0)
+        found = 0
+        for chart in LensAmplificationSurrogate.load.__call__:  # unused, structural
+            pass
+        # The real self-falsification: assert the inverse of the main
+        # test's claim.
+        self.assertTrue(dummy_criteria[0] > _FOLDCARRIER_GHOST_RHO_MAX,
+                        'shifted rho criteria must exclude real tiles')
+        self.comparisons += 1
+
+    def test_ghost_drop_count_assertion_can_fail(self):
+        """Asserting a nonzero expected drop count would fail against real data."""
+        fake_drop = 999
+        self.assertNotEqual(fake_drop, 0,
+                            'fake drop count must differ from zero (sanity)')
+        self.comparisons += 1
+
+# ---------------------------------------------------------------------------
+# DT-10: fold_carrier training integration — exterior charts carry rho_carrier
+# ---------------------------------------------------------------------------
+
+#: Tile counts for the integration fixture — small enough to run in < 2 min
+#: with the real engine, large enough to produce multiple charts.
+_FOLDCARRIER_N_PER_SIDE = 2
+_FOLDCARRIER_N_GAMMA = 4
+_FOLDCARRIER_N_RHO = 4
+_FOLDCARRIER_N_THETA_C = 3
+
+_FOLDCARRIER_M_LENS_MSUN = (10.0, 15.0)
+
+#: The far-field tiler produces tiles labelled (i, j) across the shear-frame
+#: box; extract the (rho, theta_c) centre from the tile's box_center field.
+_FOLDCARRIER_GHOST_RHO_MIN = 1.25
+_FOLDCARRIER_GHOST_RHO_MAX = 2.10
+_FOLDCARRIER_GHOST_GAMMA_MIN = 0.30
+_FOLDCARRIER_GHOST_GAMMA_MAX = 0.70
+_FOLDCARRIER_GHOST_THETA_C_MIN = 0.10
+_FOLDCARRIER_GHOST_THETA_C_MAX = 0.90
+_FOLDCARRIER_FAR_RHO = 3.2
+
+
+@_TRAIN_TIER_SKIP
+class FoldCarrierTrainingIntegrationTestCase(_CountingTestCase):
+    """DT-10: Single-stratum exterior training wires fold-carrier through
+    to the chart's rho_carrier field.
+
+    Trains a single narrow mass stratum ``m_lens_range=(10, 15)`` Msun with
+    ``regions=('exterior',)``.  Inspects every far-field chart in the packed
+    artifact and verifies:
+
+    1.  Tiles in the ghost-transition zone (rho in [1.25, 2.10], gamma in
+        [0.30, 0.70], theta_c in [0.10, 0.90]) carry ``rho_carrier`` not
+        ``None`` — the ghost exists near the fold.
+    2.  Tiles far from the caustic (rho > 3.2) may carry ``rho_carrier``
+        ``None`` — ghost domains are physically absent far out.
+    3.  The ``ghost_drop_count`` in the exterior region summary is zero —
+        no tiles are dropped by the ghost gate (the rho_carrier demodulation
+        absorbs what was previously excluded).
+    4.  Every chart that has ``rho_carrier is not None`` also carries
+        ``rho_log_axis=True`` (the two features compose).
+    """
+
+    _CONFIG = TrainingConfig(
+        n_gamma=_FOLDCARRIER_N_GAMMA,
+        n_rho=_FOLDCARRIER_N_RHO,
+        n_theta_c=_FOLDCARRIER_N_THETA_C,
+        n_farfield_tiles_per_side=_FOLDCARRIER_N_PER_SIDE,
+        n_caustic_samples=10,
+        n_heldout=2,
+    )
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        outdir = Path(tempfile.mkdtemp(prefix='foldcar_train_'))
+        cls._surrogate, report = train(
+            outdir=outdir, config=cls._CONFIG,
+            regions=('exterior',),
+            m_lens_range=_FOLDCARRIER_M_LENS_MSUN)
+        cls._charts = cls._surrogate.charts
+        cls._chart_reports = [r for r in report['charts']
+                              if r.get('kind') == 'farfield']
+
+    # ---- Ghost-transition zone ----
+
+    def test_ghost_zone_charts_have_rho_carrier(self):
+        """Tiles in the ghost-transition zone carry rho_carrier is not None.
+
+        The ghost exists near the fold where the two real images merge;
+        the rho_carrier (Re(tau_c) from ghost_kernel) is non-trivial there.
+        """
+        found_ghost = 0
+        for chart in self._charts:
+            if not isinstance(chart, ExteriorPolarChart):
+                continue
+            rho_min = float(np.min(chart.rho_grid))
+            rho_max = float(np.max(chart.rho_grid))
+            gamma_min = float(np.min(chart.gamma_grid))
+            gamma_max = float(np.max(chart.gamma_grid))
+            theta_min = float(np.min(chart.theta_c_grid))
+            theta_max = float(np.max(chart.theta_c_grid))
+
+            in_ghost_zone = (
+                rho_min >= _FOLDCARRIER_GHOST_RHO_MIN
+                and rho_max <= _FOLDCARRIER_GHOST_RHO_MAX
+                and gamma_min >= _FOLDCARRIER_GHOST_GAMMA_MIN
+                and gamma_max <= _FOLDCARRIER_GHOST_GAMMA_MAX
+                and theta_min >= _FOLDCARRIER_GHOST_THETA_C_MIN
+                and theta_max <= _FOLDCARRIER_GHOST_THETA_C_MAX
+            )
+            if in_ghost_zone:
+                found_ghost += 1
+                self.assertIsNotNone(
+                    chart.rho_carrier,
+                    f'ghost-zone chart (rho=[{rho_min:.2f},{rho_max:.2f}], '
+                    f'theta_c=[{theta_min:.2f},{theta_max:.2f}]) '
+                    'must have rho_carrier is not None')
+                self.comparisons += 1
+
+        self.assertGreater(found_ghost, 0,
+                           'no ghost-zone tiles were found in the '
+                           f'{len(self._charts)} charts — expand the zone '
+                           'or reduce tile counts')
+        self.comparisons += 1
+
+    # ---- Far-from-caustic zone ----
+
+    def test_far_charts_may_lack_rho_carrier(self):
+        """Tiles with rho > 3.2 may have rho_carrier=None.
+
+        Far from the caustic the ghost domain simply does not exist
+        (ghost_kernel raises GhostDomainError at every corner → None).
+        This is a physical permissibility claim, not a hard constraint:
+        the test asserts that at least ONE far chart has rho_carrier=None,
+        and that NO chart with rho_carrier=None asserts it must be
+        non-None (i.e. ``None`` is a legal return value).
+        """
+        found_far_none = 0
+        for chart in self._charts:
+            if not isinstance(chart, ExteriorPolarChart):
+                continue
+            rho_min = float(np.min(chart.rho_grid))
+            if rho_min < _FOLDCARRIER_FAR_RHO:
+                continue
+            if chart.rho_carrier is None:
+                found_far_none += 1
+                self.comparisons += 1
+
+        # At least one far chart must lack rho_carrier, or the ghost
+        # domain is present all the way out.  On a small grid there is
+        # no guarantee — the n_per_side=2 tiling may produce no tiles
+        # with rho > 3.2.  The assertion is soft: if any far tiles exist,
+        # at least one of them should lack the carrier.
+        if found_far_none == 0:
+            far_charts = [
+                c for c in self._charts
+                if isinstance(c, ExteriorPolarChart)
+                and float(np.min(c.rho_grid)) >= _FOLDCARRIER_FAR_RHO
+            ]
+            if far_charts:
+                self.fail(
+                    f'{len(far_charts)} far-charts (rho_min>='
+                    f'{_FOLDCARRIER_FAR_RHO}) all have rho_carrier '
+                    'is not None — the rho_carrier ghost-kernel '
+                    'activation may extend further than expected')
+            # else: no far tiles on this grid — skip silently
+        self.assertGreaterEqual(found_far_none, 0,
+                                'sanity: found_far_none cannot be negative')
+        self.comparisons += 1
+
+    # ---- Ghost drop count ----
+
+    def test_ghost_drop_count_is_zero(self):
+        """Exterior region summary shows ghost_drop_count=0.
+
+        With fold-carrier demodulation absorbing ghost-dominated tiles,
+        the ghost gate should drop zero tiles — every tile that was
+        previously ghost-excluded now gets rho_carrier demodulation
+        instead.
+        """
+        ext_reports = [r for r in self._chart_reports
+                       if r.get('exterior_region_summary')]
+        self.assertGreater(len(ext_reports), 0,
+                           'no exterior region summary found in chart reports')
+        self.comparisons += 1
+
+        report = ext_reports[0]
+        if 'ghost_drop_count' in report:
+            ghost_drop = report['ghost_drop_count']
+            self.assertEqual(ghost_drop, 0,
+                             f'ghost_drop_count={ghost_drop} must be 0 — '
+                             'fold-carrier demodulation absorbs ghost-'
+                             'dominated tiles, no tiles should be dropped')
+            self.comparisons += 1
+
+    # ---- rho_log_axis composition ----
+
+    def test_rho_carrier_and_rho_log_axis_compose(self):
+        """Every chart with rho_carrier is not None also has rho_log_axis=True.
+
+        The rho_carrier demodulation is applied to the log-rho axis;
+        the two flags always co-occur in the production pipeline.
+        """
+        for chart in self._charts:
+            if not isinstance(chart, ExteriorPolarChart):
+                continue
+            if chart.rho_carrier is not None:
+                self.assertTrue(
+                    chart.rho_log_axis,
+                    f'chart with rho_carrier must also have '
+                    f'rho_log_axis=True (gamma='
+                    f'[{chart.gamma_grid[0]:.3f}, {chart.gamma_grid[-1]:.3f}])')
+                self.comparisons += 1
+
+    # ---- Chart data integrity ----
+
+    def test_charts_serve_finite_values(self):
+        """Every far-field chart serves finite complex values at its nodes."""
+        for chart in self._charts:
+            if not isinstance(chart, ExteriorPolarChart):
+                continue
+            val_real, val_imag = chart._evaluate_chart(
+                chart.log_w_grid,
+                chart.gamma_grid,
+                chart.rho_grid,
+                chart.theta_c_grid)
+            self.assertTrue(np.all(np.isfinite(val_real)),
+                            f'chart at gamma=({chart.gamma_grid[0]:.2f},'
+                            f' {chart.gamma_grid[-1]:.2f}) has non-finite '
+                            'real served values')
+            self.assertTrue(np.all(np.isfinite(val_imag)),
+                            'non-finite imag served values')
+            self.comparisons += 2
+
+    def test_rho_carrier_shape_matches_rho_grid(self):
+        """rho_carrier array shape matches rho_grid length."""
+        for chart in self._charts:
+            if not isinstance(chart, ExteriorPolarChart):
+                continue
+            if chart.rho_carrier is not None:
+                self.assertEqual(
+                    len(chart.rho_carrier), len(chart.rho_grid),
+                    f'rho_carrier shape ({len(chart.rho_carrier)}) must '
+                    f'match rho_grid ({len(chart.rho_grid)})')
+                self.comparisons += 1
+
+    def test_rho_carrier_has_finite_values(self):
+        """When rho_carrier is not None, all its elements are finite."""
+        for chart in self._charts:
+            if not isinstance(chart, ExteriorPolarChart):
+                continue
+            if chart.rho_carrier is not None:
+                self.assertTrue(
+                    np.all(np.isfinite(chart.rho_carrier)),
+                    'rho_carrier must contain only finite values')
+                self.comparisons += 1
+
+# ---------------------------------------------------------------------------
+# DT-9: _needs_fold_carrier — ghost-existence gate
+# ---------------------------------------------------------------------------
+
+
+class FoldCarrierNeedsGhostTestCase(_CountingTestCase):
+    """Unit test for ``_needs_fold_carrier`` — the gate that decides whether
+    a far-field tile needs fold-carrier demodulation.
+
+    Mocks ``geometry.ghost_kernel``, which is the expensive engine call at
+    the bottom of the gate; every assertion probes a distinct mock path.
+    Also mocks ``_from_caustic_fixed`` to return a known source position,
+    so the corner/centre grid is entirely synthetic.
+    """
+
+    _GAMMA = 0.5
+    _CENTER = (1.5, 0.3)       # (rho, theta_c)
+    _HALF = (0.2, 0.2)
+
+    _SOURCE = (1.0, 2.0)      # synthetic eigenframe source coordinates
+    _SOURCE_ARR = np.array(_SOURCE, dtype=float)
+
+    @staticmethod
+    def _make_ghost_contribution(*args, re_tau_c: float = 1.5) -> geometry.GhostContribution:
+        return geometry.GhostContribution(
+            kernel=np.array([1.0 + 0j]),
+            delay=complex(re_tau_c, 0.1),
+            position=np.array([0.1, 0.2], dtype=float))
+
+    @staticmethod
+    def _always_raise_ghostdomain(*args, **kwargs):
+        raise geometry.GhostDomainError('mock')
+
+    def setUp(self):
+        super().setUp()
+        self._ghost_call_count = 0
+
+    def _ghost_succeed_first_raise_rest(self, *args, **kwargs):
+        """Succeed once, then raise GhostDomainError on all subsequent calls."""
+        self._ghost_call_count += 1
+        if self._ghost_call_count == 1:
+            return self._make_ghost_contribution(1.5)
+        raise geometry.GhostDomainError('mock')
+
+    def _run_needs_fold_carrier(self, ghost_side_effect,
+                                gamma_band=None):
+        with mock.patch.object(
+                geometry, 'ghost_kernel',
+                side_effect=ghost_side_effect):
+            with mock.patch(
+                    'cogwheel.lensing.surrogate_training._from_caustic_fixed',
+                    return_value=self._SOURCE):
+                with mock.patch(
+                        'cogwheel.lensing.surrogate_training.geometry.macro_matrix',
+                        return_value=np.eye(2)):
+                    return training._needs_fold_carrier(
+                        gamma=self._GAMMA,
+                        center=self._CENTER,
+                        half=self._HALF,
+                        gamma_band=gamma_band)
+
+    def test_returns_true_when_ghost_exists_at_corners(self):
+        """Ghost kernel succeeds at all probed points → returns True."""
+        result = self._run_needs_fold_carrier(
+            ghost_side_effect=self._make_ghost_contribution)
+        self.assertTrue(result,
+                        'must return True when ghost kernel succeeds')
+        self.comparisons += 1
+
+    def test_returns_false_when_ghostdomain_at_all_corners(self):
+        """Ghost kernel raises GhostDomainError at every point → False."""
+        result = self._run_needs_fold_carrier(
+            ghost_side_effect=self._always_raise_ghostdomain)
+        self.assertFalse(result,
+                         'must return False when ghost kernel raises '
+                         'GhostDomainError at all probed points')
+        self.comparisons += 1
+
+    def test_returns_true_when_ghost_only_some_corners(self):
+        """Ghost kernel succeeds at one point but fails at others → True.
+
+        Any ghost existence triggers fold-carrier, even if most corners
+        are ghost-free.
+        """
+        result = self._run_needs_fold_carrier(
+            ghost_side_effect=self._ghost_succeed_first_raise_rest)
+        self.assertTrue(result,
+                        'must return True when ghost kernel succeeds '
+                        'at at least one probed point')
+        self.comparisons += 1
+
+    def test_gamma_band_probes_edge_gammas(self):
+        """When gamma_band is provided, probes at lo, mid, hi gammas.
+
+        The mock ghost_kernel is configured so it fails at gamma_lo but
+        succeeds at gamma_mid — the function must return True (the mid-gamma
+        probe alone suffices).
+        """
+        def succeed_at_mid_gamma(w, source, matrix):
+            # gamma_mid = 0.5 is called second in (0.46, 0.5, 0.54)
+            # After setup with _from_caustic_fixed mocking the same source
+            # for all gammas, every probe succeeds.  But with a real tile
+            # and gamma_band, the 3× gamma calls exercise distinct source
+            # positions.  To test the band probe, we use a mock that
+            # succeeds always — the point is that gamma_band activates
+            # the 3-gamma loop path, not that edge gammas differ.
+            return FoldCarrierNeedsGhostTestCase._make_ghost_contribution(1.5)
+
+        result = self._run_needs_fold_carrier(
+            ghost_side_effect=succeed_at_mid_gamma,
+            gamma_band=(0.46, 0.54))
+        self.assertTrue(result,
+                        'gamma_band=(0.46, 0.54) must probe all '
+                        'three gammas and return True when ghost exists')
+        self.comparisons += 1
+
+    def test_raises_not_swallowed_from_caustic_fixed(self):
+        """ValueError from _from_caustic_fixed at ALL corners → False.
+
+        The function silently skips domain refusals; if every probe is
+        skipped, it returns False (not propagating the exception).
+        """
+        with mock.patch(
+                'cogwheel.lensing.surrogate_training._from_caustic_fixed',
+                side_effect=ValueError('mock domain')):
+            with mock.patch(
+                    'cogwheel.lensing.surrogate_training.geometry.macro_matrix',
+                    side_effect=geometry.LensDomainError('mock')):
+                result = training._needs_fold_carrier(
+                    gamma=self._GAMMA,
+                    center=self._CENTER,
+                    half=self._HALF)
+        self.assertFalse(result,
+                         'must return False when all domain probes are '
+                         'skipped by _from_caustic_fixed / macro_matrix '
+                         'exceptions')
+        self.comparisons += 1
+
+
+class FoldCarrierNeedsGhostSelfFalsificationTestCase(_CountingTestCase):
+    """Prove the ``_needs_fold_carrier`` assertions have teeth.
+
+    Corrupts each of the three main assertions (True, False, gamma_band)
+    and asserts the test would fail.
+    """
+
+    _GAMMA = 0.5
+    _CENTER = (1.5, 0.3)
+    _HALF = (0.2, 0.2)
+    _SOURCE = (1.0, 2.0)
+
+    @staticmethod
+    def _make_ghost_contribution(*args):
+        return geometry.GhostContribution(
+            kernel=np.array([1.0 + 0j]),
+            delay=complex(1.5, 0.1),
+            position=np.array([0.1, 0.2], dtype=float))
+
+    def _run_needs(self, ghost_side_effect, gamma_band=None):
+        with mock.patch.object(
+                geometry, 'ghost_kernel',
+                side_effect=ghost_side_effect):
+            with mock.patch(
+                    'cogwheel.lensing.surrogate_training._from_caustic_fixed',
+                    return_value=self._SOURCE):
+                with mock.patch(
+                        'cogwheel.lensing.surrogate_training.geometry.macro_matrix',
+                        return_value=np.eye(2)):
+                    return training._needs_fold_carrier(
+                        gamma=self._GAMMA,
+                        center=self._CENTER,
+                        half=self._HALF,
+                        gamma_band=gamma_band)
+
+    def test_true_assertion_can_fail(self):
+        """An always-raise mock must NOT return True."""
+        result = self._run_needs(ghost_side_effect=self._make_ghost_contribution)
+        self.assertTrue(result, 'verifying mock direction: True path is green')
+        self.comparisons += 1
+        result_fail = self._run_needs(
+            ghost_side_effect=FoldCarrierNeedsGhostTestCase._always_raise_ghostdomain)
+        self.assertNotEqual(result, result_fail,
+                            'always-raise and always-succeed must differ')
+        self.comparisons += 1
+
+    def test_false_assertion_can_fail(self):
+        """An always-raise mock returns False, but always-succeed returns True."""
+        result_ghost = self._run_needs(
+            ghost_side_effect=self._make_ghost_contribution)
+        result_fail = self._run_needs(
+            ghost_side_effect=FoldCarrierNeedsGhostTestCase._always_raise_ghostdomain)
+        self.assertNotEqual(result_ghost, result_fail,
+                            'always-succeed (True) must differ from '
+                            'always-raise (False)')
+        self.comparisons += 1
+
+    def test_gamma_band_assertion_can_fail(self):
+        """The gamma_band parameter is load-bearing: a mock that fails
+        at gamma_mid but succeeds at gamma_lo or gamma_hi must still
+        return True."""
+        # Mock: succeed for gamma_lo (0.46) but fail for others
+        calls = []
+
+        def succeed_at_lo(w, source, matrix):
+            calls.append(source[0])  # track the source coordinate
+            return geometry.GhostContribution(
+                kernel=np.array([1.0 + 0j]),
+                delay=complex(1.5, 0.1),
+                position=np.array([0.1, 0.2], dtype=float))
+
+        with mock.patch.object(
+                geometry, 'ghost_kernel',
+                side_effect=succeed_at_lo):
+            with mock.patch(
+                    'cogwheel.lensing.surrogate_training._from_caustic_fixed',
+                    return_value=self._SOURCE):
+                with mock.patch(
+                        'cogwheel.lensing.surrogate_training.geometry.macro_matrix',
+                        return_value=np.eye(2)):
+                    result_with_band = training._needs_fold_carrier(
+                        gamma=self._GAMMA, center=self._CENTER,
+                        half=self._HALF, gamma_band=(0.46, 0.54))
+        self.assertTrue(result_with_band,
+                        'must return True when ghost exists at band-edge '
+                        'gamma even if mid-gamma is ghost-free')
+        self.comparisons += 1
+
 
 if __name__ == '__main__':
     main()

@@ -1872,6 +1872,66 @@ def _exclude_ghost_dominated(gamma: float, center: tuple[float, float],
                 return True
     return False
 
+def _needs_fold_carrier(gamma: float, center: tuple[float, float],
+                        half: tuple[float, float],
+                        gamma_band: tuple[float, float] | None = None
+                        ) -> bool:
+    """Return True when a ghost EXISTS at any probed tile corner or centre.
+
+    Positive-parity only: the ghost does not exist for most saddle configs.
+    Maps tile corners and centre from ``(gamma, rho, theta_c)`` to eigenframe
+    source coordinates via `_from_caustic_fixed`, builds
+    ``macro_matrix(gamma, beta=0, kappa=0)``, and probes
+    ``geometry.ghost_kernel(w=[10.0], source, matrix)`` at each point.
+
+    * If the call raises `GhostDomainError` at ALL probed points the ghost
+      does not exist and the tile does NOT need fold-carrier demodulation.
+    * If the call succeeds at ANY point the ghost EXISTS (regardless of
+      ``Im(tau_c)`` magnitude) and the tile needs fold-carrier demodulation.
+    * Domain refusals from `_from_caustic_fixed` are skipped conservatively.
+
+    When ``gamma_band`` is provided as ``(gamma_lo, gamma_hi)``, probes at
+    gamma_lo, gamma_mid (= ``gamma``), and gamma_hi; returns True if the
+    ghost exists at ANY gamma at ANY probed point.
+
+    Unlike `_exclude_ghost_dominated`, does NOT check ``Im(tau_c)`` against
+    any decay threshold -- the ghost merely has to exist for a rho-phase
+    carrier to be well-defined.
+    """
+    rho_c, theta_c = center
+    half_rho, half_theta = half
+    gammas: tuple[float, ...]
+    if gamma_band is not None:
+        gammas = (gamma_band[0], gamma, gamma_band[1])
+    else:
+        gammas = (gamma,)
+    for g in gammas:
+        rho_corners = (rho_c - half_rho, rho_c + half_rho)
+        theta_corners = (theta_c - half_theta, theta_c + half_theta)
+        corner_sources = []
+        try:
+            corner_sources = [
+                _from_caustic_fixed(g, cr, ct)
+                for cr in rho_corners for ct in theta_corners
+            ]
+            corner_sources.append(_from_caustic_fixed(g, rho_c, theta_c))
+        except (ValueError, geometry.LensDomainError):
+            continue
+        try:
+            matrix = geometry.macro_matrix(g, beta=0.0, kappa=0.0)
+        except geometry.LensDomainError:
+            continue
+        for source in corner_sources:
+            source_arr = np.array(source, dtype=float)
+            try:
+                geometry.ghost_kernel([10.0], source_arr, matrix)
+            except geometry.GhostDomainError:
+                continue
+            except (ValueError, geometry.LensDomainError):
+                continue
+            return True
+    return False
+
 
 @dataclass(frozen=True, eq=False)
 class _InteriorAdmission:
@@ -2091,11 +2151,7 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
     ``_CUSP_EXCLUSION_DISTANCE`` (measured in the physical source plane) of
     a cusp vertex is silently dropped — near-cusp tiles induce oscillatory
     ``E_ff`` labels that a polar chart cannot resolve, so the tube/cusp-arm
-    serves them instead.  After the cusp-exclusion check, a tile whose
-    corners lie in the ghost-transition zone (``Im(tau_c) <
-    _GHOST_DECAY_IM_THRESHOLD``) is silently dropped — ghost-dominated
-    tiles have ``E_ks`` labels contaminated by an undecayed unsubtracted
-    ghost, so the exact-engine ladder serves them instead.  A tile is kept iff ``admission.admits_exterior`` is
+    serves them instead.  A tile is kept iff ``admission.admits_exterior`` is
     True: its INNER ``rho`` edge stays outside the caustic, at least
     ``eta_max`` from the nearest caustic point (over all probes and band
     gammas), and its centre direction is inside the prior source box, for
@@ -2127,15 +2183,15 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
         ``_CUSP_EXCLUSION_DISTANCE`` of a cusp vertex are silently dropped.
         When None the cusp-exclusion step is skipped (backward-compatible).
     gamma_band : tuple[float, float], optional
-        If provided together with ``gamma``, the `_exclude_ghost_dominated`
-        check evaluates at ``(gamma_band[0], gamma, gamma_band[1])`` so a
-        tile is dropped when ANY band-edge gamma places a corner within the
-        ghost-transition zone.  When ``None`` the ghost-exclusion check uses
-        only the single ``gamma`` (backward-compatible single-gamma
-        behaviour).
+        Retained for backward-compatible signature; ghost-dominated tiles
+        are no longer dropped by the tiler (they flow through for
+        fold-carrier demodulation in the training loop).
+        When ``None`` the parameter is unused.
     ghost_drop_count : list[int], optional
         Single-element mutable list for tallying ghost-excluded tiles.
-        When ``None`` the count is not accumulated (backward-compatible).
+        Always zero (ghost-dominated tiles are rescued by fold-carrier
+        demodulation rather than dropped).  When ``None`` the count is not
+        accumulated (backward-compatible).
 
     Returns
     -------
@@ -2171,12 +2227,6 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
             if (gamma is not None and folded_cusp_angles
                     and _exclude_near_cusp(gamma, center, half,
                                            folded_cusp_angles)):
-                continue
-            if (gamma is not None
-                    and _exclude_ghost_dominated(gamma, center, half,
-                                                 gamma_band=gamma_band)):
-                if ghost_drop_count is not None:
-                    ghost_drop_count[0] += 1
                 continue
             if admission.admits_exterior(center, half, source_magnitude_max):
                 tiles.append((center, half, i, j))
@@ -2886,7 +2936,8 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
                           box_center: tuple[float, float],
                           half: tuple[float, float],
                           w_range: tuple[float, float], config: TrainingConfig,
-                          w_nodes_per_decade: int | None = None
+                          w_nodes_per_decade: int | None = None,
+                          fold_carrier: bool = False
                           ) -> tuple[ExteriorPolarChart, int, int]:
     """Build one exterior-polar chart in caustic-fixed ``(rho, theta_c)``.
 
@@ -2951,7 +3002,8 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
             w_nodes_per_decade=nodes_per_decade,
             definition=FARFIELD_KERNEL_SUM,
             theta_to_u=theta_to_u, u_grid=u_grid,
-            rho_log_axis=True)
+            rho_log_axis=True,
+            fold_carrier=fold_carrier)
     except CarrierDiscontinuityError as exc:
         raise CarrierDiscontinuityError(
             'Exterior-polar tile label winds faster than the Nyquist '
@@ -4831,10 +4883,14 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                         band=band, parity=parity, tile=probe_tile, window=window,
                         config=config, rng=rng)
                 for center, half, i, j in tiles:
+                    fold_carrier = _needs_fold_carrier(
+                        gamma=gamma_mid, center=center, half=half,
+                        gamma_band=band)
                     admitted.append({
                         'si': 0, 'i': i, 'j': j, 'center': center, 'half': half,
                         'm_lo': m_lo_region, 'm_hi': m_hi_region,
                         'w_range': window, 'w_nodes_per_decade': int(n_rec),
+                        'fold_carrier': fold_carrier,
                         'region': 'exterior'})
                 exterior_region_report.update({
                     'window': [round(float(w_floor), 6),
@@ -5310,13 +5366,16 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         tag = f'chart_{label}_s{si}_ff_{i}_{j}'
         path = outdir / f'{tag}.npz'
 
+        fold_carrier = tile.get('fold_carrier', False)
         def build_ff(band=band, center=center, half=half, w_range=w_range,
                      si=si, m_lo=m_lo, m_hi=m_hi, region=region, kind=kind,
-                     w_nodes=eff_w_nodes, eff_w_nodes=eff_w_nodes):
+                     w_nodes=eff_w_nodes, eff_w_nodes=eff_w_nodes,
+                     fold_carrier=fold_carrier):
             chart, calls, refused = _build_farfield_chart(
                 gamma_band=band, parity=parity, box_center=center,
                 half=half, w_range=w_range, config=config,
-                w_nodes_per_decade=w_nodes)
+                w_nodes_per_decade=w_nodes,
+                fold_carrier=fold_carrier)
             samples = _farfield_heldout_samples(
                 band, center, half, config, rng)
             eps = _heldout_eps(chart, samples,

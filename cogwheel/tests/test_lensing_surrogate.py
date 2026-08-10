@@ -3929,7 +3929,7 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     and ``exterior_polar_carrier_demod_v2`` (retired in the rho_log_axis
     migration) are NOT in `_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS`, so
     ``_chart_from_npz`` raises ``ValueError``.  The NEW
-    ``exterior_polar_rho_log_v3`` schema adds ``rho_log_axis`` in meta;
+    ``exterior_polar_rho_log_carrier_v1`` schema adds ``rho_log_axis`` in meta;
     ``carrier_rate`` and ``rho_log_axis`` load via ``meta.get(...,
     default)`` for backward compat with older artifacts.
     """
@@ -4014,9 +4014,19 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
 
     def test_carrier_demod_v2_schema_raises_valueerror(self):
         """``exterior_polar_carrier_demod_v2`` hard-refuses (retired in
-        rho_log_axis migration — replaced by ``exterior_polar_rho_log_v3``)."""
+        rho_log_axis migration — replaced by ``exterior_polar_rho_log_carrier_v1``)."""
         data = self._build_minimal_npz(
             'exterior_polar_carrier_demod_v2', include_theta_to_u=True)
+        with self.assertRaises(ValueError) as ctx:
+            self._write_and_load(data)
+        self.assertIn('axis-schema tag', str(ctx.exception))
+        self.n_checks += 1
+
+    def test_rho_log_v3_schema_raises_valueerror(self):
+        """``exterior_polar_rho_log_v3`` hard-refuses (retired in
+        rho_carrier migration — replaced by ``exterior_polar_rho_log_carrier_v1``)."""
+        data = self._build_minimal_npz(
+            'exterior_polar_rho_log_v3', include_theta_to_u=True)
         with self.assertRaises(ValueError) as ctx:
             self._write_and_load(data)
         self.assertIn('axis-schema tag', str(ctx.exception))
@@ -4025,7 +4035,7 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     def test_new_schema_without_theta_to_u_loads_with_none(self):
         """A new-schema chart missing theta_to_u loads with theta_to_u=None."""
         data = self._build_minimal_npz(
-            'exterior_polar_rho_log_v3', include_theta_to_u=False)
+            'exterior_polar_rho_log_carrier_v1', include_theta_to_u=False)
         chart = self._write_and_load(data)
         self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
         self.assertIsNone(chart.theta_to_u)
@@ -4034,7 +4044,7 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     def test_valid_schema_with_theta_to_u_loads_successfully(self):
         """A valid new-schema chart with theta_to_u loads without error."""
         data = self._build_minimal_npz(
-            'exterior_polar_rho_log_v3', include_theta_to_u=True)
+            'exterior_polar_rho_log_carrier_v1', include_theta_to_u=True)
         chart = self._write_and_load(data)
         self.assertIsNotNone(chart)
         self.assertIsNotNone(chart.theta_to_u)
@@ -4043,7 +4053,7 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     def test_carrier_rate_preserved_through_npz(self):
         """carrier_rate=0.5 survives `_chart_to_npz`-style NPZ round-trip."""
         data = self._build_minimal_npz(
-            'exterior_polar_rho_log_v3', include_theta_to_u=True,
+            'exterior_polar_rho_log_carrier_v1', include_theta_to_u=True,
             carrier_rate=0.5)
         chart = self._write_and_load(data)
         self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
@@ -4054,7 +4064,7 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     def test_zero_carrier_backward_compat(self):
         """NPZ without carrier_rate key loads as carrier_rate=0.0."""
         data = self._build_minimal_npz(
-            'exterior_polar_rho_log_v3', include_theta_to_u=True,
+            'exterior_polar_rho_log_carrier_v1', include_theta_to_u=True,
             include_carrier_rate=False)
         chart = self._write_and_load(data)
         self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
@@ -4893,7 +4903,7 @@ class ExteriorPolarRhoLogAxisSerializationTestCase(SurrogateTestCase):
         meta = {'kind': 'exterior_polar', 'image_count': 2, 'parity': 1,
                 'eta_overlap_min': 0.05,
                 'envelope_definition': 'farfield_full_kernel_sum',
-                'axis_schema': 'exterior_polar_rho_log_v3'}
+                'axis_schema': 'exterior_polar_rho_log_carrier_v1'}
         if include_rho_log_axis:
             meta['rho_log_axis'] = True
         real = np.ones((n, n, n, n), dtype=float)

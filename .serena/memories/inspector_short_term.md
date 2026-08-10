@@ -1,24 +1,28 @@
-## 2026-08-10 — Review: ghost-gate tile exclusion (brief_exterior_rho_phase_carrier, WP-1)
+## 2026-08-10 — Re-review: exterior fold-carrier phase demodulation (INS-1 fixes)
 
-Reviewed the uncommitted diff on `claude-dev`. Build adds `_exclude_ghost_dominated()` in surrogate_training.py, wired into `_farfield_exterior_tiles` for positive-parity tiles.
+Re-reviewed the latest revision of the fold-carrier build. Coder addressed all three INS-1 findings from the previous review pass.
 
-### Verified correct
-- `_exclude_ghost_dominated` probes tile corners + centre via `geometry.ghost_kernel(w=[10.0], ...)`, checking `Im(tau_c) < channels._GHOST_DECAY_IM_THRESHOLD` (=0.4)
-- Conservative fail-safe: `GhostDomainError`, `LensDomainError`, `ValueError` all fall through to retain (engine serves it)
-- `gamma_band` probes gamma_lo, gamma_mid, gamma_hi — matches `_exclude_near_cusp` pattern
-- `ghost_drop_count: list[int] | None = None` mutable-counter pattern correct (default None, guarded access)
-- Wired to `exterior_region_report['ghost_excluded_tiles']` — report key additive only
-- Backward compatible: `gamma`/`gamma_band`/`ghost_drop_count` all optional with None defaults; no existing callers broken
-- All 86 exterior admission tests pass, all 88 surrogate training tests pass, 110 surrogate tests pass — no regressions
-- 7 self-falsification test classes prove detectors are not vacuous
-- Import chain clean (delayed `from cogwheel.lensing.chang_refsdal import channels` inside function body)
-- No spec/DATA_CONTRACTS divergence introduced (additive mechanism only)
+### RESOLVED
+- **INS-1-001**: `_evaluate_chart` fold-carrier re-modulation at line ~2893 now correctly uses `np.exp(log_w_clamped)`. Verified by re-reading the source and grepping for `np.exp(log_w_query)` — zero occurrences.
+- **INS-1-002**: `GhostExcludedTilesInRegionReportTestCase.test_ghost_excluded_tiles_is_zero` now asserts `ghost_ct == 0`. The mock on `_exclude_ghost_dominated` is dead but harmless (the code path was removed, the mock is never invoked).
+- **INS-1-003**: All 6 test methods in `test_lensing_surrogate.py` updated from `exterior_polar_rho_log_v3` to `exterior_polar_rho_log_carrier_v1`. New `test_rho_log_v3_schema_raises_valueerror` test added to `ExteriorPolarStaleSchemaHardRefusalTestCase`.
 
-### Findings
-None. Implementation is correct and complete for WP-1.
+### STILL OPEN (Librarian scope — not induced by this revision)
+- **INS-1-004**: SPEC.md line 62 still says `'exterior_polar_rho_log_v3'` (`_EXTERIOR_POLAR_AXIS_SCHEMA_V3`); code uses `'exterior_polar_rho_log_carrier_v1'` (`_EXTERIOR_POLAR_AXIS_SCHEMA_V4`).
+- **INS-1-005**: DATA_CONTRACTS.yaml line 199 still says `axis_schema='exterior_polar_rho_log_v3'`.
 
-### STILL OPEN (carried from previous reviews, not induced by this change)
-- **INS-16-002**: SPEC.md line 63 still says `'exterior_polar_rho_u_v1'` — should be `'exterior_polar_carrier_demod_v2'`. Librarian scope.
-- **INS-16-003**: DATA_CONTRACTS.yaml line 199 still references `axis_schema='exterior_polar_rho_u_v1'`. Librarian scope.
-- **INS-17-001**: Test file `cogwheel/tests/test_lensing_exterior_carrier.py` still untracked.
-- **INS-17-002**: `n_w = log_w_grid.size` at surrogate.py (dead code). [trivial]
+### Test results (all green)
+- test_lensing_exterior_polar_fold.py: 41 passed
+- test_lensing_surrogate.py (schema tests): 27 passed
+- test_lensing_surrogate_training.py (fast tier): 106 passed, 67 skipped (training tier), 9 deselected
+
+### Verified correct (re-confirmed)
+- INS-1-001 fix: `_evaluate_chart` uses `log_w_clamped` for fold-carrier re-modulation
+- INS-1-002 fix: test asserts `ghost_ct == 0`
+- INS-1-003 fix: all schema tags updated, V3 refusal test added
+- Composition order: fold-carrier demod BEFORE carrier_rate in `from_values`; carrier_rate remod BEFORE fold-carrier remod at serve
+- `_chart_to_npz` / `_chart_from_npz` rho_carrier round-trip correct (optional field, `.get()` fallback)
+- `_build_farfield_chart` / `_train_band_charts` fold_carrier threading correct
+- All consumer callers of `_farfield_exterior_tiles` backward-compatible (gamma_band + ghost_drop_count retained in signature)
+- Import chain clean
+- No new blocking findings
