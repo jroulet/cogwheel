@@ -52,6 +52,16 @@ Correct the rho magnitude coordinate:
 - Complex envelope phase handled correctly.
 - Plan-gate requirement: each `domain_test_descriptions` spec names exactly ONE primary `test_*.py`; no spec may reference another spec's primary file.
 
+## GHOST DOMINANCE — the residual is the ghost, and it is NOT smoothable (driver measurement 2026-08-10)
+DECISIVE FINDING that reframes this build. Measured across rho at gamma=0.5, theta=0.2, w=10:
+- Image count stays 2 everywhere (no coalescence transition).
+- |ghost| / |E_ks| = 3.2-3.4 everywhere the ghost is computable (rho>=2.0), and the ghost gate REFUSES (Im tau_c < 0.4) across the failing band [1.1, 1.9].
+- So the KERNEL_SUM residual the spline fits is DOMINATED by the ghost's oscillatory structure (~3x), and the ghost is either gated off (near) or unsubtracted (the chart uses KERNEL_SUM, Window iii).
+- CONCLUSION: no coordinate transform (rho-carrier, log-rho, etc.) can make a dominant oscillatory ghost smooth. The failing tiles are in a regime where NO kernel-sum label is valid: near the caustic the image-split breaks down (uniform-arm regime), and the ghost gate correctly refuses. The fix is ADMISSION/EXCLUSION, not conditioning: exclude tiles where the ghost gate refuses or |G|/|E| is large, serving those draws by the exact engine / Airy-Pearcey arms. This would ALSO collapse the tile count toward ~70.
+- The rho-phase-carrier idea may be moot: the phase winding is the ghost's phase, and splining it is fighting physics.
+
+RECOMMENDED RE-SCOPE: this build should (a) verify the ghost-dominance claim with a small probe, (b) implement a ghost-gate / |G|-dominance tile-exclusion in the exterior tiler (mirroring the cusp-exclusion precedent), rather than (or in addition to) the rho-phase-carrier. If the plan comes back as pure carrier-demodulation, reject and re-scope.
+
 ## Ghost hypothesis — partially confirmed (driver measurement 2026-08-10)
 The user asked whether the rho-phase winding is the unsubtracted ghost. Measured:
 - The failing rho range [1.3, 1.9] is a GHOST-TRANSITION ZONE: the ghost is substantial (at rho=2.0 |ghost|=0.005 vs |E_ks|=0.0015, 3x) but the F027 ghost gate REFUSES to subtract it there (Im tau_c < 0.4; GhostDomainError at w=10, rho=1.5). The MINUS_GHOST label is unavailable exactly where the ghost dominates.
