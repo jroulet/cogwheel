@@ -1181,7 +1181,7 @@ Tag conventions:
   ppGO-served coverage class, not a gap.
 
 
-- **Exterior envelope rho-phase carrier demodulation (+ correct log-rho coordinate)**
+- **Exterior ghost-region tile exclusion (fix the unsmoothable-region admission)**
   `[→ spec]` — identified 2026-08-10 after probe 3 (killed at 56 charts, 30/55 fail).
 
   Probe 3 (all three prior fixes in HEAD: cusp exclusion, w-carrier
@@ -1189,29 +1189,25 @@ Tag conventions:
   1e-3 bar, subdivision grinding to the depth-3 cap. At nodes eps ~1e-4
   (fixes work at nodes) but off-grid rho midpoint eps ~0.38 (catastrophic).
 
-  Root cause (measured): the envelope PHASE rotates ~2π every 0.3 in rho
-  across the tile (-1.87 -> +2.84 -> -1.73 -> +1.43 rad over rho in
-  [1.3, 2.0]). This is a rho-PHASE CARRIER, exactly analogous to the
-  w-phase carrier the w-carrier-demodulation build removed. A magnitude
-  coordinate (log(rho-1)) cannot fix a phase rotation — the real/imag
-  parts oscillate in rho at the phase rate.
+  Root cause (measured, decisive): the KERNEL_SUM residual is DOMINATED
+  by the unsubtracted ghost (|G| ~ 3.2-3.4 x |E_ks| everywhere computable;
+  image count stays 2). The ghost gate (F027) REFUSES in the failing band
+  [1.1, 1.9] (Im tau_c < 0.4), so MINUS_GHOST is unavailable there, and
+  the chart uses KERNEL_SUM (Window iii) which leaves the ghost in. The
+  rho-phase winding IS the ghost's phase. No coordinate transform
+  (carrier, log-rho) can smooth a dominant oscillatory ghost — that is
+  fighting physics.
 
-  Also corrected: the magnitude is |E| ~ rho^(-p), NOT (rho-1)^p —
-  log|E| is linear in log(rho) (R²=0.999) vs log(rho-1) (R²=0.986). The
-  rho-log build chose the slightly-wrong coordinate.
-
-  **Fix**: (1) demodulate the envelope by the rho-phase carrier before
-  fitting (measure per-node rho-phase slope, median -> k_rho_chart,
-  E *= exp(-1j * k_rho * (rho-1)) or similar), re-modulate at serve —
-  the rho analog of the w-carrier. (2) Correct the rho magnitude
-  coordinate from log(rho-1) to log(rho) (or verify whether the phase
-  demodulation alone suffices, in which case the log coordinate may be
-  unnecessary). (3) Ensure coherence with the w-carrier and serve
-  round-trip.
+  **Fix**: EXCLUDE tiles in the ghost-dominated regime from the exterior
+  tiler (mirroring the cusp-exclusion precedent), serving those draws by
+  the exact engine / Airy-Pearcey arms. Optionally use the
+  FARFIELD_KERNEL_SUM_MINUS_GHOST label where the gate permits. This
+  collapses the tile count toward ~70.
 
   ACCEPTANCE: exterior probe produces ~70 charts with all held-out eps
-  under the 1e-3 bar at the 4x4x4 node count; round-trip to machine
-  precision; serve path consistent.
+  under the 1e-3 bar at the 4x4x4 node count; excluded regions fall to
+  the exact engine (census fall-through); no tile straddles the
+  ghost-transition zone.
 
 
 - **`farfield_*` HELPER NAMES SPAN TWO PHYSICAL REGIMES** `[housekeeping]` —

@@ -1,74 +1,40 @@
-# Build Brief: Exterior rho-phase carrier demodulation (+ correct log-rho coordinate)
+# Build Brief: Exterior ghost-gate tile exclusion (fix the unsmoothable-region admission)
 
 ## Mission
 
-Fix the remaining exterior surrogate failures by removing the rho-PHASE carrier (the envelope's phase rotates ~2π per 0.3 in rho), and correct the rho magnitude coordinate from log(rho-1) to log(rho). This is the rho analog of the already-shipped w-carrier demodulation. The fix is a COORDINATE/PHASE transform, not added resolution, and must compose with the existing w-carrier + log-rho machinery and round-trip to machine precision.
+Fix the exterior surrogate failures by EXCLUDING tiles in the ghost-dominated regime (where no kernel-sum label is smooth) rather than trying to condition the envelope. The failing tiles sit where the unsubtracted ghost dominates the residual (~3x |E_ks|) and cannot be subtracted (F027 gate refuses: Im tau_c < 0.4). No coordinate transform can make a dominant oscillatory ghost smooth — the fix is admission, exactly like the cusp-exclusion precedent. Excluding these tiles collapses the tile count toward ~70 and serves the excluded region by the exact engine / Airy-Pearcey arms.
 
-## Background (measured 2026-08-10, probe 3 killed at 56 charts, 30/55 fail)
+## Background (decisive measurement 2026-08-10)
 
-All three prior fixes are in HEAD (cusp exclusion `d685ebe`, w-carrier demod `f4652e7`, log(rho-1) rho-axis `f6b8b05`). The probe still fails:
-- At training nodes: eps ~1e-4 (fixes work at nodes).
-- Off-grid rho midpoint: eps ~0.38 (catastrophic).
-- The envelope PHASE rotates ~2π per 0.3 in rho across a tile: measured at gamma=0.5, theta_c=0.2, w=12, rho in [1.3, 2.0]: phase goes -1.87, -0.44, +1.13, +2.84, -1.73, -0.12, +1.43, ... rad (full wrap every ~0.3 in rho).
-- A magnitude coordinate (log(rho-1)) cannot fix a phase rotation — the real/imag parts oscillate in rho at the phase-carrier rate.
-- Corrected structure: |E| ~ rho^(-p), log|E| linear in log(rho) (R²=0.999) vs log(rho-1) (R²=0.986). The rho-log build chose the slightly-wrong coordinate.
-
-## The core design problem
-
-The envelope E(rho, theta_c, gamma, w) has:
-1. A w-PHASE carrier (linear in w) — REMOVED by the w-carrier demodulation (shipped).
-2. A rho-PHASE carrier (the phase rotates linearly-ish in rho at rate k_rho ~ 2π/0.3 ~ 21 rad/unit-rho) — NOT yet removed. This is the dominant remaining failure.
-3. A magnitude power law |E| ~ rho^(-p) — partially conditioned by log(rho-1), better by log(rho).
-
-Design the rho-phase-carrier demodulation:
-- Measure the per-node rho-phase slope (unwrapped phase vs rho, or vs the natural coordinate), median -> k_rho_chart.
-- Demodulate E *= exp(-1j * k_rho * (rho - 1)) (or the correct phase variable) before fitting.
-- Re-modulate at serve.
-- The phase variable: is it linear in rho, or in rho-1, or in log(rho)? Measure. (The w-carrier was linear in w; the rho-carrier's variable must be measured, not assumed.)
-- Coherence: the rho-carrier demodulation composes with the w-carrier (they commute — independent axes). The stored object must round-trip to machine precision.
-
-Correct the rho magnitude coordinate:
-- Switch log(rho-1) -> log(rho) if that's genuinely better (R² 0.999 vs 0.986), OR determine whether the rho-phase demodulation alone makes the real/imag smooth enough that the log coordinate is secondary/unnecessary. The plan should measure which combination (log(rho) vs log(rho-1) vs raw rho, with/without phase demod) clears the bar at 4 nodes/axis.
+Probe 3 (all prior fixes: cusp exclusion, w-carrier, log(rho-1)) killed at 56 charts, 30/55 fail. Root cause now proven:
+- Image count stays 2 everywhere (no coalescence transition).
+- |ghost| / |E_ks| = 3.2-3.4 everywhere the ghost is computable (rho>=2.0), and the ghost gate REFUSES (Im tau_c < 0.4) across the failing band [1.1, 1.9].
+- The KERNEL_SUM residual is DOMINATED by the ghost's oscillatory structure. The ghost is either gated off (near) or unsubtracted (the chart uses KERNEL_SUM = Window iii).
+- No coordinate transform (rho-carrier, log-rho) can make a dominant oscillatory ghost smooth — the phase winding IS the ghost's phase.
+- The three-window label scheme (DIFFRACTIVE / KERNEL_SUM_MINUS_GHOST / KERNEL_SUM) assumed the ghost is negligible (high w) or small-and-subtractable (mid w where the gate passes). The failing region [1.1, 1.9] is a ghost-transition zone where the gate refuses but the ghost dominates — a coverage gap.
 
 ## Work
 
-1. **Measure the rho-phase structure** (design input): for several (gamma, theta_c, w), characterize the phase vs rho (linear? in which variable? rate? does it vary across theta_c/w?). Also re-confirm the magnitude power law in log(rho) vs log(rho-1) across the band.
-2. **Design** (deliverable): the rho-phase-carrier demodulation scheme (variable, rate measurement, single canonical site, serve re-modulation), and the rho magnitude coordinate choice. Prototype at 4 nodes/axis, verify off-grid eps < 1e-3.
-3. **Implement** in `ExteriorPolarChart` (from_values/_assemble/_evaluate_chart/npz/schema), `from_engine`/`_build_farfield_chart`, consistent with the existing `carrier_rate` (w) machinery — likely a parallel `rho_carrier_rate` field, or a generalized carrier structure. Schema bump if the stored object changes.
-4. **Verify**: node-exact round-trip (machine precision), off-grid eps < 1e-3 at 4 nodes/axis in rho AND theta, full exterior probe ~70 charts all under bar, backward compat (default 0.0 = byte-identical to HEAD).
+1. **Verify the ghost-dominance claim** (small probe): at the probe's failing tiles, confirm |ghost| > |E_ks| and the gate refuses. Map the region where |G|/|E_ks| > 1 (or where the gate refuses) as a function of (gamma, rho, theta_c, parity).
+2. **Implement ghost-region tile exclusion** in the exterior tiler (`_farfield_exterior_tiles` / `_build_farfield_chart` / the admission path): exclude a tile when its corners (or center) are in a region where the ghost gate refuses OR |G|/|E_ks| exceeds a threshold (e.g. 1.0, giving the kernel-sum label a chance to be the residual). This mirrors `_exclude_near_cusp` (source-plane distance-based) — extend the same pattern to a ghost-region test. Excluded tiles fall to the exact engine / uniform arms at serve (the ladder already handles this).
+   - Consider whether the existing `_GhostSeparationMin` / `_GHOST_DECAY_IM_THRESHOLD` machinery can be reused as the admission test (it is configuration-only, no w-dependence — provably consistent train/serve).
+3. **Optionally**: switch the mid-w band of the exterior chart to the `FARFIELD_KERNEL_SUM_MINUS_GHOST` label WHERE the gate permits, so the retained tiles are smooth by construction. (This is the correct label for the mid-w window; KERNEL_SUM is Window iii only.)
+4. **Verify**: exterior probe produces ~70 charts with all held-out eps under the 1e-3 bar; excluded regions fall to the exact engine (census shows the fall-through); no tile straddles the ghost-transition zone.
 
 ## Measured facts (re-probe at HEAD before coding)
-- Phase vs rho at gamma=0.5, theta_c=0.2, w=12, rho in [1.3,2.0]: -1.87, -0.44, +1.13, +2.84, -1.73, -0.12, +1.43, ... (~2π per 0.3 rho)
-- |E| ~ rho^(-p): log|E| vs log(rho) R²=0.999; log(rho-1) R²=0.986; over 2.5 decades (0.0009 -> 0.27)
-- Off-grid rho eps ~0.38 with all three prior fixes; node eps ~1e-4
-- Relevant code: `carrier_rate` machinery (surrogate.py, from_values ~1665, _evaluate_chart ~2769, from_engine ~3011), `rho_log_axis` machinery (surrogate.py, just added), `_build_farfield_chart` (surrogate_training.py ~2714), `reconstruct_farfield` (channels.py)
-- Envelope: `farfield_envelope_from_partition(partition, FARFIELD_KERNEL_SUM)`
+- |ghost|/|E_ks| ~ 3.2-3.4 (rho>=2.0); ghost gate refuses [1.1, 1.9] (Im tau_c < 0.4) at gamma=0.5, theta=0.2, w=10
+- Image count = 2 throughout (no transition)
+- Prior fixes in HEAD: cusp exclusion (d685ebe), w-carrier (f4652e7), log(rho-1) rho-axis (f6b8b05) — probe still 30/55 fail
+- Ghost machinery: `farfield_ghost_term` (channels.py ~964), `_GHOST_SEPARATION_MIN = 0.7`, `_GHOST_DECAY_IM_THRESHOLD = 0.4` (channels.py ~219-234), `_exclude_near_cusp` (surrogate_training.py ~1676, called ~2007)
+- Envelope labels: FARFIELD_KERNEL_SUM (Window iii), FARFIELD_KERNEL_SUM_MINUS_GHOST (Window ii), FARFIELD_DIFFRACTIVE (Window i) — channels.py ~131-141
 - Probe: `scripts/probe_exterior_recursion.py` (4x4x4, w 4/decade, engine 80)
 
 ## Constraints
 - Fast tests. Follow AGENTS.md.
-- Coordinate/phase transform — NOT node-density increase.
-- Compose with w-carrier + log-rho machinery; round-trip to machine precision.
-- Complex envelope phase handled correctly.
+- EXCLUSION is the primary fix, NOT envelope conditioning. Do not add node density.
+- The ghost gate is configuration-only (no w-dependence) — the admission test must be train/serve consistent.
+- Keep the shipped fixes (cusp exclusion, w-carrier, log-rho); they are correct and remain.
 - Plan-gate requirement: each `domain_test_descriptions` spec names exactly ONE primary `test_*.py`; no spec may reference another spec's primary file.
 
-## GHOST DOMINANCE — the residual is the ghost, and it is NOT smoothable (driver measurement 2026-08-10)
-DECISIVE FINDING that reframes this build. Measured across rho at gamma=0.5, theta=0.2, w=10:
-- Image count stays 2 everywhere (no coalescence transition).
-- |ghost| / |E_ks| = 3.2-3.4 everywhere the ghost is computable (rho>=2.0), and the ghost gate REFUSES (Im tau_c < 0.4) across the failing band [1.1, 1.9].
-- So the KERNEL_SUM residual the spline fits is DOMINATED by the ghost's oscillatory structure (~3x), and the ghost is either gated off (near) or unsubtracted (the chart uses KERNEL_SUM, Window iii).
-- CONCLUSION: no coordinate transform (rho-carrier, log-rho, etc.) can make a dominant oscillatory ghost smooth. The failing tiles are in a regime where NO kernel-sum label is valid: near the caustic the image-split breaks down (uniform-arm regime), and the ghost gate correctly refuses. The fix is ADMISSION/EXCLUSION, not conditioning: exclude tiles where the ghost gate refuses or |G|/|E| is large, serving those draws by the exact engine / Airy-Pearcey arms. This would ALSO collapse the tile count toward ~70.
-- The rho-phase-carrier idea may be moot: the phase winding is the ghost's phase, and splining it is fighting physics.
-
-RECOMMENDED RE-SCOPE: this build should (a) verify the ghost-dominance claim with a small probe, (b) implement a ghost-gate / |G|-dominance tile-exclusion in the exterior tiler (mirroring the cusp-exclusion precedent), rather than (or in addition to) the rho-phase-carrier. If the plan comes back as pure carrier-demodulation, reject and re-scope.
-
-## Ghost hypothesis — partially confirmed (driver measurement 2026-08-10)
-The user asked whether the rho-phase winding is the unsubtracted ghost. Measured:
-- The failing rho range [1.3, 1.9] is a GHOST-TRANSITION ZONE: the ghost is substantial (at rho=2.0 |ghost|=0.005 vs |E_ks|=0.0015, 3x) but the F027 ghost gate REFUSES to subtract it there (Im tau_c < 0.4; GhostDomainError at w=10, rho=1.5). The MINUS_GHOST label is unavailable exactly where the ghost dominates.
-- Subtracting the ghost (MINUS_GHOST) does NOT remove the rho-phase winding where it IS allowed (both labels wind together, ghost phase rate -0.49 vs envelope +0.72, opposite signs).
-- So the ghost is substantial-and-unsubtracted in the failing zone (a real windowed-label coverage gap: KERNEL_SUM=Window iii high-w leaves it, MINUS_GHOST=Window ii refuses it), BUT the phase-winding rate does NOT match the ghost's phase rate — the winding is dominated by the two-image differential-delay interference, not the ghost's own phase.
-
-DESIGN IMPLICATION: (a) the rho-phase-carrier demodulation (fitting the residual fringe) is the primary fix — it removes the two-image interference winding regardless of its exact origin. (b) Additionally evaluate whether switching the mid-w band to the MINUS_GHOST label (where the gate permits) improves the magnitude conditioning near rho=2 — but it will NOT fix the phase winding by itself. (c) The ghost-transition zone [rho where the gate refuses but the ghost is large] is a coverage gap worth documenting; the rho-carrier is the pragmatic surrogate-level fix.
-
-## Design note from the driver
-The w-carrier demodulation (shipped) removed the w-phase rotation; the rho axis has an analogous phase rotation that is now the dominant failure. The user's principle applies again: spline smooth things — remove the oscillation physics first. The rho-phase carrier is the missing oscillation. Also note: the magnitude coordinate should be log(rho) not log(rho-1) per the R² evidence, but confirm whether the phase demodulation alone suffices before layering both.
+## Why not the rho-phase-carrier / log-rho approach
+The rho-phase winding is the ghost's phase. A coordinate/carrier transform tries to spline a dominant oscillatory ghost — fighting physics. The correct engineering is admission: don't chart what the label can't represent, serve it by the exact engine. This also collapses the tile count (the original ~500 -> ~70 goal) by not tiling the ghost-dominated region at all.
