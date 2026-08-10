@@ -1184,24 +1184,24 @@ Tag conventions:
 - **Exterior envelope w-axis power-law conditioning (log-scale fit)**
   `[→ spec]` — identified 2026-08-09 by Professor + Coder investigation.
 
-  The exterior `E_ff` label is SMOOTH and correctly non-oscillatory (full
-  kernel subtraction works; the earlier "beat" claim was a measurement
-  artifact). But `|E(w)| ~ w^(-0.60)` (R²=0.996): a clean power-law decay
-  spanning ~1000× over the w-band. A cubic spline with ~7 w-nodes
-  (4/decade) is exact at nodes (1e-17) but 12%–1200% off between them,
-  because the steep power-law curvature can't be tracked at low node
-  counts. The eps bar (1e-3 normalized by max|F|) is breached.
+  **W-AXIS DONE (2026-08-10, build exterior_w_axis_powerlaw_conditioning, commit f4652e7):**
+  Carrier-phase demodulation (`carrier_rate = k_chart`) implemented in
+  `ExteriorPolarChart`. Per-node unwrapped-phase slope is medianed to
+  `k_chart`; the stored envelope is demodulated by `exp(-1j*k_chart*w)`
+  before spline fitting (`from_values`, single canonical site) and
+  re-modulated at serve. Axis schema bumped to
+  `'exterior_polar_carrier_demod_v2'` (old tag hard-refuses). W-axis
+  off-grid eps now ~1e-4 (node eps 1e-17), well below the 1e-3 bar.
 
-  The fix must be a COORDINATE/SCALE transform, not added resolution (per
-  the engineering principle: spline smooth things, don't out-resolve
-  steep ones). The magnitude follows a clean power law, suggesting a
-  log-scale or power-law-rescaling coordinate on the w-axis. BUT the
-  envelope is complex (real/imag with rotating phase), and the spatial
-  axes (rho, theta_c, gamma) interact — a log|F| ordinate alone is not
-  self-consistent. The build must DESIGN the full representation: how to
-  fit a complex envelope with ~1000× dynamic range at low node counts,
-  including phase handling and whether the spatial axes need matching
-  transforms, and keep the serve path (reconstruct_farfield) consistent.
+  **REMAINING — SPATIAL AXES:** the carrier fix exposes the spatial-axis
+  problem: `rho` spans ~3 decades toward rho=1 and `theta_c` also need
+  coordinate conditioning; off-grid rho eps ~0.04 at 4 nodes/decade.
+  The full acceptance bar is NOT yet cleared. The spatial-axis conditioning
+  is a follow-on build (not yet in a TODO fragment).
+
+  The fix must be a COORDINATE/SCALE transform on the spatial axes too,
+  not added resolution. The build must keep the serve path
+  (`reconstruct_farfield`) consistent.
 
   ACCEPTANCE: the exterior surrogate clears the 1e-3 eps bar at the probe's
   4×4×4 (or modestly higher) node count WITHOUT resolving the decay by

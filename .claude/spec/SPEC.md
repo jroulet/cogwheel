@@ -1,6 +1,6 @@
 ---
-spec_version: 0.36.2
-last_updated: 2026-08-09
+spec_version: 0.36.3
+last_updated: 2026-08-10
 ---
 
 # cogwheel — Project Specification
@@ -60,9 +60,9 @@ EventData (strain + ASD)  ->  WaveformGenerator  ->  Likelihood
 Far-field surrogate coordinate contract: exterior charts — positive-parity
 astroid and macro-saddle alike — are `ExteriorPolarChart` records,
 interpolating in caustic-fixed polar `(rho, theta_c)` coordinates (axis-schema
-tag `'exterior_polar_rho_u_v1'` — the ONLY known tag; the retired
-`'exterior_polar_rho_theta_c'` schema is dropped from the known set and
-hard-refuses at load). Positive-parity (`parity == 1`) exterior charts carry an
+tag `'exterior_polar_carrier_demod_v2'` (`_EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER`) — the ONLY known tag; the retired
+`'exterior_polar_rho_theta_c'` and `'exterior_polar_rho_u_v1'` schemas are dropped from the known set and
+hard-refuse at load). Each `ExteriorPolarChart` additionally carries a `carrier_rate` field (float, default 0.0): the residual carrier-phase rate `k_chart` estimated from per-node unwrapped-phase slope; when nonzero, the stored envelope is demodulated by `exp(-1j*k_chart*w)` before spline fitting and re-modulated at serve, absorbing the ~1000x dynamic range of `|E(w)| ~ w^(-0.60)`. Positive-parity (`parity == 1`) exterior charts carry an
 optional cusp-adapted `theta_to_u` map — the spline's 4th axis is then
 `u = d**(2/3)`, `d` the angular distance to the NEAR caustic cusp (`0` or
 `pi/2` in the D2-folded quadrant), the same gamma-universal cusp-reach scaling
