@@ -1100,41 +1100,31 @@ Tag conventions:
   identical values; and the saddle interior charts one half-lobe.
 
 
-- **Exterior fold-carrier phase demodulation (recover ghost-transition zone)**
-  `[→ spec]` — identified 2026-08-10 after the ghost-gate exclusion build.
+- **Exterior 2D (rho, u) fold-carrier (extend the 1D rho-carrier)**
+  `[→ spec]` — identified 2026-08-10 after probe (killed at 14 charts, all fail).
 
-  The ghost-gate exclusion (cf81d66) correctly excludes tiles where the
-  unsubtracted ghost dominates the KERNEL_SUM residual, but that is ~40%
-  of the exterior prior box (measured). Those draws fall to the exact
-  engine (correct but ~tens of ms/node vs surrogate speed). This build
-  recovers them at surrogate speed via analytic FOLD-CARRIER phase
-  demodulation:
+  The 1D rho-carrier (b061103) fixed the rho-axis phase winding but left
+  the u-axis winding: measured 11.66 rad phase span in u (and in theta_c —
+  span is coordinate-independent), max dphase/du = 48 (the cusp-adapted u
+  reduces the gradient from 82 but not the total winding). The probe failed
+  with off-grid theta (u) eps ~0.52.
 
-  The ghost's phase oscillation is e^{iw·Re(tau_c(rho))}, where tau_c is
-  the delay of the fold point where the two real images merged (the ghost
-  is the single Fresnel/Airy blob centered there). Demodulating the
-  envelope by e^{-iw·Re(tau_c(rho))} per node before fitting flattens the
-  rho-phase winding (measured: 16.7 -> 3.2 rad over rho in [1.3, 2.1]),
-  leaving a smooth splineable residual — WITHOUT needing the decay gate
-  (Re(tau_c) is well-defined regardless of Im(tau_c)). tau_c comes from
-  `geom.ghost_kernel(...).delay`, already computable.
-
-  IMPORTANT (measured): do NOT demodulate by the full complex tau_c
-  (multiply by e^{+w·Im}) — that divides out the ghost's decay and
-  amplifies everything by ~19x at w=30 (numerically explosive). Only the
-  phase (Re) is demodulated; the ghost's smooth amplitude decay e^{-w·Im}
-  is left in the residual for the spline to fit (it is monotone, not
-  oscillatory). Equivalently, where the ghost model is accurate
-  (Im tau_c >= 0.4) the MINUS_GHOST label subtracts analytically and the
-  reconstruction re-adds it at serve — the layered strategy:
-  (1) MINUS_GHOST subtraction where the model is accurate,
-  (2) fold-carrier phase demodulation in the transition zone,
-  (3) exclusion -> exact engine for the residual.
+  Fix (validated): the fold-carrier must be a 2D array Re(tau_c(rho, u))
+  on the spline's ACTUAL axes (rho, u), NOT (rho, theta_c). Measured:
+  - Re(tau_c) is LINEAR in rho (slope 2.4-2.7, varying with the angular
+    coordinate — the theta_c-dependence is really u-dependence).
+  - Re(tau_c) is LINEAR in u (dRe/du ~ -1.45, nearly constant) — the ideal
+    carrier form.
+  - The exterior rho is the ADDITIVE form (rho = 1 + |y| - r_caustic), so
+    the linear-in-rho carrier is consistent with the caustic scaling.
+  - A 2D (rho, u) fold-carrier flattens the per-rho phase span in u from
+    11.66 -> <= 1.63 rad, splineable at 4 nodes/axis.
+  - Serve re-modulation MUST happen at the interpolated u (after the
+    theta_c -> u map), never at raw theta_c.
 
   ACCEPTANCE: the exterior probe produces ~70 charts with all held-out eps
-  under the 1e-3 bar, AND the previously-ghost-excluded region (~40%) is
-  now served by the surrogate (census shows the ghost-region draws served,
-  not falling to the engine); round-trip to machine precision.
+  under the 1e-3 bar; the u-axis off-grid eps drops below the bar; round-trip
+  to machine precision; re-modulation at interpolated u verified.
 
 
 - **EXTERIOR FOLLOW-UP: ghost label, cusp exclusion, node-budget test, ppGO

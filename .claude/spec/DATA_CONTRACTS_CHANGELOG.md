@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `contracts_changelog.d/`.
 
 ---
 
-- `3.0.2` (2026-08-10):
+- `3.0.3` (2026-08-10):
 ## Exterior rho-axis conditioning: axis schema bump to exterior_polar_rho_log_v3
 
 - `ExteriorPolarChart` `axis_schema` bumped from `'exterior_polar_carrier_demod_v2'`
@@ -17,6 +17,11 @@ Add a new entry by creating a fragment in `contracts_changelog.d/`.
   meta dict: when True, the rho axis in the stored spline is `ur = log(rho-1)`;
   inverted transparently at serve. Default False preserves byte-identity with
   pre-v3 builds (but stale v2 artifacts still hard-refuse on the schema tag).
+
+- `3.0.2` (2026-08-10):
+Updated ExteriorPolarChart axis_schema to `'exterior_polar_rho_log_carrier_v1'`
+(`_EXTERIOR_POLAR_AXIS_SCHEMA_V4`); added `'exterior_polar_rho_log_v3'` to retired
+schema list; added `rho_carrier` field description (np.ndarray or None, default None).
 
 - `3.0.1` (2026-08-10):
 

@@ -6,13 +6,13 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.36.5` (2026-08-10):
+- `0.36.6` (2026-08-10):
 Add GHOST-EXCLUSION FILTER section to SPEC.md (FAR-FIELD TILING row):
 `_exclude_ghost_dominated` mechanism, `_GHOST_DECAY_IM_THRESHOLD` reuse,
 positive-parity scope, gamma-band probe pattern, `ghost_excluded_tiles`
 counter in region report, and certification tests (DT-1 through DT-8).
 
-- `0.36.4` (2026-08-10):
+- `0.36.5` (2026-08-10):
 ## Exterior rho-axis conditioning: axis schema bump to exterior_polar_rho_log_v3
 
 - `ExteriorPolarChart` axis schema bumped from `'exterior_polar_carrier_demod_v2'`
@@ -24,6 +24,12 @@ counter in region report, and certification tests (DT-1 through DT-8).
   inverted transparently at serve.
 - Key abstractions section updated: schema tag, constant, retired-tag list,
   and `rho_log_axis` field description.
+
+- `0.36.4` (2026-08-10):
+Updated exterior-polar surrogate schema tag to `'exterior_polar_rho_log_carrier_v1'`
+(`_EXTERIOR_POLAR_AXIS_SCHEMA_V4`); added `rho_carrier` field description;
+replaced GHOST-EXCLUSION FILTER with FOLD-CARRIER DEMODULATION section in
+FAR-FIELD TILING.
 
 - `0.36.3` (2026-08-10):
 
