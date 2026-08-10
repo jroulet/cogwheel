@@ -26,6 +26,13 @@
 - Test files that import _EXTERIOR_POLAR_AXIS_SCHEMA directly will get ImportError (renamed to _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER) — test_dev to fix.
 (INCLUDED: NEW ENTRY BELOW)
 
+(ghost_excluded_tiles build, 2026-08-10):
+- Added _exclude_ghost_dominated(gamma, center, half, gamma_band=None) -> bool in surrogate_training.py, mirroring _exclude_near_cusp's gamma-band probe pattern. Maps tile corners+centre from (gamma, rho, theta_c) to eigenframe source via _from_caustic_fixed, builds macro_matrix(gamma, beta=0, kappa=0), probes ghost_kernel(w=[10.0]) at each point. GhostDomainError -> pass (retainable). contrib.delay.imag < _GHOST_DECAY_IM_THRESHOLD -> exclude. Domain refusals treated conservatively as retainable.
+- Modified _farfield_exterior_tiles: added gamma_band and ghost_drop_count params (both optional, backward-compatible). Calls _exclude_ghost_dominated after _exclude_near_cusp in tile loop, increments ghost_drop_count[0] on exclusion.
+- Wired in _train_band_charts: ghost_drop_count=[0] defined at 'exterior' in regions block, passed to _farfield_exterior_tiles with gamma_band=band, accumulated into exterior_region_report['ghost_excluded_tiles'].
+- Saddle pproad (parity==-1, uses _farfield_tiles not _farfield_exterior_tiles) is unaffected.
+- Imports _GHOST_DECAY_IM_THRESHOLD inside _exclude_ghost_dominated via `from cogwheel.lensing.chang_refsdal import channels` (lazy, avoids circular import at module level).
+
 (rho_log_axis build, 2026-08-10):
 - Renamed _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER -> _EXTERIOR_POLAR_AXIS_SCHEMA_V3 with value 'exterior_polar_rho_log_v3'. Old tag removed from _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS (hard-refuse on pre-v3 artifacts).
 - Added rho_log_axis: bool = False field to ExteriorPolarChart (after carrier_rate).

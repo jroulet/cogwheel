@@ -1805,6 +1805,73 @@ def _exclude_near_cusp(gamma: float, center: tuple[float, float],
             return True
     return False
 
+def _exclude_ghost_dominated(gamma: float, center: tuple[float, float],
+                             half: tuple[float, float],
+                             gamma_band: tuple[float, float] | None = None
+                             ) -> bool:
+    """Return True when any tile corner lies in the ghost-transition zone.
+
+    Positive-parity only: the ghost does not exist for most saddle configs,
+    so saddle-invoked tiles passed through the non-exterior tiler are
+    unaffected.
+
+    Maps tile corners and centre from ``(gamma, rho, theta_c)`` to eigenframe
+    source coordinates via `_from_caustic_fixed`, builds
+    ``macro_matrix(gamma, beta=0, kappa=0)``, and probes the ghost's imaginary
+    delay at each point via ``geometry.ghost_kernel(w=[10.0], ...)``.
+
+    * If the call raises `GhostDomainError` (no ghost pair exists) the point
+      is retainable — KERNEL_SUM is ghost-free and splineable there.
+    * If the call succeeds but ``Im(tau_c) < channels._GHOST_DECAY_IM_THRESHOLD``
+      (the ghost exists yet refuses to decay, so its oscillation contaminates
+      ``E_ks`` irreparably), the tile is excluded.
+    * Domain refusals from `_from_caustic_fixed` / `geometry.ghost_kernel` are
+      treated conservatively as retainable — the engine can serve the tile.
+
+    When ``gamma_band`` is provided as ``(gamma_lo, gamma_hi)`` the check is
+    repeated at gamma_lo, gamma_mid (= ``gamma``), and gamma_hi; the tile is
+    excluded if ANY probed point fails the decay gate at ANY of the three
+    gammas.  Mirrors `_exclude_near_cusp`'s gamma-band probe pattern.
+
+    The check reuses the EXISTING ``_GHOST_DECAY_IM_THRESHOLD`` constant
+    (no new constant introduced).
+    """
+    from cogwheel.lensing.chang_refsdal import channels
+    rho_c, theta_c = center
+    half_rho, half_theta = half
+    gammas: tuple[float, ...]
+    if gamma_band is not None:
+        gammas = (gamma_band[0], gamma, gamma_band[1])
+    else:
+        gammas = (gamma,)
+    for g in gammas:
+        rho_corners = (rho_c - half_rho, rho_c + half_rho)
+        theta_corners = (theta_c - half_theta, theta_c + half_theta)
+        corner_sources = []
+        try:
+            corner_sources = [
+                _from_caustic_fixed(g, cr, ct)
+                for cr in rho_corners for ct in theta_corners
+            ]
+            corner_sources.append(_from_caustic_fixed(g, rho_c, theta_c))
+        except (ValueError, geometry.LensDomainError):
+            continue
+        try:
+            matrix = geometry.macro_matrix(g, beta=0.0, kappa=0.0)
+        except geometry.LensDomainError:
+            continue
+        for source in corner_sources:
+            source_arr = np.array(source, dtype=float)
+            try:
+                contrib = geometry.ghost_kernel([10.0], source_arr, matrix)
+            except geometry.GhostDomainError:
+                continue
+            except (ValueError, geometry.LensDomainError):
+                continue
+            if contrib.delay.imag < channels._GHOST_DECAY_IM_THRESHOLD:
+                return True
+    return False
+
 
 @dataclass(frozen=True, eq=False)
 class _InteriorAdmission:
@@ -2000,7 +2067,9 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
                              admission: '_InteriorAdmission',
                              source_magnitude_max: float,
                              cusp_angles: list[float] | None = None,
-                             gamma: float | None = None
+                             gamma: float | None = None,
+                             gamma_band: tuple[float, float] | None = None,
+                             ghost_drop_count: list[int] | None = None
                              ) -> list[tuple[tuple[float, float],
                                              tuple[float, float], int, int]]:
     """Per-``theta_c``-column exterior tiles in the D₂-folded first quadrant.
@@ -2022,7 +2091,11 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
     ``_CUSP_EXCLUSION_DISTANCE`` (measured in the physical source plane) of
     a cusp vertex is silently dropped — near-cusp tiles induce oscillatory
     ``E_ff`` labels that a polar chart cannot resolve, so the tube/cusp-arm
-    serves them instead.  A tile is kept iff ``admission.admits_exterior`` is
+    serves them instead.  After the cusp-exclusion check, a tile whose
+    corners lie in the ghost-transition zone (``Im(tau_c) <
+    _GHOST_DECAY_IM_THRESHOLD``) is silently dropped — ghost-dominated
+    tiles have ``E_ks`` labels contaminated by an undecayed unsubtracted
+    ghost, so the exact-engine ladder serves them instead.  A tile is kept iff ``admission.admits_exterior`` is
     True: its INNER ``rho`` edge stays outside the caustic, at least
     ``eta_max`` from the nearest caustic point (over all probes and band
     gammas), and its centre direction is inside the prior source box, for
@@ -2053,6 +2126,16 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
         When supplied and ``cusp_angles`` is non-empty, tiles within
         ``_CUSP_EXCLUSION_DISTANCE`` of a cusp vertex are silently dropped.
         When None the cusp-exclusion step is skipped (backward-compatible).
+    gamma_band : tuple[float, float], optional
+        If provided together with ``gamma``, the `_exclude_ghost_dominated`
+        check evaluates at ``(gamma_band[0], gamma, gamma_band[1])`` so a
+        tile is dropped when ANY band-edge gamma places a corner within the
+        ghost-transition zone.  When ``None`` the ghost-exclusion check uses
+        only the single ``gamma`` (backward-compatible single-gamma
+        behaviour).
+    ghost_drop_count : list[int], optional
+        Single-element mutable list for tallying ghost-excluded tiles.
+        When ``None`` the count is not accumulated (backward-compatible).
 
     Returns
     -------
@@ -2088,6 +2171,12 @@ def _farfield_exterior_tiles(rho_outer: float, n_per_side: int, *,
             if (gamma is not None and folded_cusp_angles
                     and _exclude_near_cusp(gamma, center, half,
                                            folded_cusp_angles)):
+                continue
+            if (gamma is not None
+                    and _exclude_ghost_dominated(gamma, center, half,
+                                                 gamma_band=gamma_band)):
+                if ghost_drop_count is not None:
+                    ghost_drop_count[0] += 1
                 continue
             if admission.admits_exterior(center, half, source_magnitude_max):
                 tiles.append((center, half, i, j))
@@ -4590,6 +4679,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     exterior_admission = None
     if 'exterior' in regions:
         exterior_tiles: list | None = None
+        ghost_drop_count = [0]
         if parity == 1:
             exterior_admission = _interior_admission(
                 band, 1, reach_scalar, config, eta_max=max_eta_max)
@@ -4604,7 +4694,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 rho_outer_region, config.n_farfield_tiles_per_side,
                 admission=exterior_admission,
                 source_magnitude_max=y_outer_region,
-                cusp_angles=cusp_angles, gamma=gamma_mid)
+                cusp_angles=cusp_angles, gamma=gamma_mid,
+                gamma_band=band, ghost_drop_count=ghost_drop_count)
             region_exclusion_rho = (
                 min(center[0] - half[0] for center, half, _, _ in exterior_tiles)
                 if exterior_tiles else exclusion_rho)
@@ -4677,7 +4768,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             'rho_outer': round(float(rho_outer_region), 6),
             'mass_range': [round(float(m_lo_region), 3),
                            round(float(m_hi_region), 3)],
-            'n_rho': config.n_rho, 'n_theta_c': config.n_theta_c}
+            'n_rho': config.n_rho, 'n_theta_c': config.n_theta_c,
+            'ghost_excluded_tiles': ghost_drop_count[0]}
         if parity == 1 and not exterior_tiles:
             # Loud zero-admission (WP1): no ``theta_c`` column clears the caustic +
             # tube shell inside the prior box, so no exterior chart is built and

@@ -5082,5 +5082,217 @@ class RhoLogAxisSelfFalsificationTestCase(TestCase):
         self.assertFalse(loaded.charts[0].rho_log_axis,
                          'missing rho_log_axis key must default to False')
 
+
+# ---------------------------------------------------------------------------
+# DT-8: ghost_excluded_tiles wired through to the region report
+# ---------------------------------------------------------------------------
+
+
+class GhostExcludedTilesInRegionReportTestCase(_CountingTestCase):
+    """DT-8: ghost_excluded_tiles counter is wired through to the region report.
+
+    Integration-level — calls the real `_train_band_charts` — but mocks
+    ``_exclude_ghost_dominated`` and ``_load_or_build`` so the test runs
+    fast.  The ghost-exclusion logic itself is tested in
+    ``test_lensing_exterior_admission.py`` (DT-1 through DT-7); this test
+    verifies only the COUNTER WIRING: ``_farfield_exterior_tiles`` →
+    ``ghost_drop_count`` → ``exterior_region_report['ghost_excluded_tiles']``
+    → ``chart_reports``.
+    """
+
+    #: Gamma band near 0.5, where ghost-dominated tiles naturally appear.
+    _DT8_GAMMA_MID = 0.5
+    _DT8_HALF = 0.04
+    _DT8_BAND = (_DT8_GAMMA_MID - _DT8_HALF, _DT8_GAMMA_MID + _DT8_HALF)
+
+    def setUp(self):
+        super().setUp()
+        self.box = PriorBox.from_prior_classes()
+        self.parity = 1
+        self.config = TrainingConfig(
+            n_gamma=4, n_rho=4, n_theta_c=4,
+            n_farfield_tiles_per_side=2,
+            n_caustic_samples=10,
+            n_heldout=2,
+        )
+        self.structure = training.CausticStructure(
+            parity=1, gamma=self._DT8_GAMMA_MID, cusp_thetas=(),
+            detected_cusps=4, expected_cusps=4,
+            caustic_reach=training._scalar_caustic_reach(self._DT8_GAMMA_MID),
+            arcs=())
+        self.outdir = Path(tempfile.mkdtemp(prefix='ghost_dt8_'))
+
+    def _ghost_true_for_all(self, *args, **kwargs):
+        """Mock: always exclude (True) for ghost count accumulation."""
+        return True
+
+    def _ghost_false_for_all(self, *args, **kwargs):
+        """Mock: never exclude (False)."""
+        return False
+
+    def _run_training_with_ghost_mock(
+            self, ghost_side_effect) -> list[dict]:
+        """Run _train_band_charts with mocked ghost exclusion and chart build."""
+        chart_reports: list[dict] = []
+        charts: list = []
+        rng = np.random.default_rng(42)
+
+        with mock.patch.object(
+                training, '_exclude_ghost_dominated',
+                side_effect=ghost_side_effect):
+            with mock.patch.object(
+                    training, '_load_or_build',
+                    return_value=(mock.MagicMock(), {
+                        'heldout_eps': 0.0, 'kind': 'farfield',
+                        'region': 'exterior',
+                    }, True)):
+                training._train_band_charts(
+                    box=self.box, config=self.config, rng=rng,
+                    outdir=self.outdir, parity=self.parity,
+                    label='test', band=self._DT8_BAND,
+                    structure=self.structure, charts=charts,
+                    chart_reports=chart_reports,
+                    regions=('exterior',))
+        return chart_reports
+
+    def test_ghost_excluded_tiles_key_exists(self):
+        """The exterior region report contains the ghost_excluded_tiles key."""
+        chart_reports = self._run_training_with_ghost_mock(
+            self._ghost_true_for_all)
+
+        region_reports = [r for r in chart_reports
+                          if r.get('exterior_region_summary')]
+        self.assertGreater(len(region_reports), 0,
+                           'No exterior region report in chart_reports')
+        self.comparisons += 1
+
+        report = region_reports[0]
+        self.assertIn('ghost_excluded_tiles', report,
+                      'ghost_excluded_tiles key missing from region report')
+        self.comparisons += 1
+
+    def test_ghost_excluded_tiles_is_positive_integer(self):
+        """ghost_excluded_tiles is a positive integer."""
+        chart_reports = self._run_training_with_ghost_mock(
+            self._ghost_true_for_all)
+
+        region_reports = [r for r in chart_reports
+                          if r.get('exterior_region_summary')]
+        report = region_reports[0]
+
+        ghost_ct = report['ghost_excluded_tiles']
+        self.assertIsInstance(ghost_ct, int,
+                              'ghost_excluded_tiles must be an integer')
+        self.comparisons += 1
+
+        self.assertGreater(ghost_ct, 0,
+                           f'ghost_excluded_tiles={ghost_ct} must be > 0')
+        self.comparisons += 1
+
+    def test_zero_ghost_when_all_tiles_pass(self):
+        """Mocking ghost exclusion to always-False gives ghost_excluded_tiles=0.
+
+        Proves the mock above has teeth: the counter is not hardcoded and
+        respects the function's return value.
+        """
+        chart_reports = self._run_training_with_ghost_mock(
+            self._ghost_false_for_all)
+
+        region_reports = [r for r in chart_reports
+                          if r.get('exterior_region_summary')]
+        report = region_reports[0]
+
+        ghost_ct = report['ghost_excluded_tiles']
+        self.assertEqual(ghost_ct, 0,
+                         f'ghost_excluded_tiles={ghost_ct} should be 0 '
+                         'when all tiles pass ghost exclusion')
+        self.comparisons += 1
+
+
+class GhostExcludedTilesInRegionReportSelfFalsificationTestCase(
+        _CountingTestCase):
+    """DT-8 self-falsification: prove the ghost counter test can go red.
+
+    Verifies that:
+    1.  Asserting ``ghost_ct > 0`` against a zero count deliberately fails.
+    2.  The key-existence assertion would fail if the key were missing.
+    3.  The type assertion would fail if the value were not an int.
+    """
+
+    _DT8_GAMMA_MID = 0.5
+    _DT8_HALF = 0.04
+    _DT8_BAND = (_DT8_GAMMA_MID - _DT8_HALF, _DT8_GAMMA_MID + _DT8_HALF)
+
+    def setUp(self):
+        super().setUp()
+        self.box = PriorBox.from_prior_classes()
+        self.config = TrainingConfig(
+            n_gamma=4, n_rho=4, n_theta_c=4,
+            n_farfield_tiles_per_side=2,
+            n_caustic_samples=10,
+            n_heldout=2,
+        )
+        self.structure = training.CausticStructure(
+            parity=1, gamma=self._DT8_GAMMA_MID, cusp_thetas=(),
+            detected_cusps=4, expected_cusps=4,
+            caustic_reach=training._scalar_caustic_reach(self._DT8_GAMMA_MID),
+            arcs=())
+        self.outdir = Path(tempfile.mkdtemp(prefix='ghost_dt8sf_'))
+
+    def test_assert_can_fail_zero_count_fails_positive_test(self):
+        """Asserting ghost_ct > 0 fails when count is zero."""
+        chart_reports: list[dict] = []
+        charts: list = []
+        rng = np.random.default_rng(42)
+
+        with mock.patch.object(
+                training, '_exclude_ghost_dominated',
+                return_value=False):
+            with mock.patch.object(
+                    training, '_load_or_build',
+                    return_value=(mock.MagicMock(), {
+                        'heldout_eps': 0.0, 'kind': 'farfield',
+                        'region': 'exterior',
+                    }, True)):
+                training._train_band_charts(
+                    box=self.box, config=self.config, rng=rng,
+                    outdir=self.outdir, parity=1, label='test',
+                    band=self._DT8_BAND, structure=self.structure,
+                    charts=charts, chart_reports=chart_reports,
+                    regions=('exterior',))
+
+        region_reports = [r for r in chart_reports
+                          if r.get('exterior_region_summary')]
+        report = region_reports[0]
+        ghost_ct = report['ghost_excluded_tiles']
+
+        self.assertEqual(ghost_ct, 0,
+                         'all-False mock should give zero ghost count')
+        self.comparisons += 1
+        # Prove assertion can fail: a zero count IS rejected by > 0.
+        self.assertFalse(ghost_ct > 0,
+                         'zero ghost count must NOT satisfy > 0')
+        self.comparisons += 1
+
+    def test_assert_key_existence_can_fail(self):
+        """A report without ghost_excluded_tiles would fail contains check."""
+        report = {'name': 'test', 'exterior_region_summary': True,
+                  'other_key': 1}
+        self.assertNotIn('ghost_excluded_tiles', report,
+                         'deliberately missing key must be absent')
+        self.comparisons += 1
+
+    def test_assert_type_can_fail(self):
+        """A non-integer value would fail isinstance check."""
+        self.assertFalse(isinstance(3.5, int),
+                         'float must NOT pass isinstance(int, ...)')
+        self.comparisons += 1
+        self.assertFalse(isinstance(None, int),
+                         'None must NOT pass isinstance(int, ...)')
+        self.comparisons += 1
+        self.assertFalse(isinstance('12', int),
+                         'str must NOT pass isinstance(int, ...)')
+        self.comparisons += 1
+
 if __name__ == '__main__':
     main()

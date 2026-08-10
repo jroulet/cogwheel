@@ -1,5 +1,56 @@
 # Test Dev Short-Term Observations
 
+2026-08-10: Extended test_lensing_surrogate_training.py (DT-8, ghost_excluded_tiles in region report):
+  - GhostExcludedTilesInRegionReportTestCase (3 tests): calls the real
+    _train_band_charts with mocked _exclude_ghost_dominated (always-True
+    yields ghost_excluded_tiles=3 > 0; always-False yields 0); mocked
+    _load_or_build to avoid engine chart building. Verifies key exists,
+    is positive int, and counter respects the gate function's return.
+  - GhostExcludedTilesInRegionReportSelfFalsificationTestCase (3 tests):
+    zero count fails > 0 assertion; missing key fails In check; non-int
+    values fail isinstance. 6 new tests, all green.
+  CONFIG: n_gamma=4, n_rho=4, n_theta_c=4, n_farfield_tiles_per_side=2,
+  gamma_mid=0.5, gamma_band=(0.46, 0.54).
+
+2026-08-10: Extended test_lensing_exterior_admission.py (DT-7, farfield_exterior_tiles ghost integration):
+  - FarfieldExteriorTilesGhostExclusionTestCase (7 tests): builds
+    _farfield_exterior_tiles with/without ghost kwargs (gamma=0.5,
+    gamma_band=(0.48,0.52), ghost_drop_count); ghost exclusion drops 12
+    of ~33 inspected tiles, 4 of which would have been admitted (net
+    drop 4); ghost_drop_count=12 >> net_dropped=4 > 0; near-axis tiles
+    dropped; far-outer tiles retained; backward-compat gamma=None
+    unfiltered.  N_PER_SIDE=8, SOURCE_MAG_MAX=8.0.
+  - FarfieldExteriorTilesGhostExclusionSelfFalsificationTestCase
+    (4 tests): threshold-zero inert, mock _exclude_ghost_dominated→False
+    restores unfiltered, threshold-zero ghost_ct=0, real ghost exclusion
+    makes filtered≠unfiltered.
+  2 new classes, 11 new tests (10 green, 0 skip).  87 total (1
+  pre-existing skip: CuspAlignmentSelfFalsificationTestCase).
+
+  MEASURED: ghost_drop_count=12 (all ghost-inspected tiles), net_dropped=4
+  (tiles that would have been admitted but are ghost-excluded).  The 8=
+  12-4 tiles fail BOTH ghost exclusion AND admission (they're too close
+  to the caustic).
+
+2026-08-10: Extended test_lensing_exterior_admission.py (DT-4/DT-5/DT-6):
+  - DecayGateOnlyExclusionTestCase (4 tests): single-gamma (no gamma_band)
+    correctly excludes a near-axis tile (rho=1.1, theta=0.05) with Im(tau_c)<0.4
+    at surviving corners, and retains a higher-rho tile (5.16) with Im(tau_c)>=0.42;
+    quantitative corner-Im assertions confirming the exclusion/retention is
+    physically grounded.
+  - MultiGammaBandEdgeTestCase (3 tests): tile (rho=5.16, theta=0.05) passes at
+    gamma_mid=0.5 (without gamma_band → False) but fails at gamma_hi=0.54
+    (with gamma_band → True); quantitative corner-Im assertion confirms
+    band-edge probe triggers.
+  - CenterProbeStraddleTestCase (3 tests): no physical tile found where corners
+    all >= 0.4 and center < 0.4 (low-rho corners always closer to caustic);
+    mock-based proof that center probe is load-bearing — mocking bad center
+    flips result on an otherwise-retained tile; corners-only confirmation.
+  - DecayGateSelfFalsificationTestCase (4 tests): threshold-zero unexcludes,
+    retain assertion teeth, single-gamma assertion teeth, center-mock
+    inversion sanity check.
+  4 classes, 14 tests, all green; 76 total (1 pre-existing skip).
+
 2026-08-10: Updated test_lensing_surrogate.py for carrier_demod schema migration (carrier_demod_v2):
   - ExteriorPolarStaleSchemaHardRefusalTestCase: 8 tests (was 3). Both
     exterior_polar_rho_theta_c and exterior_polar_rho_u_v1 hard-refuse;
@@ -52,6 +103,21 @@
   - CarrierSelfFalsificationTestCase (3 tests): wrong reference detectable, node-exact assertion can fail deliberately, coarse 4-node grid with large modulation fails bar (5.57e-3 > 1e-3).
   Key bug found and fixed: _build_w_envelope originally computed w_mean from the QUERY grid, not the TRAINING grid — held-out reference used different w_mean causing inflated eps (7e-3 vs real 3e-5).  Fixed by adding optional w_mean parameter, passing _W_MEAN_TRAIN for all held-out references.
   5 classes, 12 tests, all green.  Diagnostic plot: exterior_carrier_held_out_residual.png.
+
+2026-08-10: Wrote ghost-dominated tile exclusion tests in test_lensing_exterior_admission.py:
+  - GhostDominatedExclusionTestCase (2 tests): DT-1 near-axis tile where Im(tau_c)~0.013
+    at corners triggers exclusion (True); gamma_band=None also triggers (center gamma
+    0.5 has Im~0.013 too); threshold-zero patch makes gate inert (False).
+  - GhostDominatedKnownGoodTestCase (2 tests): DT-2 far-off-axis tile retained (False);
+    measured min Im(tau_c)=5.36 >> 0.4 across corners at both band edges.
+  - GhostDominatedNoGhostTestCase (1 test): DT-3 saddle-parity tile at gamma=1.5,
+    rho=4.0, theta_c=1.4 where ALL corners raise GhostDomainError — returns False
+    (retainable, ghost-free KERNEL_SUM).
+  - GhostDominatedSelfFalsificationTestCase (3 tests): threshold-zero, saddle-parity
+    tile with existing ghost below threshold at (1.3, 0.175) returns True (proves
+    DT-3's False is not blanket saddle-retain), known-good assertion can be falsified.
+  All 8 new tests green; 61 total (1 pre-existing skip). Imported channels module
+  for _GHOST_DECAY_IM_THRESHOLD mocking. No existing test breakage.
 
 2026-08-09: Wrote test_lensing_exterior_admission.py WP3 (exterior-cusp-exclusion):
   - ExcludeNearCuspBandEdgeTestCase (2 tests): gamma_band band-edge check is load-bearing

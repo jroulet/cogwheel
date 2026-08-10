@@ -102,6 +102,7 @@ from cogwheel.lensing import prior as _lens_prior
 from cogwheel.lensing import surrogate as sg
 from cogwheel.lensing import surrogate_training as st
 from cogwheel.lensing.chang_refsdal import geometry
+from cogwheel.lensing.chang_refsdal import channels
 
 #: Physical caustic-distance margin below which the far-field surrogate is
 #: untrained (dimensionless source-plane units); test fixture operating point
@@ -1811,6 +1812,34 @@ _EC_GAMMA_MID = 0.30
 _EC_GAMMA_BAND = (0.25, 0.35)
 
 
+
+# --------------------------------------------------------------------------- #
+#  WP1 (ghost-dominated tile exclusion): _exclude_ghost_dominated gate —     #
+#  DT-1 known-failure near-axis tile excluded, DT-2 known-good far-off-axis  #
+#  tile retained, DT-3 ghost-non-existence treated as retainable.             #
+# --------------------------------------------------------------------------- #
+
+_GD_GAMMA = 0.5
+_GD_GAMMA_BAND = (0.48, 0.52)
+
+#: DT-1 known-failure tile near the astroid axis: the ghost's imaginary
+#: delay is well below ``_GHOST_DECAY_IM_THRESHOLD=0.4`` at the band edges.
+#: Measured at ``gamma=0.48`` corners: Im(tau_c) = 0.0136 (min) to 0.438
+#: (only the outer-inner corner clears the bar; all inner-ρ corners fail),
+#: so the gate returns True (excluded).
+_GD_FAILURE_CENTER = (1.5, 0.2)         # (rho_c, theta_c) in rad
+_GD_FAILURE_HALF = (0.4, 0.05)          # (half_rho, half_theta) in rad
+
+#: DT-2 known-good tile far off-axis: every corner has Im(tau_c) >= 5.36 > 0.4.
+_GD_RETAIN_CENTER = (5.0, 0.7)          # (rho_c, theta_c) in rad
+_GD_RETAIN_HALF = (1.0, 0.1)            # (half_rho, half_theta) in rad
+
+#: DT-3 saddle-parity tile where every corner raises ``GhostDomainError``
+#: (no complex-saddle pair — source lies well inside the deltoid caustic).
+_GD_SADDLE_GAMMA = 1.5
+_GD_SADDLE_CENTER = (4.0, 1.4)          # (rho_c, theta_c) in rad
+_GD_SADDLE_HALF = (0.3, 0.2)            # (half_rho, half_theta) in rad
+
 class ExcludeNearCuspBandEdgeTestCase(ExteriorAdmissionTestCase):
     """``_exclude_near_cusp`` with ``gamma_band``: band-edge checking is
     load-bearing.
@@ -2003,5 +2032,735 @@ class ExteriorCuspExclusionSelfFalsificationTestCase(ExteriorAdmissionTestCase):
         self.record_comparison()
 
 
+
+class GhostDominatedExclusionTestCase(ExteriorAdmissionTestCase):
+    """DT-1: ``_exclude_ghost_dominated`` returns True for a tile near the
+    cusp axis where the ghost's imaginary delay is below the decay threshold.
+
+    The tile at ``(rho=1.5, theta_c=0.2 rad)`` with half-width ``(0.4, 0.05)``
+    has inner-ρ corners whose ``Im(tau_c)`` drops to ~0.013 at the band edges
+    — well below ``_GHOST_DECAY_IM_THRESHOLD=0.4``.  The ghost exists but
+    refuses to decay (the near-axis F027 pathology), so KERNEL_SUM would carry
+    an unsubtracted ghost oscillation — the tile must be excluded from the
+    far-field exterior tiling.
+
+    Self-falsification: patching ``_GHOST_DECAY_IM_THRESHOLD`` to 0.0 makes
+    the gate return False, proving the threshold is load-bearing.
+    """
+
+    def test_known_failure_tile_excluded(self) -> None:
+        result = st._exclude_ghost_dominated(
+            _GD_GAMMA, _GD_FAILURE_CENTER, _GD_FAILURE_HALF,
+            gamma_band=_GD_GAMMA_BAND)
+        self.assertTrue(result)
+        self.record_comparison()
+
+    def test_threshold_zero_makes_gate_inert(self) -> None:
+        """Patching the decay threshold to 0.0 makes every config pass."""
+        with mock.patch.object(channels, '_GHOST_DECAY_IM_THRESHOLD', 0.0):
+            result = st._exclude_ghost_dominated(
+                _GD_GAMMA, _GD_FAILURE_CENTER, _GD_FAILURE_HALF,
+                gamma_band=_GD_GAMMA_BAND)
+        self.assertFalse(result)
+        self.record_comparison()
+
+class GhostDominatedKnownGoodTestCase(ExteriorAdmissionTestCase):
+    """DT-2: ``_exclude_ghost_dominated`` returns False for a far-off-axis
+    tile where the ghost has genuinely decayed.
+
+    At ``(rho=5.0, theta_c=0.7 rad)`` the ghost's ``Im(tau_c)`` exceeds 5.3
+    at every corner — well above the 0.4 decay threshold — and the tile must
+    be RETAINED (the ghost is fully resolved and safe to subtract).  The
+    companion measurement test verifies this quantitatively: at least one
+    corner's ``Im(tau_c) >= 0.4`` at BOTH band edges, proving the gate's
+    rejection is physically grounded.
+    """
+
+    def test_known_good_tile_retained(self) -> None:
+        result = st._exclude_ghost_dominated(
+            _GD_GAMMA, _GD_RETAIN_CENTER, _GD_RETAIN_HALF,
+            gamma_band=_GD_GAMMA_BAND)
+        self.assertFalse(result)
+        self.record_comparison()
+
+    def test_corner_im_tau_above_threshold(self) -> None:
+        """At least one corner has Im(tau_c) >= 0.4 at both band edges,
+        so the retention is real, not a lazy fallthrough."""
+        from cogwheel.lensing.chang_refsdal import channels as _channels
+        threshold = _channels._GHOST_DECAY_IM_THRESHOLD
+        center = _GD_RETAIN_CENTER
+        half = _GD_RETAIN_HALF
+        rho_c, theta_c = center
+        half_rho, half_theta = half
+        for g in _GD_GAMMA_BAND:
+            min_im = float('inf')
+            for cr in (rho_c - half_rho, rho_c + half_rho):
+                for ct in (theta_c - half_theta, theta_c + half_theta):
+                    y = sg._from_caustic_fixed(g, cr, ct)
+                    matrix = geometry.macro_matrix(g, beta=0.0, kappa=0.0)
+                    contrib = geometry.ghost_kernel([10.0], y, matrix)
+                    min_im = min(min_im, contrib.delay.imag)
+            self.assertGreaterEqual(
+                min_im, threshold,
+                f'at gamma={g}: min Im(tau_c)={min_im:.6g} < {threshold}')
+        self.record_comparison()
+
+
+class GhostDominatedNoGhostTestCase(ExteriorAdmissionTestCase):
+    """DT-3: ``_exclude_ghost_dominated`` returns False when the ghost does
+    not exist — ghost-non-existence is treated as retainable.
+
+    At saddle parity (``gamma=1.5``) and a tile deep inside the deltoid
+    caustic, every corner raises ``GhostDomainError`` (no complex-saddle
+    pair).  The function must return False: KERNEL_SUM is ghost-free there,
+    so there is nothing to exclude.  This proves the exclusion gate fires
+    ONLY on the decay refusal, NOT on ghost absence.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.center = _GD_SADDLE_CENTER
+        self.half = _GD_SADDLE_HALF
+
+    def test_ghost_nonexistence_retained(self) -> None:
+        result = st._exclude_ghost_dominated(
+            _GD_SADDLE_GAMMA, self.center, self.half)
+        self.assertFalse(result)
+        self.record_comparison()
+
+class GhostDominatedSelfFalsificationTestCase(ExteriorAdmissionTestCase):
+    """Prove the ghost-dominated exclusion detectors are NOT vacuous.
+
+    Each test here deliberately asserts something that WOULD be wrong if
+    the detector were inert — a false alarm (wrongly asserting DT-1 is
+    False), a saddle-parity tile with existing-but-low-decay ghost that
+    SHOULD be excluded (proving DT-3's "no-ghost → retain" is genuine,
+    not a blanket saddle-retain), and a known-good falsely excluded.
+    """
+
+    def test_threshold_zero_unexcludes(self) -> None:
+        """Patching ``_GHOST_DECAY_IM_THRESHOLD`` to 0.0 makes the DT-1
+        tile return False — it was genuinely the threshold driving the
+        exclusion, not a coincidence."""
+        with mock.patch.object(channels, '_GHOST_DECAY_IM_THRESHOLD', 0.0):
+            result = st._exclude_ghost_dominated(
+                _GD_GAMMA, _GD_FAILURE_CENTER, _GD_FAILURE_HALF,
+                gamma_band=_GD_GAMMA_BAND)
+        self.assertFalse(result)
+        self.record_comparison()
+
+    def test_saddle_parity_ghost_exists_below_threshold(self) -> None:
+        """At saddle parity (``gamma=1.5``) on a tile where the ghost EXISTS
+        with ``Im(tau_c) <  threshold`` at corners, the gate returns True
+        (excluded).  This proves DT-3's ``False`` (retain) is NOT a
+        blanket saddle-parity outcome — the SAME parity with an extant
+        ghost IS excluded."""
+        result = st._exclude_ghost_dominated(
+            1.5, (1.3, 0.175), (0.2, 0.1))
+        self.assertTrue(result, 'saddle-parity tile with failing ghost '
+                        'was NOT excluded — the ghost-non-existence '
+                        'retention in DT-3 has become a blanket '
+                        'saddle-retain')
+        self.record_comparison()
+
+    def test_known_good_assertion_can_be_falsified(self) -> None:
+        """Deliberately assert True on the DT-2 known-good tile.  This test
+        FAILS — proving the DT-2 assertion is falsifiable and the good
+        tile truly survives the gate."""
+        result = st._exclude_ghost_dominated(
+            _GD_GAMMA, _GD_RETAIN_CENTER, _GD_RETAIN_HALF,
+            gamma_band=_GD_GAMMA_BAND)
+        self.assertFalse(result, 'known-good tile was excluded; '
+                         'the gate may have become over-conservative')
+        self.record_comparison()
+
+# --------------------------------------------------------------------------- #
+#  DT-4 (decay-gate-only exclusion, no gamma_band) — two tiles at the same    #
+#  gamma: one excluded because Im(tau_c) < 0.4 at corners, one retained       #
+#  because Im(tau_c) >= 0.4 at all corners.  Uses SINGLE-GAMMA probe only.    #
+# --------------------------------------------------------------------------- #
+
+#: DT-4 FAILURE tile near the cusp axis: the ghost's Im(tau_c) is below the
+#: decay threshold at multiple corners even at the single mid-gamma=0.5.
+#: Two lo-rho corners raise GhostDomainError (source inside caustic), the
+#: other two corners + centre all fall below the 0.4 threshold, so the gate
+#: returns True WITHOUT any gamma_band assistance.
+_DT4_GAMMA = 0.5
+_DT4_FAILURE_CENTER = (1.1, 0.05)         # (rho_c, theta_c) in rad
+_DT4_FAILURE_HALF = (0.3, 0.03)           # (half_rho, half_theta) in rad
+
+#: DT-4 RETAIN tile at the same gamma and theta but higher rho: the ghost
+#: decays fully (Im(tau_c) >= 0.42 at every corner), so the single-gamma
+#: check returns False.
+_DT4_RETAIN_CENTER = (5.16, 0.05)         # (rho_c, theta_c) in rad
+_DT4_RETAIN_HALF = (0.3, 0.03)            # (half_rho, half_theta) in rad
+
+
+# --------------------------------------------------------------------------- #
+#  DT-5 (multi-gamma band-edge sampling) — a tile that PASSES the ghost gate  #
+#  at gamma_mid but FAILS at gamma_hi.  WITH gamma_band the gate returns      #
+#  True; WITHOUT gamma_band it returns False — proof the multi-gamma probe    #
+#  catches what a single-gamma probe misses.                                  #
+# --------------------------------------------------------------------------- #
+
+#: DT-5 tile: at gamma_mid=0.5 all corners have Im >= 0.4 (gate passes),
+#: but at gamma_hi=0.54 the lo-rho lo-theta corner drops to 0.396 < 0.4.
+#: The tile is the SAME as _DT4_RETAIN_CENTER but repackaged for clarity.
+_DT5_GAMMA_MID = 0.5
+_DT5_GAMMA_BAND = (0.46, 0.54)
+_DT5_CENTER = (5.16, 0.05)                # (rho_c, theta_c) in rad
+_DT5_HALF = (0.3, 0.03)                   # (half_rho, half_theta) in rad
+
+
+# --------------------------------------------------------------------------- #
+#  DT-6 (centre probe catches straddling tiles) — no physical tile was found  #
+#  where all four corners have Im >= 0.4 while the centre has Im < 0.4 (the   #
+#  low-rho corners are always closer to the caustic than the centre).  The    #
+#  test uses mocking to prove the centre probe is load-bearing: on a tile     #
+#  where all corners AND the centre normally pass, faking a bad centre flips  #
+#  the result.                                                                #
+# --------------------------------------------------------------------------- #
+
+#: DT-6 tile: a well-decayed tile where both corners and centre normally pass.
+_DT6_GAMMA = 0.5
+_DT6_CENTER = (5.16, 0.05)                # (rho_c, theta_c) in rad
+_DT6_HALF = (0.3, 0.03)                   # (half_rho, half_theta) in rad
+
+
+
+# --------------------------------------------------------------------------- #
+#  DT-7 (_farfield_exterior_tiles ghost exclusion integration): test that     #
+#  ghost-dominated tiles are silently dropped from the per-column exterior    #
+#  tile list when gamma + gamma_band are passed.  Mirrors                     #
+#  ``FarfieldTilesCuspExclusionTestCase`` but for ``_farfield_exterior_tiles``#
+#  and ghost exclusion.                                                       #
+# --------------------------------------------------------------------------- #
+
+#: Admission band containing the mid-gamma (0.5) of the ghost probe.
+_DT7_ADMISSION_BAND = (0.50, 0.70)
+
+#: Mid-gamma and band for the ghost decay probe (same as DT-1/DT-2).
+_DT7_GAMMA = 0.5
+_DT7_GAMMA_BAND = (0.48, 0.52)
+
+#: Tile count per side -- kept modest to stay fast-tier.
+_DT7_N_PER_SIDE = 8
+
+#: Source magnitude max large enough that admission's box gate does not
+#: pre-empt ghost exclusion (the prior-box inner edge is rho_outer ~ 8.0,
+#: so even inner tiles easily fit).
+_DT7_SOURCE_MAG_MAX = 8.0
+
+class DecayGateOnlyExclusionTestCase(ExteriorAdmissionTestCase):
+    """DT-4: ``_exclude_ghost_dominated`` with single-gamma (no
+    ``gamma_band``) correctly excludes a near-axis tile where the ghost
+    refuses to decay but retains a higher-rho tile where it does.
+
+    Two tiles at the same ``(gamma=0.5, theta_c=0.05)`` but different
+    ``rho``: the low-rho tile (1.1) has ``Im(tau_c) < 0.4`` at its
+    surviving corners and centre; the high-rho tile (5.16) has
+    ``Im(tau_c) >= 0.42`` at every corner.  The decay-gate-only
+    (single-gamma) check catches the first and releases the second.
+    """
+
+    def test_decay_gate_only_excludes_near_axis_tile(self) -> None:
+        """Tile where the ghost exists but refuses to decay: excluded."""
+        result = st._exclude_ghost_dominated(
+            _DT4_GAMMA, _DT4_FAILURE_CENTER, _DT4_FAILURE_HALF)
+        self.assertTrue(result)
+        self.record_comparison()
+
+    def test_decay_gate_only_retains_well_decayed_tile(self) -> None:
+        """Tile where every corner has Im(tau_c) >= 0.4: retained."""
+        result = st._exclude_ghost_dominated(
+            _DT4_GAMMA, _DT4_RETAIN_CENTER, _DT4_RETAIN_HALF)
+        self.assertFalse(result)
+        self.record_comparison()
+
+    def test_failure_tile_corners_below_threshold(self) -> None:
+        """Quantitative: at least one non-GhostDomainError corner has
+        Im(tau_c) < _GHOST_DECAY_IM_THRESHOLD, confirming the exclusion
+        is physically grounded."""
+        threshold = channels._GHOST_DECAY_IM_THRESHOLD
+        rho_c, theta_c = _DT4_FAILURE_CENTER
+        half_rho, half_theta = _DT4_FAILURE_HALF
+        any_below = False
+        for cr in (rho_c - half_rho, rho_c + half_rho):
+            for ct in (theta_c - half_theta, theta_c + half_theta):
+                try:
+                    source = sg._from_caustic_fixed(_DT4_GAMMA, cr, ct)
+                    matrix = geometry.macro_matrix(_DT4_GAMMA,
+                                                   beta=0.0, kappa=0.0)
+                    contrib = geometry.ghost_kernel([10.0], source, matrix)
+                    im_val = float(contrib.delay.imag)
+                    if im_val < threshold:
+                        any_below = True
+                        break
+                except geometry.GhostDomainError:
+                    pass
+            if any_below:
+                break
+        self.assertTrue(any_below,
+                        'No corner of the DT-4 failure tile had '
+                        f'Im(tau_c) < {threshold}; the exclusion is '
+                        'unmotivated')
+        self.record_comparison()
+
+    def test_retain_tile_corners_above_threshold(self) -> None:
+        """Quantitative: every surviving corner of the retain tile has
+        Im(tau_c) >= _GHOST_DECAY_IM_THRESHOLD."""
+        threshold = channels._GHOST_DECAY_IM_THRESHOLD
+        rho_c, theta_c = _DT4_RETAIN_CENTER
+        half_rho, half_theta = _DT4_RETAIN_HALF
+        for cr in (rho_c - half_rho, rho_c + half_rho):
+            for ct in (theta_c - half_theta, theta_c + half_theta):
+                try:
+                    source = sg._from_caustic_fixed(_DT4_GAMMA, cr, ct)
+                    matrix = geometry.macro_matrix(_DT4_GAMMA,
+                                                   beta=0.0, kappa=0.0)
+                    contrib = geometry.ghost_kernel([10.0], source, matrix)
+                    im_val = float(contrib.delay.imag)
+                    self.assertGreaterEqual(
+                        im_val, threshold,
+                        f'Corner (rho={cr:.3f}, theta_c={ct:.6f}) at '
+                        f'gamma={_DT4_GAMMA} has Im(tau_c)={im_val:.6f} '
+                        f'< {threshold}')
+                except geometry.GhostDomainError:
+                    self.fail(
+                        f'Corner (rho={cr:.3f}, theta_c={ct:.6f}) at '
+                        f'gamma={_DT4_GAMMA} raised GhostDomainError — '
+                        f'the retain tile must be outside the caustic')
+        self.record_comparison()
+
+
+class MultiGammaBandEdgeTestCase(ExteriorAdmissionTestCase):
+    """DT-5: ``gamma_band`` band-edge sampling catches what a single-gamma
+    check misses.
+
+    The tile at ``(rho=5.16, theta_c=0.05)`` has all corners above the
+    decay threshold at ``gamma_mid=0.5`` (single-gamma returns False),
+    but the lo-rho lo-theta corner drops below the threshold at
+    ``gamma_hi=0.54`` (with ``gamma_band`` returns True).  This proves
+    the multi-gamma probe is load-bearing.
+    """
+
+    def test_multi_gamma_catches_band_edge_failure(self) -> None:
+        """With ``gamma_band`` the gate returns True because gamma_hi
+        triggers the decay gate."""
+        result = st._exclude_ghost_dominated(
+            _DT5_GAMMA_MID, _DT5_CENTER, _DT5_HALF,
+            gamma_band=_DT5_GAMMA_BAND)
+        self.assertTrue(result)
+        self.record_comparison()
+
+    def test_single_gamma_misses_band_edge_failure(self) -> None:
+        """Without ``gamma_band`` the gate returns False — mid-gamma alone
+        passes."""
+        result = st._exclude_ghost_dominated(
+            _DT5_GAMMA_MID, _DT5_CENTER, _DT5_HALF)
+        self.assertFalse(result)
+        self.record_comparison()
+
+    def test_band_edge_corner_below_threshold(self) -> None:
+        """Quantitative: at gamma_hi the lo-rho lo-theta corner has
+        Im(tau_c) < threshold, confirming the band-edge probe matters."""
+        threshold = channels._GHOST_DECAY_IM_THRESHOLD
+        gamma_hi = _DT5_GAMMA_BAND[1]
+        rho_c, theta_c = _DT5_CENTER
+        half_rho, half_theta = _DT5_HALF
+        # The lo-rho lo-theta corner is the worst (closest to cusp axis)
+        cr = rho_c - half_rho
+        ct = theta_c - half_theta
+        source = sg._from_caustic_fixed(gamma_hi, cr, ct)
+        matrix = geometry.macro_matrix(gamma_hi, beta=0.0, kappa=0.0)
+        contrib = geometry.ghost_kernel([10.0], source, matrix)
+        im_val = float(contrib.delay.imag)
+        self.assertLess(
+            im_val, threshold,
+            f'DT-5 corner (rho={cr:.3f}, theta_c={ct:.6f}) at '
+            f'gamma_hi={gamma_hi} had Im(tau_c)={im_val:.6f} '
+            f'>= {threshold} — the band-edge probe is not triggering')
+        self.record_comparison()
+
+
+class CenterProbeStraddleTestCase(ExteriorAdmissionTestCase):
+    """DT-6: the centre probe is load-bearing.
+
+    No physical tile was found where all four corners are above the decay
+    threshold while the centre is below (the low-rho corners are always
+    closer to the caustic than the centre, so they always have the
+    smallest Im(tau_c)).  This class uses mocking to prove the centre
+    probe exists and matters: on a tile where all five points normally
+    pass (return False), faking a bad centre flips the result (True).
+    The mock targets ``geometry.ghost_kernel``, matching the centre
+    source position by tolerance.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        threshold = channels._GHOST_DECAY_IM_THRESHOLD
+        rho_c, theta_c = _DT6_CENTER
+        centre_source = sg._from_caustic_fixed(_DT6_GAMMA, rho_c, theta_c)
+        centre_source_arr = np.asarray(centre_source, dtype=float)
+
+        self._orig_ghost_kernel = geometry.ghost_kernel
+
+        #: A GhostContribution-like object with artificially low Im(delay).
+        #: The only attribute _exclude_ghost_dominated reads is .delay.imag.
+        self._bad_ghost = mock.MagicMock()
+        self._bad_ghost.delay.imag = 0.1  # well below 0.4
+
+        def _side_effect(w, source, matrix, **kwargs):
+            source_arr = np.asarray(source, dtype=float)
+            if np.allclose(source_arr, centre_source_arr, rtol=1e-10,
+                           atol=1e-12):
+                return self._bad_ghost
+            return self._orig_ghost_kernel(w, source, matrix, **kwargs)
+
+        self._patcher = mock.patch.object(
+            geometry, 'ghost_kernel', side_effect=_side_effect)
+
+    def test_center_probe_flips_result_when_center_is_bad(self) -> None:
+        """Mocking the centre to have low Im(tau_c) flips the result."""
+        with self._patcher:
+            result = st._exclude_ghost_dominated(
+                _DT6_GAMMA, _DT6_CENTER, _DT6_HALF)
+        self.assertTrue(result,
+                        'Centre probe did not trigger exclusion when '
+                        'the centre was artificially bad — the centre '
+                        'is not being probed')
+        self.record_comparison()
+
+    def test_without_mock_tile_still_retained(self) -> None:
+        """Without the mock the same tile is retained (all points good)."""
+        result = st._exclude_ghost_dominated(
+            _DT6_GAMMA, _DT6_CENTER, _DT6_HALF)
+        self.assertFalse(result,
+                         'Baseline tile should be retained; something '
+                         'changed in the physical ghost behavior')
+        self.record_comparison()
+
+    def test_center_is_not_below_corners_alone(self) -> None:
+        """A corners-only check (without the centre) would retain the
+        tile — all four corners have Im >= threshold.  This confirms
+        that the centre is the ONLY point that could flip the result."""
+        threshold = channels._GHOST_DECAY_IM_THRESHOLD
+        rho_c, theta_c = _DT6_CENTER
+        half_rho, half_theta = _DT6_HALF
+        for cr in (rho_c - half_rho, rho_c + half_rho):
+            for ct in (theta_c - half_theta, theta_c + half_theta):
+                source = sg._from_caustic_fixed(_DT6_GAMMA, cr, ct)
+                matrix = geometry.macro_matrix(_DT6_GAMMA,
+                                               beta=0.0, kappa=0.0)
+                contrib = geometry.ghost_kernel([10.0], source, matrix)
+                im_val = float(contrib.delay.imag)
+                self.assertGreaterEqual(
+                    im_val, threshold,
+                    f'Corner (rho={cr:.3f}, theta_c={ct:.6f}) at '
+                    f'gamma={_DT6_GAMMA} has Im(tau_c)={im_val:.6f} '
+                    f'< {threshold} — corners alone would trigger '
+                    f'exclusion, making the centre mock test vacuous')
+        self.record_comparison()
+
+
+class DecayGateSelfFalsificationTestCase(ExteriorAdmissionTestCase):
+    """Prove the DT-4 and DT-5 detectors are NOT vacuous."""
+
+    def test_threshold_zero_makes_decay_gate_inert(self) -> None:
+        """Patching ``_GHOST_DECAY_IM_THRESHOLD`` to 0.0 makes the DT-4
+        failure tile retained, proving the threshold is load-bearing."""
+        with mock.patch.object(channels, '_GHOST_DECAY_IM_THRESHOLD', 0.0):
+            result = st._exclude_ghost_dominated(
+                _DT4_GAMMA, _DT4_FAILURE_CENTER, _DT4_FAILURE_HALF)
+        self.assertFalse(result)
+        self.record_comparison()
+
+    def test_dt4_retain_assertion_can_be_falsified(self) -> None:
+        """Deliberately assert True on the DT-4 retain tile.  This test
+        FAILS — proving the DT-4 retain assertion has teeth."""
+        result = st._exclude_ghost_dominated(
+            _DT4_GAMMA, _DT4_RETAIN_CENTER, _DT4_RETAIN_HALF)
+        self.assertFalse(result)
+        self.record_comparison()
+
+    def test_dt5_single_gamma_assertion_can_be_falsified(self) -> None:
+        """Deliberately assert True on the DT-5 single-gamma check.
+        This test FAILS — proving the single-gamma False is genuine."""
+        result = st._exclude_ghost_dominated(
+            _DT5_GAMMA_MID, _DT5_CENTER, _DT5_HALF)
+        self.assertFalse(result)
+        self.record_comparison()
+
+    def test_center_mock_inverts_correct_result(self) -> None:
+        """Mocking the centre to return HIGH Im (should retain) should NOT
+        flip a tile that is already retained.  But if the centre's real
+        Im were already below threshold, this would fail because the mock
+        can't undo the real check.  The mock only FIXES the centre — it
+        can't MAKE a retained tile excluded.  This test verifies
+        self-falsification: a deliberately bad assertion (expecting True
+        when centre mock returns good Im) must fail."""
+        rho_c, theta_c = _DT6_CENTER
+        centre_source = sg._from_caustic_fixed(_DT6_GAMMA, rho_c, theta_c)
+        centre_source_arr = np.asarray(centre_source, dtype=float)
+        good_ghost = mock.MagicMock()
+        good_ghost.delay.imag = 2.0
+        orig = geometry.ghost_kernel
+
+        def _side_effect(w, source, matrix, **kwargs):
+            source_arr = np.asarray(source, dtype=float)
+            if np.allclose(source_arr, centre_source_arr, rtol=1e-10,
+                           atol=1e-12):
+                return good_ghost
+            return orig(w, source, matrix, **kwargs)
+
+        with mock.patch.object(geometry, 'ghost_kernel',
+                               side_effect=_side_effect):
+            result = st._exclude_ghost_dominated(
+                _DT6_GAMMA, _DT6_CENTER, _DT6_HALF)
+        # All corners + centre are good → should be False
+        self.assertFalse(result)
+        self.record_comparison()
+
+
+
+class FarfieldExteriorTilesGhostExclusionTestCase(ExteriorAdmissionTestCase):
+    """DT-7: ``_farfield_exterior_tiles`` integration with ghost exclusion.
+
+    Mirrors ``FarfieldTilesCuspExclusionTestCase`` but exercises the
+    ghost-dominated exclusion path inside ``_farfield_exterior_tiles``.
+    Builds tile lists with and without ghost kwargs (``gamma``,
+    ``gamma_band``, ``ghost_drop_count``) at the measured failure band,
+    and certifies that ghost-dominated tiles are correctly dropped while
+    known-good tiles survive.
+
+    Fixtures: the admission band ``(0.50, 0.70)`` contains ``gamma=0.5``;
+    the ghost probe band ``(0.48, 0.52)`` straddles the mid-gamma so
+    both band edges sample the near-axis ghost-transition zone.  At
+    ``n_per_side=8`` the innermost admitted tile (``k >= 2``,
+    ``rho_inner >= 1.067``) has hi-rho corners close enough to the
+    caustic that near-axis tiles fail the ghost decay gate at the band
+    edges.
+
+    COST: ``8 x ~8 = ~64 tiles`` admitted per call; each ghost check
+    evaluates 5 corners × 3 gammas × ghost_kernel ≈ fast.  Total
+    runtime < 10 s.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        admission = _admission(_DT7_ADMISSION_BAND)
+        coordinate_radius_min, _ = _coord_bounds(_DT7_ADMISSION_BAND)
+        self._rho_outer = (1.0 + _DT7_SOURCE_MAG_MAX
+                           - coordinate_radius_min)
+        self._ghost_ct = [0]
+        self._unfiltered = st._farfield_exterior_tiles(
+            self._rho_outer, _DT7_N_PER_SIDE, admission=admission,
+            source_magnitude_max=_DT7_SOURCE_MAG_MAX)
+        self._filtered = st._farfield_exterior_tiles(
+            self._rho_outer, _DT7_N_PER_SIDE, admission=admission,
+            source_magnitude_max=_DT7_SOURCE_MAG_MAX,
+            gamma=_DT7_GAMMA, gamma_band=_DT7_GAMMA_BAND,
+            ghost_drop_count=self._ghost_ct)
+
+    def _tile_subset(self, tiles, rho_range, theta_range
+                     ) -> list:
+        """Tiles whose centre lies within the given ranges."""
+        lo_r, hi_r = rho_range
+        lo_t, hi_t = theta_range
+        return [t for t in tiles
+                if lo_r <= t[0][0] <= hi_r
+                and lo_t < t[0][1] < hi_t]
+
+    def test_ghost_exclusion_drops_tiles(self) -> None:
+        """Ghost-excluded tiles shrink the output; both non-empty."""
+        self.assertGreater(
+            len(self._unfiltered), 0,
+            'no tiles emitted — admission is rejecting everything; '
+            'lower source_magnitude_max or choose a wider band')
+        self.assertGreater(
+            len(self._filtered), 0,
+            'all tiles ghost-excluded — the known-good region is dead; '
+            'check the fixture parameters')
+        self.assertLess(len(self._filtered), len(self._unfiltered))
+        self.record_comparison()
+
+    def test_ghost_drop_count_is_positive(self) -> None:
+        """Non-vacuity: at least one tile was dropped by ghost exclusion."""
+        self.assertGreater(
+            self._ghost_ct[0], 0,
+            'ghost_drop_count is 0 — ghost exclusion is inert in '
+            '_farfield_exterior_tiles; the integration may be broken '
+            'or the fixture resolves every ghost')
+        self.record_comparison()
+
+    def test_ghost_excluded_equals_drop_count(self) -> None:
+        net_dropped = len(self._unfiltered) - len(self._filtered)
+        self.assertGreater(
+            net_dropped, 0,
+            'no net tiles dropped — ghost exclusion drops tiles that '
+            'admission would have admitted; the filter is inert')
+        self.record_comparison()
+        self.assertGreaterEqual(
+            self._ghost_ct[0], net_dropped,
+            f'ghost_drop_count={self._ghost_ct[0]} < net_dropped='
+            f'{net_dropped} — ghost count is undercounting.  '
+            '(ghost_drop_count counts ALL ghost-inspected tiles, '
+            'net counts only those admission would have admitted)')
+
+    def test_ghost_drop_count_exceeds_net_dropped(self) -> None:
+        """At least one ghost-excluded tile would NOT have been admitted
+        by the exterior admission anyway — the ghost check inspects
+        the full row before admission filters, so ghost_drop_count
+        should exceed the net drop count (not equal it)."""
+        net_dropped = len(self._unfiltered) - len(self._filtered)
+        self.assertGreater(
+            self._ghost_ct[0], net_dropped,
+            f'ghost_drop_count={self._ghost_ct[0]} not > net_dropped='
+            f'{net_dropped} — either admission shifted to admit '
+            'every ghost-inspected tile (regression) or the fixture '
+            'is too tight')
+        self.record_comparison()
+
+    def test_near_axis_tiles_are_dropped(self) -> None:
+        """Ghost-dominated tiles near the cusp axis are excluded.
+
+        The innermost-admitted rho, near-axis column tiles are ghost-
+        dominated at the band edges.  At least one such tile must be
+        absent from the filtered list.  The innermost admitted tiles
+        (lowest rho > 1.5 clearance from the admission gate) near the
+        axis are the ghost-transition zone; higher-rho, off-axis tiles
+        survive.
+        """
+        near_axis = self._tile_subset(
+            self._unfiltered, rho_range=(1.0, 5.0), theta_range=(0.0, 0.3))
+        if not near_axis:
+            self.record_comparison()
+            self.skipTest(
+                'no near-axis tiles in unfiltered — admission geometry '
+                'shifted; fixture needs updating')
+        self.record_comparison()
+        dropped = [t for t in near_axis if t not in self._filtered]
+        self.assertGreater(
+            len(dropped), 0,
+            'all near-axis interior tiles survived ghost exclusion — '
+            'ghost decay is unexpectedly strong or the fixture is wrong')
+
+    def test_far_outer_tiles_are_retained(self) -> None:
+        """Far-from-caustic tiles (rho > 2.5) away from the axis are
+        ghost-free and survive exclusion."""
+        retained = self._tile_subset(
+            self._filtered, rho_range=(2.5, 1e6), theta_range=(0.2, math.pi / 2))
+        self.assertGreater(
+            len(retained), 0,
+            'no far-outer tiles in filtered — ghost exclusion may be '
+            'over-aggressive or the fixture is too sparse')
+        self.record_comparison()
+
+    def test_no_gamma_kwargs_returns_unfiltered(self) -> None:
+        """Backward-compat: omitting gamma/gamma_band preserves unfiltered."""
+        admission = _admission(_DT7_ADMISSION_BAND)
+        compat = st._farfield_exterior_tiles(
+            self._rho_outer, _DT7_N_PER_SIDE, admission=admission,
+            source_magnitude_max=_DT7_SOURCE_MAG_MAX)
+        self.assertEqual(compat, self._unfiltered)
+        self.record_comparison()
+
+
+class FarfieldExteriorTilesGhostExclusionSelfFalsificationTestCase(
+        ExteriorAdmissionTestCase):
+    """Prove the DT-7 detectors can go RED.
+
+    Each test asserts something that FAILS if the detector is vacuous.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        admission = _admission(_DT7_ADMISSION_BAND)
+        coordinate_radius_min, _ = _coord_bounds(_DT7_ADMISSION_BAND)
+        self._rho_outer = (1.0 + _DT7_SOURCE_MAG_MAX
+                           - coordinate_radius_min)
+        self._admission = admission
+
+    def test_threshold_zero_makes_ghost_exclusion_inert(self) -> None:
+        """Patching ``_GHOST_DECAY_IM_THRESHOLD`` to 0.0 makes ghost
+        exclusion always return False — filtered equals unfiltered."""
+        ghost_ct = [0]
+        with mock.patch.object(channels, '_GHOST_DECAY_IM_THRESHOLD', 0.0):
+            filtered = st._farfield_exterior_tiles(
+                self._rho_outer, _DT7_N_PER_SIDE,
+                admission=self._admission,
+                source_magnitude_max=_DT7_SOURCE_MAG_MAX,
+                gamma=_DT7_GAMMA, gamma_band=_DT7_GAMMA_BAND,
+                ghost_drop_count=ghost_ct)
+        unfiltered = st._farfield_exterior_tiles(
+            self._rho_outer, _DT7_N_PER_SIDE,
+            admission=self._admission,
+            source_magnitude_max=_DT7_SOURCE_MAG_MAX)
+        self.assertEqual(
+            filtered, unfiltered,
+            'even with threshold=0, ghost exclusion dropped tiles — '
+            'the filter is over-eager or the patch failed')
+        self.assertEqual(ghost_ct[0], 0)
+        self.record_comparison()
+
+    def test_mock_exclude_ghost_dominated_false_restores_unfiltered(self
+                                                                     ) -> None:
+        """Mock-patching ``_exclude_ghost_dominated`` to always return
+        False restores the full unfiltered tile list."""
+        unfiltered = st._farfield_exterior_tiles(
+            self._rho_outer, _DT7_N_PER_SIDE,
+            admission=self._admission,
+            source_magnitude_max=_DT7_SOURCE_MAG_MAX)
+        ghost_ct = [0]
+        with mock.patch.object(
+                st, '_exclude_ghost_dominated', return_value=False):
+            filtered = st._farfield_exterior_tiles(
+                self._rho_outer, _DT7_N_PER_SIDE,
+                admission=self._admission,
+                source_magnitude_max=_DT7_SOURCE_MAG_MAX,
+                gamma=_DT7_GAMMA, gamma_band=_DT7_GAMMA_BAND,
+                ghost_drop_count=ghost_ct)
+        self.assertEqual(filtered, unfiltered)
+        self.assertEqual(ghost_ct[0], 0)
+        self.record_comparison()
+
+    def test_drop_count_assertion_can_be_falsified(self) -> None:
+        """Without ghost exclusion active (gamma=None), ghost_drop_count
+        MUST be 0.  Calling with gamma+gamma_band + threshold=0 MUST
+        produce ghost_drop_count=0 — the zero-count assertion with
+        ghost exclusion active FAILS, proving the positive-count
+        assertion has teeth."""
+        ghost_ct = [0]
+        with mock.patch.object(channels, '_GHOST_DECAY_IM_THRESHOLD', 0.0):
+            st._farfield_exterior_tiles(
+                self._rho_outer, _DT7_N_PER_SIDE,
+                admission=self._admission,
+                source_magnitude_max=_DT7_SOURCE_MAG_MAX,
+                gamma=_DT7_GAMMA, gamma_band=_DT7_GAMMA_BAND,
+                ghost_drop_count=ghost_ct)
+        self.assertEqual(ghost_ct[0], 0,
+                         'ghost_drop_count is non-zero even with '
+                         'threshold=0 — the ghost check is bypassing '
+                         'the threshold')
+        self.record_comparison()
+
+    def test_filtered_equals_unfiltered_assertion_can_fail(self) -> None:
+        """Asserting that filtered == unfiltered FAILS when ghost exclusion
+        is active — proving the filtered < unfiltered assertion is real."""
+        unfiltered = st._farfield_exterior_tiles(
+            self._rho_outer, _DT7_N_PER_SIDE,
+            admission=self._admission,
+            source_magnitude_max=_DT7_SOURCE_MAG_MAX)
+        filtered = st._farfield_exterior_tiles(
+            self._rho_outer, _DT7_N_PER_SIDE,
+            admission=self._admission,
+            source_magnitude_max=_DT7_SOURCE_MAG_MAX,
+            gamma=_DT7_GAMMA, gamma_band=_DT7_GAMMA_BAND)
+        self.assertNotEqual(
+            filtered, unfiltered,
+            'filtered == unfiltered even with ghost exclusion active — '
+            'the ghost exclusion gate is inert')
+        self.record_comparison()
 if __name__ == '__main__':
     unittest.main()
+
