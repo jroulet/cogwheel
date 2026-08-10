@@ -1,47 +1,52 @@
 # Librarian Short-Term Observations
 
-## 2026-08-10 — post-commit sync for d5da155 (ppGO rung gate calibration)
+## 2026-08-10 — post-commit sync for d5da155 + 6d42675
 
-**Scope**: Commit d5da155 calibrated the provisional ppGO rung gate constants in
-`cogwheel/lensing/chang_refsdal/_pearcey_cusp.py` (`_W_PPGO_FLOOR` 50.0→8.0,
-`_R_PPGO_ERROR_CONST` 50.0→3.0) and added a new calibration script
-`scripts/calibrate_ppgo_rung.py` (291 lines).
+**Scope**: Two commits: ppGO rung gate calibration build (d5da155) and saddle
+exterior full treatment TODO + brief (6d42675).
 
-**Triage outcome**: Pure no-op. Reasoning:
-- `_pearcey_cusp.py` changes are constant value + docstring updates only — no
-  new or removed public symbols, no API changes, no serialization artifacts.
-- `scripts/calibrate_ppgo_rung.py` is in `scripts/` (not `cogwheel/`); introduces
-  no disk serialization artifacts (searched for save/load/savez/to_file/.npz/.json/
-  open() — only match was a print() warning string).
-- SPEC.md has no "provisional" language for these constants (confirmed by empty
-  search). SPEC correctly carries mechanism/gate description, not the provisional
-  values themselves.
-- DATA_CONTRACTS.yaml: no stale entries for `_R_PPGO_ERROR_CONST` or `_W_PPGO_FLOOR`.
-- `sync_derived_docs.py` ran cleanly — only the recurring test-consumer warning for
-  `lens_amplification_surrogate` (escalation TODO `surrogate_contract_test_consumer_warning`
-  already open; do NOT re-create).
-- `depends_on: [2026-08-10_exterior_2d_fold_carrier]` in the open TODO fragment
-  resolves correctly (completed fragment exists).
-- Stale constant values (50.0/50.0) remain in the TODO fragment description, but
-  updating TODO fragment context descriptions is outside the Librarian's enforcement
-  rules (acceptance criteria are still unambiguous and the fragment is open).
+**Triage — 6d42675**: Pure no-op. Added only agent-only paths (.claude/handoff/
+brief + .claude/spec/todo.d/lensing_saddle_exterior_full_treatment.md +
+generated TODO.md). No doc surface stale.
 
-**Pattern observed**: A build that exclusively calibrates constants (no new public
-symbols, no new modules, no new disk artifacts) is always a Librarian no-op even if
-it's a substantial code change — triage on API/module/serialization surface only.
+**Triage — d5da155**: Changed files:
+- `.claude/agent_state/architect.json`, `.claude/agent_state/librarian.json`,
+  `.serena/memories/architect_short_term.md`, `.serena/memories/
+  professor_short_term.md` — agent-only, no-op
+- `scripts/calibrate_ppgo_rung.py` — new scripts/ file; per SCRIPTS/ REWRITE
+  NO-OP RULE: no new public API, no new disk artifacts — no-op for doc surfaces
+- `cogwheel/lensing/chang_refsdal/_pearcey_cusp.py` — changed `_R_PPGO_ERROR_
+  CONST` 50.0→3.0 and `_W_PPGO_FLOOR` 50.0→8.0 (constants measured, not
+  provisional). SPEC.md already describes the mechanism mechanistically without
+  provisional language — no SPEC update needed.
 
-**Finding from commit message (for awareness)**: ppGO still does NOT serve the
-excised cusp-window region (R too small even with new gates; needs R>=71). The
-`lensing_ppgo_rung_gate_calibration` TODO remains open with original acceptance
-criteria intact.
+**Actions taken**:
+- Closed ppGO rung gate calibration TODO:
+  - Created `completed.d/2026-08-10_ppgo_rung_gate_calibration.md`
+  - Deleted `todo.d/lensing_ppgo_rung_gate_calibration.md`
+  - Ran render_fragments.py (COMPLETED.md and TODO.md updated)
+- Reverted stray `.claude/tidy_advisory.json` diff (sync script side-effect)
+- Did NOT commit `.serena/memories/professor_short_term.md` (pre-existing stray
+  from build, not my change)
+
+**Key finding recorded in completed.d**: ppGO does NOT certify in the immediate
+excised cusp-window region (R too small there, R-gate requires R >= 71); the
+excised cusp-window draws still fall to Pearcey. Gates measured and conservative
+(not a code mistake). The original TODO's full acceptance (excised regions
+served by ppGO) was not met for the immediate cusp-window; this is a physics
+constraint, not a calibration failure.
+
+**`[→ spec]` tag in closed TODO**: SPEC.md already mechanistically correct; no
+spec_changelog.d fragment written.
 
 **Still pending from librarian_knowledge** (carried forward, not in scope):
 - FOLD-CARRIER SCHEMA CROSS-REF CLUSTER (INS-1-002/003): SPEC.md ~line 63 and
-  DATA_CONTRACTS.yaml ~line 199 still describe `exterior_polar_rho_log_carrier_v1`
+  DATA_CONTRACTS.yaml ~line 199 still describe exterior_polar_rho_log_carrier_v1
   as "ONLY known tag" with 1D rho_carrier — stale since V5 2D tag shipped.
+  Inspector verified code correct; doc update still pending.
+- lensing_farfield_sd_coordinate_degenerates and lensing_farfield_name_spans_
+  three_regimes fragments still open as measurement/deferral records.
+- surrogate_contract_test_consumer_warning escalation fragment still open (per
+  memory: do NOT create a duplicate — it exists).
 - Lobe axis-schema rows in DATA_CONTRACTS.yaml still describe old V1/sqrt-edge
   tags (INS-4-002 / F050, deferred).
-- surrogate_contract_test_consumer_warning escalation fragment still open.
-- lensing_farfield_sd_coordinate_degenerates and
-  lensing_farfield_name_spans_three_regimes fragments still open as
-  measurement/deferral records.
