@@ -33,7 +33,8 @@ _ROLE_TO_AGENT_FILE = {
 
 def main():
     sys.path.insert(0, str(REPO_ROOT / ".claude" / "sdk"))
-    from runtime_opencode import OPENCODE_ROLE_MODELS, OPENCODE_ROLE_VARIANTS
+    from runtime_opencode import (
+        OPENCODE_ROLE_MODELS, OPENCODE_ROLE_VARIANTS, _PROVIDER)
 
     n = 0
     for role, model in OPENCODE_ROLE_MODELS.items():
@@ -52,7 +53,9 @@ def main():
         path.write_text(text)
         n += 1
 
-    print(f"synced {n} agent(s) → provider '{os.environ.get('OPENCODE_MODEL_PROVIDER', 'ai-commons')}'",
+    print(f"synced {n} agent(s) → provider "
+          f"'{_PROVIDER or 'ai-commons'}' (from "
+          f"env{'' if os.environ.get('OPENCODE_MODEL_PROVIDER') else ' or .env'})",
           file=sys.stderr)
 
 

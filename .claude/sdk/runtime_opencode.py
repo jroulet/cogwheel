@@ -20,6 +20,7 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Literal, Optional
@@ -153,8 +154,39 @@ _DS_CLAUDEMAP = {
 # Set OPENCODE_MODEL_PROVIDER=go in the environment (or in .env) to use
 # the Go native models; =deepseek to use the API-key DeepSeek provider.
 # Unset or empty retains the AI Commons mappings.
+#
+# Precedence matches the rest of the SDK: a shell-set value wins, then a
+# repo-root `.env` entry, then the default.  Without the `.env` fallback a
+# bare `python scripts/sync_opencode_agents.py` silently selects
+# ai-commons even when `.env` says otherwise (the launcher masks the bug
+# by exporting the value itself).  Repo root is derived from the script
+# location so this works from any cwd.
 
-_PROVIDER = os.environ.get("OPENCODE_MODEL_PROVIDER", "").strip().lower()
+
+def _load_repo_env(key: str) -> str:
+    """Return ``key`` from the repo-root ``.env``, or ``''`` if absent."""
+    if os.environ.get(key):
+        return ""
+    try:
+        root = subprocess.check_output(
+            ["git", "-C", os.path.dirname(os.path.abspath(__file__)),
+             "rev-parse", "--show-toplevel"],
+            text=True, stderr=subprocess.DEVNULL).strip()
+        env_path = os.path.join(root, ".env")
+        if not os.path.isfile(env_path):
+            return ""
+        with open(env_path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith(f"{key}=") or line.startswith(f"{key} ="):
+                    return line.split("=", 1)[1].strip().strip("\"'")
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return ""
+
+
+_PROVIDER = (os.environ.get("OPENCODE_MODEL_PROVIDER", "")
+             or _load_repo_env("OPENCODE_MODEL_PROVIDER")).strip().lower()
 _GO_MODE = _PROVIDER == "go"
 _DS_MODE = _PROVIDER == "deepseek"
 
