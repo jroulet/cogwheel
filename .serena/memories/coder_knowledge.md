@@ -546,3 +546,30 @@
   fixes: raised `_PPGO_SERVE_W` to 20000.0, saddle-parity test fixtures to
   w in [5000, 20000], corrected stale comments. OWED: post-build driver
   measurement to tighten `_R_PPGO_ERROR_CONST`.
+- EXTERIOR 2D (rho, u) FOLD-CARRIER (Build exterior_2d_fold_carrier,
+  2026-08-10): ExteriorPolarChart field is `rho_u_carrier` (2D
+  (n_rho, n_theta_c), default None) — Re(tau_c(rho,u)) at EVERY node, not a
+  per-rho median. `_compute_rho_u_carrier` probes ghost_kernel per node,
+  takes median over gamma, NaN-fills along u (axis=1) THEN rho (axis=0)
+  (linear interp, zero-order hold at boundaries), all-NaN -> None.
+  `from_values` demodulates exp(-1j*w*rho_u_carrier[None,None,:,:]) BEFORE
+  the residual carrier_rate demod; serve re-modulates in reverse order with
+  the delay BILINEARLY interpolated at the query u-coordinate (searchsorted
+  on u_axis built from theta_c_grid via theta_to_u — NEVER raw theta_c).
+  Schema V5 'exterior_polar_rho_u_carrier_v2' writes; V4
+  'exterior_polar_rho_log_carrier_v1' stays known; backward compat: NPZ
+  load tries 'rho_u_carrier' key, falls back to 'rho_carrier' broadcast
+  1D->2D (np.broadcast_to) — broadcast at the LOAD boundary, single serve
+  path. Index-pairing on theta_c_grid (u_grid[j] is partner of
+  theta_c_grid[j]) needs no inverse interp. surrogate_training.py zero
+  changes in this build.
+- FOLD-CARRIER DEMODULATE RE ONLY: demodulate/remodulate ONLY Re(tau_c);
+  never touch Im(tau_c) — a full-complex e^{+w*Im} remodulation is
+  explosive (~19x at w=30). from_engine's continuity gate AND k_chart
+  estimation must both run on the 2D-demodulated envelope when
+  fold_carrier=True (never the raw envelope).
+- CLAMPED-log_w RE-MODULATION (INS-1-001, exterior_2d_fold_carrier): the
+  fold-carrier re-modulation must use np.exp(log_w_clamped) — the SAME
+  clamped log_w the carrier_rate re-modulation uses — NOT
+  np.exp(log_w_query); a mismatch breaks phase cancellation on low-w
+  extrapolation queries.

@@ -430,3 +430,19 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   `test_moving_error_const_threshold_flips_a_fixed_node`'s config on both
   branches (r_ppgo_min ~25x the radius at the low-const setting) — the
   timeout is a broader-suite performance issue.
+- EXTERIOR 2D (rho, u) FOLD-CARRIER PHYSICS (Build exterior_2d_fold_carrier,
+  2026-08-10, verdict PASS): the fold-carrier is the fold-merge-point delay
+  Re(tau_c(rho, u)) stored at EVERY spline node as a 2D (n_rho, n_theta_c)
+  array; per-node median over gamma is correct, w_grid[0] probing is
+  sufficient, tabulate (no linear fit). Carrier uses RAW absolute delays —
+  demodulate ONLY Re(tau_c); a full-complex e^{+w*Im(tau_c)} remodulation
+  explodes (~19x at w=30). Serve re-modulates the delay bilinearly at the
+  query u-coordinate after the theta_c -> u map — never raw theta_c.
+  Coordinate facts: exterior rho is ADDITIVE, rho = 1 + |y| - r_caustic(gamma)
+  (macro-saddle exterior uses the same additive scalar reach); u is the
+  spline axis. SCHEMA DISAMBIGUATION: `exterior_polar_rho_u_v1` = cusp-
+  adapted u coordinate (theta_to_u, earlier build); `exterior_polar_rho_u_
+  carrier_v2` (V5) = the 2D fold-carrier field (current write tag); V4
+  `exterior_polar_rho_log_carrier_v1` = the superseded 1D rho-carrier
+  (loads by broadcast to 2D). Tolerances: node-exact 5e-13, off-grid phase
+  1e-3 rad, NPZ bit-for-bit, self-falsification 10x, heldout eps 4e-3.

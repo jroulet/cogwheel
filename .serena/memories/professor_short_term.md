@@ -1,1 +1,3 @@
-2026-08-10 — Provided complete 8 test specifications for the 2D (rho, u) fold-carrier design in test_lensing_exterior_polar_fold.py. Reviewed existing 1D rho_carrier test suite (11 test classes at b061103/HEAD), identified 8 that need porting to 2D and 3 that should stay as-is for backward compat. Tolerances from physics rulings: node-exact 5e-13, off-grid phase 1e-3 rad, NPZ bit-for-bit, self-falsification 10x margin, heldout eps 4e-3.
+# Professor Short-Term Observations
+
+(empty — last consolidated by Dreamer on 2026-08-10)

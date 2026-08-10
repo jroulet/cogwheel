@@ -383,3 +383,28 @@
   LensDomainError caught -> fall through to the Pearcey path. Professor
   confirms: Pearcey -> geometric image sum as (x,y)->inf; fold_ppgo_correction
   converges to the same limit; both branches (astroid+saddle) valid.
+
+## Exterior 2D (rho, u) fold-carrier (2026-08-10)
+
+- DESIGN (Build exterior_2d_fold_carrier): extends the 1D rho-carrier
+  (b061103) to a 2D (n_rho, n_theta_c) `rho_u_carrier` on ExteriorPolarChart.
+  MOTIVATION (probe): the 1D rho-only carrier left 11.66 rad phase winding
+  in u (max dphase/du 48, 82 on raw theta_c); the 2D carrier flattens the
+  per-rho u-phase span to <= 1.63 rad, splineable at 4 nodes/axis.
+  Simplifier rulings: migrate 1D->2D at the NPZ load boundary (broadcast,
+  ONE serve path); compute on theta_c_grid by index-pairing (no inverse
+  interp); extract `_probe_ghost_delay` helper; NaN fill along u then rho;
+  schema bump to exterior_polar_rho_u_carrier_v2; continuity gate + k_chart
+  on the 2D-demodulated envelope. Professor rulings: median-over-gamma
+  correct; w_grid[0] probing sufficient; tabulate (no linear fit); RAW
+  absolute delays, Re(tau_c) only (NO Im(tau_c) demod — e^{+w*Im} explosive
+  ~19x at w=30); tolerances node-exact 5e-13, off-grid phase 1e-3 rad,
+  heldout eps 4e-3, self-falsification 10x. INS-1-002/003 (SPEC.md +
+  DATA_CONTRACTS.yaml still 1D/"only known tag") = OVERRIDE -> Librarian
+  doc-sync (recurring rule), NOT Coder.
+- BUILD-RESUME PATTERN (this build): a build that dies at the Inspector
+  stage (after coder fixes were committed but before final verification)
+  is completed by a FRESH Inspector re-verify (re-run suites + re-derive
+  invariants), then the Librarian post-commit sync, then the manual
+  test-fix pass — same family as the quota-death salvage pattern; never
+  close on the pre-crash partial pass.

@@ -244,3 +244,20 @@
   `_R_PPGO_ERROR_CONST`/`_W_PPGO_FLOOR`/`_PPGO_BAR_DIVISOR` + the phrase
   "returns before any table or quadrature lookup" breaks if a future build
   moves the rung after the table consult.
+- FOLD-CARRIER SCHEMA CROSS-REF CLUSTER STILL STALE (2026-08-10,
+  INS-1-002/003, carried from the 2D fold-carrier build): SPEC.md ~line 63
+  and DATA_CONTRACTS.yaml ~line 199 still describe
+  `exterior_polar_rho_log_carrier_v1` as "the ONLY known tag" with a 1D
+  `(n_rho,)` rho_carrier — stale since V5 `exterior_polar_rho_u_carrier_v2`
+  (2D `(n_rho, n_theta_c)`) shipped and the old tag became known-but-not-
+  written. Both surfaces cite `_EXTERIOR_POLAR_AXIS_SCHEMA_V4` + `_V5`,
+  both literal tags, and the "Old 1-D rho_carrier artifacts load by
+  broadcasting to 2-D" sentence — if V4 or the broadcast is ever dropped,
+  all of these go stale together. SPEC.md also cites `_compute_rho_u_carrier`.
+  Inspector verified the code correct (OVERRIDE -> doc-sync); the update is
+  still pending.
+- POST-COMMIT SYNC NO-OP RULE (2026-08-10, commit 992c500): a post-commit
+  sync triggered by `.claude/sync_issues.json` whose changed file is
+  TEST-ONLY (or a notebook) is a NO-OP — skip entirely, no doc surface
+  stale, no sync script needed. Don't manufacture work for test-only
+  commits.

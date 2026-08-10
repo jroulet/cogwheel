@@ -353,3 +353,22 @@
   `_grid_served` -> `F_op_grid` -> mpmath quadrature at w=80 (Professor
   confirmed the ppGO gate fails these configs on both branches —
   r_ppgo_min ~25x the radius at the low-const setting). Note, don't chase.
+- 2D (rho, u) FOLD-CARRIER REVIEW CHECKLIST (Build exterior_2d_fold_carrier,
+  re-review PASS, 2026-08-10): (a) demod broadcast
+  exp(-1j*w*carrier[None,None,:,:]) shape (n_w,1,n_rho,n_theta_c) x
+  envelope (n_w,n_gamma,n_rho,n_theta_c); (b) NaN fill order along u
+  (axis=1) then rho (axis=0), zero-order hold at boundaries, all-NaN->None;
+  (c) NPZ backward compat: data.get('rho_u_carrier') then
+  data.get('rho_carrier') -> np.broadcast_to 1D->2D; (d) V4+V5 both in
+  _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS, _chart_to_npz AND _build_provenance
+  write V5; (e) grep stale `_compute_rho_carrier`/`rho_carrier` in
+  production AND tests — the ONLY surviving 'rho_carrier' is the backward-
+  compat NPZ load key; (f) from_engine continuity gate + k_chart BOTH use
+  the 2D-demodulated envelope when fold_carrier=True; (g) serve re-
+  modulation at the interpolated u (after theta_c->u map), never raw
+  theta_c.
+- STILL OPEN -> Librarian (INS-1-002/003, doc staleness, NOT code defects,
+  2026-08-10): SPEC.md ~line 63 and DATA_CONTRACTS.yaml ~line 199 still
+  call exterior_polar_rho_log_carrier_v1 "the ONLY known tag" and describe
+  rho_carrier as 1D (n_rho,) — stale since V5 2D shipped; code verified
+  correct, OVERRIDE to Librarian doc-sync (recurring rule).

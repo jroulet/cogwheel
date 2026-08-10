@@ -1,17 +1,33 @@
-# Tidy Short-Term Observations
+# Tidy observations (2026-08-10) — build 572eaa4 (2D (rho, u) fold-carrier)
 
-## cusp ppGO fast rung build (c0089e0-ish), 2026-08-09 — structural pass
+Scoped style review of the build's three changed .py files.
 
-- `cogwheel/tests/test_lensing_airy_fold.py`: removed unused `main` from the
-  `unittest` import (never referenced; no `__main__` block, file ends at the
-  last test class). Only edit of the pass.
-- `cogwheel/lensing/chang_refsdal/_pearcey_cusp.py`: clean. Layering
-  (stdlib/third-party/cogwheel) correct; all imports used; section-based
-  private-helpers-beside-public-API organization is coherent, not a
-  public/private inversion.
-- Observation for the driver (NOT touched per "no blank-line reflow"): in
-  `_pearcey_cusp.py` the constant `_PPGO_BAR_DIVISOR = 10` (line ~437) is
-  followed by `def _real_stationary_points` with only ONE blank line — the
-  only place in the module with a single blank between top-level defs. The
-  mechanical script does not insert a missing blank line (it only collapses
-  3+ runs), so this stays invisible to `tidy_mechanical.py --check`.
+## Changed
+- cogwheel/tests/test_lensing_surrogate_training.py: removed genuinely unused
+  import `from cogwheel.lensing.waveform import dimensionless_frequency`
+  (was line 185). Verified by AST scan + reading: referenced only in the
+  module docstring (line 65), a comment (213) and a test docstring (1765);
+  the F002 oracle deliberately uses the independent `1.2372e-4` closed form
+  "never the production `dimensionless_frequency`". No Load usage anywhere.
+
+## Clean (no change) — surrogate.py
+- Imports all used and correctly layered (stdlib → numpy/scipy → cogwheel),
+  TYPE_CHECKING block commented and separated. `_SaddleLobeAdmission` is
+  legitimately used in string annotations (from_lobe_engine / LobeInteriorChart)
+  under `from __future__ import annotations` — do NOT remove.
+- Organization: bottom-up (private coordinate helpers → chart dataclasses →
+  guard stack → LensAmplificationSurrogate → private npz/validation helpers)
+  is pre-existing and coherent with the module docstring; the build added
+  `_probe_ghost_delay` + `_compute_rho_u_carrier` inside the existing private
+  region. `select_chart` (public) sits among private `_*_serves`/`_evaluate_chart`
+  — dependency-driven, not moved; reordering 4.4k lines would be unsafe.
+- `make_interp_spline`/`BSpline`/`minimize_scalar`/`hashlib`/`files` all used
+  (verified by reading, not just AST).
+
+## Clean (no change) — test files
+- test_lensing_exterior_polar_fold.py: helpers-first + private base class then
+  public TestCases is the repo's standard test-suite layout; `matplotlib.use
+  ('Agg')` before `pyplot` import is the canonical headless idiom. All imports
+  used.
+- test_lensing_surrogate_training.py: after the one removal above, no dangling
+  imports; stdlib → numpy → cogwheel layering correct.

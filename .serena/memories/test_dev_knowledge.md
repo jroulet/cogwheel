@@ -360,3 +360,27 @@
   docstring. Fixture measurements: rung fires at w>=500 for astroid
   (radius=98 > r_ppgo_min=54 at the provisional const), w>=200 for saddle
   (radius=29 at w=100).
+- 2D FOLD-CARRIER TEST PATTERNS (test_lensing_exterior_polar_fold.py,
+  58 tests, Build exterior_2d_fold_carrier, 2026-08-10): port from 1D:
+  rho_carrier -> rho_u_carrier shape (n_rho, n_theta_c), schema tag
+  exterior_polar_rho_u_carrier_v2, NPZ key chart0_rho_u_carrier. (1) 1D->2D
+  backward-compat tests use a CONSTANT-in-u carrier (broadcast of
+  rho_u_carrier[:,0]) because byte-identical claims require zero u-
+  variation. (2) angular distance helper: abs(np.angle(np.exp(1j*(p1-p2))))
+  — naive abs(diff) fails on 2pi-wrapped differences. (3) magnitude
+  invariance: compare served magnitude with-k vs without-k on the SAME
+  rho_log_axis (shared spline-on-log interpolation budget ~1e-3), NOT vs
+  an analytic oracle — interpolation error dwarfs pure-phase-rotation error
+  (~5e-13). (4) ghost-kernel delay-match probe must use MEDIAN across all
+  gamma-band gammas (production _compute_rho_u_carrier stores median), not
+  first-match. (5) import path for geometry is
+  cogwheel.lensing.chang_refsdal.geometry (NOT cogwheel.lensing.geometry).
+  (6) theta_to_u at 4 nodes gives ~22% piecewise-linear interp error in u
+  (~37x worse off-grid accuracy than raw-theta axis) — for smoke-scale
+  carrier tests use a carrier bilinear in (rho, theta_c) directly;
+  u-coordinate accuracy is separate from the carrier demodulation mechanism.
+- GATED TESTS HIDE STALE FIELD REFS (TRAIN_TIER, 2026-08-10): after a
+  production field rename, COGWHEEL_TRAIN_TIER-gated classes don't run in
+  the fast tier and silently keep stale references (DT-10 referenced
+  chart.rho_carrier post-rename; fast tier stayed green). Grep gated test
+  classes for the old field name as part of the port.
