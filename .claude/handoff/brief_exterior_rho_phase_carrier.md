@@ -52,5 +52,13 @@ Correct the rho magnitude coordinate:
 - Complex envelope phase handled correctly.
 - Plan-gate requirement: each `domain_test_descriptions` spec names exactly ONE primary `test_*.py`; no spec may reference another spec's primary file.
 
+## Ghost hypothesis — partially confirmed (driver measurement 2026-08-10)
+The user asked whether the rho-phase winding is the unsubtracted ghost. Measured:
+- The failing rho range [1.3, 1.9] is a GHOST-TRANSITION ZONE: the ghost is substantial (at rho=2.0 |ghost|=0.005 vs |E_ks|=0.0015, 3x) but the F027 ghost gate REFUSES to subtract it there (Im tau_c < 0.4; GhostDomainError at w=10, rho=1.5). The MINUS_GHOST label is unavailable exactly where the ghost dominates.
+- Subtracting the ghost (MINUS_GHOST) does NOT remove the rho-phase winding where it IS allowed (both labels wind together, ghost phase rate -0.49 vs envelope +0.72, opposite signs).
+- So the ghost is substantial-and-unsubtracted in the failing zone (a real windowed-label coverage gap: KERNEL_SUM=Window iii high-w leaves it, MINUS_GHOST=Window ii refuses it), BUT the phase-winding rate does NOT match the ghost's phase rate — the winding is dominated by the two-image differential-delay interference, not the ghost's own phase.
+
+DESIGN IMPLICATION: (a) the rho-phase-carrier demodulation (fitting the residual fringe) is the primary fix — it removes the two-image interference winding regardless of its exact origin. (b) Additionally evaluate whether switching the mid-w band to the MINUS_GHOST label (where the gate permits) improves the magnitude conditioning near rho=2 — but it will NOT fix the phase winding by itself. (c) The ghost-transition zone [rho where the gate refuses but the ghost is large] is a coverage gap worth documenting; the rho-carrier is the pragmatic surrogate-level fix.
+
 ## Design note from the driver
 The w-carrier demodulation (shipped) removed the w-phase rotation; the rho axis has an analogous phase rotation that is now the dominant failure. The user's principle applies again: spline smooth things — remove the oscillation physics first. The rho-phase carrier is the missing oscillation. Also note: the magnitude coordinate should be log(rho) not log(rho-1) per the R² evidence, but confirm whether the phase demodulation alone suffices before layering both.
