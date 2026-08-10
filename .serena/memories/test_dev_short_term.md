@@ -20,6 +20,31 @@
   (demodulates with estimated k_chart) and the reference/envelope comparison
   at serve time no longer matches at the old tolerance.
 
+2026-08-10: Extended test_lensing_exterior_carrier.py (rho_log_axis A/B + composition):
+  - RhoLogAxisABComparisonTestCase (4 tests): builds chart pairs from identical
+    grids/values, rho_log_axis=True vs False. Log-axis eps is strictly smaller
+    (ratio > 3×) for both positive (gamma=0.5) and saddle (gamma=1.5) parity.
+    Envelope is (rho-1)^{-0.5} * (1 + A*(w/w_mean-1)) — power-law radial
+    singularity that cubic spline resolves better in ur=log(rho-1). RHO_GRID_LOG
+    = [1.05, 1.15, 1.30, 1.50] (4 nodes). Off-grid probes: 3 random per
+    inter-node interval. Diagnostic plot at output/.
+  - RhoLogCarrierCompositionTestCase (2 tests): rho_log_axis=True +
+    carrier_rate=0.05 compose correctly — off-grid eps < 5e-2 bar.
+    Diagnostic plot at output/.
+  - RhoLogAxisABSelfFalsificationTestCase (2 tests): flat (constant-rho)
+    envelope has no improvement (ratio < 3×), proving the A/B detector has
+    teeth. Synthetic assertion-can-fail test.
+  - RhoLogCompositionSelfFalsificationTestCase (2 tests): wrong
+    carrier_rate (Δk=0.1) and zero carrier_rate for modulated envelope both
+    exceed the held-out bar, proving the composition detector has teeth.
+  4 new classes, 10 new tests (23 total), all green.
+  PRODUCTION BUG FOUND: surrogate.py:2775 uses math.log() without importing
+  math — crashes all rho_log_axis=True serve paths with NameError.
+  Workaround in test: sg.math = math injected at module level.
+  Helper fixes: _build_rho_dependent_chart and _envelope_exact had
+  float64→complex128 in-place casting errors (envelope *= exp(i*k*w) on
+  float array) — fixed with (envelope + 0j) pattern.
+
 2026-08-10: Wrote test_lensing_exterior_carrier.py (carrier demodulation round-trip):
   - NodeRoundTripTestCase (3 tests): node-exact round-trip to 1e-13 at all 64 (4³) spatial nodes × 5 w-nodes, backward-compat zero-carrier, wiring guard (carrier_rate is stored correctly).  Measured node-err ≤ 3e-15.
   - HeldOutAccuracyTestCase (2 tests): w-midpoint eps 3.12e-05 < 1e-3 bar (5 w-nodes, 20% amplitude modulation), diagnostic plot saved to tests/output/.

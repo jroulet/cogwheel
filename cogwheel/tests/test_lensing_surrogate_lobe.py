@@ -1251,7 +1251,7 @@ class LobePersistenceTestCase(LobeTestCase):
                 fixture.surrogate, src, bad, 0,
                 lambda meta: {**meta,
                               'axis_schema':
-                                  surrogate_module._EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER})
+                                  surrogate_module._EXTERIOR_POLAR_AXIS_SCHEMA_V3})
             self.n_checks += 1
             with self.assertRaises(ValueError):
                 surrogate_module.LensAmplificationSurrogate.load(bad)
@@ -1291,7 +1291,7 @@ class LobePersistenceTestCase(LobeTestCase):
         # Far-field tag on the lobe validator -> refuse; lobe tag OK.
         with self.assertRaises(ValueError):
             surrogate_module._validate_lobe_axis_schema(
-                surrogate_module._EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER, 'chart 0')
+                surrogate_module._EXTERIOR_POLAR_AXIS_SCHEMA_V3, 'chart 0')
         with self.assertRaises(ValueError):
             surrogate_module._validate_lobe_axis_schema(None, 'chart 0')
         self.assertEqual(
@@ -1306,8 +1306,8 @@ class LobePersistenceTestCase(LobeTestCase):
             surrogate_module._validate_exterior_polar_axis_schema(None, 'chart 0')
         self.assertEqual(
             surrogate_module._validate_exterior_polar_axis_schema(
-                surrogate_module._EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER, 'chart 0'),
-            surrogate_module._EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER)
+                surrogate_module._EXTERIOR_POLAR_AXIS_SCHEMA_V3, 'chart 0'),
+            surrogate_module._EXTERIOR_POLAR_AXIS_SCHEMA_V3)
 
 
 class EngineLobeSelfFalsificationTestCase(TestCase):

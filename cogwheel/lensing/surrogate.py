@@ -89,6 +89,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
@@ -253,8 +254,8 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
 # ``exp(+1j w t_min)``); the tag carries a ``_framewinv`` suffix and the loader
 # hard-refuses any frame-dependent-label artifact rather than serving a
 # finite-but-wrong reconstruction.
-_EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER = 'exterior_polar_carrier_demod_v2'
-_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER})
+_EXTERIOR_POLAR_AXIS_SCHEMA_V3 = 'exterior_polar_rho_log_v3'
+_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA_V3})
 _EXTERIOR_POLAR_CARRIER_STEP_MAX = 1.0
 _LOBE_AXIS_SCHEMA_NEW = 'lobe_caustic_relative_v1'
 _KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_NEW})
@@ -1579,6 +1580,14 @@ class ExteriorPolarChart:
         ``E_tilde * exp(-1j * k_chart * w)``, and serve re-modulates
         via ``exp(+1j * k_chart * w)``.  Default 0.0 (no demodulation,
         backward-compatible).
+    rho_log_axis : bool, optional
+        When True, reparameterizes the spline's rho axis to
+        ``ur = log(rho - 1)``.  Training fits on ``ur_grid =
+        log(rho_grid - 1.0)`` and serve maps the query rho to
+        ``math.log(rho - 1.0)`` before spline contraction.  The
+        coordinate is a closed-form transform that absorbs the ~4.5-decade
+        envelope growth toward the caustic (``rho → 1``).  Default False
+        (backward-compatible).
     """
 
     gamma_grid: np.ndarray
@@ -1596,6 +1605,7 @@ class ExteriorPolarChart:
     envelope_definition: str
     theta_to_u: np.ndarray | None
     carrier_rate: float = 0.0
+    rho_log_axis: bool = False
 
     @classmethod
     def from_values(cls, *, gamma_grid: np.ndarray, rho_grid: np.ndarray,
@@ -1607,7 +1617,8 @@ class ExteriorPolarChart:
                     envelope_definition: str = _FARFIELD_ENVELOPE_DEFINITION,
                     theta_to_u: np.ndarray | None = None,
                     u_grid: np.ndarray | None = None,
-                    carrier_rate: float = 0.0
+                    carrier_rate: float = 0.0,
+                    rho_log_axis: bool = False
                     ) -> 'ExteriorPolarChart':
         """Build an exterior-polar chart by fitting splines to a value tensor.
 
@@ -1641,6 +1652,10 @@ class ExteriorPolarChart:
             ``exp(-1j * k_chart * w_grid[:, None, None, None])`` before
             fitting so the spline absorbs a lower-frequency label.
             Default 0.0 (no demodulation, backward-compatible).
+        rho_log_axis : bool, optional
+            When True, reparameterize the rho axis to ``ur = log(rho - 1)``.
+            The spline fit uses ``ur_grid = log(rho_grid - 1.0)`` as the
+            3rd axis.  Default False (backward-compatible).
         """
         gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
         rho_grid = _validate_axis(rho_grid, 'rho_grid')
@@ -1668,13 +1683,24 @@ class ExteriorPolarChart:
             demod_envelope = (envelope_real + 1j * envelope_imag) * demod
             envelope_real = demod_envelope.real
             envelope_imag = demod_envelope.imag
+        if rho_log_axis:
+            if not rho_grid[0] > 1.0:
+                raise ValueError(
+                    f'rho_grid[0] ({rho_grid[0]}) must be > 1.0 for '
+                    f'rho_log_axis (log(rho-1) undefined at rho <= 1).')
+            ur_grid = np.log(rho_grid - 1.0)
+            _validate_axis(ur_grid, 'ur_grid')
+            ur_grid = np.ascontiguousarray(ur_grid, dtype=float)
+            spline_axes = (spline_axes[0], spline_axes[1],
+                           ur_grid, spline_axes[3])
         real_c, imag_c, knots = _fit_tensor_spline(
             spline_axes, envelope_real, envelope_imag)
         return cls._assemble(
             gamma_grid, rho_grid, theta_c_grid, log_w_grid, real_c, imag_c,
             knots, image_count, parity, eta_overlap_min, refused_points,
             envelope_definition=envelope_definition,
-            theta_to_u=theta_to_u, carrier_rate=carrier_rate)
+            theta_to_u=theta_to_u, carrier_rate=carrier_rate,
+            rho_log_axis=rho_log_axis)
 
     @classmethod
     def _assemble(cls, gamma_grid, rho_grid, theta_c_grid, log_w_grid,
@@ -1682,7 +1708,8 @@ class ExteriorPolarChart:
                   eta_overlap_min, refused_points,
                   envelope_definition=_FARFIELD_ENVELOPE_DEFINITION,
                   theta_to_u=None,
-                  carrier_rate: float = 0.0
+                  carrier_rate: float = 0.0,
+                  rho_log_axis: bool = False
                   ) -> 'ExteriorPolarChart':
         """Assemble a chart from prebuilt coefficient tensors and knots.
 
@@ -1716,7 +1743,8 @@ class ExteriorPolarChart:
             envelope_definition=str(envelope_definition),
             theta_to_u=(np.ascontiguousarray(theta_to_u, dtype=float)
                         if theta_to_u is not None else None),
-            carrier_rate=float(carrier_rate))
+            carrier_rate=float(carrier_rate),
+            rho_log_axis=bool(rho_log_axis))
 
 
 @dataclass(frozen=True, eq=False)
@@ -2745,6 +2773,8 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
     elif isinstance(chart, ExteriorPolarChart):
         rho, theta_c = _to_exterior_fixed(gamma, y1_eig, y2_eig)
         v1 = rho
+        if chart.rho_log_axis:
+            v1 = math.log(v1 - 1.0)
         if chart.theta_to_u is not None:
             v2 = float(np.interp(theta_c, chart.theta_to_u[0],
                                  chart.theta_to_u[1]))
@@ -2866,7 +2896,8 @@ class LensAmplificationSurrogate:
                     w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE,
                     definition: str = _FARFIELD_ENVELOPE_DEFINITION,
                     theta_to_u: np.ndarray | None = None,
-                    u_grid: np.ndarray | None = None
+                    u_grid: np.ndarray | None = None,
+                    rho_log_axis: bool = False
                     ) -> 'LensAmplificationSurrogate':
         """Train a single-box exterior-polar surrogate on a dense engine grid.
 
@@ -2926,6 +2957,9 @@ class LensAmplificationSurrogate:
         u_grid : np.ndarray or None, optional
             1-D u-coordinate grid nodes (same length as ``theta_c_grid``).
             Required when ``theta_to_u`` is given.
+        rho_log_axis : bool, optional
+            When True, reparameterize the rho axis to ``ur = log(rho - 1)``.
+            Default False (backward-compatible).
 
         Returns
         -------
@@ -2996,7 +3030,6 @@ class LensAmplificationSurrogate:
         # outliers.  If no valid nodes, k_chart stays 0.0.
         env_complex = envelope_real + 1j * envelope_imag
         k_nodes = []
-        n_w = log_w_grid.size
         for i_g in range(gamma_grid.size):
             for i_r in range(rho_grid.size):
                 for i_t in range(theta_c_grid.size):
@@ -3030,7 +3063,8 @@ class LensAmplificationSurrogate:
             refused_points=refused_points,
             envelope_definition=definition,
             theta_to_u=theta_to_u, u_grid=u_grid,
-            carrier_rate=k_chart)
+            carrier_rate=k_chart,
+            rho_log_axis=rho_log_axis)
         provenance = cls._build_provenance(
             gamma_range, rho_range, theta_c_range, w_range, shape,
             envelope_real, envelope_imag)
@@ -3503,7 +3537,7 @@ class LensAmplificationSurrogate:
             'rho_range': [float(rho_range[0]), float(rho_range[1])],
             'theta_c_range': [float(theta_c_range[0]),
                               float(theta_c_range[1])],
-            'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER,
+            'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA_V3,
             'w_range': [float(w_range[0]), float(w_range[1])],
             'resolution': {'n_w': int(n_w), 'n_gamma': int(n_gamma),
                            'n_rho': int(n_rho),
@@ -4004,7 +4038,8 @@ def _validate_exterior_polar_axis_schema(tag, artifact_label: str) -> str:
     known set.  Exterior-polar charts require the self-contained caustic-fixed
     ``(rho, u)`` coordinate (angular axis ``u = d**(2/3)`` where ``d`` is
     the distance to the nearer cusp) and must not serve under the retired
-    ``exterior_polar_rho_theta_c`` schema.
+    ``exterior_polar_rho_theta_c``, ``exterior_polar_rho_u_v1``, and
+    ``exterior_polar_carrier_demod_v2`` schemas.
     """
     return _validate_axis_schema(
         tag, _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS,
@@ -4086,8 +4121,9 @@ def _chart_to_npz(chart, index: int) -> dict:
                 'parity': chart.parity,
                 'eta_overlap_min': chart.eta_overlap_min,
                 'envelope_definition': chart.envelope_definition,
-                'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER,
-                'carrier_rate': float(chart.carrier_rate)}
+                'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA_V3,
+                'carrier_rate': float(chart.carrier_rate),
+                'rho_log_axis': chart.rho_log_axis}
         axes = (chart.log_w_grid, chart.gamma_grid, chart.rho_grid,
                 chart.theta_c_grid)
         arrays = {prefix + 'refused': chart.refused_points}
@@ -4187,6 +4223,7 @@ def _chart_from_npz(data, index: int):
     # loader treats it as None — `_assemble` already handles None.
     theta_to_u = data.get(prefix + 'theta_to_u')
     carrier_rate = meta.get('carrier_rate', 0.0)
+    rho_log_axis = meta.get('rho_log_axis', False)
     return ExteriorPolarChart._assemble(
         gamma_grid=gamma_grid, rho_grid=p1_grid, theta_c_grid=p2_grid,
         log_w_grid=log_w_grid, real_coeffs=real_coeffs,
@@ -4196,4 +4233,5 @@ def _chart_from_npz(data, index: int):
         refused_points=data[prefix + 'refused'],
         envelope_definition=definition,
         theta_to_u=theta_to_u,
-        carrier_rate=carrier_rate)
+        carrier_rate=carrier_rate,
+        rho_log_axis=rho_log_axis)

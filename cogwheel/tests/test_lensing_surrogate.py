@@ -132,7 +132,6 @@ from cogwheel.lensing.surrogate import (
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, LensedBinningError,
     dimensionless_frequency)
-
 # --------------------------------------------------------------------------
 # Training boxes (chosen to lie wholly inside ONE image-count region with
 # caustic distance bounded away from zero -- the surrogate's contract).
@@ -3644,6 +3643,55 @@ _NODE_EXACT_TOL = 1e-7
 _CUSP_MUTATION_FACTOR = 1.05
 
 
+# ==========================================================================
+# WP: rho_log_axis — log(rho-1) reparametrization for ExteriorPolarChart
+#
+# When True, the 3rd spline axis is ``ur = log(rho - 1)`` (instead of
+# raw rho).  Training fits on ``log(rho_grid - 1.0)``; serve-time
+# ``_evaluate_chart`` maps ``v1 = math.log(rho - 1.0)`` before contracting
+# the spline.  The coordinate absorbs the ~4.5-decade envelope growth
+# toward the caustic (``rho → 1``).
+# ==========================================================================
+
+#: Smoke-scale rho grid for rho_log_axis=True chart (all nodes > 1.0).
+_RHO_LOG_RHO_AXIS = np.array([1.05, 1.15, 1.30, 1.50], dtype=float)
+
+#: ur_grid = log(rho_grid - 1.0) — the 3rd spline axis internally.
+_RHO_LOG_UR_AXIS = np.log(_RHO_LOG_RHO_AXIS - 1.0)
+
+#: Gamma axis for rho_log_axis fixture charts.
+_RHO_LOG_GAMMA_AXIS = surrogate_module._log_reach_gamma_axis(
+    (0.40, 0.50), 4, 'gamma')
+
+#: Theta_c axis for rho_log_axis fixture charts.
+_RHO_LOG_THETA_C_AXIS = surrogate_module._uniform_axis(
+    (0.15, 0.45), 4, 'theta_c')
+
+#: Log-w axis for rho_log_axis fixture charts.
+_RHO_LOG_LOG_W_AXIS = np.linspace(np.log(5.0), np.log(25.0), 4)
+
+#: Machine-precision tolerance for node-exact round-trip.
+_RHO_LOG_NODE_EXACT_TOL = 1e-15
+
+
+def _rho_log_synthetic_envelope_real(gamma_grid, rho_grid, theta_c_grid,
+                                      log_w_grid):
+    """Smooth real envelope with explicit rho dependence for log-axis tests."""
+    w, g, r, t = np.meshgrid(log_w_grid, gamma_grid, rho_grid, theta_c_grid,
+                             indexing='ij')
+    return (np.cos(0.8 * w) * (1.0 + 0.1 * g)
+            * (r - 1.0)**(-0.5) * (1.0 + 0.12 * t))
+
+
+def _rho_log_synthetic_envelope_imag(gamma_grid, rho_grid, theta_c_grid,
+                                      log_w_grid):
+    """Smooth imag envelope with explicit rho dependence for log-axis tests."""
+    w, g, r, t = np.meshgrid(log_w_grid, gamma_grid, rho_grid, theta_c_grid,
+                             indexing='ij')
+    return (np.sin(0.8 * w) * (1.0 - 0.12 * g)
+            * (r - 1.0)**(-0.5) * np.cos(0.2 * t))
+
+
 def _cusp_synthetic_envelope_real(gamma_grid, rho_grid, theta_c_grid,
                                    log_w_grid):
     """Deterministic smooth real envelope for cusp-adapted fixture charts."""
@@ -3874,19 +3922,21 @@ class ExteriorPolarCuspAdaptedSerializationTestCase(SurrogateTestCase):
 
 
 class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
-    """Old (retired) schemas hard-refuse; carrier_rate preserved through NPZ.
+    """Old (retired) schemas hard-refuse; new fields preserved through NPZ.
 
-    Both ``exterior_polar_rho_theta_c`` (retired in WP1) and
-    ``exterior_polar_rho_u_v1`` (retired in the carrier-demod migration)
-    are NOT in `_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS`, so ``_chart_from_npz``
-    raises ``ValueError``.  The NEW ``exterior_polar_carrier_demod_v2``
-    schema includes a ``carrier_rate`` key in meta; a chart saved without
-    it (backward-compatible artifact) loads via ``meta.get('carrier_rate',
-    0.0)`` → ``carrier_rate=0.0``.
+    ``exterior_polar_rho_theta_c`` (retired in WP1),
+    ``exterior_polar_rho_u_v1`` (retired in the carrier-demod migration),
+    and ``exterior_polar_carrier_demod_v2`` (retired in the rho_log_axis
+    migration) are NOT in `_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS`, so
+    ``_chart_from_npz`` raises ``ValueError``.  The NEW
+    ``exterior_polar_rho_log_v3`` schema adds ``rho_log_axis`` in meta;
+    ``carrier_rate`` and ``rho_log_axis`` load via ``meta.get(...,
+    default)`` for backward compat with older artifacts.
     """
 
     def _build_minimal_npz(self, axis_schema, include_theta_to_u=True,
-                           carrier_rate=0.0, include_carrier_rate=True):
+                           carrier_rate=0.0, include_carrier_rate=True,
+                           include_rho_log_axis=False):
         """Build a minimal npz dict for one exterior-polar chart.
 
         Parameters
@@ -3914,6 +3964,8 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
                 'axis_schema': axis_schema}
         if include_carrier_rate:
             meta['carrier_rate'] = float(carrier_rate)
+        if include_rho_log_axis:
+            meta['rho_log_axis'] = True
         real = np.ones(shape, dtype=float)
         imag = np.zeros(shape, dtype=float)
         real_c, imag_c, knots = surrogate_module._fit_tensor_spline(
@@ -3951,9 +4003,20 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
 
     def test_old_rho_u_v1_schema_raises_valueerror(self):
         """``exterior_polar_rho_u_v1`` hard-refuses (retired in carrier-demod
-        migration -- replaced by ``exterior_polar_carrier_demod_v2``)."""
+        migration)."""
         data = self._build_minimal_npz(
             'exterior_polar_rho_u_v1', include_theta_to_u=True)
+        with self.assertRaises(ValueError) as ctx:
+            self._write_and_load(data)
+        self.assertIn('axis-schema tag', str(ctx.exception))
+        self.n_checks += 1
+
+
+    def test_carrier_demod_v2_schema_raises_valueerror(self):
+        """``exterior_polar_carrier_demod_v2`` hard-refuses (retired in
+        rho_log_axis migration — replaced by ``exterior_polar_rho_log_v3``)."""
+        data = self._build_minimal_npz(
+            'exterior_polar_carrier_demod_v2', include_theta_to_u=True)
         with self.assertRaises(ValueError) as ctx:
             self._write_and_load(data)
         self.assertIn('axis-schema tag', str(ctx.exception))
@@ -3962,7 +4025,7 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     def test_new_schema_without_theta_to_u_loads_with_none(self):
         """A new-schema chart missing theta_to_u loads with theta_to_u=None."""
         data = self._build_minimal_npz(
-            'exterior_polar_carrier_demod_v2', include_theta_to_u=False)
+            'exterior_polar_rho_log_v3', include_theta_to_u=False)
         chart = self._write_and_load(data)
         self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
         self.assertIsNone(chart.theta_to_u)
@@ -3971,7 +4034,7 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     def test_valid_schema_with_theta_to_u_loads_successfully(self):
         """A valid new-schema chart with theta_to_u loads without error."""
         data = self._build_minimal_npz(
-            'exterior_polar_carrier_demod_v2', include_theta_to_u=True)
+            'exterior_polar_rho_log_v3', include_theta_to_u=True)
         chart = self._write_and_load(data)
         self.assertIsNotNone(chart)
         self.assertIsNotNone(chart.theta_to_u)
@@ -3980,7 +4043,7 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     def test_carrier_rate_preserved_through_npz(self):
         """carrier_rate=0.5 survives `_chart_to_npz`-style NPZ round-trip."""
         data = self._build_minimal_npz(
-            'exterior_polar_carrier_demod_v2', include_theta_to_u=True,
+            'exterior_polar_rho_log_v3', include_theta_to_u=True,
             carrier_rate=0.5)
         chart = self._write_and_load(data)
         self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
@@ -3991,7 +4054,7 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     def test_zero_carrier_backward_compat(self):
         """NPZ without carrier_rate key loads as carrier_rate=0.0."""
         data = self._build_minimal_npz(
-            'exterior_polar_carrier_demod_v2', include_theta_to_u=True,
+            'exterior_polar_rho_log_v3', include_theta_to_u=True,
             include_carrier_rate=False)
         chart = self._write_and_load(data)
         self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
@@ -4326,6 +4389,550 @@ class ExteriorPolarCuspAdaptedSelfFalsificationTestCase(SurrogateTestCase):
                 envelope_real=real, envelope_imag=imag,
                 image_count=2, parity=1,
                 theta_to_u=_CUSP_THETA_TO_U, u_grid=None)
+        self.n_checks += 1
+
+
+
+class ExteriorPolarRhoLogAxisFromValuesTestCase(SurrogateTestCase):
+    """Wiring: `from_values` with ``rho_log_axis`` flag.
+
+    The ``True`` branch reparameterizes the 3rd axis from ``rho`` to
+    ``ur = log(rho - 1.0)``.  The spline is fit on the transformed axis
+    and the chart stores ``rho_log_axis=True`` for serve-time dispatch.
+    """
+
+    def setUp(self):
+        super().setUp()
+        real = _rho_log_synthetic_envelope_real(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        imag = _rho_log_synthetic_envelope_imag(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        self.chart_log = (
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_RHO_LOG_GAMMA_AXIS,
+                rho_grid=_RHO_LOG_RHO_AXIS,
+                theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+                log_w_grid=_RHO_LOG_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                rho_log_axis=True))
+        self.chart_linear = (
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_RHO_LOG_GAMMA_AXIS,
+                rho_grid=_RHO_LOG_RHO_AXIS,
+                theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+                log_w_grid=_RHO_LOG_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                rho_log_axis=False))
+
+    def test_rho_log_axis_true_on_chart(self):
+        self.n_checks += 1
+        self.assertTrue(self.chart_log.rho_log_axis,
+                        'rho_log_axis must be True when requested')
+
+    def test_rho_log_axis_false_on_linear_chart(self):
+        self.n_checks += 1
+        self.assertFalse(self.chart_linear.rho_log_axis,
+                         'rho_log_axis must be False when not requested')
+
+    def test_knot_bounds_match_ur_grid_not_rho_grid(self):
+        knot_2 = self.chart_log.knots[2]
+        self.n_checks += 1
+        self.assertAlmostEqual(
+            float(np.min(knot_2)), float(_RHO_LOG_UR_AXIS[0]),
+            msg='3rd-axis knot lower bound does not match ur_grid')
+        self.n_checks += 1
+        self.assertAlmostEqual(
+            float(np.max(knot_2)), float(_RHO_LOG_UR_AXIS[-1]),
+            msg='3rd-axis knot upper bound does not match ur_grid')
+        self.n_checks += 1
+        self.assertNotAlmostEqual(
+            float(np.min(knot_2)), float(_RHO_LOG_RHO_AXIS[0]),
+            places=2,
+            msg='3rd-axis knot matches raw rho — rho_log_axis not wired')
+
+    def test_knot_bounds_match_raw_rho_grid_when_linear(self):
+        knot_2 = self.chart_linear.knots[2]
+        self.n_checks += 1
+        self.assertAlmostEqual(
+            float(np.min(knot_2)), float(_RHO_LOG_RHO_AXIS[0]),
+            msg='3rd-axis knot lower bound does not match raw rho_grid')
+        self.n_checks += 1
+        self.assertAlmostEqual(
+            float(np.max(knot_2)), float(_RHO_LOG_RHO_AXIS[-1]),
+            msg='3rd-axis knot upper bound does not match raw rho_grid')
+
+    def test_rho_grid_le_one_raises_valueerror(self):
+        real = _rho_log_synthetic_envelope_real(
+            _RHO_LOG_GAMMA_AXIS,
+            np.array([1.0, 1.2, 1.4, 1.6]),
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        imag = _rho_log_synthetic_envelope_imag(
+            _RHO_LOG_GAMMA_AXIS,
+            np.array([1.0, 1.2, 1.4, 1.6]),
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        with self.assertRaises(ValueError) as ctx:
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_RHO_LOG_GAMMA_AXIS,
+                rho_grid=np.array([1.0, 1.2, 1.4, 1.6]),
+                theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+                log_w_grid=_RHO_LOG_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                rho_log_axis=True)
+        self.assertIn('rho_grid[0]', str(ctx.exception))
+        self.n_checks += 1
+
+    def test_rho_grid_below_one_raises_valueerror(self):
+        real = _rho_log_synthetic_envelope_real(
+            _RHO_LOG_GAMMA_AXIS,
+            np.array([0.95, 1.2, 1.4, 1.6]),
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        imag = _rho_log_synthetic_envelope_imag(
+            _RHO_LOG_GAMMA_AXIS,
+            np.array([0.95, 1.2, 1.4, 1.6]),
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        with self.assertRaises(ValueError) as ctx:
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_RHO_LOG_GAMMA_AXIS,
+                rho_grid=np.array([0.95, 1.2, 1.4, 1.6]),
+                theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+                log_w_grid=_RHO_LOG_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                rho_log_axis=True)
+        self.assertIn('rho_grid[0]', str(ctx.exception))
+        self.n_checks += 1
+
+    def test_composes_with_theta_to_u(self):
+        """rho_log_axis=True + theta_to_u compose without error."""
+        u_fine = np.linspace(_RHO_LOG_THETA_C_AXIS[0],
+                             _RHO_LOG_THETA_C_AXIS[-1], 2001)
+        theta_to_u = np.vstack([u_fine, u_fine - u_fine[0]])
+        u_grid = np.interp(_RHO_LOG_THETA_C_AXIS, u_fine,
+                           u_fine - u_fine[0])
+        real = _rho_log_synthetic_envelope_real(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        imag = _rho_log_synthetic_envelope_imag(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        chart = surrogate_module.ExteriorPolarChart.from_values(
+            gamma_grid=_RHO_LOG_GAMMA_AXIS,
+            rho_grid=_RHO_LOG_RHO_AXIS,
+            theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+            log_w_grid=_RHO_LOG_LOG_W_AXIS,
+            envelope_real=real, envelope_imag=imag,
+            image_count=2, parity=1,
+            theta_to_u=theta_to_u, u_grid=u_grid,
+            rho_log_axis=True)
+        self.n_checks += 1
+        self.assertTrue(chart.rho_log_axis)
+        self.n_checks += 1
+        self.assertIsNotNone(chart.theta_to_u)
+        knot_2 = chart.knots[2]
+        self.n_checks += 1
+        self.assertAlmostEqual(
+            float(np.min(knot_2)), float(_RHO_LOG_UR_AXIS[0]))
+
+
+class ExteriorPolarRhoLogAxisNodeExactTestCase(SurrogateTestCase):
+    """Node-exact round-trip: serve at training nodes → training values.
+
+    The B-spline reproduces stored axis nodes exactly; the log transform
+    ``ur = log(rho - 1.0)`` is applied at serve time so the contracted
+    coordinate ``ur_grid[i]`` coincides with the stored knot, giving a
+    machine-precision reconstruction.
+    """
+
+    def setUp(self):
+        super().setUp()
+        real = _rho_log_synthetic_envelope_real(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        imag = _rho_log_synthetic_envelope_imag(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        self.chart = surrogate_module.ExteriorPolarChart.from_values(
+            gamma_grid=_RHO_LOG_GAMMA_AXIS,
+            rho_grid=_RHO_LOG_RHO_AXIS,
+            theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+            log_w_grid=_RHO_LOG_LOG_W_AXIS,
+            envelope_real=real, envelope_imag=imag,
+            image_count=2, parity=1,
+            rho_log_axis=True)
+        self.training = np.asarray(real + 1j * imag)
+
+    def test_node_exact_round_trip_to_machine_precision(self):
+        """At every training node, served value == training value to 1e-15."""
+        max_relerr = 0.0
+        for i_w in range(len(_RHO_LOG_LOG_W_AXIS)):
+            for i_g in range(len(_RHO_LOG_GAMMA_AXIS)):
+                for i_r in range(len(_RHO_LOG_RHO_AXIS)):
+                    for i_tc in range(len(_RHO_LOG_THETA_C_AXIS)):
+                        gamma_q = float(_RHO_LOG_GAMMA_AXIS[i_g])
+                        rho_q = float(_RHO_LOG_RHO_AXIS[i_r])
+                        v1 = np.log(rho_q - 1.0)
+                        v2 = float(_RHO_LOG_THETA_C_AXIS[i_tc])
+                        served = np.asarray(
+                            surrogate_module._contract_tensor_spline(
+                                self.chart.real_coeffs,
+                                self.chart.knots,
+                                gamma_q, v1, v2,
+                                _RHO_LOG_LOG_W_AXIS[i_w:i_w + 1])
+                            + 1j * surrogate_module._contract_tensor_spline(
+                                self.chart.imag_coeffs,
+                                self.chart.knots,
+                                gamma_q, v1, v2,
+                                _RHO_LOG_LOG_W_AXIS[i_w:i_w + 1]))
+                        want = self.training[i_w, i_g, i_r, i_tc]
+                        err = float(np.abs(served[0] - want))
+                        scale = float(max(np.abs(want), 1e-15))
+                        relerr = err / scale
+                        max_relerr = max(max_relerr, relerr)
+                        self.n_checks += 1
+        self.n_checks += 1
+        self.assertLess(
+            max_relerr, _RHO_LOG_NODE_EXACT_TOL,
+            msg=f'max relative error {max_relerr:.2e} exceeds '
+                f'node-exact tolerance {_RHO_LOG_NODE_EXACT_TOL}')
+
+    def test_v1_is_log_rho_minus_one_at_grid_nodes(self):
+        """The serve-time coordinate v1 = log(rho - 1.0) reproduces values."""
+        max_relerr_correct = 0.0
+        max_relerr_raw = 0.0
+        for i_r in range(len(_RHO_LOG_RHO_AXIS)):
+            rho_q = float(_RHO_LOG_RHO_AXIS[i_r])
+            v1_log = np.log(rho_q - 1.0)
+            v1_raw = rho_q
+            gamma_q = float(_RHO_LOG_GAMMA_AXIS[0])
+            v2 = float(_RHO_LOG_THETA_C_AXIS[0])
+            served_log = np.asarray(
+                surrogate_module._contract_tensor_spline(
+                    self.chart.real_coeffs, self.chart.knots,
+                    gamma_q, v1_log, v2,
+                    _RHO_LOG_LOG_W_AXIS[0:1])
+                + 1j * surrogate_module._contract_tensor_spline(
+                    self.chart.imag_coeffs, self.chart.knots,
+                    gamma_q, v1_log, v2,
+                    _RHO_LOG_LOG_W_AXIS[0:1]))
+            served_raw = np.asarray(
+                surrogate_module._contract_tensor_spline(
+                    self.chart.real_coeffs, self.chart.knots,
+                    gamma_q, v1_raw, v2,
+                    _RHO_LOG_LOG_W_AXIS[0:1])
+                + 1j * surrogate_module._contract_tensor_spline(
+                    self.chart.imag_coeffs, self.chart.knots,
+                    gamma_q, v1_raw, v2,
+                    _RHO_LOG_LOG_W_AXIS[0:1]))
+            want = self.training[0, 0, i_r, 0]
+            scale = float(max(np.abs(want), 1e-15))
+            max_relerr_correct = max(
+                max_relerr_correct,
+                float(np.abs(served_log[0] - want)) / scale)
+            max_relerr_raw = max(
+                max_relerr_raw,
+                float(np.abs(served_raw[0] - want)) / scale)
+            self.n_checks += 1
+        self.n_checks += 1
+        self.assertLess(
+            max_relerr_correct, _RHO_LOG_NODE_EXACT_TOL,
+            msg=f'correct v1=log(rho-1) relerr {max_relerr_correct:.2e} '
+                f'exceeds {_RHO_LOG_NODE_EXACT_TOL}')
+        self.assertGreater(
+            max_relerr_raw, 0.1,
+            msg=f'raw v1=rho relerr {max_relerr_raw:.2e} is too small — '
+                f'the log-axis encoding is not load-bearing')
+
+
+class ExteriorPolarRhoLogAxisEvaluateDispatchTestCase(SurrogateTestCase):
+    """``_evaluate_chart`` applies ``v1 = log(rho - 1.0)`` when
+    ``rho_log_axis=True``.
+
+    Tests the dispatch by contracting the tensor spline with the
+    serve-time coordinate ``v1 = log(rho - 1.0)`` and verifying it
+    reproduces the training values at grid nodes.  The coordinate
+    round-trip through ``_from_caustic_fixed`` / ``_to_exterior_fixed``
+    is separately verified via the node-exact test.
+    """
+
+    def setUp(self):
+        super().setUp()
+        real = _rho_log_synthetic_envelope_real(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        imag = _rho_log_synthetic_envelope_imag(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        self.chart_log = surrogate_module.ExteriorPolarChart.from_values(
+            gamma_grid=_RHO_LOG_GAMMA_AXIS,
+            rho_grid=_RHO_LOG_RHO_AXIS,
+            theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+            log_w_grid=_RHO_LOG_LOG_W_AXIS,
+            envelope_real=real, envelope_imag=imag,
+            image_count=2, parity=1,
+            rho_log_axis=True)
+        self.chart_linear = surrogate_module.ExteriorPolarChart.from_values(
+            gamma_grid=_RHO_LOG_GAMMA_AXIS,
+            rho_grid=_RHO_LOG_RHO_AXIS,
+            theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+            log_w_grid=_RHO_LOG_LOG_W_AXIS,
+            envelope_real=real, envelope_imag=imag,
+            image_count=2, parity=1,
+            rho_log_axis=False)
+        self.training = np.asarray(real + 1j * imag)
+        self.surrogate = LensAmplificationSurrogate(
+            [self.chart_log], {'engine_version': 'log_axis_test'})
+
+    def test_rho_log_chart_finite_served_values(self):
+        """rho_log_axis chart produces finite values at midpoints."""
+        gamma_q = float(np.median(_RHO_LOG_GAMMA_AXIS))
+        rho_q = float(np.median(_RHO_LOG_RHO_AXIS))
+        v1 = np.log(rho_q - 1.0)
+        v2 = float(np.median(_RHO_LOG_THETA_C_AXIS))
+        served = np.asarray(
+            surrogate_module._contract_tensor_spline(
+                self.chart_log.real_coeffs, self.chart_log.knots,
+                gamma_q, v1, v2, _RHO_LOG_LOG_W_AXIS)
+            + 1j * surrogate_module._contract_tensor_spline(
+                self.chart_log.imag_coeffs, self.chart_log.knots,
+                gamma_q, v1, v2, _RHO_LOG_LOG_W_AXIS))
+        self.n_checks += 1
+        self.assertTrue(np.all(np.isfinite(served)),
+                        f'served values not finite')
+
+    def test_surrogate_surround_serve_is_finite(self):
+        """LensAmplificationSurrogate serve path produces finite output."""
+        w_array = np.exp(_RHO_LOG_LOG_W_AXIS)
+        gamma_mid = float(np.median(_RHO_LOG_GAMMA_AXIS))
+        rho_mid = float(np.median(_RHO_LOG_RHO_AXIS))
+        theta_mid = float(np.median(_RHO_LOG_THETA_C_AXIS))
+        y1, y2 = surrogate_module._from_caustic_fixed(
+            gamma_mid, rho_mid, theta_mid)
+        f, served, method = self.surrogate.serve(
+            w_array, gamma=gamma_mid, y1=y1, y2=y2,
+            beta=0.0, eta=0.1, theta=theta_mid, image_count=2)
+        self.n_checks += 1
+        self.assertTrue(served,
+                        f'serve refused: method={method}')
+        self.n_checks += 1
+        self.assertTrue(np.all(np.isfinite(f)),
+                        f'served values not finite: {f!r}')
+
+
+class ExteriorPolarRhoLogAxisSelfFalsificationTestCase(SurrogateTestCase):
+    """Self-falsification: each gate can go red when its premise is broken."""
+
+    def setUp(self):
+        super().setUp()
+        real = _rho_log_synthetic_envelope_real(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        imag = _rho_log_synthetic_envelope_imag(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        self.chart_log = (
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_RHO_LOG_GAMMA_AXIS,
+                rho_grid=_RHO_LOG_RHO_AXIS,
+                theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+                log_w_grid=_RHO_LOG_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                rho_log_axis=True))
+        self.chart_linear = (
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_RHO_LOG_GAMMA_AXIS,
+                rho_grid=_RHO_LOG_RHO_AXIS,
+                theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+                log_w_grid=_RHO_LOG_LOG_W_AXIS,
+                envelope_real=real, envelope_imag=imag,
+                image_count=2, parity=1,
+                rho_log_axis=False))
+        self.training = np.asarray(real + 1j * imag)
+
+    def test_log_vs_linear_returns_different_values(self):
+        """Same envelope data, different axis → different served values."""
+        gamma_q = float(np.median(_RHO_LOG_GAMMA_AXIS))
+        theta_q = float(_RHO_LOG_THETA_C_AXIS[1])
+        rho_q = 0.5 * (_RHO_LOG_RHO_AXIS[1] + _RHO_LOG_RHO_AXIS[2])
+        v1_log = np.log(rho_q - 1.0)
+        v1_linear = float(rho_q)
+        v2 = float(theta_q)
+        served_log = (
+            surrogate_module._contract_tensor_spline(
+                self.chart_log.real_coeffs, self.chart_log.knots,
+                gamma_q, v1_log, v2, _RHO_LOG_LOG_W_AXIS)
+            + 1j * surrogate_module._contract_tensor_spline(
+                self.chart_log.imag_coeffs, self.chart_log.knots,
+                gamma_q, v1_log, v2, _RHO_LOG_LOG_W_AXIS))
+        served_linear = (
+            surrogate_module._contract_tensor_spline(
+                self.chart_linear.real_coeffs, self.chart_linear.knots,
+                gamma_q, v1_linear, v2, _RHO_LOG_LOG_W_AXIS)
+            + 1j * surrogate_module._contract_tensor_spline(
+                self.chart_linear.imag_coeffs, self.chart_linear.knots,
+                gamma_q, v1_linear, v2, _RHO_LOG_LOG_W_AXIS))
+        self.n_checks += 1
+        diff = float(np.max(np.abs(np.asarray(served_log)
+                                   - np.asarray(served_linear))))
+        self.assertGreater(
+            diff, 1e-12,
+            msg=f'rho_log_axis=True vs False delta ({diff:.2e}) '
+                f'is zero — the axis remap is dead code')
+
+    def test_node_exact_assertion_can_fail_deliberately(self):
+        """The node-exact gate has teeth: wrong v1 breaks the round-trip."""
+        gamma_q = float(_RHO_LOG_GAMMA_AXIS[0])
+        rho_q = float(_RHO_LOG_RHO_AXIS[0])
+        # Deliberately wrong coordinate: pass raw rho instead of log(rho-1).
+        # This is the same v1 the LINEAR chart would use — it's miles
+        # from the correct ur=log(rho-1) coordinate.
+        v1_wrong = rho_q  # ~1.05 instead of ~log(0.05) ~ -2.996
+        v2 = float(_RHO_LOG_THETA_C_AXIS[0])
+        served = np.asarray(
+            surrogate_module._contract_tensor_spline(
+                self.chart_log.real_coeffs, self.chart_log.knots,
+                gamma_q, v1_wrong, v2,
+                _RHO_LOG_LOG_W_AXIS[0:1])
+            + 1j * surrogate_module._contract_tensor_spline(
+                self.chart_log.imag_coeffs, self.chart_log.knots,
+                gamma_q, v1_wrong, v2,
+                _RHO_LOG_LOG_W_AXIS[0:1]))
+        want = self.training[0, 0, 0, 0]
+        err = float(np.abs(served[0] - want))
+        scale = float(max(np.abs(want), 1e-15))
+        relerr = err / scale
+        self.n_checks += 1
+        self.assertGreater(
+            relerr, _RHO_LOG_NODE_EXACT_TOL * 1e5,
+            msg=f'deliberately wrong v1 (raw rho) still round-trips '
+                f'to {relerr:.2e} — the node-exact gate has no teeth')
+
+    def test_rho_grid_strictly_greater_than_one_gate_has_teeth(self):
+        """rho_grid[0] = 1.0 raises; the gate is not vacuously silent."""
+        # Use a non-singular envelope: the (r-1)**(-0.5) in our synthetic
+        # helper diverges at rho→1, masking the gate.  Use a safe function.
+        shape = (4, 4, 4, 4)
+        real_safe = np.ones(shape)
+        imag_safe = np.zeros(shape)
+        with self.assertRaises(ValueError) as ctx:
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_RHO_LOG_GAMMA_AXIS,
+                rho_grid=np.array([1.0, 1.2, 1.4, 1.6]),
+                theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+                log_w_grid=_RHO_LOG_LOG_W_AXIS,
+                envelope_real=real_safe, envelope_imag=imag_safe,
+                image_count=2, parity=1,
+                rho_log_axis=True)
+        self.assertIn('rho_grid[0]', str(ctx.exception))
+        self.n_checks += 1
+        # Positive control: rho_grid[0] > 1.0 succeeds.
+        try:
+            surrogate_module.ExteriorPolarChart.from_values(
+                gamma_grid=_RHO_LOG_GAMMA_AXIS,
+                rho_grid=np.array([1.001, 1.2, 1.4, 1.6]),
+                theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+                log_w_grid=_RHO_LOG_LOG_W_AXIS,
+                envelope_real=real_safe, envelope_imag=imag_safe,
+                image_count=2, parity=1,
+                rho_log_axis=True)
+        except ValueError:
+            self.fail('rho_grid[0] = 1.001 must succeed with '
+                      'rho_log_axis=True')
+        self.n_checks += 1
+
+
+class ExteriorPolarRhoLogAxisSerializationTestCase(SurrogateTestCase):
+    """``rho_log_axis`` survives NPZ write/read and production save/load."""
+
+    def setUp(self):
+        super().setUp()
+        real = _rho_log_synthetic_envelope_real(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        imag = _rho_log_synthetic_envelope_imag(
+            _RHO_LOG_GAMMA_AXIS, _RHO_LOG_RHO_AXIS,
+            _RHO_LOG_THETA_C_AXIS, _RHO_LOG_LOG_W_AXIS)
+        self.chart = surrogate_module.ExteriorPolarChart.from_values(
+            gamma_grid=_RHO_LOG_GAMMA_AXIS,
+            rho_grid=_RHO_LOG_RHO_AXIS,
+            theta_c_grid=_RHO_LOG_THETA_C_AXIS,
+            log_w_grid=_RHO_LOG_LOG_W_AXIS,
+            envelope_real=real, envelope_imag=imag,
+            image_count=2, parity=1,
+            rho_log_axis=True)
+
+    def test_rho_log_axis_preserved_through_npz_roundtrip(self):
+        """rho_log_axis=True survives _chart_to_npz / _chart_from_npz."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'chart.npz'
+            sur = LensAmplificationSurrogate(
+                [self.chart], {'engine_version': 'test'})
+            sur.save(path)
+            reloaded = LensAmplificationSurrogate.load(path)
+        reloaded_chart = reloaded.charts[0]
+        self.assertIsInstance(reloaded_chart,
+                              surrogate_module.ExteriorPolarChart)
+        self.n_checks += 1
+        self.assertTrue(reloaded_chart.rho_log_axis,
+                        'rho_log_axis not preserved through save/load')
+        self.n_checks += 1
+
+    @staticmethod
+    def _build_rho_log_npz(include_rho_log_axis):
+        """Build minimal NPZ dict for rho_log_axis round-trip tests."""
+        n = 4
+        gamma = surrogate_module._uniform_axis((0.4, 0.5), n, 'gamma')
+        rho = surrogate_module._uniform_axis((1.6, 2.1), n, 'rho')
+        theta_c = surrogate_module._uniform_axis((0.1, 0.3), n, 'theta_c')
+        log_w = np.linspace(np.log(10), np.log(20), n)
+        meta = {'kind': 'exterior_polar', 'image_count': 2, 'parity': 1,
+                'eta_overlap_min': 0.05,
+                'envelope_definition': 'farfield_full_kernel_sum',
+                'axis_schema': 'exterior_polar_rho_log_v3'}
+        if include_rho_log_axis:
+            meta['rho_log_axis'] = True
+        real = np.ones((n, n, n, n), dtype=float)
+        imag = np.zeros((n, n, n, n), dtype=float)
+        real_c, imag_c, knots = surrogate_module._fit_tensor_spline(
+            (log_w, gamma, rho, theta_c), real, imag)
+        data = {}
+        data['chart0_meta'] = np.array(json.dumps(meta))
+        data['chart0_re_coeffs'] = real_c
+        data['chart0_im_coeffs'] = imag_c
+        for j, (axis, knot) in enumerate(zip(
+                (log_w, gamma, rho, theta_c), knots)):
+            data[f'chart0_axis{j}'] = axis
+            data[f'chart0_knots_{j}'] = knot
+        data['chart0_refused'] = np.empty((0, 3), dtype=float)
+        return data
+
+    def test_rho_log_axis_missing_key_defaults_false(self):
+        """NPZ without rho_log_axis key loads as rho_log_axis=False."""
+        data = self._build_rho_log_npz(include_rho_log_axis=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'chart.npz'
+            np.savez_compressed(path, **data)
+            chart = surrogate_module._chart_from_npz(np.load(path), 0)
+        self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
+        self.assertFalse(chart.rho_log_axis,
+                         'missing rho_log_axis should default to False')
+        self.n_checks += 1
+
+    def test_rho_log_axis_preserved_via_build_minimal_npz(self):
+        """rho_log_axis=True in meta survives _chart_from_npz."""
+        data = self._build_rho_log_npz(include_rho_log_axis=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'chart.npz'
+            np.savez_compressed(path, **data)
+            chart = surrogate_module._chart_from_npz(np.load(path), 0)
+        self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
+        self.assertTrue(chart.rho_log_axis,
+                        'rho_log_axis=True not preserved through NPZ')
         self.n_checks += 1
 
 

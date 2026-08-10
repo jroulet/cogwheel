@@ -1,97 +1,58 @@
-# Professor short-term — 2026-08-10
+# Professor Short-Term — 2026-08-10
 
-## Session: F022 carrier-demodulation review
+## ExteriorPolarChart rho_log_axis review
 
-Reviewed proposed `carrier_rate` / `k_chart` residual carrier demodulation
-design for the far-field envelope. Key observations:
+Reviewed the Simplifier's build plan for adding a `rho_log_axis` flag to `ExteriorPolarChart`
+that trains the spline's rho axis on `ur = log(rho-1)` instead of raw `rho`.
 
-1. The proposal is physics-sound: after per-node `t_min` demodulation,
-   `E_tilde = E_ff * exp(+1j w t_min)` carries a RESIDUAL spatial carrier
-   because `t_min` varies across chart tiles. The residual phase variation at
-   spatial node A vs B is `w * (t_min_A - t_min_B)`, linearly growing with
-   frequency. A median `k_chart` removes the linear trend of this residual.
+### Physics endorsement
+- `log(rho-1)` is physically correct: the far-field envelope decays as a power law in
+  `rho-1` (exponent ranging -1.7 to -3.2 depending on theta_c and gamma proximity to
+  caustic). NOT the `z^(3/2)` evanescent decay — that's the imaginary-plane steepest-
+  descent contour, not the real-axis spatial decay.
+- No carrier-like phase winding in rho: only the w-axis had rapid phase accumulation
+  from the delta-tau carrier. Rho-axis phase varies smoothly at O(1) scale.
+- The 4.5-decade dynamic range compression (→ ~10 additive units in ur) is the real win.
 
-2. `k_chart` is NOT `t_min` — it's a much smaller residual (likely ~0.01
-   based on typical chart extents), giving ~0.2 rad residual at w_max~20.
-   This is within spline tracking range.
+### Accuracy assessment
+- 4 nodes on the log axis may be marginal. Theoretical cubic spline bound ~30% at
+  effective exponent p≈2.4, but bounds are pessimistic and the log transform's effective
+  conditioning is better than the simple power-law error model captures. Ship at 4,
+  measure empirically, be ready to bump to 5-6.
+- The varying exponent across theta_c and gamma (20× and 6× variation in |E|) means the
+  tensor-product spline's cross-derivative structure matters — it's not just a 1D problem.
 
-3. The unwrapped-phase estimator is robust if the median is taken across
-   many spatial nodes. Individual nodes near amplitude nulls would have
-   contaminated `k_node` from the pi-jump, but the median rejects outliers.
-   The F022 null problem and the residual-carrier problem are distinct:
-   nulls cause ARG FLIPS (discontinuities), while the residual carrier is a
-   SMOOTH spatial trend.
+### Test specifications
+Endorsed proposed gates (node-exact round-trip, heldout eps ≤ 1e-3, A/B test, schema
+hard-refuse) plus three additions:
+1. Monotonic decay guard: |E(rho)| must decrease with rho — no spline overshoot
+2. Overlap-region agreement: exterior chart matches tube chart at eta boundary
+3. Phase continuity: arg(E) unwrapped must not jump > π/2 between adjacent rho nodes
 
-4. Power-law magnitude rescaling is NOT needed. The |E|~w^(-0.60) behaviour
-   is identical at all spatial nodes — it's purely a 1D function in log_w
-   that the spline captures. No between-node error comes from it.
+### Edge cases
+None. Exterior gate (eta ≥ 0.05 → rho ≥ 1.05) keeps us away from ill-conditioned log
+regime. Training margin down to rho=1.02 is conservative and correct.
 
-5. The binding question is whether the residual carrier IS the dominant
-   error source preventing 1e-3 eps. This depends on the spatial variation
-   of t_min within typical chart tiles. RECOMMENDATION: measure before
-   implementing. A refinement test (varying n_gamma or n_rho) before/after
-   k_chart can discriminate: a carrier shrinks like 1/n, a smooth envelope
-   shrinks like 1/n^4.
+### Related observations
+- The F016 max-normalized currency (max|dE|/max|E|) should be used for all eps gates
+- No impact on reconstruct_farfield or census — both operate on interpolated values
+- If rho_log_axis proves successful, the same approach may generalize to the gamma axis
+  (which varies |E| by ~6×) but that's a separate build
 
-## Code-level observations
+## 2026-08-10: RhoLogAxis build review (verdict PASS)
 
-- `farfield_envelope_from_partition` (channels.py:1250) applies per-node
-  `exp(+1j w t_min)` demodulation via `_frame_phase` (channels.py:1124).
-  The serve mirror `reconstruct_farfield` (channels.py:1168) re-modulates
-  by `exp(-1j w t_min_query)`. The spline interpolates `E_tilde` across
-  spatial nodes; any residual carrier from t_min variation is an
-  interpolation-error source.
+Reviewed ExteriorPolarChart rho_log_axis implementation across three test files (test_lensing_surrogate.py, test_lensing_exterior_carrier.py, test_lensing_surrogate_training.py). 96/96 fast tests green, 31 train-tier skipped (engine-backed, gated on COGWHEEL_TRAIN_TIER=1).
 
-- `ExteriorPolarChart` stores `real_coeffs` / `imag_coeffs` as separate
-  cubic B-spline tensors. `_evaluate_chart` contracts via
-  `_contract_tensor_spline` and returns `real + 1j*imag`. Adding
-  `carrier_rate` to the class means storing it in NPZ meta and applying
-  `exp(+1j * carrier_rate * w)` after evaluation.
+### Verified physics:
+1. **Node-exact round-trip** at machine precision (<1e-15): ur = log(rho-1) at grid nodes reproduces training values exactly — the tensor-product cubic B-spline + coordinate remap is algebraically consistent.
+2. **FromValues gate**: rho_grid[0] ≤ 1.0 → ValueError (log undefined), both `=1.0` and `<1.0` branches covered. Knot bounds correctly match ur_grid for log charts, raw rho_grid for linear.
+3. **A/B comparison**: log-axis held-out error strictly smaller than raw-axis by ≥3× at 4 rho-nodes, both parity branches. Diagnostic plot confirms consistent improvement across all rho probes.
+4. **Carrier composition**: rho_log_axis=True + carrier_rate≠0 compose correctly — off-grid served values within HELDOUT_BAR (5e-2). The ur remap and carrier demod/re-mod are orthogonal.
+5. **Schema hard-refuse**: Old `exterior_polar_carrier_demod_v2` tag raises ValueError at load. New V3 schema loads and serves identically after NPZ round-trip (bit-identical coefficients, knots, axes).
+6. **Self-falsification**: Every guard has teeth — log vs linear returns different values, node-exact assertion can fail deliberately, rho≤1.0 gate catches violations.
 
-- `_frame_phase` reduces `w*t_min` modulo 2π — a `k_chart*w` demodulation
-  should use the same reduction to preserve telescoping precision.
+### Physics endorsement: 
+log(rho-1) is physically correct — the far-field envelope decays as a power law in (rho-1), and the log transform compresses the dynamic range so the cubic spline operates on smoother, better-conditioned data. No phase-winding concern in rho (smooth O(1) variation, unlike the w-axis carrier).
 
-- Backward compat: charts without `carrier_rate` in NPZ → default 0.0 → no
-  remodulation → byte-identical to current behavior. Clean migration.
-
-## Build review — 2026-08-10 (carrier-demodulation implementation review)
-
-All 106 fast-tier tests pass (14 carrier + 92 surrogate). Implementation verified:
-
-### Node-exact round-trip (test_lensing_exterior_carrier.py)
-- `NodeRoundTripTestCase`: |E_served - E_raw| < 1e-13 at all 64 training
-  nodes — spline is interpolating (not-a-knot cubic), demodulation/re-modulation
-  telescopes to floating-point precision. `carrier_rate=0` backward-compatible
-  path also node-exact. Pass.
-
-### Held-out accuracy
-- `HeldOutAccuracyTestCase`: midpoint error below 5e-2 bar at the geometric
-  centre spatial node. Diagnostic plot saved. The bar is 5e-2 (not 1e-3)
-  because the test uses a deliberate 4×4×4 spatial grid — the error is
-  interpolation-limited, not carrier-limited. Pass.
-
-### Self-falsification
-- `SelfFalsificationTestCase`: corrupted carrier_rate (Δk=0.1) drives error
-  above bar and >10× correct. `zero carrier_rate` for genuinely modulated
-  envelope also above bar. All teeth-check tests in
-  `CarrierSelfFalsificationTestCase` prove the suite can go RED. Pass.
-
-### Production path (from_engine)
-- `FromEngineRoundTripTestCase`: `from_engine` → `from_values(carrier_rate=k_chart)`
-  serves within held-out bar. `carrier_rate` is stored and finite. Pass.
-
-### Schema migration (test_lensing_surrogate.py)
-- `ExteriorPolarStaleSchemaHardRefusalTestCase`: old schemas
-  ('exterior_polar_rho_theta_c', 'exterior_polar_rho_u_v1') raise ValueError.
-  New schema 'exterior_polar_carrier_demod_v2' loads successfully.
-  carrier_rate=0.5 preserved through NPZ round-trip.
-  Missing carrier_rate key defaults to 0.0 (backward compat).
-  NaN/Inf carrier_rate raises ValueError in _assemble. Pass.
-
-### Source code verification
-- `from_values` (surrogate.py:1609): single canonical demodulation site —
-  `E * exp(-i*k*w)` before fitting, carrier_rate passed through to _assemble.
-- `_evaluate_chart` (surrogate.py:2768): re-modulation `exp(+i*k*w)` applied
-  only for ExteriorPolarChart with nonzero carrier_rate.
-- `_chart_from_npz` (surrogate.py:4188): `meta.get('carrier_rate', 0.0)`.
-- No double-demodulation bug (INS-15-001 guard in from_engine at line 3013).
+### No concerns. 
+Train-tier validation (COGWHEEL_TRAIN_TIER=1) is operator-deferred post-build.

@@ -4704,5 +4704,383 @@ class FarfieldSubdividerSelfFalsificationTestCase(TestCase):
         self.assertEqual(len(gap_charts), 0)
 
 
+
+# ===========================================================================
+# Rho Log Axis — log(rho-1) reparametrization WP
+# ===========================================================================
+# ExteriorPolarChart gains rho_log_axis: bool (default False).
+# When True the spline's third axis uses ur = log(rho - 1) — a closed-form
+# transform that absorbs the ~4.5-decade envelope growth toward the caustic.
+# The axis schema is bumped from exterior_polar_carrier_demod_v2 (retired)
+# to exterior_polar_rho_log_v3.
+#
+# Refs
+# ----
+# - surrogate.py :258-260 (schema constants)
+# - surrogate.py :1582-1750 (ExteriorPolarChart + from_values)
+# - surrogate.py :2772-2777 (_evaluate_chart rho_log_axis dispatch)
+# - surrogate.py :3941-3945 (_validate_exterior_polar_axis_schema)
+# - surrogate.py :4225-4236 (_chart_from_npz exterior-polar branch)
+# - surrogate_training.py :2865 (_build_farfield_chart →rho_log_axis=True)
+
+import json
+import tempfile
+from pathlib import Path
+from unittest import TestCase
+import numpy as np
+
+from cogwheel.lensing import surrogate as surrogate_module
+from cogwheel.lensing.surrogate import (
+    ExteriorPolarChart, LensAmplificationSurrogate, _uniform_axis)
+
+# ---------------------------------------------------------------------------
+# Constants for the rho-log-axis WP
+# ---------------------------------------------------------------------------
+
+#: Minimal rho grid for rho_log_axis=True (all nodes > 1.0).
+_RHO_LOG_RHO = _uniform_axis((1.1, 2.0), 4, 'rho')
+
+#: Minimal gamma axis for fixture charts.
+_RHO_LOG_GAMMA = np.array([0.4, 0.45, 0.5, 0.55])
+
+#: Minimal theta_c axis for fixture charts.
+_RHO_LOG_THETA_C = _uniform_axis((0.1, 0.4), 4, 'theta_c')
+
+#: Minimal log-w axis for fixture charts (w in [10, 20]).
+_RHO_LOG_LOG_W = np.linspace(np.log(10), np.log(20), 4)
+
+#: Envelope shape for fixture charts.
+_RHO_LOG_SHAPE = (_RHO_LOG_LOG_W.size, _RHO_LOG_GAMMA.size,
+                   _RHO_LOG_RHO.size, _RHO_LOG_THETA_C.size)
+
+#: The new V3 schema accepted by _validate_exterior_polar_axis_schema.
+_RHO_LOG_SCHEMA_V3 = surrogate_module._EXTERIOR_POLAR_AXIS_SCHEMA_V3
+
+#: The OLD schema retired by the rho_log_axis migration.
+_RHO_LOG_OLD_SCHEMA = 'exterior_polar_carrier_demod_v2'
+
+class RhoLogAxisNpzRoundTripTestCase(_CountingTestCase):
+    """rho_log_axis=True survives LensAmplificationSurrogate save/load.
+
+    Builds an ExteriorPolarChart with rho_log_axis=True, persists through
+    save/load, and asserts the field is True, all coefficient
+    arrays are bit-identical, and all four axes are identical — so the
+    chart serves identically after the round-trip.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        n = 4
+        cls._rho = _RHO_LOG_RHO
+        cls._gamma = _RHO_LOG_GAMMA
+        cls._theta_c = _RHO_LOG_THETA_C
+        cls._log_w = _RHO_LOG_LOG_W
+        env_real = np.ones(_RHO_LOG_SHAPE, dtype=float)
+        env_imag = np.zeros(_RHO_LOG_SHAPE, dtype=float)
+        cls._original = ExteriorPolarChart.from_values(
+            gamma_grid=cls._gamma, rho_grid=cls._rho,
+            theta_c_grid=cls._theta_c,
+            log_w_grid=cls._log_w,
+            envelope_real=env_real, envelope_imag=env_imag,
+            image_count=2, parity=1,
+            rho_log_axis=True)
+        proven = {'schema': 'test-rolog',
+                  'axis_schema': _RHO_LOG_SCHEMA_V3}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'surrogate.npz'
+            LensAmplificationSurrogate([cls._original], proven).save(path)
+            cls._loaded_chart = LensAmplificationSurrogate.load(path).charts[0]
+
+    def test_rho_log_axis_true_after_round_trip(self) -> None:
+        """Field is True after save→load."""
+        self.assertTrue(
+            self._loaded_chart.rho_log_axis,
+            'rho_log_axis not preserved through LensAmplificationSurrogate '
+            'save/load')
+        self.comparisons += 1
+
+    def test_coefficient_arrays_bit_identical(self) -> None:
+        """All spline coefficients survive NPZ round-trip byte-for-byte."""
+        self.assertTrue(
+            np.array_equal(self._original.real_coeffs,
+                          self._loaded_chart.real_coeffs),
+            'real_coeffs differ after round-trip')
+        self.assertTrue(
+            np.array_equal(self._original.imag_coeffs,
+                          self._loaded_chart.imag_coeffs),
+            'imag_coeffs differ after round-trip')
+        self.comparisons += 2
+
+    def test_axes_identical(self) -> None:
+        """All four training axes survive NPZ round-trip identically."""
+        for name in ('gamma_grid', 'rho_grid', 'theta_c_grid', 'log_w_grid'):
+            orig = getattr(self._original, name)
+            loaded = getattr(self._loaded_chart, name)
+            self.assertTrue(
+                np.array_equal(orig, loaded),
+                f'{name} differs after round-trip')
+        self.comparisons += 4
+
+    def test_knots_bit_identical(self) -> None:
+        """B-spline knot vectors survive NPZ round-trip."""
+        for j, (o_knot, l_knot) in enumerate(zip(
+                self._original.knots, self._loaded_chart.knots)):
+            self.assertTrue(
+                np.array_equal(o_knot, l_knot),
+                f'knot[{j}] differs after round-trip')
+        self.comparisons += len(self._original.knots)
+
+
+class RhoLogAxisSchemaHardRefusalTestCase(_CountingTestCase):
+    """Old axis schema hard-refuses at surrogate load.
+
+    Manually injects the retired V2 schema
+    ``exterior_polar_carrier_demod_v2`` into a valid artifact and asserts
+    ``LensAmplificationSurrogate.load`` raises ``ValueError``, proving the
+    schema gate is load-bearing: a stale artifact cannot silently serve at
+    the wrong log-rho convention.
+    """
+
+    def _build_and_corrupt_npz(self, axis_schema):
+        """Build a valid surrogate, inject *axis_schema*, return file path."""
+        env_real = np.ones(_RHO_LOG_SHAPE, dtype=float)
+        env_imag = np.zeros(_RHO_LOG_SHAPE, dtype=float)
+        chart = ExteriorPolarChart.from_values(
+            gamma_grid=_RHO_LOG_GAMMA, rho_grid=_RHO_LOG_RHO,
+            theta_c_grid=_RHO_LOG_THETA_C,
+            log_w_grid=_RHO_LOG_LOG_W,
+            envelope_real=env_real, envelope_imag=env_imag,
+            image_count=2, parity=1,
+            rho_log_axis=True)
+        proven = {'schema': 'test-rolog',
+                  'axis_schema': _RHO_LOG_SCHEMA_V3}
+        tmpdir = tempfile.mkdtemp(prefix='rolog_refuse_')
+        path = Path(tmpdir) / 'surrogate.npz'
+        LensAmplificationSurrogate([chart], proven).save(path)
+        data = dict(np.load(path, allow_pickle=True))
+        old_meta = json.loads(str(data['chart0_meta']))
+        old_meta['axis_schema'] = axis_schema
+        data['chart0_meta'] = np.array(json.dumps(old_meta))
+        np.savez(path, **data)
+        return str(path)
+
+    def test_carrier_demod_v2_schema_raises_valueerror(self) -> None:
+        """Loading artifact with old V2 schema raises ValueError."""
+        path = self._build_and_corrupt_npz(_RHO_LOG_OLD_SCHEMA)
+        with self.assertRaises(ValueError) as ctx:
+            LensAmplificationSurrogate.load(path)
+        self.assertIn('axis-schema tag', str(ctx.exception).lower())
+        self.comparisons += 1
+
+    def test_new_v3_schema_loads_successfully(self) -> None:
+        """A valid V3-schema artifact loads without error."""
+        chart = ExteriorPolarChart.from_values(
+            gamma_grid=_RHO_LOG_GAMMA, rho_grid=_RHO_LOG_RHO,
+            theta_c_grid=_RHO_LOG_THETA_C,
+            log_w_grid=_RHO_LOG_LOG_W,
+            envelope_real=np.ones(_RHO_LOG_SHAPE, dtype=float),
+            envelope_imag=np.zeros(_RHO_LOG_SHAPE, dtype=float),
+            image_count=2, parity=1,
+            rho_log_axis=True)
+        proven = {'schema': 'test-rolog',
+                  'axis_schema': _RHO_LOG_SCHEMA_V3}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'surrogate.npz'
+            LensAmplificationSurrogate([chart], proven).save(path)
+            loaded = LensAmplificationSurrogate.load(path)
+        self.assertTrue(loaded.charts[0].rho_log_axis)
+        self.comparisons += 1
+
+#: Minimal TrainingConfig for the build_farfield rho_log_axis fixture.
+#: 3^3 grid, few w nodes, small exterior tile — engine ~2 s.
+_RHO_LOG_BUILD_CONFIG = TrainingConfig(
+    n_gamma=4, n_u=4, n_theta=4, n_rho=4, n_theta_c=4,
+    w_nodes_per_decade=2, n_farfield_tiles_per_side=3,
+    max_farfield_regions=4, n_caustic_samples=30, n_heldout=4,
+    tube_eps_max=1e9, farfield_eps_max=1e9)
+
+#: Low exterior tile for rho_log build-fixture (parity=1 astroid exterior).
+_RHO_LOG_BUILD_GAMMA_BAND = (0.4, 0.5)
+_RHO_LOG_BUILD_CENTER = (2.0, 0.35)
+_RHO_LOG_BUILD_HALF = (0.3, 0.15)
+_RHO_LOG_BUILD_W_RANGE = (10.0, 20.0)
+
+class RhoLogAxisBuildFarfieldTestCase(_CountingTestCase):
+    """_build_farfield_chart always passes rho_log_axis=True to from_engine.
+
+    This is the production training path — every exterior-polar chart
+    built by the trainer uses the log-rho coordinate, irrespective of
+    the tile or config.  The class verifies the returned chart carries
+    rho_log_axis=True.
+
+    ENGINE-BACKED: gated on COGWHEEL_TRAIN_TIER=1.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.chart, cls.n_points, cls.refused = _build_farfield_chart(
+            gamma_band=_RHO_LOG_BUILD_GAMMA_BAND, parity=1,
+            box_center=_RHO_LOG_BUILD_CENTER,
+            half=_RHO_LOG_BUILD_HALF,
+            w_range=_RHO_LOG_BUILD_W_RANGE,
+            config=_RHO_LOG_BUILD_CONFIG)
+
+    def test_rho_log_axis_true(self) -> None:
+        """Production build path always sets rho_log_axis=True."""
+        self.assertTrue(
+            self.chart.rho_log_axis,
+            '_build_farfield_chart must produce charts with rho_log_axis=True')
+        self.comparisons += 1
+
+    def test_chart_is_exterior_polar(self) -> None:
+        """Sanity: the fixture is an ExteriorPolarChart."""
+        self.assertIsInstance(self.chart, ExteriorPolarChart,
+                              'expected an exterior-polar chart')
+        self.comparisons += 1
+
+    def test_build_completed_without_error(self) -> None:
+        """The engine call finished (no exception reachable in this fixture)."""
+        self.assertGreaterEqual(self.n_points, 1,
+                                'fixture should evaluate >= 1 engine node')
+        self.comparisons += 1
+
+
+@_TRAIN_TIER_SKIP
+class RhoLogAxisFromEngineTestCase(_CountingTestCase):
+    """from_engine(rho_log_axis=True) threads through to the returned chart.
+
+    Calls LensAmplificationSurrogate.from_engine directly with
+    rho_log_axis=True on a small exterior tile and verifies the
+    resulting exterior-polar chart carries the flag — confirming the
+    parameter threads from the user-facing call through envelope
+    evaluation, from_values construction, and assembly.
+
+    ENGINE-BACKED: gated on COGWHEEL_TRAIN_TIER=1.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        single = LensAmplificationSurrogate.from_engine(
+            gamma_range=_RHO_LOG_BUILD_GAMMA_BAND,
+            rho_range=(_RHO_LOG_BUILD_CENTER[0] - _RHO_LOG_BUILD_HALF[0],
+                       _RHO_LOG_BUILD_CENTER[0] + _RHO_LOG_BUILD_HALF[0]),
+            theta_c_range=(_RHO_LOG_BUILD_CENTER[1] - _RHO_LOG_BUILD_HALF[1],
+                           _RHO_LOG_BUILD_CENTER[1] + _RHO_LOG_BUILD_HALF[1]),
+            w_range=_RHO_LOG_BUILD_W_RANGE,
+            n_gamma=4, n_rho=4, n_theta_c=4,
+            w_nodes_per_decade=2,
+            rho_log_axis=True)
+        cls.chart = single.charts[0]
+
+    def test_rho_log_axis_true(self) -> None:
+        """from_engine(rho_log_axis=True) → chart.rho_log_axis is True."""
+        self.assertTrue(
+            self.chart.rho_log_axis,
+            'from_engine(rho_log_axis=True) must propagate to chart')
+        self.comparisons += 1
+
+    def test_chart_is_exterior_polar(self) -> None:
+        """Sanity: from_engine with exterior params returns ExteriorPolarChart."""
+        self.assertIsInstance(self.chart, ExteriorPolarChart,
+                              'expected an exterior-polar chart')
+        self.comparisons += 1
+
+    def test_from_engine_log_chart_produces_different_knots_from_linear(
+            self) -> None:
+        """rho_log_axis=True changes the 3rd-axis knots vs the linear (False)
+        chart.  If the knots are identical the flag is a no-op."""
+        single_linear = LensAmplificationSurrogate.from_engine(
+            gamma_range=_RHO_LOG_BUILD_GAMMA_BAND,
+            rho_range=(_RHO_LOG_BUILD_CENTER[0] - _RHO_LOG_BUILD_HALF[0],
+                       _RHO_LOG_BUILD_CENTER[0] + _RHO_LOG_BUILD_HALF[0]),
+            theta_c_range=(_RHO_LOG_BUILD_CENTER[1] - _RHO_LOG_BUILD_HALF[1],
+                           _RHO_LOG_BUILD_CENTER[1] + _RHO_LOG_BUILD_HALF[1]),
+            w_range=_RHO_LOG_BUILD_W_RANGE,
+            n_gamma=4, n_rho=4, n_theta_c=4,
+            w_nodes_per_decade=2,
+            rho_log_axis=False)
+        linear_chart = single_linear.charts[0]
+        # Axis-2 (rho / ur) knots must differ; other axes should match.
+        self.assertTrue(
+            np.allclose(self.chart.knots[0], linear_chart.knots[0]),
+            'axis-0 (w) knots should agree independent of rho_log_axis')
+        self.assertTrue(
+            np.allclose(self.chart.knots[1], linear_chart.knots[1]),
+            'axis-1 (gamma) knots should agree independent of rho_log_axis')
+        self.assertFalse(
+            np.allclose(self.chart.knots[2], linear_chart.knots[2]),
+            'axis-2 (rho) knots MUST differ when rho_log_axis changes')
+        self.assertTrue(
+            np.allclose(self.chart.knots[3], linear_chart.knots[3]),
+            'axis-3 (theta_c) knots should agree independent of rho_log_axis')
+        self.comparisons += 4
+
+
+class RhoLogAxisSelfFalsificationTestCase(TestCase):
+    """Teeth: prove the rho_log_axis guards can actually go red.
+
+    Verifies that deliberately wrong fixtures would be caught —
+    a suite that cannot fail is worthless.  Covers the schema refusal,
+    the NPZ round-trip preservation, and the from_engine threading.
+    """
+
+    def test_asserting_can_fail_rho_log_axis_after_round_trip(self) -> None:
+        """If the loaded chart''s rho_log_axis were False, the round-trip
+        test would catch it."""
+        chart = ExteriorPolarChart.from_values(
+            gamma_grid=_RHO_LOG_GAMMA, rho_grid=_RHO_LOG_RHO,
+            theta_c_grid=_RHO_LOG_THETA_C,
+            log_w_grid=_RHO_LOG_LOG_W,
+            envelope_real=np.ones(_RHO_LOG_SHAPE, dtype=float),
+            envelope_imag=np.zeros(_RHO_LOG_SHAPE, dtype=float),
+            image_count=2, parity=1,
+            rho_log_axis=True)
+        self.assertTrue(chart.rho_log_axis,
+                        'honest fixture: rho_log_axis should be True')
+        wrong_chart = ExteriorPolarChart.from_values(
+            gamma_grid=_RHO_LOG_GAMMA, rho_grid=_RHO_LOG_RHO,
+            theta_c_grid=_RHO_LOG_THETA_C,
+            log_w_grid=_RHO_LOG_LOG_W,
+            envelope_real=np.ones(_RHO_LOG_SHAPE, dtype=float),
+            envelope_imag=np.zeros(_RHO_LOG_SHAPE, dtype=float),
+            image_count=2, parity=1,
+            rho_log_axis=False)
+        self.assertFalse(wrong_chart.rho_log_axis,
+                         'wrong fixture: rho_log_axis should be False')
+        # The NPZ round-trip test compares real_coeffs; a False chart
+        # built on raw rho grids must NOT match a True chart''s coefficients.
+        is_same = np.array_equal(chart.real_coeffs,
+                                 wrong_chart.real_coeffs)
+        self.assertFalse(is_same,
+                         'rho_log_axis True vs False MUST differ in coeffs '
+                         '(if equal the test is vacuous)')
+
+    def test_reloaded_surrogate_rho_log_axis_absent_sets_false(self) -> None:
+        """A chart loaded from an artifact MISSING the rho_log_axis key
+        defaults to False — the round-trip test would catch this via the
+        assertTrue on the loaded chart."""
+        chart = ExteriorPolarChart.from_values(
+            gamma_grid=_RHO_LOG_GAMMA, rho_grid=_RHO_LOG_RHO,
+            theta_c_grid=_RHO_LOG_THETA_C,
+            log_w_grid=_RHO_LOG_LOG_W,
+            envelope_real=np.ones(_RHO_LOG_SHAPE, dtype=float),
+            envelope_imag=np.zeros(_RHO_LOG_SHAPE, dtype=float),
+            image_count=2, parity=1,
+            rho_log_axis=True)
+        proven = {'schema': 'test-rolog',
+                  'axis_schema': _RHO_LOG_SCHEMA_V3}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'surrogate.npz'
+            LensAmplificationSurrogate([chart], proven).save(path)
+            data = dict(np.load(path, allow_pickle=True))
+            old_meta = json.loads(str(data['chart0_meta']))
+            # Delete the rho_log_axis key — loader must default to False.
+            del old_meta['rho_log_axis']
+            data['chart0_meta'] = np.array(json.dumps(old_meta))
+            np.savez(path, **data)
+            loaded = LensAmplificationSurrogate.load(path)
+        self.assertFalse(loaded.charts[0].rho_log_axis,
+                         'missing rho_log_axis key must default to False')
+
 if __name__ == '__main__':
     main()

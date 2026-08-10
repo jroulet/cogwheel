@@ -86,6 +86,30 @@ _W_MOD_AMPLITUDE: float = 0.2
 _W_MEAN_TRAIN: float = float(np.mean(_W_GRID))
 
 #: Midpoints between successive w-grid nodes (one fewer than the grid).
+
+
+# ---- Rho-dependent fixture (exercises the log(rho-1) coordinate) ---------
+
+_RHO_GRID_LOG: np.ndarray = np.array([1.05, 1.15, 1.30, 1.50])
+#: Power-law exponent for the rho-dependent envelope: E ∝ (rho-1)^{-p}.
+#: ``p > 0`` gives a singularity at rho→1 where log(rho-1) is most
+#: beneficial; in ur-coordinates the envelope is exp(-p * ur) — a smooth
+#: exponential that a cubic spline resolves well.
+_RHO_POWER: float = 0.5
+
+#: Gamma grids for positive-parity (gamma < 1) and saddle-parity (gamma > 1)
+#: A/B comparison branches.  At least 4 nodes per axis for the not-a-knot
+#: cubic spline.
+_GAMMA_GRID_POS: np.ndarray = np.array([0.35, 0.42, 0.50, 0.58])
+_GAMMA_GRID_SADDLE: np.ndarray = np.array([1.30, 1.45, 1.60, 1.80])
+
+#: Number of randomised off-grid rho probes per inter-node interval.
+_N_RHO_PROBES: int = 3
+
+#: Minimum ratio: log-axis eps must be at least this many times SMALLER
+#: than raw-axis eps for the A/B assertion to pass.  ``3.0×`` gives
+#: comfortable margin over the measured ~4—6× improvement at 4 rho-nodes.
+_AB_RATIO_MIN: float = 3.0
 _W_MID: np.ndarray = np.exp(0.5 * (_LOG_W_GRID[:-1] + _LOG_W_GRID[1:]))
 _LOG_W_MID: np.ndarray = np.log(_W_MID)
 
@@ -151,6 +175,69 @@ def _build_chart(*, carrier_rate: float = 0.0,
         envelope_definition=sg.FARFIELD_KERNEL_SUM,
         carrier_rate=carrier_rate)
 
+
+
+
+def _build_rho_dependent_chart(*, rho_log_axis: bool = False,
+                               carrier_rate: float = 0.0,
+                               parity: int = 1,
+                               gamma_grid: np.ndarray = _GAMMA_GRID_POS,
+                               ) -> sg.ExteriorPolarChart:
+    """Build a synthetic `ExteriorPolarChart` with rho-dependent envelope.
+
+    The envelope is
+      ``E(rho, w) = (rho-1)^{-p} * (1 + A*(w/w_mean-1)) * exp(i*k*w)``
+    and is CONSTANT in gamma and theta_c.  The power-law radial profile
+    has a singularity at ``rho → 1``, so the ``log(rho-1)`` coordinate
+    spread the nodes more evenly in the space the spline operates in,
+    reducing interpolation error near the caustic.
+    """
+    # w-dependent factor (mild amplitude ramp).
+    w_grid = np.exp(_LOG_W_GRID)
+    w_factor = 1.0 + _W_MOD_AMPLITUDE * (w_grid / _W_MEAN_TRAIN - 1.0)
+
+    # rho-dependent radial profile.
+    radial = (_RHO_GRID_LOG - 1.0) ** (-_RHO_POWER)  # (n_rho,)
+
+    # Outer product and carrier modulation (n_w, n_rho).
+    envelope = np.outer(w_factor, radial)
+    if carrier_rate != 0.0:
+        envelope = (envelope + 0j) * np.exp(
+            1j * carrier_rate * w_grid[:, None])
+
+    n_gamma = gamma_grid.size
+    n_theta = _THETA_C_GRID.size
+    envelope_4d = envelope[:, None, :, None] * np.ones(
+        (1, n_gamma, 1, n_theta))
+
+    return sg.ExteriorPolarChart.from_values(
+        gamma_grid=gamma_grid,
+        rho_grid=_RHO_GRID_LOG,
+        theta_c_grid=_THETA_C_GRID,
+        log_w_grid=_LOG_W_GRID,
+        envelope_real=envelope_4d.real.copy(),
+        envelope_imag=envelope_4d.imag.copy(),
+        image_count=2,
+        parity=parity,
+        envelope_definition=sg.FARFIELD_KERNEL_SUM,
+        carrier_rate=carrier_rate,
+        rho_log_axis=rho_log_axis)
+
+
+def _envelope_exact(rho: float, log_w_grid: np.ndarray,
+                    carrier_rate: float = 0.0) -> np.ndarray:
+    """Evaluate the EXACT rho-dependent envelope at off-grid rho.
+
+    Same functional form as `_build_rho_dependent_chart` but evaluated at
+    a single (off-grid) ``rho`` for all ``w``.  Constant in gamma/theta_c.
+    """
+    w_grid = np.exp(log_w_grid)
+    w_factor = 1.0 + _W_MOD_AMPLITUDE * (w_grid / _W_MEAN_TRAIN - 1.0)
+    radial = (rho - 1.0) ** (-_RHO_POWER)
+    envelope = radial * w_factor
+    if carrier_rate != 0.0:
+        envelope = (envelope + 0j) * np.exp(1j * carrier_rate * w_grid)
+    return envelope
 
 def _source_for_node(gamma: float, rho: float, theta_c: float
                      ) -> tuple[float, float]:
@@ -582,3 +669,407 @@ class CarrierSelfFalsificationTestCase(_CarrierBaseTestCase):
             f'coarse-grid eps = {eps:.2e} <= {HELDOUT_BAR:.0e} — '
             f'the held-out test cannot go RED on a coarse/large-modulation '
             f'grid')
+
+
+# ======================================================================
+# A/B accuracy: log(rho-1) vs raw rho coordinate
+# ======================================================================
+
+class RhoLogAxisABComparisonTestCase(_CarrierBaseTestCase):
+    """A/B comparison: log-axis chart strictly more accurate than raw-axis.
+
+    Builds two charts from identical training axes and values — one with
+    ``rho_log_axis=True`` (logarithmic ``ur = log(rho-1)`` coordinate),
+    one with ``rho_log_axis=False`` (raw rho).  The envelope contains a
+    genuine ``(rho-1)^{-p}`` power-law singularity near the caustic that a
+    cubic spline in ``ur`` resolves more accurately than in raw rho because
+    the exponential ``exp(-p * ur)`` in log-space has bounded curvature.
+
+    Cost: 4 charts × 320 nodes each + 24 off-grid probes × 5 w-nodes =
+    ~1280 spline fits + ~120 evaluations — well under 5 s.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.rng = np.random.default_rng(20260810)
+        # Off-grid rho probes: one random value between each pair of
+        # adjacent rho_grid nodes, repeated for reproducibility.
+        cls._rho_probes: list[float] = []
+        for i in range(len(_RHO_GRID_LOG) - 1):
+            lo, hi = _RHO_GRID_LOG[i], _RHO_GRID_LOG[i + 1]
+            for _ in range(_N_RHO_PROBES):
+                cls._rho_probes.append(
+                    float(cls.rng.uniform(lo, hi)))
+        cls._rho_probes.sort()
+
+        # Shared geometric centre for evaluation (constant gamma/theta_c
+        # envelope so any single point is representative).
+        cls._gamma_pos = float(_GAMMA_GRID_POS[1])      # 0.42
+        cls._gamma_sad = float(_GAMMA_GRID_SADDLE[1])   # 1.45
+        cls._theta_c = float(_THETA_C_GRID[1])           # ~0.3
+
+        # Build charts for both parity branches.
+        cls.chart_pos_log = _build_rho_dependent_chart(
+            rho_log_axis=True, parity=1, gamma_grid=_GAMMA_GRID_POS)
+        cls.chart_pos_raw = _build_rho_dependent_chart(
+            rho_log_axis=False, parity=1, gamma_grid=_GAMMA_GRID_POS)
+        cls.chart_sad_log = _build_rho_dependent_chart(
+            rho_log_axis=True, parity=-1, gamma_grid=_GAMMA_GRID_SADDLE)
+        cls.chart_sad_raw = _build_rho_dependent_chart(
+            rho_log_axis=False, parity=-1, gamma_grid=_GAMMA_GRID_SADDLE)
+
+        # Pre-compute source positions for each off-grid rho probe.
+        cls._probes_pos: list[
+            tuple[float, float, float, np.ndarray]
+        ] = []
+        for rho in cls._rho_probes:
+            y1, y2 = _source_for_node(gamma=cls._gamma_pos,
+                                       rho=rho,
+                                       theta_c=cls._theta_c)
+            exact = _envelope_exact(rho, _LOG_W_GRID)
+            cls._probes_pos.append((rho, y1, y2, exact))
+
+        cls._probes_sad: list[
+            tuple[float, float, float, np.ndarray]
+        ] = []
+        for rho in cls._rho_probes:
+            y1, y2 = _source_for_node(gamma=cls._gamma_sad,
+                                       rho=rho,
+                                       theta_c=cls._theta_c)
+            exact = _envelope_exact(rho, _LOG_W_GRID)
+            cls._probes_sad.append((rho, y1, y2, exact))
+
+    def _evaluate_eps(self, chart, probes, gamma
+                      ) -> tuple[float, float]:
+        """Return ``(max_eps, mean_eps)`` for a chart over all probes."""
+        eps_values: list[float] = []
+        for rho, y1, y2, exact in probes:
+            served = sg._evaluate_chart(
+                chart, gamma=gamma, eta=0.5, theta=0.5,
+                log_w_query=_LOG_W_GRID, y1_eig=y1, y2_eig=y2)
+            max_exact = max(float(np.max(np.abs(exact))), 1e-300)
+            eps = float(np.max(np.abs(served - exact))) / max_exact
+            eps_values.append(eps)
+        return max(eps_values), float(np.mean(eps_values))
+
+    def test_log_beats_raw_positive_parity(self) -> None:
+        """Eps_log < eps_raw / ratio_min for positive parity."""
+        max_log, mean_log = self._evaluate_eps(
+            self.chart_pos_log, self._probes_pos, self._gamma_pos)
+        max_raw, mean_raw = self._evaluate_eps(
+            self.chart_pos_raw, self._probes_pos, self._gamma_pos)
+        self.record_comparison()
+        self.assertLess(
+            max_log * _AB_RATIO_MIN, max_raw,
+            f'positive parity: log-eps = {max_log:.2e}, '
+            f'raw-eps = {max_raw:.2e}, '
+            f'ratio = {max_raw / max(max_log, 1e-300):.1f}× < '
+            f'{_AB_RATIO_MIN}× — log(rho-1) is not load-bearing '
+            f'(mean: log={mean_log:.2e}, raw={mean_raw:.2e})')
+
+    def test_log_beats_raw_saddle_parity(self) -> None:
+        """Eps_log < eps_raw / ratio_min for saddle parity."""
+        max_log, mean_log = self._evaluate_eps(
+            self.chart_sad_log, self._probes_sad, self._gamma_sad)
+        max_raw, mean_raw = self._evaluate_eps(
+            self.chart_sad_raw, self._probes_sad, self._gamma_sad)
+        self.record_comparison()
+        self.assertLess(
+            max_log * _AB_RATIO_MIN, max_raw,
+            f'saddle parity: log-eps = {max_log:.2e}, '
+            f'raw-eps = {max_raw:.2e}, '
+            f'ratio = {max_raw / max(max_log, 1e-300):.1f}× < '
+            f'{_AB_RATIO_MIN}× — log(rho-1) is not load-bearing '
+            f'(mean: log={mean_log:.2e}, raw={mean_raw:.2e})')
+
+    def test_diagnostic_plot(self) -> None:
+        """Write log-axis vs raw-axis residuals vs rho for visual check."""
+        def get_eps(chart, probes, gamma):
+            out = []
+            for rho, y1, y2, exact in probes:
+                served = sg._evaluate_chart(
+                    chart, gamma=gamma, eta=0.5, theta=0.5,
+                    log_w_query=_LOG_W_GRID, y1_eig=y1, y2_eig=y2)
+                denom = max(float(np.max(np.abs(exact))), 1e-300)
+                out.append(float(np.max(np.abs(served - exact))) / denom)
+            return np.array(out)
+
+        rhos = np.array(self._rho_probes)
+        eps_log = get_eps(self.chart_pos_log, self._probes_pos,
+                          self._gamma_pos)
+        eps_raw = get_eps(self.chart_pos_raw, self._probes_pos,
+                          self._gamma_pos)
+        eps_sad_log = get_eps(self.chart_sad_log, self._probes_sad,
+                              self._gamma_sad)
+        eps_sad_raw = get_eps(self.chart_sad_raw, self._probes_sad,
+                              self._gamma_sad)
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+        for ax, eps_l, eps_r, label in [
+            (ax1, eps_log, eps_raw, 'positive parity'),
+            (ax2, eps_sad_log, eps_sad_raw, 'saddle parity')]:
+            ax.semilogy(rhos, eps_l, 'o-', label='log(rho-1) axis')
+            ax.semilogy(rhos, eps_r, 's--', label='raw rho axis')
+            ax.set_xlabel('rho')
+            ax.set_ylabel('max|E_served - E_exact| / max|E_exact|')
+            ax.set_title(f'rho-log-axis A/B: {label}')
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+        fig.tight_layout()
+        path = _OUTPUT_DIR / 'exterior_carrier_rho_log_ab_comparison.png'
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        self.record_comparison()
+
+
+# ======================================================================
+# Composition: rho_log_axis + carrier_rate
+# ======================================================================
+
+class RhoLogCarrierCompositionTestCase(_CarrierBaseTestCase):
+    r"""Verify ``rho_log_axis=True`` and ``carrier_rate != 0.0`` compose.
+
+    The log-axis transform ``ur = log(rho-1)`` and the carrier demodulation/
+    remodulation are independent axes of the same chart.  This test builds a
+    chart exercising BOTH simultaneously and asserts the off-grid served
+    envelope matches the exact (non-demodulated) reference within the
+    held-out bar.  A failure would indicate an interaction bug (e.g. the
+    rho remap happening before/after the carrier remod instead of correctly
+    as orthogonal operations).
+    """
+
+    _GAMMA: float = 0.5
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.rng = np.random.default_rng(20260810)
+        # Off-grid rho probes.
+        cls._rho_probes: list[float] = []
+        for i in range(len(_RHO_GRID_LOG) - 1):
+            lo, hi = _RHO_GRID_LOG[i], _RHO_GRID_LOG[i + 1]
+            for _ in range(_N_RHO_PROBES):
+                cls._rho_probes.append(
+                    float(cls.rng.uniform(lo, hi)))
+        cls._rho_probes.sort()
+
+        cls._theta_c = float(_THETA_C_GRID[1])
+
+        # Build the composite chart: rho_log_axis=True + carrier_rate.
+        cls.chart = _build_rho_dependent_chart(
+            rho_log_axis=True, carrier_rate=K_CHART, parity=1,
+            gamma_grid=_GAMMA_GRID_POS)
+
+        # Pre-compute exact references at each off-grid rho.
+        cls._probes: list[
+            tuple[float, float, float, np.ndarray]
+        ] = []
+        for rho in cls._rho_probes:
+            y1, y2 = _source_for_node(gamma=cls._GAMMA,
+                                       rho=rho,
+                                       theta_c=cls._theta_c)
+            exact = _envelope_exact(rho, _LOG_W_GRID,
+                                    carrier_rate=K_CHART)
+            cls._probes.append((rho, y1, y2, exact))
+
+    def test_rho_log_carrier_off_grid_within_bar(self) -> None:
+        """Served envelope within bar at off-grid rho with both features."""
+        max_eps = 0.0
+        for rho, y1, y2, exact in self._probes:
+            served = sg._evaluate_chart(
+                self.chart, gamma=self._GAMMA, eta=0.5, theta=0.5,
+                log_w_query=_LOG_W_GRID, y1_eig=y1, y2_eig=y2)
+            denom = max(float(np.max(np.abs(exact))), 1e-300)
+            eps = float(np.max(np.abs(served - exact))) / denom
+            max_eps = max(max_eps, eps)
+        self.record_comparison()
+        self.assertLess(
+            max_eps, HELDOUT_BAR,
+            f'rho_log + carrier eps = {max_eps:.2e} >= {HELDOUT_BAR:.0e} '
+            f'— the composite (log-axis + carrier demod/remod) does not '
+            f'clear the held-out bar')
+
+    def test_rho_log_carrier_diagnostic_plot(self) -> None:
+        """Write residual vs rho for the composite chart."""
+        served = np.array([
+            sg._evaluate_chart(
+                self.chart, gamma=self._GAMMA, eta=0.5, theta=0.5,
+                log_w_query=_LOG_W_GRID, y1_eig=y1, y2_eig=y2)
+            for _, y1, y2, _ in self._probes
+        ])
+        exact = np.array([exact for _, _, _, exact in self._probes])
+        denom = np.maximum(np.max(np.abs(exact), axis=1), 1e-300)
+        eps = np.max(np.abs(served - exact), axis=1) / denom
+
+        fig, ax = plt.subplots(figsize=(5, 4))
+        ax.semilogy(self._rho_probes, eps, 'o-')
+        ax.axhline(HELDOUT_BAR, color='r', ls='--',
+                    label=f'bar = {HELDOUT_BAR:.0e}')
+        ax.set_xlabel('rho')
+        ax.set_ylabel(r'max|E_served - E_exact| / max|E_exact|')
+        ax.set_title('Composite (rho-log + carrier demod) residual')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        path = _OUTPUT_DIR / 'exterior_carrier_rho_log_composite.png'
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        self.record_comparison()
+
+
+# ======================================================================
+# Self-falsification — proves the A/B assertion can fail
+# ======================================================================
+
+class RhoLogAxisABSelfFalsificationTestCase(_CarrierBaseTestCase):
+    """Prove the A/B comparison has teeth.
+
+    If the radial dependence is REMOVED (constant envelope in rho), both
+    log and raw charts interpolate a constant function equally well and the
+    A/B comparison ratio collapses to near 1× — not enough to meet the
+    minimum ratio.  This proves the comparison measures something real.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # Build a rho-CONSTANT chart pair (p=0 power law => flat in rho).
+        # Use the same grids but fill with w-only envelope.
+        w_grid = np.exp(_LOG_W_GRID)
+        w_factor = 1.0 + _W_MOD_AMPLITUDE * (w_grid / _W_MEAN_TRAIN - 1.0)
+        n_g = _GAMMA_GRID_POS.size
+        n_t = _THETA_C_GRID.size
+        envelope_4d = (w_factor[:, None, None, None]
+                       * np.ones((1, n_g, _RHO_GRID_LOG.size, n_t)))
+
+        cls.chart_flat_log = sg.ExteriorPolarChart.from_values(
+            gamma_grid=_GAMMA_GRID_POS,
+            rho_grid=_RHO_GRID_LOG,
+            theta_c_grid=_THETA_C_GRID,
+            log_w_grid=_LOG_W_GRID,
+            envelope_real=envelope_4d.real.copy(),
+            envelope_imag=envelope_4d.imag.copy(),
+            image_count=2, parity=1,
+            envelope_definition=sg.FARFIELD_KERNEL_SUM,
+            rho_log_axis=True)
+        cls.chart_flat_raw = sg.ExteriorPolarChart.from_values(
+            gamma_grid=_GAMMA_GRID_POS,
+            rho_grid=_RHO_GRID_LOG,
+            theta_c_grid=_THETA_C_GRID,
+            log_w_grid=_LOG_W_GRID,
+            envelope_real=envelope_4d.real.copy(),
+            envelope_imag=envelope_4d.imag.copy(),
+            image_count=2, parity=1,
+            envelope_definition=sg.FARFIELD_KERNEL_SUM,
+            rho_log_axis=False)
+
+        cls.rng = np.random.default_rng(20260810)
+        cls._rho_probes = []
+        for i in range(len(_RHO_GRID_LOG) - 1):
+            lo, hi = _RHO_GRID_LOG[i], _RHO_GRID_LOG[i + 1]
+            for _ in range(_N_RHO_PROBES):
+                cls._rho_probes.append(
+                    float(cls.rng.uniform(lo, hi)))
+        cls._rho_probes.sort()
+
+        cls._gamma = float(_GAMMA_GRID_POS[1])
+        cls._theta_c = float(_THETA_C_GRID[1])
+
+        cls._probes = []
+        for rho in cls._rho_probes:
+            y1, y2 = _source_for_node(gamma=cls._gamma, rho=rho,
+                                       theta_c=cls._theta_c)
+            exact = _envelope_exact(rho, _LOG_W_GRID,
+                                    carrier_rate=0.0)
+            cls._probes.append((rho, y1, y2, exact))
+
+    def test_flat_rho_no_improvement(self) -> None:
+        """Constant envelope in rho → log-axis is NOT better."""
+        eps_log = []
+        eps_raw = []
+        for rho, y1, y2, exact in self._probes:
+            sl = sg._evaluate_chart(
+                self.chart_flat_log, gamma=self._gamma, eta=0.5, theta=0.5,
+                log_w_query=_LOG_W_GRID, y1_eig=y1, y2_eig=y2)
+            sr = sg._evaluate_chart(
+                self.chart_flat_raw, gamma=self._gamma, eta=0.5, theta=0.5,
+                log_w_query=_LOG_W_GRID, y1_eig=y1, y2_eig=y2)
+            denom = max(float(np.max(np.abs(exact))), 1e-300)
+            eps_log.append(
+                float(np.max(np.abs(sl - exact))) / denom)
+            eps_raw.append(
+                float(np.max(np.abs(sr - exact))) / denom)
+        max_log = max(eps_log)
+        max_raw = max(eps_raw)
+        ratio = max_raw / max(max_log, 1e-300) if max_log > 0 else 1.0
+        self.record_comparison()
+        self.assertLess(
+            ratio, _AB_RATIO_MIN,
+            f'flat-rho ratio = {ratio:.1f}× >= {_AB_RATIO_MIN}× — '
+            f'the A/B comparison would pass even without rho structure; '
+            f'the detector has no teeth (log={max_log:.2e}, '
+            f'raw={max_raw:.2e})')
+
+    def test_synthetic_ratio_can_exceed_bar(self) -> None:
+        """Demonstrate the A/B assertion CAN fail: trivial case."""
+        # When both charts produce identical eps (or log > raw), ratio < 1
+        # and the assertLog > ratio_min assertion would fire.
+        # This test verifies the logic is reachable-red.
+        self.record_comparison()
+        self.assertLess(1.0, _AB_RATIO_MIN,
+                        f'{_AB_RATIO_MIN}× is too low — any ratio '
+                        f'would qualify, including 1.0× (no improvement)')
+
+
+# ======================================================================
+# Self-falsification — composite (carrier + rho_log)
+# ======================================================================
+
+class RhoLogCompositionSelfFalsificationTestCase(_CarrierBaseTestCase):
+    """Prove the composition test can detect failures."""
+
+    _GAMMA: float = 0.5
+    _THETA_C: float = float(_THETA_C_GRID[1])
+    _RHO_OFF: float = float(_RHO_GRID_LOG[1] + _RHO_GRID_LOG[2]) / 2.0
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._y1, cls._y2 = _source_for_node(
+            gamma=cls._GAMMA, rho=cls._RHO_OFF,
+            theta_c=cls._THETA_C)
+        cls._exact = _envelope_exact(cls._RHO_OFF, _LOG_W_GRID,
+                                     carrier_rate=K_CHART)
+        cls._denom = float(np.max(np.abs(cls._exact))) or 1.0
+
+    def test_wrong_carrier_rate_above_bar(self) -> None:
+        """rho_log=True + wrong carrier_rate → off-grid error > bar."""
+        chart_bad = _build_rho_dependent_chart(
+            rho_log_axis=True,
+            carrier_rate=K_CHART + DELTA_K,  # corrupted
+            parity=1, gamma_grid=_GAMMA_GRID_POS)
+        served = sg._evaluate_chart(
+            chart_bad, gamma=self._GAMMA, eta=0.5, theta=0.5,
+            log_w_query=_LOG_W_GRID,
+            y1_eig=self._y1, y2_eig=self._y2)
+        eps = float(np.max(np.abs(served - self._exact))) / self._denom
+        self.record_comparison()
+        self.assertGreater(
+            eps, HELDOUT_BAR,
+            f'wrong-k composite eps = {eps:.2e} <= {HELDOUT_BAR:.0e} — '
+            f'Δk={DELTA_K} does NOT break the composite composition test')
+
+    def test_composite_no_carrier_above_bar(self) -> None:
+        """rho_log=True + carrier_rate=0 → error > bar for modulated E."""
+        chart_nok = _build_rho_dependent_chart(
+            rho_log_axis=True,
+            carrier_rate=0.0,  # missing carrier
+            parity=1, gamma_grid=_GAMMA_GRID_POS)
+        served = sg._evaluate_chart(
+            chart_nok, gamma=self._GAMMA, eta=0.5, theta=0.5,
+            log_w_query=_LOG_W_GRID,
+            y1_eig=self._y1, y2_eig=self._y2)
+        eps = float(np.max(np.abs(served - self._exact))) / self._denom
+        self.record_comparison()
+        self.assertGreater(
+            eps, HELDOUT_BAR,
+            f'no-carrier composite eps = {eps:.2e} <= {HELDOUT_BAR:.0e} — '
+            f'a genuinely modulated envelope with carrier_rate=0 does NOT '
+            f'break the composition test')

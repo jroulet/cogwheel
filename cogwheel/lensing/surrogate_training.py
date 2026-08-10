@@ -2861,7 +2861,8 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
             n_theta_c=config.n_rho,
             w_nodes_per_decade=nodes_per_decade,
             definition=FARFIELD_KERNEL_SUM,
-            theta_to_u=theta_to_u, u_grid=u_grid)
+            theta_to_u=theta_to_u, u_grid=u_grid,
+            rho_log_axis=True)
     except CarrierDiscontinuityError as exc:
         raise CarrierDiscontinuityError(
             'Exterior-polar tile label winds faster than the Nyquist '

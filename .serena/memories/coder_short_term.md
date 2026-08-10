@@ -22,14 +22,19 @@
 - Orphaned comment line "#: Deltoid-lobe interior near-cusp carve-out
   distance..." on former _LOBE_CUSP_EXCLUSION_DISTANCE line left as-is
   (cosmetic only, not in scope).
-- (carrier_demod_1 build, 2026-08-10):
-- Added carrier_rate field (float, default 0.0) to ExteriorPolarChart.
-- from_values: when carrier_rate != 0, demodulates envelope by exp(-1j * carrier_rate * w_grid[:,None,None,None]) before spline fitting.
-- _evaluate_chart ExteriorPolarChart branch: re-modulates via exp(1j * carrier_rate * w_query) after spline when carrier_rate != 0.
-- LensAmplificationSurrogate.from_engine: after carrier continuity check (unchanged, on pre-demod envelope), estimates per-node k_node via unwrap+finite-diff, median → k_chart, demodulates envelope arrays, passes carrier_rate=k_chart to from_values.
-- _chart_to_npz exterior polar branch: writes carrier_rate in meta, axis_schema → new tag _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER = 'exterior_polar_carrier_demod_v2'.
-- _chart_from_npz exterior polar branch: reads carrier_rate via meta.get('carrier_rate', 0.0) for backward compat, passes to _assemble.
-- _assemble: accepts carrier_rate param with validation (must be finite).
-- _build_provenance: uses _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER.
-- _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER}); old 'exterior_polar_rho_u_v1' tag removed → hard-refuses at load.
+- ((carrier_demod_1 build, 2026-08-10):...
 - Test files that import _EXTERIOR_POLAR_AXIS_SCHEMA directly will get ImportError (renamed to _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER) — test_dev to fix.
+(INCLUDED: NEW ENTRY BELOW)
+
+(rho_log_axis build, 2026-08-10):
+- Renamed _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER -> _EXTERIOR_POLAR_AXIS_SCHEMA_V3 with value 'exterior_polar_rho_log_v3'. Old tag removed from _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS (hard-refuse on pre-v3 artifacts).
+- Added rho_log_axis: bool = False field to ExteriorPolarChart (after carrier_rate).
+- from_values: rho_log_axis=True validates rho_grid[0] > 1.0, computes ur_grid = log(rho_grid - 1.0), replaces the 3rd spline axis with ur_grid. Passes rho_log_axis to _assemble.
+- _assemble: new rho_log_axis param, passes through to cls(...).
+- _evaluate_chart exterior branch: when chart.rho_log_axis, v1 = math.log(v1 - 1.0) replaces raw rho.
+- _chart_to_npz: meta adds 'rho_log_axis', axis_schema uses _EXTERIOR_POLAR_AXIS_SCHEMA_V3.
+- _chart_from_npz: reads rho_log_axis = meta.get('rho_log_axis', False) for backward compat, passes to _assemble.
+- _build_provenance: axis_schema -> _EXTERIOR_POLAR_AXIS_SCHEMA_V3.
+- LensAmplificationSurrogate.from_engine: new rho_log_axis param, passed through to ExteriorPolarChart.from_values.
+- _build_farfield_chart: passes rho_log_axis=True to from_engine for both parity branches.
+- Test files importing _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER will get ImportError — test_dev to fix.
