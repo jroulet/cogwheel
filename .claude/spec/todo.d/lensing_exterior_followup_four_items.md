@@ -36,7 +36,7 @@ depends_on: [2026-08-07_polar_rechart]
   where it makes the remainder smooth. Then the label can be used everywhere
   outside, exactly as the owner proposes, and the decay gate can retire.
 
-  ## 2. Cusp exclusion belongs in the TILER
+  ## 2. Cusp exclusion belongs in the TILER (DONE: 2026-08-09, build exterior_cusp_exclusion_cut, commit d685ebe)
 
   Pearcey is a SERVING RUNG, not a chart: `_pearcey_cusp.cusp_amplification` is
   called from `operator.py:447` inside `F_op`'s ladder, which returns the first
@@ -65,7 +65,7 @@ depends_on: [2026-08-07_polar_rechart]
   charts are children. It was the INTERIOR wedge path that had none; that is
   being fixed in the `wedge_cusp_axis` build.
 
-  ## 4. ppGO as the fallback rung where charts cannot reach
+  ## 4. ppGO as the fallback rung where charts cannot reach (DONE: 2026-08-08, build exterior_followup WP4, commit 609d8d3)
 
   Where the exact engine cannot extend a chart — above the QD ceiling
   (`W_CEILING_SCHWINGER_QD = 150`), or where the DD product cap

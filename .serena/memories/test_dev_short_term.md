@@ -1,5 +1,33 @@
 # Test Dev Short-Term Observations
 
+2026-08-10: Updated test_lensing_surrogate.py for carrier_demod schema migration (carrier_demod_v2):
+  - ExteriorPolarStaleSchemaHardRefusalTestCase: 8 tests (was 3). Both
+    exterior_polar_rho_theta_c and exterior_polar_rho_u_v1 hard-refuse;
+    new carrier_demod_v2 schema accepted; carrier_rate preserved through NPZ
+    round-trip (0.5); zero-carrier backward compat (missing key → 0.0);
+    NaN/Inf guard. Updated _build_minimal_npz to accept carrier_rate and
+    include_carrier_rate params.
+  - ExteriorPolarCuspAdaptedFromValuesTestCase: 6 tests (was 4, +2 for
+    carrier_rate default=0.0 and storage when nonzero).
+  - ExteriorPolarCuspAdaptedSerializationTestCase: 3 tests (was 2, +1 for
+    carrier_rate surviving production save/load round-trip).
+  All 26 ExteriorPolar tests green.
+  PRE-EXISTING FAILURES (from production code's from_engine carrier
+  estimation): BetaEliminationTestCase (2 tests, eps=0.144 >> 2e-9) and
+  LnlikeAccuracyTestCase.test_positive_served_lnlike_tracks_engine (0.582 >
+  0.5). These pass on HEAD (old production code) — the carrier_demod
+  production change from from_engine modifies the chart's trained envelope
+  (demodulates with estimated k_chart) and the reference/envelope comparison
+  at serve time no longer matches at the old tolerance.
+
+2026-08-10: Wrote test_lensing_exterior_carrier.py (carrier demodulation round-trip):
+  - NodeRoundTripTestCase (3 tests): node-exact round-trip to 1e-13 at all 64 (4³) spatial nodes × 5 w-nodes, backward-compat zero-carrier, wiring guard (carrier_rate is stored correctly).  Measured node-err ≤ 3e-15.
+  - HeldOutAccuracyTestCase (2 tests): w-midpoint eps 3.12e-05 < 1e-3 bar (5 w-nodes, 20% amplitude modulation), diagnostic plot saved to tests/output/.
+  - SelfFalsificationTestCase (4 tests): Δk=0.1 corrupted eps=1.06e-2 > bar (> 340× correct), zero-k eps=1.87e-3 > bar (> 60× correct), sanity assert correct < bar.
+  - CarrierSelfFalsificationTestCase (3 tests): wrong reference detectable, node-exact assertion can fail deliberately, coarse 4-node grid with large modulation fails bar (5.57e-3 > 1e-3).
+  Key bug found and fixed: _build_w_envelope originally computed w_mean from the QUERY grid, not the TRAINING grid — held-out reference used different w_mean causing inflated eps (7e-3 vs real 3e-5).  Fixed by adding optional w_mean parameter, passing _W_MEAN_TRAIN for all held-out references.
+  5 classes, 12 tests, all green.  Diagnostic plot: exterior_carrier_held_out_residual.png.
+
 2026-08-09: Wrote test_lensing_exterior_admission.py WP3 (exterior-cusp-exclusion):
   - ExcludeNearCuspBandEdgeTestCase (2 tests): gamma_band band-edge check is load-bearing
     (excluded at gamma_lo=0.25 where r_caustic is SMALLER, NOT at mid-gamma=0.30;

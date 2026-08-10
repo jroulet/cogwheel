@@ -147,7 +147,7 @@ from cogwheel.lensing.chang_refsdal._schwinger import (
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate, ExteriorPolarChart, TubeChart,
     _FARFIELD_ENVELOPE_DEFINITION, _KNOWN_ENVELOPE_DEFINITIONS,
-    _EXTERIOR_POLAR_AXIS_SCHEMA, _wedge_cusp_axis_map,
+    _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER, _wedge_cusp_axis_map,
     _wedge_theta_waist)
 from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing import surrogate_training
@@ -1088,7 +1088,7 @@ def _legacy_single_box_arrays(chart: ExteriorPolarChart, tag: str | None
         'knot_log_w': knot_log_w, 'knot_gamma': knot_gamma,
         'knot_rho': knot_rho, 'knot_theta_c': knot_theta_c,
         'refused_points': chart.refused_points,
-        'axis_schema': np.array(_EXTERIOR_POLAR_AXIS_SCHEMA),
+        'axis_schema': np.array(_EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER),
         'provenance': np.array(json.dumps({}))}
     if tag is not None:
         arrays['envelope_definition'] = np.array(tag)
@@ -2218,7 +2218,7 @@ class StaleFarfieldAxisSchemaRefusalTestCase(FarfieldEnvelopeTestCase):
         self.assertNotIn(OLD_EXTERIOR_POLAR_AXIS_SCHEMA,
                          surrogate_module._KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS)
         self.comparisons += 1
-        self.assertIn(_EXTERIOR_POLAR_AXIS_SCHEMA,
+        self.assertIn(_EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER,
                       surrogate_module._KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS)
 
 

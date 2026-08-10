@@ -3745,6 +3745,34 @@ class ExteriorPolarCuspAdaptedFromValuesTestCase(SurrogateTestCase):
                 theta_to_u=_CUSP_THETA_TO_U, u_grid=None)
         self.n_checks += 1
 
+    def test_carrier_rate_default_zero(self):
+        """from_values default carrier_rate is 0.0."""
+        self.n_checks += 1
+        self.assertEqual(self.chart_with_map.carrier_rate, 0.0,
+                         'default carrier_rate should be 0.0')
+        self.n_checks += 1
+        self.assertEqual(self.chart_without_map.carrier_rate, 0.0,
+                         'default carrier_rate should be 0.0')
+
+    def test_carrier_rate_stored_when_nonzero(self):
+        """carrier_rate=0.5 is stored correctly in the chart."""
+        real = _cusp_synthetic_envelope_real(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        imag = _cusp_synthetic_envelope_imag(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        chart = surrogate_module.ExteriorPolarChart.from_values(
+            gamma_grid=_CUSP_GAMMA_AXIS, rho_grid=_CUSP_RHO_AXIS,
+            theta_c_grid=_CUSP_THETA_C_AXIS, log_w_grid=_CUSP_LOG_W_AXIS,
+            envelope_real=real, envelope_imag=imag,
+            image_count=2, parity=1,
+            theta_to_u=_CUSP_THETA_TO_U, u_grid=_CUSP_U_AXIS,
+            carrier_rate=0.5)
+        self.n_checks += 1
+        self.assertEqual(chart.carrier_rate, 0.5,
+                         'carrier_rate not stored correctly')
+
 
 class ExteriorPolarCuspAdaptedSerializationTestCase(SurrogateTestCase):
     """NPZ write/read cycles preserve theta_to_u and the full chart bitwise."""
@@ -3807,27 +3835,72 @@ class ExteriorPolarCuspAdaptedSerializationTestCase(SurrogateTestCase):
                         f'{field_name} changed after npz round-trip')
         self.n_checks += 1
 
+    def test_carrier_rate_preserved_through_npz_roundtrip(self):
+        """carrier_rate=0.5 survives production save/load round-trip."""
+        real = _cusp_synthetic_envelope_real(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        imag = _cusp_synthetic_envelope_imag(
+            _CUSP_GAMMA_AXIS, _CUSP_RHO_AXIS, _CUSP_THETA_C_AXIS,
+            _CUSP_LOG_W_AXIS)
+        chart = surrogate_module.ExteriorPolarChart.from_values(
+            gamma_grid=_CUSP_GAMMA_AXIS, rho_grid=_CUSP_RHO_AXIS,
+            theta_c_grid=_CUSP_THETA_C_AXIS, log_w_grid=_CUSP_LOG_W_AXIS,
+            envelope_real=real, envelope_imag=imag,
+            image_count=2, parity=1,
+            theta_to_u=_CUSP_THETA_TO_U, u_grid=_CUSP_U_AXIS,
+            carrier_rate=0.5)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'chart.npz'
+            sur = LensAmplificationSurrogate(
+                [chart], {'engine_version': 'test'})
+            sur.save(path)
+            reloaded = LensAmplificationSurrogate.load(path)
+        reloaded_chart = reloaded.charts[0]
+        self.assertIsInstance(reloaded_chart,
+                              surrogate_module.ExteriorPolarChart)
+        self.n_checks += 1
+        self.assertEqual(reloaded_chart.carrier_rate, 0.5,
+                         'carrier_rate not preserved through save/load '
+                         'round-trip')
+        self.n_checks += 1
+        np.testing.assert_array_equal(
+            reloaded_chart.real_coeffs, chart.real_coeffs,
+            err_msg='real_coeffs changed after npz round-trip')
+        np.testing.assert_array_equal(
+            reloaded_chart.imag_coeffs, chart.imag_coeffs,
+            err_msg='imag_coeffs changed after npz round-trip')
+
 
 
 class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
-    """Old (retired) schema hard-refuses; missing theta_to_u loads as None.
+    """Old (retired) schemas hard-refuse; carrier_rate preserved through NPZ.
 
-    The old ``exterior_polar_rho_theta_c`` axis-schema tag (retired in
-    WP1) is NOT in `_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS`, so `_chart_from_npz`
-    raises ``ValueError`` before it ever reaches the ``theta_to_u`` key
-    access.  A new-schema artifact that OMITS the ``theta_to_u`` key
-    (e.g. a synthetic chart built without the cusp-adapted map, or a
-    saddle-exterior chart) passes the schema gate and loads with
-    ``theta_to_u=None`` via ``data.get()``.
+    Both ``exterior_polar_rho_theta_c`` (retired in WP1) and
+    ``exterior_polar_rho_u_v1`` (retired in the carrier-demod migration)
+    are NOT in `_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS`, so ``_chart_from_npz``
+    raises ``ValueError``.  The NEW ``exterior_polar_carrier_demod_v2``
+    schema includes a ``carrier_rate`` key in meta; a chart saved without
+    it (backward-compatible artifact) loads via ``meta.get('carrier_rate',
+    0.0)`` → ``carrier_rate=0.0``.
     """
 
-    def _build_minimal_npz(self, axis_schema, include_theta_to_u=True):
+    def _build_minimal_npz(self, axis_schema, include_theta_to_u=True,
+                           carrier_rate=0.0, include_carrier_rate=True):
         """Build a minimal npz dict for one exterior-polar chart.
 
-        Returns a writable dict that `_chart_from_npz` can read.  The
-        axes, coefficients, and labels are minimal but valid -- the test
-        cares only about the schema/theta_to_u gate, not numerical
-        correctness.
+        Parameters
+        ----------
+        axis_schema : str
+            Value for the ``axis_schema`` meta key.
+        include_theta_to_u : bool
+            If True, write a synthetic ``theta_to_u`` map.
+        carrier_rate : float
+            Value for the ``carrier_rate`` meta key (ignored when
+            ``include_carrier_rate`` is False).
+        include_carrier_rate : bool
+            If False, the ``carrier_rate`` key is OMITTED from meta
+            (backward-compatible artifact with no key).
         """
         n = 4
         gamma = surrogate_module._uniform_axis((0.4, 0.5), n, 'gamma')
@@ -3839,7 +3912,8 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
                 'eta_overlap_min': 0.05,
                 'envelope_definition': 'farfield_full_kernel_sum',
                 'axis_schema': axis_schema}
-        # Build a proper tensor spline so knots are valid.
+        if include_carrier_rate:
+            meta['carrier_rate'] = float(carrier_rate)
         real = np.ones(shape, dtype=float)
         imag = np.zeros(shape, dtype=float)
         real_c, imag_c, knots = surrogate_module._fit_tensor_spline(
@@ -3866,11 +3940,20 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
             np.savez_compressed(path, **data)
             return surrogate_module._chart_from_npz(np.load(path), 0)
 
-    def test_old_schema_raises_valueerror(self):
-
-        """A chart stamped with the retired schema hard-refuses."""
+    def test_old_rho_theta_c_schema_raises_valueerror(self):
+        """``exterior_polar_rho_theta_c`` hard-refuses (retired WP1)."""
         data = self._build_minimal_npz(
             'exterior_polar_rho_theta_c', include_theta_to_u=True)
+        with self.assertRaises(ValueError) as ctx:
+            self._write_and_load(data)
+        self.assertIn('axis-schema tag', str(ctx.exception))
+        self.n_checks += 1
+
+    def test_old_rho_u_v1_schema_raises_valueerror(self):
+        """``exterior_polar_rho_u_v1`` hard-refuses (retired in carrier-demod
+        migration -- replaced by ``exterior_polar_carrier_demod_v2``)."""
+        data = self._build_minimal_npz(
+            'exterior_polar_rho_u_v1', include_theta_to_u=True)
         with self.assertRaises(ValueError) as ctx:
             self._write_and_load(data)
         self.assertIn('axis-schema tag', str(ctx.exception))
@@ -3879,7 +3962,7 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     def test_new_schema_without_theta_to_u_loads_with_none(self):
         """A new-schema chart missing theta_to_u loads with theta_to_u=None."""
         data = self._build_minimal_npz(
-            'exterior_polar_rho_u_v1', include_theta_to_u=False)
+            'exterior_polar_carrier_demod_v2', include_theta_to_u=False)
         chart = self._write_and_load(data)
         self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
         self.assertIsNone(chart.theta_to_u)
@@ -3888,10 +3971,64 @@ class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     def test_valid_schema_with_theta_to_u_loads_successfully(self):
         """A valid new-schema chart with theta_to_u loads without error."""
         data = self._build_minimal_npz(
-            'exterior_polar_rho_u_v1', include_theta_to_u=True)
+            'exterior_polar_carrier_demod_v2', include_theta_to_u=True)
         chart = self._write_and_load(data)
         self.assertIsNotNone(chart)
         self.assertIsNotNone(chart.theta_to_u)
+        self.n_checks += 1
+
+    def test_carrier_rate_preserved_through_npz(self):
+        """carrier_rate=0.5 survives `_chart_to_npz`-style NPZ round-trip."""
+        data = self._build_minimal_npz(
+            'exterior_polar_carrier_demod_v2', include_theta_to_u=True,
+            carrier_rate=0.5)
+        chart = self._write_and_load(data)
+        self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
+        self.assertEqual(chart.carrier_rate, 0.5,
+                         'carrier_rate not preserved through NPZ round-trip')
+        self.n_checks += 1
+
+    def test_zero_carrier_backward_compat(self):
+        """NPZ without carrier_rate key loads as carrier_rate=0.0."""
+        data = self._build_minimal_npz(
+            'exterior_polar_carrier_demod_v2', include_theta_to_u=True,
+            include_carrier_rate=False)
+        chart = self._write_and_load(data)
+        self.assertIsInstance(chart, surrogate_module.ExteriorPolarChart)
+        self.assertEqual(chart.carrier_rate, 0.0,
+                         'missing carrier_rate key should default to 0.0')
+        self.n_checks += 1
+
+    def test_carrier_rate_finite_guard_nan_raises(self):
+        """non-finite carrier_rate raises ValueError in _assemble."""
+        with self.assertRaises(ValueError):
+            surrogate_module.ExteriorPolarChart._assemble(
+                gamma_grid=np.array([0.3, 0.4, 0.5, 0.6]),
+                rho_grid=np.array([1.6, 1.8, 2.0, 2.2]),
+                theta_c_grid=np.array([0.1, 0.15, 0.2, 0.25]),
+                log_w_grid=np.array([2.3, 2.6, 2.9, 3.2]),
+                real_coeffs=np.zeros((4, 4, 4, 4)),
+                imag_coeffs=np.zeros((4, 4, 4, 4)),
+                knots=tuple(np.zeros(8) for _ in range(4)),
+                image_count=2, parity=1, eta_overlap_min=0.05,
+                refused_points=np.empty((0, 3), dtype=float),
+                carrier_rate=np.nan)
+        self.n_checks += 1
+
+    def test_carrier_rate_finite_guard_inf_raises(self):
+        """+inf carrier_rate raises ValueError in _assemble."""
+        with self.assertRaises(ValueError):
+            surrogate_module.ExteriorPolarChart._assemble(
+                gamma_grid=np.array([0.3, 0.4, 0.5, 0.6]),
+                rho_grid=np.array([1.6, 1.8, 2.0, 2.2]),
+                theta_c_grid=np.array([0.1, 0.15, 0.2, 0.25]),
+                log_w_grid=np.array([2.3, 2.6, 2.9, 3.2]),
+                real_coeffs=np.zeros((4, 4, 4, 4)),
+                imag_coeffs=np.zeros((4, 4, 4, 4)),
+                knots=tuple(np.zeros(8) for _ in range(4)),
+                image_count=2, parity=1, eta_overlap_min=0.05,
+                refused_points=np.empty((0, 3), dtype=float),
+                carrier_rate=np.inf)
         self.n_checks += 1
 
 

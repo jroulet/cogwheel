@@ -253,8 +253,8 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
 # ``exp(+1j w t_min)``); the tag carries a ``_framewinv`` suffix and the loader
 # hard-refuses any frame-dependent-label artifact rather than serving a
 # finite-but-wrong reconstruction.
-_EXTERIOR_POLAR_AXIS_SCHEMA = 'exterior_polar_rho_u_v1'
-_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA})
+_EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER = 'exterior_polar_carrier_demod_v2'
+_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER})
 _EXTERIOR_POLAR_CARRIER_STEP_MAX = 1.0
 _LOBE_AXIS_SCHEMA_NEW = 'lobe_caustic_relative_v1'
 _KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_NEW})
@@ -1572,6 +1572,13 @@ class ExteriorPolarChart:
         D₂-folded quadrant).  When ``None``, the spline axis is raw
         ``theta_c`` (backward-compatible with fixtures not built via the
         cusp-adapted coordinate).
+    carrier_rate : float
+        Residual carrier-phase rate ``k_chart`` (frequency-slope of the
+        demodulated envelope).  When nonzero, the stored spline
+        coefficients were fit on the demodulated envelope
+        ``E_tilde * exp(-1j * k_chart * w)``, and serve re-modulates
+        via ``exp(+1j * k_chart * w)``.  Default 0.0 (no demodulation,
+        backward-compatible).
     """
 
     gamma_grid: np.ndarray
@@ -1588,6 +1595,7 @@ class ExteriorPolarChart:
     param_spacing: np.ndarray
     envelope_definition: str
     theta_to_u: np.ndarray | None
+    carrier_rate: float = 0.0
 
     @classmethod
     def from_values(cls, *, gamma_grid: np.ndarray, rho_grid: np.ndarray,
@@ -1598,7 +1606,8 @@ class ExteriorPolarChart:
                     refused_points: np.ndarray | None = None,
                     envelope_definition: str = _FARFIELD_ENVELOPE_DEFINITION,
                     theta_to_u: np.ndarray | None = None,
-                    u_grid: np.ndarray | None = None
+                    u_grid: np.ndarray | None = None,
+                    carrier_rate: float = 0.0
                     ) -> 'ExteriorPolarChart':
         """Build an exterior-polar chart by fitting splines to a value tensor.
 
@@ -1626,6 +1635,12 @@ class ExteriorPolarChart:
         u_grid : np.ndarray or None, optional
             1-D strictly increasing u-coordinate nodes (same length as
             ``theta_c_grid``).  Required when ``theta_to_u`` is given.
+        carrier_rate : float, optional
+            Residual carrier-phase rate ``k_chart``.  When nonzero,
+            the envelope is demodulated by
+            ``exp(-1j * k_chart * w_grid[:, None, None, None])`` before
+            fitting so the spline absorbs a lower-frequency label.
+            Default 0.0 (no demodulation, backward-compatible).
         """
         gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
         rho_grid = _validate_axis(rho_grid, 'rho_grid')
@@ -1647,20 +1662,27 @@ class ExteriorPolarChart:
         else:
             raise ValueError(
                 'theta_to_u and u_grid must both be None or both provided.')
+        if carrier_rate != 0.0:
+            w_grid = np.exp(log_w_grid)
+            demod = np.exp(-1j * carrier_rate * w_grid[:, None, None, None])
+            demod_envelope = (envelope_real + 1j * envelope_imag) * demod
+            envelope_real = demod_envelope.real
+            envelope_imag = demod_envelope.imag
         real_c, imag_c, knots = _fit_tensor_spline(
             spline_axes, envelope_real, envelope_imag)
         return cls._assemble(
             gamma_grid, rho_grid, theta_c_grid, log_w_grid, real_c, imag_c,
             knots, image_count, parity, eta_overlap_min, refused_points,
             envelope_definition=envelope_definition,
-            theta_to_u=theta_to_u)
+            theta_to_u=theta_to_u, carrier_rate=carrier_rate)
 
     @classmethod
     def _assemble(cls, gamma_grid, rho_grid, theta_c_grid, log_w_grid,
                   real_coeffs, imag_coeffs, knots, image_count, parity,
                   eta_overlap_min, refused_points,
                   envelope_definition=_FARFIELD_ENVELOPE_DEFINITION,
-                  theta_to_u=None
+                  theta_to_u=None,
+                  carrier_rate: float = 0.0
                   ) -> 'ExteriorPolarChart':
         """Assemble a chart from prebuilt coefficient tensors and knots.
 
@@ -1675,6 +1697,9 @@ class ExteriorPolarChart:
             float(np.mean(np.diff(gamma_grid))),
             float(np.mean(np.diff(rho_grid))),
             float(np.mean(np.diff(theta_c_grid)))])
+        if not np.isfinite(carrier_rate):
+            raise ValueError(
+                f'carrier_rate must be finite, got {carrier_rate}.')
         return cls(
             gamma_grid=gamma_grid,
             rho_grid=rho_grid,
@@ -1690,7 +1715,8 @@ class ExteriorPolarChart:
             param_spacing=param_spacing,
             envelope_definition=str(envelope_definition),
             theta_to_u=(np.ascontiguousarray(theta_to_u, dtype=float)
-                        if theta_to_u is not None else None))
+                        if theta_to_u is not None else None),
+            carrier_rate=float(carrier_rate))
 
 
 @dataclass(frozen=True, eq=False)
@@ -2739,7 +2765,11 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
                                    gamma, v1, v2, log_w_clamped)
     imag = _contract_tensor_spline(chart.imag_coeffs, chart.knots,
                                    gamma, v1, v2, log_w_clamped)
-    return real + 1j * imag
+    result = real + 1j * imag
+    if isinstance(chart, ExteriorPolarChart) and chart.carrier_rate != 0.0:
+        w_query = np.exp(log_w_clamped)
+        result *= np.exp(1j * chart.carrier_rate * w_query)
+    return result
 
 
 class LensAmplificationSurrogate:
@@ -2958,6 +2988,35 @@ class LensAmplificationSurrogate:
             gamma_grid,
             (gamma_grid.size, rho_grid.size, theta_c_grid.size))
 
+        # Estimate residual carrier-phase rate per valid spatial node.
+        # For each node with a valid (not refused) envelope, unwrap the
+        # phase along w and use the finite difference between the first
+        # and last w-node to estimate the per-node slope k_node.  The
+        # median over valid nodes is robust to F022 amplitude-null pi-jump
+        # outliers.  If no valid nodes, k_chart stays 0.0.
+        env_complex = envelope_real + 1j * envelope_imag
+        k_nodes = []
+        n_w = log_w_grid.size
+        for i_g in range(gamma_grid.size):
+            for i_r in range(rho_grid.size):
+                for i_t in range(theta_c_grid.size):
+                    env_node = env_complex[:, i_g, i_r, i_t]
+                    if not np.all(np.isfinite(env_node)):
+                        continue
+                    uw = np.unwrap(np.angle(env_node))
+                    k_node = (uw[-1] - uw[0]) / (w_grid[-1] - w_grid[0])
+                    if np.isfinite(k_node):
+                        k_nodes.append(k_node)
+        if k_nodes:
+            k_chart = float(np.median(k_nodes))
+        else:
+            k_chart = 0.0
+        # The single canonical demodulation site is from_values (carrier_rate
+        # != 0 -> E * exp(-1j*k_chart*w) before fitting, re-modulated at
+        # serve).  Pass the RAW envelope + carrier_rate here so the envelope
+        # is demodulated EXACTLY ONCE -- pre-demodulating here AND passing
+        # carrier_rate would double-demodulate (INS-15-001).
+
         refused_points = (np.array(refused, dtype=float) if refused
                           else np.empty((0, 3), dtype=float))
         image_count, parity = cls._box_region_labels(
@@ -2970,7 +3029,8 @@ class LensAmplificationSurrogate:
             eta_overlap_min=_DEFAULT_CAUSTIC_FLOOR,
             refused_points=refused_points,
             envelope_definition=definition,
-            theta_to_u=theta_to_u, u_grid=u_grid)
+            theta_to_u=theta_to_u, u_grid=u_grid,
+            carrier_rate=k_chart)
         provenance = cls._build_provenance(
             gamma_range, rho_range, theta_c_range, w_range, shape,
             envelope_real, envelope_imag)
@@ -3443,7 +3503,7 @@ class LensAmplificationSurrogate:
             'rho_range': [float(rho_range[0]), float(rho_range[1])],
             'theta_c_range': [float(theta_c_range[0]),
                               float(theta_c_range[1])],
-            'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA,
+            'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER,
             'w_range': [float(w_range[0]), float(w_range[1])],
             'resolution': {'n_w': int(n_w), 'n_gamma': int(n_gamma),
                            'n_rho': int(n_rho),
@@ -4026,7 +4086,8 @@ def _chart_to_npz(chart, index: int) -> dict:
                 'parity': chart.parity,
                 'eta_overlap_min': chart.eta_overlap_min,
                 'envelope_definition': chart.envelope_definition,
-                'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA}
+                'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER,
+                'carrier_rate': float(chart.carrier_rate)}
         axes = (chart.log_w_grid, chart.gamma_grid, chart.rho_grid,
                 chart.theta_c_grid)
         arrays = {prefix + 'refused': chart.refused_points}
@@ -4125,6 +4186,7 @@ def _chart_from_npz(data, index: int):
     # parity=-1, or any chart built with the raw-theta fallback), the
     # loader treats it as None — `_assemble` already handles None.
     theta_to_u = data.get(prefix + 'theta_to_u')
+    carrier_rate = meta.get('carrier_rate', 0.0)
     return ExteriorPolarChart._assemble(
         gamma_grid=gamma_grid, rho_grid=p1_grid, theta_c_grid=p2_grid,
         log_w_grid=log_w_grid, real_coeffs=real_coeffs,
@@ -4133,4 +4195,5 @@ def _chart_from_npz(data, index: int):
         eta_overlap_min=meta['eta_overlap_min'],
         refused_points=data[prefix + 'refused'],
         envelope_definition=definition,
-        theta_to_u=theta_to_u)
+        theta_to_u=theta_to_u,
+        carrier_rate=carrier_rate)

@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [lensing_exterior_cusp_exclusion_cut]
+depends_on: [2026-08-09_exterior_cusp_exclusion_cut]
 ---
 
 - **Exterior envelope w-axis power-law conditioning (log-scale fit)**
