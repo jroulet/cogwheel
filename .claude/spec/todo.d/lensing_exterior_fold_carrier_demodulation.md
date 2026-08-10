@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [lensing_exterior_rho_phase_carrier]
+depends_on: [2026-08-10_exterior_rho_phase_carrier]
 ---
 
 - **Exterior fold-carrier phase demodulation (recover ghost-transition zone)**

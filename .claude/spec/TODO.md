@@ -1100,6 +1100,43 @@ Tag conventions:
   identical values; and the saddle interior charts one half-lobe.
 
 
+- **Exterior fold-carrier phase demodulation (recover ghost-transition zone)**
+  `[→ spec]` — identified 2026-08-10 after the ghost-gate exclusion build.
+
+  The ghost-gate exclusion (cf81d66) correctly excludes tiles where the
+  unsubtracted ghost dominates the KERNEL_SUM residual, but that is ~40%
+  of the exterior prior box (measured). Those draws fall to the exact
+  engine (correct but ~tens of ms/node vs surrogate speed). This build
+  recovers them at surrogate speed via analytic FOLD-CARRIER phase
+  demodulation:
+
+  The ghost's phase oscillation is e^{iw·Re(tau_c(rho))}, where tau_c is
+  the delay of the fold point where the two real images merged (the ghost
+  is the single Fresnel/Airy blob centered there). Demodulating the
+  envelope by e^{-iw·Re(tau_c(rho))} per node before fitting flattens the
+  rho-phase winding (measured: 16.7 -> 3.2 rad over rho in [1.3, 2.1]),
+  leaving a smooth splineable residual — WITHOUT needing the decay gate
+  (Re(tau_c) is well-defined regardless of Im(tau_c)). tau_c comes from
+  `geom.ghost_kernel(...).delay`, already computable.
+
+  IMPORTANT (measured): do NOT demodulate by the full complex tau_c
+  (multiply by e^{+w·Im}) — that divides out the ghost's decay and
+  amplifies everything by ~19x at w=30 (numerically explosive). Only the
+  phase (Re) is demodulated; the ghost's smooth amplitude decay e^{-w·Im}
+  is left in the residual for the spline to fit (it is monotone, not
+  oscillatory). Equivalently, where the ghost model is accurate
+  (Im tau_c >= 0.4) the MINUS_GHOST label subtracts analytically and the
+  reconstruction re-adds it at serve — the layered strategy:
+  (1) MINUS_GHOST subtraction where the model is accurate,
+  (2) fold-carrier phase demodulation in the transition zone,
+  (3) exclusion -> exact engine for the residual.
+
+  ACCEPTANCE: the exterior probe produces ~70 charts with all held-out eps
+  under the 1e-3 bar, AND the previously-ghost-excluded region (~40%) is
+  now served by the surrogate (census shows the ghost-region draws served,
+  not falling to the engine); round-trip to machine precision.
+
+
 - **EXTERIOR FOLLOW-UP: ghost label, cusp exclusion, node-budget test, ppGO
   fallback** `[→ spec]` — owner-directed 2026-08-06, following
   [[2026-08-07_polar_rechart]]. Four coupled items; the
@@ -1179,72 +1216,6 @@ Tag conventions:
   (3) polar beats `(s, d)` on eps at matched node count and needs materially
   fewer charts than 57/band; (4) regions beyond the engine's reach report a
   ppGO-served coverage class, not a gap.
-
-
-- **Exterior ghost-region tile exclusion (fix the unsmoothable-region admission)**
-  `[→ spec]` — identified 2026-08-10 after probe 3 (killed at 56 charts, 30/55 fail).
-
-  Probe 3 (all three prior fixes in HEAD: cusp exclusion, w-carrier
-  demodulation, log(rho-1) rho-axis) still fails: 30/55 charts over the
-  1e-3 bar, subdivision grinding to the depth-3 cap. At nodes eps ~1e-4
-  (fixes work at nodes) but off-grid rho midpoint eps ~0.38 (catastrophic).
-
-  Root cause (measured, decisive): the KERNEL_SUM residual is DOMINATED
-  by the unsubtracted ghost (|G| ~ 3.2-3.4 x |E_ks| everywhere computable;
-  image count stays 2). The ghost gate (F027) REFUSES in the failing band
-  [1.1, 1.9] (Im tau_c < 0.4), so MINUS_GHOST is unavailable there, and
-  the chart uses KERNEL_SUM (Window iii) which leaves the ghost in. The
-  rho-phase winding IS the ghost's phase. No coordinate transform
-  (carrier, log-rho) can smooth a dominant oscillatory ghost — that is
-  fighting physics.
-
-  **Fix**: EXCLUDE tiles in the ghost-dominated regime from the exterior
-  tiler (mirroring the cusp-exclusion precedent), serving those draws by
-  the exact engine / Airy-Pearcey arms. Optionally use the
-  FARFIELD_KERNEL_SUM_MINUS_GHOST label where the gate permits. This
-  collapses the tile count toward ~70.
-
-  ACCEPTANCE: exterior probe produces ~70 charts with all held-out eps
-  under the 1e-3 bar at the 4x4x4 node count; excluded regions fall to
-  the exact engine (census fall-through); no tile straddles the
-  ghost-transition zone.
-
-
-- **Exterior fold-carrier phase demodulation (recover ghost-transition zone)**
-  `[→ spec]` — identified 2026-08-10 after the ghost-gate exclusion build.
-
-  The ghost-gate exclusion (cf81d66) correctly excludes tiles where the
-  unsubtracted ghost dominates the KERNEL_SUM residual, but that is ~40%
-  of the exterior prior box (measured). Those draws fall to the exact
-  engine (correct but ~tens of ms/node vs surrogate speed). This build
-  recovers them at surrogate speed via analytic FOLD-CARRIER phase
-  demodulation:
-
-  The ghost's phase oscillation is e^{iw·Re(tau_c(rho))}, where tau_c is
-  the delay of the fold point where the two real images merged (the ghost
-  is the single Fresnel/Airy blob centered there). Demodulating the
-  envelope by e^{-iw·Re(tau_c(rho))} per node before fitting flattens the
-  rho-phase winding (measured: 16.7 -> 3.2 rad over rho in [1.3, 2.1]),
-  leaving a smooth splineable residual — WITHOUT needing the decay gate
-  (Re(tau_c) is well-defined regardless of Im(tau_c)). tau_c comes from
-  `geom.ghost_kernel(...).delay`, already computable.
-
-  IMPORTANT (measured): do NOT demodulate by the full complex tau_c
-  (multiply by e^{+w·Im}) — that divides out the ghost's decay and
-  amplifies everything by ~19x at w=30 (numerically explosive). Only the
-  phase (Re) is demodulated; the ghost's smooth amplitude decay e^{-w·Im}
-  is left in the residual for the spline to fit (it is monotone, not
-  oscillatory). Equivalently, where the ghost model is accurate
-  (Im tau_c >= 0.4) the MINUS_GHOST label subtracts analytically and the
-  reconstruction re-adds it at serve — the layered strategy:
-  (1) MINUS_GHOST subtraction where the model is accurate,
-  (2) fold-carrier phase demodulation in the transition zone,
-  (3) exclusion -> exact engine for the residual.
-
-  ACCEPTANCE: the exterior probe produces ~70 charts with all held-out eps
-  under the 1e-3 bar, AND the previously-ghost-excluded region (~40%) is
-  now served by the surrogate (census shows the ghost-region draws served,
-  not falling to the engine); round-trip to machine precision.
 
 
 - **`farfield_*` HELPER NAMES SPAN TWO PHYSICAL REGIMES** `[housekeeping]` —
