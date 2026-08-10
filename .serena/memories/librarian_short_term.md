@@ -1,62 +1,50 @@
 # Librarian Short-Term Observations
 
-## 2026-08-10 — Post-commit sync: exterior fold-carrier demodulation (b061103)
+## 2026-08-10 — Doc sync: 2D (rho, u) fold-carrier build (lensing_exterior_2d_fold_carrier)
 
 ### Scope
-Triggered by sync_issues.json listing SDK fix commit (`4c16ca4` — no-op, per prior session).
-Actual doc work: build `exterior_fold_carrier_demodulation` (b061103) left untracked fragment
-files and working-tree canonical file changes that needed committing.
+Doc-only sync for the 2D fold-carrier build (surrogate.py + tests, Inspector PASS).
+Code grounded independently: `_EXTERIOR_POLAR_AXIS_SCHEMA_V5 = 'exterior_polar_rho_u_carrier_v2'`
+(current write tag), V4 `'exterior_polar_rho_log_carrier_v1'` retained in known set;
+`_compute_rho_u_carrier` → `(n_rho, n_theta_c)` per-spline-node `Re(tau_c(rho, u))`;
+serve re-modulation is bilinear (rho, u) interpolation at the query u-coordinate
+(surrogate.py ~2933-2952); load broadcasts legacy 1-D `rho_carrier` to 2-D (line 4427-4431).
+`_needs_fold_carrier` (surrogate_training.py) unchanged; `_compute_rho_carrier` is GONE.
 
 ### What changed
-Build b061103 added:
-- `_needs_fold_carrier` / `_compute_rho_carrier` to `surrogate_training.py` / `surrogate.py`
-- `ExteriorPolarChart.rho_carrier` field — 1D `(n_rho,)` fold-carrier delays
-- Schema bumped to `exterior_polar_rho_log_carrier_v1` (`_EXTERIOR_POLAR_AXIS_SCHEMA_V4`)
-- Ghost-dominated tiles recovered (no longer dropped); ghost-transition zone (~40% of prior box)
+- SPEC.md: exterior-polar key-abstractions paragraph — both known tags (V4 retained,
+  V5 current write tag), `rho_carrier` → 2-D `rho_u_carrier` (+1-D-broadcast note).
+- SPEC.md line 56 FOLD-CARRIER DEMODULATION sentence: `_compute_rho_carrier` →
+  `_compute_rho_u_carrier`, per-rho median → 2-D, `rho_carrier` array → `rho_u_carrier`,
+  added the u-winding flattening (11.66 rad → <= 1.63 rad). THIS second spot was stale
+  silently — the task brief only named the key-abstractions paragraph; grep for the dead
+  symbol name caught it (librarian dead-reference rule).
+- DATA_CONTRACTS.yaml line 199: both known tags + 2-D `rho_u_carrier` + broadcast note.
+- Fragments: spec_changelog.d (bump: minor), contracts_changelog.d (bump: minor),
+  completed.d (section: lensing-surrogate), deleted todo.d/lensing_exterior_2d_fold_carrier,
+  root changelog.d entry. Left completed.d/2026-08-10_exterior_fold_carrier_demodulation.md
+  in place.
+- render_fragments.py clean ("All surfaces up to date" on re-run). SPEC.md → 0.37.4,
+  DATA_CONTRACTS schema_version → 3.1.3 (minor bump stacks alphabetically after the
+  three 2026-08-10 patch fragments in the same date bucket — known rendering quirk, don't fix).
 
-### State at commit time
-- Fragments untracked (never staged): completed.d, spec_changelog.d, contracts_changelog.d,
-  todo.d entries
-- Canonical files (SPEC.md, DATA_CONTRACTS.yaml, TODO.md, COMPLETED.md, SPEC_CHANGELOG.md,
-  DATA_CONTRACTS_CHANGELOG.md) modified in working tree but not staged (except COMPLETED.md)
-- render_fragments.py ran cleanly: "All surfaces up to date"
-- overview.rst has no surrogate/exterior content — no Sphinx update needed (implementation detail)
+### Fragile cross-references (next build)
+- Both surfaces cite `_EXTERIOR_POLAR_AXIS_SCHEMA_V4` AND `_EXTERIOR_POLAR_AXIS_SCHEMA_V5`
+  plus the two literal tags; and SPEC.md line 56 cites `_compute_rho_u_carrier` — any
+  rename/bump touches both surfaces simultaneously.
+- The "Old 1-D rho_carrier artifacts load by broadcasting to 2-D" sentence in BOTH
+  surfaces is paired with the V4-retained claim: if a future build drops V4 or the
+  broadcast, all three sentences go stale together.
 
-### Committed
-Staged and committed: all spec fragments + canonical files for fold-carrier build
-(completed.d, spec_changelog.d, contracts_changelog.d, todo.d/lensing_exterior_2d_fold_carrier,
-deletion of todo.d/lensing_exterior_fold_carrier_demodulation, SPEC.md, DATA_CONTRACTS.yaml,
-SPEC_CHANGELOG.md, DATA_CONTRACTS_CHANGELOG.md, TODO.md, COMPLETED.md,
-handoff/brief_exterior_2d_fold_carrier.md, librarian_short_term.md)
-
-### Critical discovery: 2D carrier already in progress (uncommitted)
-The working tree surrogate.py already has:
-- `_EXTERIOR_POLAR_AXIS_SCHEMA_V5 = 'exterior_polar_rho_u_carrier_v2'` added to known schemas
-- `_compute_rho_u_carrier` replacing `_compute_rho_carrier` — shape changed from `(n_rho,)` to
-  `(n_rho, n_th)` (2D carrier on rho × theta_c grid)
-- test files heavily modified
-
-These are uncommitted — part of the lensing_exterior_2d_fold_carrier build in progress.
-DATA_CONTRACTS.yaml currently describes COMMITTED state only (1D `rho_carrier`, V4 schema).
-When 2D carrier build commits, DATA_CONTRACTS.yaml needs:
-- rho_carrier shape updated from `(n_rho,)` to `(n_rho, n_u)` (or `(n_rho, n_theta_c)`)
-- New V5 schema tag added (or V4 replaced)
-- SPEC.md fold-carrier section updated to describe 2D mechanism
-
-### BornResidualChart.load status sentence
-SPEC.md says "(A BornResidualChart.load classmethod is not yet implemented; construct directly
-from the shipped .npz arrays)." — VERIFIED STILL ACCURATE (no def load in _born.py).
+### Surprise / observation (NOT librarian scope — Inspector-owned)
+`test_lensing_surrogate_training.py` DT-10 tests STILL access `chart.rho_carrier`
+(assertIsNotNone, `len(chart.rho_carrier) == len(chart.rho_grid)`, isfinite checks)
+but `ExteriorPolarChart` has NO `rho_carrier` attribute — the field is `rho_u_carrier`
+(grep: `rho_carrier` appears in surrogate.py ONLY at the legacy-load line 4429). Either
+the tests mock charts or they are red despite "Inspector PASS". If a failure surfaces,
+that is the first place to look; do not "fix" from the doc side.
 
 ### sync_derived_docs.py
-Only recurring test-consumer warnings for `lens_amplification_surrogate`. The escalation
-fragment `todo.d/surrogate_contract_test_consumer_warning.md` is still open (verified via
-prior memory — do NOT create duplicate).
-
-### Fragile cross-references
-- SPEC.md + DATA_CONTRACTS.yaml cite `_EXTERIOR_POLAR_AXIS_SCHEMA_V4` and
-  `exterior_polar_rho_log_carrier_v1` — when 2D build commits and V5 is the new known schema,
-  BOTH surfaces need updating simultaneously
-- SPEC.md FOLD-CARRIER section cites `_needs_fold_carrier`, `_compute_rho_carrier` — the
-  uncommitted code RENAMES this to `_compute_rho_u_carrier`; when that commits, SPEC.md
-  fold-carrier function names go stale
-- DATA_CONTRACTS.yaml cites `rho_carrier` shape as `(n_rho,)` — will need update to `(n_rho, n_u)`
+Ran clean; only the known recurring `lens_amplification_surrogate` test-consumer
+warnings (tracked by open escalation fragment todo.d/surrogate_contract_test_consumer_warning.md —
+do NOT create a duplicate). No stray diffs in tidy_advisory.json/foreman_lite.json this run.

@@ -1,7 +1,7 @@
 ---
 description: Lightweight code fixer — applies small targeted fixes from inspector findings.
 mode: subagent
-model: deepseek/deepseek-v4-flash
+model: opencode-go/deepseek-v4-flash
 permission:
   edit: allow
   bash: allow

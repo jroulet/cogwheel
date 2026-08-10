@@ -1,7 +1,7 @@
 ---
 description: Audits implementation against the plan; runs fast tests and checks correctness.
 mode: subagent
-model: deepseek/deepseek-v4-pro
+model: opencode-go/deepseek-v4-pro
 permission:
   edit: deny
   bash: allow

@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `contracts_changelog.d/`.
 
 ---
 
-- `3.0.3` (2026-08-10):
+- `3.1.3` (2026-08-10):
 ## Exterior rho-axis conditioning: axis schema bump to exterior_polar_rho_log_v3
 
 - `ExteriorPolarChart` `axis_schema` bumped from `'exterior_polar_carrier_demod_v2'`
@@ -18,12 +18,12 @@ Add a new entry by creating a fragment in `contracts_changelog.d/`.
   inverted transparently at serve. Default False preserves byte-identity with
   pre-v3 builds (but stale v2 artifacts still hard-refuse on the schema tag).
 
-- `3.0.2` (2026-08-10):
+- `3.1.2` (2026-08-10):
 Updated ExteriorPolarChart axis_schema to `'exterior_polar_rho_log_carrier_v1'`
 (`_EXTERIOR_POLAR_AXIS_SCHEMA_V4`); added `'exterior_polar_rho_log_v3'` to retired
 schema list; added `rho_carrier` field description (np.ndarray or None, default None).
 
-- `3.0.1` (2026-08-10):
+- `3.1.1` (2026-08-10):
 
 ## Exterior polar axis schema updated to carrier_demod_v2
 
@@ -37,6 +37,15 @@ Update `lens_amplification_surrogate` contract description for
 - New `carrier_rate` field (float, default 0.0) documented: residual
   carrier-phase rate `k_chart`; when nonzero, envelope is demodulated by
   `exp(-1j*k_chart*w)` before spline fitting and re-modulated at serve.
+
+- `3.1.0` (2026-08-10):
+Updated the `lens_amplification_surrogate` contract's ExteriorPolarChart
+description: `rho_carrier` (1-D `(n_rho,)`) replaced by the 2-D
+`rho_u_carrier` (`(n_rho, n_theta_c)`, `Re(tau_c(rho, u))` at each spline
+node); `axis_schema` now lists TWO known tags — V4
+`'exterior_polar_rho_log_carrier_v1'` (retained for backward compatibility)
+and V5 `'exterior_polar_rho_u_carrier_v2'` (current write tag) — with old 1-D
+`rho_carrier` artifacts loading via broadcast to 2-D.
 
 - `3.0.0` (2026-08-08):
 

@@ -1,7 +1,7 @@
 ---
 description: Complexity auditor — checks if proposed approaches are over-engineered.
 mode: subagent
-model: deepseek/deepseek-v4-flash
+model: opencode-go/deepseek-v4-flash
 permission:
   edit: deny
   bash: deny

@@ -6,13 +6,13 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.36.6` (2026-08-10):
+- `0.37.4` (2026-08-10):
 Add GHOST-EXCLUSION FILTER section to SPEC.md (FAR-FIELD TILING row):
 `_exclude_ghost_dominated` mechanism, `_GHOST_DECAY_IM_THRESHOLD` reuse,
 positive-parity scope, gamma-band probe pattern, `ghost_excluded_tiles`
 counter in region report, and certification tests (DT-1 through DT-8).
 
-- `0.36.5` (2026-08-10):
+- `0.37.3` (2026-08-10):
 ## Exterior rho-axis conditioning: axis schema bump to exterior_polar_rho_log_v3
 
 - `ExteriorPolarChart` axis schema bumped from `'exterior_polar_carrier_demod_v2'`
@@ -25,13 +25,13 @@ counter in region report, and certification tests (DT-1 through DT-8).
 - Key abstractions section updated: schema tag, constant, retired-tag list,
   and `rho_log_axis` field description.
 
-- `0.36.4` (2026-08-10):
+- `0.37.2` (2026-08-10):
 Updated exterior-polar surrogate schema tag to `'exterior_polar_rho_log_carrier_v1'`
 (`_EXTERIOR_POLAR_AXIS_SCHEMA_V4`); added `rho_carrier` field description;
 replaced GHOST-EXCLUSION FILTER with FOLD-CARRIER DEMODULATION section in
 FAR-FIELD TILING.
 
-- `0.36.3` (2026-08-10):
+- `0.37.1` (2026-08-10):
 
 ## Exterior carrier demodulation: axis schema bump to exterior_polar_carrier_demod_v2
 
@@ -48,6 +48,18 @@ Document the shipped carrier-demodulation mechanism in `ExteriorPolarChart`
   `from_values`) and re-modulated at serve, making the complex exterior
   envelope splineable despite ~1000x dynamic range (`|E(w)| ~ w^(-0.60)`).
 - Updated in SPEC.md Key abstractions and DATA_CONTRACTS.yaml description.
+
+- `0.37.0` (2026-08-10):
+Updated the exterior-polar surrogate coordinate contract (Key abstractions):
+the fold-carrier is now the 2-D `rho_u_carrier` (`(n_rho, n_theta_c)`,
+`Re(tau_c(rho, u))` at each spline node) replacing the 1-D `rho_carrier`;
+listed BOTH known axis-schema tags — V4 `'exterior_polar_rho_log_carrier_v1'`
+(`_EXTERIOR_POLAR_AXIS_SCHEMA_V4`, retained for backward compatibility) and
+V5 `'exterior_polar_rho_u_carrier_v2'` (`_EXTERIOR_POLAR_AXIS_SCHEMA_V5`, the
+current write tag) — and described demodulation by
+`exp(-1j*w*rho_u_carrier[rho,u])` with serve re-modulation at the
+u-coordinate. Also updated the FOLD-CARRIER DEMODULATION sentence in the
+far-field tiling narrative (`_compute_rho_carrier` → `_compute_rho_u_carrier`).
 
 - `0.36.2` (2026-08-09):
 

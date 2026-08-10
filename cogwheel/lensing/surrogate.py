@@ -255,7 +255,9 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
 # hard-refuses any frame-dependent-label artifact rather than serving a
 # finite-but-wrong reconstruction.
 _EXTERIOR_POLAR_AXIS_SCHEMA_V4 = 'exterior_polar_rho_log_carrier_v1'
-_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA_V4})
+_EXTERIOR_POLAR_AXIS_SCHEMA_V5 = 'exterior_polar_rho_u_carrier_v2'
+_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA_V4,
+                                                _EXTERIOR_POLAR_AXIS_SCHEMA_V5})
 _EXTERIOR_POLAR_CARRIER_STEP_MAX = 1.0
 _LOBE_AXIS_SCHEMA_NEW = 'lobe_caustic_relative_v1'
 _KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_NEW})
@@ -1517,52 +1519,89 @@ def _assert_exterior_polar_carrier_continuity(env_grid: np.ndarray,
                 f'amplitude {rel:.3g}); subdivide the tile so the '
                 'demodulated envelope is spline-representable.')
 
-def _compute_rho_carrier(gamma_grid: np.ndarray, rho_grid: np.ndarray,
-                         theta_c_grid: np.ndarray, w_grid: np.ndarray
-                         ) -> np.ndarray | None:
-    """Compute per-rho ghost-kernel ``Re(tau_c)`` median for fold-carrier.
+def _probe_ghost_delay(gamma: float, rho: float, theta_c: float,
+                       matrix: np.ndarray, w0: float) -> float | None:
+    """Probe ``ghost_kernel`` at one ``(gamma, rho, theta_c)`` point.
 
-    For each rho grid node, probes ``geometry.ghost_kernel(w=[w_grid[0]],
-    source, matrix)`` at every ``(gamma, theta_c)`` node mapped via
-    `_from_caustic_fixed`.  Skipping nodes that raise `GhostDomainError`
-    (no ghost pair exists), takes the median ``Re(tau_c)`` over valid
-    ``(gamma, theta_c)`` nodes for each rho.
-
-    Returns ``None`` when ghost_kernel raises `GhostDomainError` at ALL
-    probed points (no ghost anywhere in the tile).
+    Returns ``Re(tau_c)`` (the ghost-pair differential delay) or ``None``
+    if the ghost does not exist at the probed point.
     """
-    n_rho = rho_grid.shape[0]
-    rho_carrier = np.full(n_rho, np.nan, dtype=float)
+    try:
+        source = _from_caustic_fixed(gamma, rho, theta_c)
+    except (ValueError, geometry.LensDomainError):
+        return None
+    source_arr = np.array(source, dtype=float)
+    try:
+        contrib = geometry.ghost_kernel([w0], source_arr, matrix)
+    except (geometry.GhostDomainError, ValueError, geometry.LensDomainError):
+        return None
+    if np.isfinite(contrib.delay.real):
+        return float(contrib.delay.real)
+    return None
+
+
+def _compute_rho_u_carrier(gamma_grid: np.ndarray, rho_grid: np.ndarray,
+                            theta_c_grid: np.ndarray, w_grid: np.ndarray
+                            ) -> np.ndarray | None:
+    """Compute 2D ``Re(tau_c(rho, u))`` carrier on spline axes.
+
+    Output shape ``(n_rho, n_theta_c)`` — one value per ``(rho, u)`` spline
+    node.  For each ``(rho, theta_c)`` node, probes
+    ``geometry.ghost_kernel(w=[w_grid[0]], source, matrix)``, taking the
+    median ``Re(tau_c)`` over ``gamma``.  ``theta_c_grid[j]`` is the u-axis
+    partner of ``u_grid[j]`` (index-paired, no inverse interp needed).
+
+    NaN nodes (where the ghost does not exist) are filled conservatively:
+    first along ``u`` (axis=1 — smooth ~linear ``Re(tau_c)`` in ``u``),
+    then ``rho`` (axis=0); zero-order hold at boundaries.  All-NaN → None.
+    """
+    n_rho = rho_grid.size
+    n_th = theta_c_grid.size
+    rho_u_carrier = np.full((n_rho, n_th), np.nan, dtype=float)
     for i_r, rho in enumerate(rho_grid):
-        valid_re_tau_c = []
-        for gamma in gamma_grid:
-            for theta_c in theta_c_grid:
-                source = None
-                try:
-                    source = _from_caustic_fixed(
-                        float(gamma), float(rho), float(theta_c))
-                except (ValueError, geometry.LensDomainError):
-                    continue
-                source_arr = np.array(source, dtype=float)
+        for i_t, theta_c in enumerate(theta_c_grid):
+            valid = []
+            for gamma in gamma_grid:
                 try:
                     matrix = geometry.macro_matrix(
                         float(gamma), beta=0.0, kappa=0.0)
                 except geometry.LensDomainError:
                     continue
-                try:
-                    contrib = geometry.ghost_kernel(
-                        [float(w_grid[0])], source_arr, matrix)
-                except geometry.GhostDomainError:
-                    continue
-                except (ValueError, geometry.LensDomainError):
-                    continue
-                if np.isfinite(contrib.delay.real):
-                    valid_re_tau_c.append(float(contrib.delay.real))
-        if valid_re_tau_c:
-            rho_carrier[i_r] = float(np.median(valid_re_tau_c))
-    if np.all(np.isnan(rho_carrier)):
+                val = _probe_ghost_delay(
+                    float(gamma), float(rho), float(theta_c),
+                    matrix, float(w_grid[0]))
+                if val is not None:
+                    valid.append(val)
+            if valid:
+                rho_u_carrier[i_r, i_t] = float(np.median(valid))
+    if np.all(np.isnan(rho_u_carrier)):
         return None
-    return rho_carrier
+    # NaN fill: first along u (axis=1 — smooth ~linear Re(tau_c) in u),
+    # then along rho (axis=0).  For each axis, interpolate interior NaNs
+    # linearly, then forward/backward fill boundaries.
+    for axis in (1, 0):
+        for i in range(rho_u_carrier.shape[1 - axis]):
+            col = (rho_u_carrier[i, :] if axis == 1
+                   else rho_u_carrier[:, i])
+            nan_mask = np.isnan(col)
+            if not np.any(nan_mask):
+                continue
+            valid_idx = np.where(~nan_mask)[0]
+            if valid_idx.size == 0:
+                continue
+            # Linear interpolation for interior NaNs.
+            nan_idx = np.where(nan_mask)[0]
+            col[nan_idx] = np.interp(nan_idx, valid_idx, col[valid_idx])
+            # Forward/backward fill remaining boundary NaNs.
+            nan_mask = np.isnan(col)
+            if not np.any(nan_mask):
+                continue
+            valid_ff = np.where(~nan_mask)[0]
+            if valid_ff.size == 0:
+                continue
+            col[:valid_ff[0]] = col[valid_ff[0]]
+            col[valid_ff[-1] + 1:] = col[valid_ff[-1]]
+    return rho_u_carrier
 
 # ---- Charts -----------------------------------------------------------
 
@@ -1635,16 +1674,17 @@ class ExteriorPolarChart:
         coordinate is a closed-form transform that absorbs the ~4.5-decade
         envelope growth toward the caustic (``rho → 1``).  Default False
         (backward-compatible).
-        rho_carrier : np.ndarray or None
-        Optional ``(n_rho,)`` array of fold-carrier phase delays
-        ``Re(tau_c)`` at each rho grid node.  When not None, the stored
-        spline coefficients were fit on an envelope that was first
-        demodulated by ``exp(-1j * w * rho_carrier[rho_node])`` (removing
+        rho_u_carrier : np.ndarray or None
+        Optional ``(n_rho, n_theta_c)`` array of fold-carrier phase delays
+        ``Re(tau_c(rho, u))`` at each ``(rho, u)`` spline node.  When not
+        None, the stored spline coefficients were fit on an envelope that was
+        first demodulated by
+        ``exp(-1j * w * rho_u_carrier[rho_node, u_node])`` (removing
         the dominant fold-carrier phase) and THEN by the residual
         ``carrier_rate`` phase.  Serve re-modulates in reverse order:
-        carrier_rate first, then the rho_carrier delay interpolated at the
-        query rho.  Default None (no fold-carrier demodulation,
-        backward-compatible).
+        carrier_rate first, then the rho_u_carrier bilinearly interpolated
+        at the query ``(rho, u)``.  Default None (no fold-carrier
+        demodulation, backward-compatible).
     """
 
     gamma_grid: np.ndarray
@@ -1663,7 +1703,7 @@ class ExteriorPolarChart:
     theta_to_u: np.ndarray | None
     carrier_rate: float = 0.0
     rho_log_axis: bool = False
-    rho_carrier: np.ndarray | None = None
+    rho_u_carrier: np.ndarray | None = None
 
     @classmethod
     def from_values(cls, *, gamma_grid: np.ndarray, rho_grid: np.ndarray,
@@ -1677,7 +1717,7 @@ class ExteriorPolarChart:
                     u_grid: np.ndarray | None = None,
                     carrier_rate: float = 0.0,
                     rho_log_axis: bool = False,
-                    rho_carrier: np.ndarray | None = None
+                    rho_u_carrier: np.ndarray | None = None
                     ) -> 'ExteriorPolarChart':
         """Build an exterior-polar chart by fitting splines to a value tensor.
 
@@ -1715,12 +1755,13 @@ class ExteriorPolarChart:
             When True, reparameterize the rho axis to ``ur = log(rho - 1)``.
             The spline fit uses ``ur_grid = log(rho_grid - 1.0)`` as the
             3rd axis.  Default False (backward-compatible).
-        rho_carrier : np.ndarray or None, optional
-            ``(n_rho,)`` array of fold-carrier phase delays ``Re(tau_c)``
-            at each rho grid node.  When not None, the envelope is first
-            demodulated by ``exp(-1j * w * rho_carrier[rho_node])``
-            BEFORE the residual ``carrier_rate`` demodulation.  Default
-            None (backward-compatible).
+        rho_u_carrier : np.ndarray or None, optional
+            ``(n_rho, n_theta_c)`` array of fold-carrier phase delays
+            ``Re(tau_c(rho, u))`` at each ``(rho, u)`` spline node.
+            When not None, the envelope is first demodulated by
+            ``exp(-1j * w * rho_u_carrier[rho_node, u_node])`` BEFORE the
+            residual ``carrier_rate`` demodulation.  Default None
+            (backward-compatible).
         """
         gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
         rho_grid = _validate_axis(rho_grid, 'rho_grid')
@@ -1742,18 +1783,18 @@ class ExteriorPolarChart:
         else:
             raise ValueError(
                 'theta_to_u and u_grid must both be None or both provided.')
-        if rho_carrier is not None:
-            rho_carrier = np.ascontiguousarray(rho_carrier, dtype=float)
-            if rho_carrier.size != rho_grid.size:
+        if rho_u_carrier is not None:
+            rho_u_carrier = np.ascontiguousarray(rho_u_carrier, dtype=float)
+            if rho_u_carrier.ndim != 2 or rho_u_carrier.shape != (rho_grid.size, theta_c_grid.size):
                 raise ValueError(
-                    f'rho_carrier length ({rho_carrier.size}) must equal '
-                    f'rho_grid size ({rho_grid.size}).')
-            if not np.all(np.isfinite(rho_carrier)):
-                raise ValueError('rho_carrier must be finite.')
+                    f'rho_u_carrier shape {rho_u_carrier.shape} must equal '
+                    f'({rho_grid.size}, {theta_c_grid.size}).')
+            if not np.all(np.isfinite(rho_u_carrier)):
+                raise ValueError('rho_u_carrier must be finite.')
             w_grid = np.exp(log_w_grid)
             demod_fold = np.exp(
                 -1j * w_grid[:, None, None, None]
-                * rho_carrier[None, None, :, None])
+                * rho_u_carrier[None, None, :, :])
             demod_env = (envelope_real + 1j*envelope_imag) * demod_fold
             envelope_real = demod_env.real
             envelope_imag = demod_env.imag
@@ -1780,7 +1821,7 @@ class ExteriorPolarChart:
             knots, image_count, parity, eta_overlap_min, refused_points,
             envelope_definition=envelope_definition,
             theta_to_u=theta_to_u, carrier_rate=carrier_rate,
-            rho_log_axis=rho_log_axis, rho_carrier=rho_carrier)
+            rho_log_axis=rho_log_axis, rho_u_carrier=rho_u_carrier)
 
     @classmethod
     def _assemble(cls, gamma_grid, rho_grid, theta_c_grid, log_w_grid,
@@ -1790,7 +1831,7 @@ class ExteriorPolarChart:
                   theta_to_u=None,
                   carrier_rate: float = 0.0,
                   rho_log_axis: bool = False,
-                  rho_carrier: np.ndarray | None = None
+                  rho_u_carrier: np.ndarray | None = None
                   ) -> 'ExteriorPolarChart':
         """Assemble a chart from prebuilt coefficient tensors and knots.
 
@@ -1808,14 +1849,14 @@ class ExteriorPolarChart:
         if not np.isfinite(carrier_rate):
             raise ValueError(
                 f'carrier_rate must be finite, got {carrier_rate}.')
-        if rho_carrier is not None:
-            rho_carrier = np.ascontiguousarray(rho_carrier, dtype=float)
-            if rho_carrier.size != rho_grid.size:
+        if rho_u_carrier is not None:
+            rho_u_carrier = np.ascontiguousarray(rho_u_carrier, dtype=float)
+            if rho_u_carrier.ndim != 2 or rho_u_carrier.shape != (rho_grid.size, theta_c_grid.size):
                 raise ValueError(
-                    f'rho_carrier length ({rho_carrier.size}) must equal '
-                    f'rho_grid size ({rho_grid.size}).')
-            if not np.all(np.isfinite(rho_carrier)):
-                raise ValueError('rho_carrier must be finite.')
+                    f'rho_u_carrier shape {rho_u_carrier.shape} must equal '
+                    f'({rho_grid.size}, {theta_c_grid.size}).')
+            if not np.all(np.isfinite(rho_u_carrier)):
+                raise ValueError('rho_u_carrier must be finite.')
         return cls(
             gamma_grid=gamma_grid,
             rho_grid=rho_grid,
@@ -1834,7 +1875,7 @@ class ExteriorPolarChart:
                         if theta_to_u is not None else None),
             carrier_rate=float(carrier_rate),
             rho_log_axis=bool(rho_log_axis),
-            rho_carrier=rho_carrier)
+            rho_u_carrier=rho_u_carrier)
 
 
 @dataclass(frozen=True, eq=False)
@@ -2889,9 +2930,26 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
     if isinstance(chart, ExteriorPolarChart) and chart.carrier_rate != 0.0:
         w_query = np.exp(log_w_clamped)
         result *= np.exp(1j * chart.carrier_rate * w_query)
-    if isinstance(chart, ExteriorPolarChart) and chart.rho_carrier is not None:
-        rho_c_interp = float(np.interp(rho, chart.rho_grid, chart.rho_carrier))
-        result *= np.exp(1j * np.exp(log_w_clamped) * rho_c_interp)
+    if isinstance(chart, ExteriorPolarChart) and chart.rho_u_carrier is not None:
+        if chart.theta_to_u is not None:
+            u_axis = np.interp(chart.theta_c_grid,
+                               chart.theta_to_u[0], chart.theta_to_u[1])
+        else:
+            u_axis = chart.theta_c_grid
+        i_u = np.searchsorted(u_axis, v2)
+        i_lo = max(0, min(i_u - 1, u_axis.size - 1))
+        i_hi = min(i_u, u_axis.size - 1)
+        if i_lo == i_hi:
+            carrier_val = float(np.interp(rho, chart.rho_grid,
+                                          chart.rho_u_carrier[:, i_lo]))
+        else:
+            t = (v2 - u_axis[i_lo]) / (u_axis[i_hi] - u_axis[i_lo])
+            val_lo = float(np.interp(rho, chart.rho_grid,
+                                      chart.rho_u_carrier[:, i_lo]))
+            val_hi = float(np.interp(rho, chart.rho_grid,
+                                      chart.rho_u_carrier[:, i_hi]))
+            carrier_val = val_lo + t * (val_hi - val_lo)
+        result *= np.exp(1j * np.exp(log_w_clamped) * carrier_val)
     return result
 
 
@@ -3055,12 +3113,13 @@ class LensAmplificationSurrogate:
             When True, reparameterize the rho axis to ``ur = log(rho - 1)``.
             Default False (backward-compatible).
         fold_carrier : bool, optional
-            When True, compute a per-rho ghost-kernel Re(tau_c) carrier and
-            demodulate the envelope by it before the continuity check and
-            k_chart estimation.  The ``rho_carrier`` array is passed to
-            ``ExteriorPolarChart.from_values``, which applies the rho_carrier
-            demodulation before the w-carrier demodulation.  When False
-            (default), behaviour is byte-identical to HEAD.
+            When True, compute a 2D ``(rho, u)`` ghost-kernel Re(tau_c)
+            carrier on the spline axes and demodulate the envelope by it
+            before the continuity check and k_chart estimation.  The
+            ``rho_u_carrier`` array (shape ``(n_rho, n_theta_c)``) is passed
+            to ``ExteriorPolarChart.from_values``, which applies the
+            rho_u_carrier demodulation before the w-carrier demodulation.
+            When False (default), behaviour is byte-identical to HEAD.
 
         Returns
         -------
@@ -3120,18 +3179,18 @@ class LensAmplificationSurrogate:
         # peak magnitude across one node gap.
         env_complex = envelope_real + 1j * envelope_imag
 
-        rho_carrier: np.ndarray | None = None
+        rho_u_carrier: np.ndarray | None = None
         if fold_carrier:
-            rho_carrier = _compute_rho_carrier(
+            rho_u_carrier = _compute_rho_u_carrier(
                 gamma_grid, rho_grid, theta_c_grid, w_grid)
-            if rho_carrier is not None:
-                # Temporarily demodulate the envelope by rho_carrier for
+            if rho_u_carrier is not None:
+                # Temporarily demodulate the envelope by rho_u_carrier for
                 # the continuity check and k_chart estimation.  The raw
                 # envelope (envelope_real/envelope_imag) is preserved
                 # for from_values, which applies the full demodulation
-                # chain (rho_carrier then carrier_rate).
+                # chain (rho_u_carrier then carrier_rate).
                 w_bc = w_grid[:, None, None, None]
-                rho_c_bc = rho_carrier[None, None, :, None]
+                rho_c_bc = rho_u_carrier[None, None, :, :]
                 env_demod = env_complex * np.exp(
                     -1j * w_bc * rho_c_bc)
                 _assert_exterior_polar_carrier_continuity(
@@ -3151,16 +3210,16 @@ class LensAmplificationSurrogate:
                 (gamma_grid.size, rho_grid.size, theta_c_grid.size))
 
         # Estimate residual carrier-phase rate per valid spatial node.
-        # Uses the rho_carrier-demodulated envelope when fold_carrier=True
+        # Uses the rho_u_carrier-demodulated envelope when fold_carrier=True
         # (the ghost's rho-phase has been removed, leaving the w-phase).
         # For each node with a valid (not refused) envelope, unwrap the
         # phase along w and use the finite difference between the first
         # and last w-node to estimate the per-node slope k_node.  The
         # median over valid nodes is robust to F022 amplitude-null pi-jump
         # outliers.  If no valid nodes, k_chart stays 0.0.
-        if fold_carrier and rho_carrier is not None:
+        if fold_carrier and rho_u_carrier is not None:
             w_bc = w_grid[:, None, None, None]
-            rho_c_bc = rho_carrier[None, None, :, None]
+            rho_c_bc = rho_u_carrier[None, None, :, :]
             env_for_k = env_complex * np.exp(
                 -1j * w_bc * rho_c_bc)
         else:
@@ -3200,7 +3259,7 @@ class LensAmplificationSurrogate:
             envelope_definition=definition,
             theta_to_u=theta_to_u, u_grid=u_grid,
             carrier_rate=k_chart,
-            rho_carrier=rho_carrier,
+            rho_u_carrier=rho_u_carrier,
             rho_log_axis=rho_log_axis)
         provenance = cls._build_provenance(
             gamma_range, rho_range, theta_c_range, w_range, shape,
@@ -3674,7 +3733,7 @@ class LensAmplificationSurrogate:
             'rho_range': [float(rho_range[0]), float(rho_range[1])],
             'theta_c_range': [float(theta_c_range[0]),
                               float(theta_c_range[1])],
-            'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA_V4,
+            'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA_V5,
             'w_range': [float(w_range[0]), float(w_range[1])],
             'resolution': {'n_w': int(n_w), 'n_gamma': int(n_gamma),
                            'n_rho': int(n_rho),
@@ -4177,7 +4236,8 @@ def _validate_exterior_polar_axis_schema(tag, artifact_label: str) -> str:
     the distance to the nearer cusp) and must not serve under the retired
     ``exterior_polar_rho_theta_c``, ``exterior_polar_rho_u_v1``,
     ``exterior_polar_carrier_demod_v2``, and ``exterior_polar_rho_log_v3``
-    schemas.
+    schemas.  Currently accepts ``exterior_polar_rho_log_carrier_v1`` (V4)
+    and ``exterior_polar_rho_u_carrier_v2`` (V5).
     """
     return _validate_axis_schema(
         tag, _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS,
@@ -4259,7 +4319,7 @@ def _chart_to_npz(chart, index: int) -> dict:
                 'parity': chart.parity,
                 'eta_overlap_min': chart.eta_overlap_min,
                 'envelope_definition': chart.envelope_definition,
-                'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA_V4,
+                'axis_schema': _EXTERIOR_POLAR_AXIS_SCHEMA_V5,
                 'carrier_rate': float(chart.carrier_rate),
                 'rho_log_axis': chart.rho_log_axis}
         axes = (chart.log_w_grid, chart.gamma_grid, chart.rho_grid,
@@ -4267,8 +4327,8 @@ def _chart_to_npz(chart, index: int) -> dict:
         arrays = {prefix + 'refused': chart.refused_points}
         if chart.theta_to_u is not None:
             arrays[prefix + 'theta_to_u'] = chart.theta_to_u
-        if chart.rho_carrier is not None:
-            arrays[prefix + 'rho_carrier'] = chart.rho_carrier
+        if chart.rho_u_carrier is not None:
+            arrays[prefix + 'rho_u_carrier'] = chart.rho_u_carrier
     arrays[prefix + 'meta'] = np.array(json.dumps(meta))
     arrays[prefix + 're_coeffs'] = chart.real_coeffs
     arrays[prefix + 'im_coeffs'] = chart.imag_coeffs
@@ -4364,7 +4424,12 @@ def _chart_from_npz(data, index: int):
     theta_to_u = data.get(prefix + 'theta_to_u')
     carrier_rate = meta.get('carrier_rate', 0.0)
     rho_log_axis = meta.get('rho_log_axis', False)
-    rho_carrier = data.get(prefix + 'rho_carrier')
+    rho_u_carrier = data.get(prefix + 'rho_u_carrier')
+    if rho_u_carrier is None:
+        rho_1d = data.get(prefix + 'rho_carrier')
+        if rho_1d is not None:
+            rho_u_carrier = np.broadcast_to(
+                rho_1d[:, None], (p1_grid.size, p2_grid.size))
     return ExteriorPolarChart._assemble(
         gamma_grid=gamma_grid, rho_grid=p1_grid, theta_c_grid=p2_grid,
         log_w_grid=log_w_grid, real_coeffs=real_coeffs,
@@ -4376,4 +4441,4 @@ def _chart_from_npz(data, index: int):
         theta_to_u=theta_to_u,
         carrier_rate=carrier_rate,
         rho_log_axis=rho_log_axis,
-        rho_carrier=rho_carrier)
+        rho_u_carrier=rho_u_carrier)

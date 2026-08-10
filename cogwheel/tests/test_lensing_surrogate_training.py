@@ -5308,7 +5308,7 @@ class GhostExcludedTilesInRegionReportSelfFalsificationTestCase(
 class FoldCarrierContinuitySafetyNetTestCase(_CountingTestCase):
     """DT-11: ``_assert_exterior_polar_carrier_continuity`` is the safety net.
 
-    When the ghost exists (rho_carrier is not None) but the demodulated
+    When the ghost exists (rho_u_carrier is not None) but the demodulated
     envelope still has a sharp jump, the continuity check must raise
     ``CarrierDiscontinuityError`` — the tile falls to the ladder gap
     (existing exact-engine fallback) rather than silently serving a
@@ -5318,7 +5318,7 @@ class FoldCarrierContinuitySafetyNetTestCase(_CountingTestCase):
     1.  Direct-call: a synthetic ``(n_w, n_γ, n_ρ, n_θ)`` grid whose
         top-w-slice has a ``[+1, −1]`` adjacent pair produces a step
         of 2 > ``_EXTERIOR_POLAR_CARRIER_STEP_MAX`` (1.0) → raises.
-    2.  from_engine: mock ``_compute_rho_carrier`` to return zeros
+    2.  from_engine: mock ``_compute_rho_u_carrier`` to return zeros
         (no-op demodulation) on a near-caustic tile where the raw
         envelope is oscillatory — verifies the engine path reaches
         the continuity check and it catches the problem.
@@ -5423,14 +5423,14 @@ class FoldCarrierContinuitySafetyNetTestCase(_CountingTestCase):
                 shape=self.shape_3d)
         self.comparisons += 1
 
-    # ---- Engine-path: mock _compute_rho_carrier → zeros ----
+    # ---- Engine-path: mock _compute_rho_u_carrier → zeros ----
 
     def test_engine_path_continuity_safety_net_fires(self):
         """``from_engine(fold_carrier=True)`` propagates a
         ``CarrierDiscontinuityError`` raised by the continuity check.
 
         Mocks ``_assert_exterior_polar_carrier_continuity`` to raise
-        directly, and ``_compute_rho_carrier`` to return a non-None
+        directly, and ``_compute_rho_u_carrier`` to return a non-None
         array so the demodulated branch is entered.  Verifies that
         ``from_engine`` does NOT swallow the exception — the tile
         falls to the ladder gap.
@@ -5440,10 +5440,10 @@ class FoldCarrierContinuitySafetyNetTestCase(_CountingTestCase):
         gamma_range = (0.46, 0.50)
         theta_c_range = (0.30, 0.36)
         w_range = (8.0, 15.0)
-        zero_carrier = np.zeros(n_rho, dtype=float)
+        zero_carrier = np.zeros((n_rho, 4), dtype=float)
 
         with mock.patch(
-                'cogwheel.lensing.surrogate._compute_rho_carrier',
+                'cogwheel.lensing.surrogate._compute_rho_u_carrier',
                 return_value=zero_carrier):
             with mock.patch(
                     'cogwheel.lensing.surrogate.'
@@ -5499,7 +5499,7 @@ class FoldCarrierContinuitySelfFalsificationTestCase(
     Verifies that:
     1.  The sharp-jump assertion can fail — a smooth envelope does NOT raise.
     2.  The smooth-envelope assertion can fail — a sharp jump DOES raise.
-    3.  The mock-zero path can be bypassed (real rho_carrier may not cause
+    3.  The mock-zero path can be bypassed (real rho_u_carrier may not cause
         the check to fire).
     """
 
@@ -5543,7 +5543,7 @@ class FoldCarrierContinuitySelfFalsificationTestCase(
         self.comparisons += 1
 
     def test_zero_carrier_mock_can_be_bypassed(self):
-        """When _compute_rho_carrier returns None (no ghost anywhere),
+        """When _compute_rho_u_carrier returns None (no ghost anywhere),
         from_engine falls back to the raw-envelope check — and a
         smooth tile passes."""
         rho_range = (3.5, 4.0)
@@ -5552,7 +5552,7 @@ class FoldCarrierContinuitySelfFalsificationTestCase(
         w_range = (10.0, 15.0)
 
         with mock.patch(
-                'cogwheel.lensing.surrogate._compute_rho_carrier',
+                'cogwheel.lensing.surrogate._compute_rho_u_carrier',
                 return_value=None):
             try:
                 LensAmplificationSurrogate.from_engine(
@@ -5566,7 +5566,7 @@ class FoldCarrierContinuitySelfFalsificationTestCase(
                     fold_carrier=True)
             except Exception:
                 self.fail(
-                    'from_engine on a far tile with rho_carrier=None '
+                    'from_engine on a far tile with rho_u_carrier=None '
                     'must succeed — the raw envelope is smooth at large rho')
         self.comparisons += 1
 
@@ -5604,7 +5604,7 @@ class FoldCarrierTrainingIntegrationSelfFalsificationTestCase(
         self.comparisons += 1
 
 # ---------------------------------------------------------------------------
-# DT-10: fold_carrier training integration — exterior charts carry rho_carrier
+# DT-10: fold_carrier training integration — exterior charts carry rho_u_carrier
 # ---------------------------------------------------------------------------
 
 #: Tile counts for the integration fixture — small enough to run in < 2 min
@@ -5630,21 +5630,21 @@ _FOLDCARRIER_FAR_RHO = 3.2
 @_TRAIN_TIER_SKIP
 class FoldCarrierTrainingIntegrationTestCase(_CountingTestCase):
     """DT-10: Single-stratum exterior training wires fold-carrier through
-    to the chart's rho_carrier field.
+    to the chart's rho_u_carrier field.
 
     Trains a single narrow mass stratum ``m_lens_range=(10, 15)`` Msun with
     ``regions=('exterior',)``.  Inspects every far-field chart in the packed
     artifact and verifies:
 
     1.  Tiles in the ghost-transition zone (rho in [1.25, 2.10], gamma in
-        [0.30, 0.70], theta_c in [0.10, 0.90]) carry ``rho_carrier`` not
+        [0.30, 0.70], theta_c in [0.10, 0.90]) carry ``rho_u_carrier`` not
         ``None`` — the ghost exists near the fold.
-    2.  Tiles far from the caustic (rho > 3.2) may carry ``rho_carrier``
+    2.  Tiles far from the caustic (rho > 3.2) may carry ``rho_u_carrier``
         ``None`` — ghost domains are physically absent far out.
     3.  The ``ghost_drop_count`` in the exterior region summary is zero —
-        no tiles are dropped by the ghost gate (the rho_carrier demodulation
+        no tiles are dropped by the ghost gate (the rho_u_carrier demodulation
         absorbs what was previously excluded).
-    4.  Every chart that has ``rho_carrier is not None`` also carries
+    4.  Every chart that has ``rho_u_carrier is not None`` also carries
         ``rho_log_axis=True`` (the two features compose).
     """
 
@@ -5670,11 +5670,11 @@ class FoldCarrierTrainingIntegrationTestCase(_CountingTestCase):
 
     # ---- Ghost-transition zone ----
 
-    def test_ghost_zone_charts_have_rho_carrier(self):
-        """Tiles in the ghost-transition zone carry rho_carrier is not None.
+    def test_ghost_zone_charts_have_rho_u_carrier(self):
+        """Tiles in the ghost-transition zone carry rho_u_carrier is not None.
 
         The ghost exists near the fold where the two real images merge;
-        the rho_carrier (Re(tau_c) from ghost_kernel) is non-trivial there.
+        the rho_u_carrier (Re(tau_c) from ghost_kernel) is non-trivial there.
         """
         found_ghost = 0
         for chart in self._charts:
@@ -5698,10 +5698,10 @@ class FoldCarrierTrainingIntegrationTestCase(_CountingTestCase):
             if in_ghost_zone:
                 found_ghost += 1
                 self.assertIsNotNone(
-                    chart.rho_carrier,
+                    chart.rho_u_carrier,
                     f'ghost-zone chart (rho=[{rho_min:.2f},{rho_max:.2f}], '
                     f'theta_c=[{theta_min:.2f},{theta_max:.2f}]) '
-                    'must have rho_carrier is not None')
+                    'must have rho_u_carrier is not None')
                 self.comparisons += 1
 
         self.assertGreater(found_ghost, 0,
@@ -5712,14 +5712,14 @@ class FoldCarrierTrainingIntegrationTestCase(_CountingTestCase):
 
     # ---- Far-from-caustic zone ----
 
-    def test_far_charts_may_lack_rho_carrier(self):
-        """Tiles with rho > 3.2 may have rho_carrier=None.
+    def test_far_charts_may_lack_rho_u_carrier(self):
+        """Tiles with rho > 3.2 may have rho_u_carrier=None.
 
         Far from the caustic the ghost domain simply does not exist
         (ghost_kernel raises GhostDomainError at every corner → None).
         This is a physical permissibility claim, not a hard constraint:
-        the test asserts that at least ONE far chart has rho_carrier=None,
-        and that NO chart with rho_carrier=None asserts it must be
+        the test asserts that at least ONE far chart has rho_u_carrier=None,
+        and that NO chart with rho_u_carrier=None asserts it must be
         non-None (i.e. ``None`` is a legal return value).
         """
         found_far_none = 0
@@ -5729,11 +5729,11 @@ class FoldCarrierTrainingIntegrationTestCase(_CountingTestCase):
             rho_min = float(np.min(chart.rho_grid))
             if rho_min < _FOLDCARRIER_FAR_RHO:
                 continue
-            if chart.rho_carrier is None:
+            if chart.rho_u_carrier is None:
                 found_far_none += 1
                 self.comparisons += 1
 
-        # At least one far chart must lack rho_carrier, or the ghost
+        # At least one far chart must lack rho_u_carrier, or the ghost
         # domain is present all the way out.  On a small grid there is
         # no guarantee — the n_per_side=2 tiling may produce no tiles
         # with rho > 3.2.  The assertion is soft: if any far tiles exist,
@@ -5747,8 +5747,8 @@ class FoldCarrierTrainingIntegrationTestCase(_CountingTestCase):
             if far_charts:
                 self.fail(
                     f'{len(far_charts)} far-charts (rho_min>='
-                    f'{_FOLDCARRIER_FAR_RHO}) all have rho_carrier '
-                    'is not None — the rho_carrier ghost-kernel '
+                    f'{_FOLDCARRIER_FAR_RHO}) all have rho_u_carrier '
+                    'is not None — the rho_u_carrier ghost-kernel '
                     'activation may extend further than expected')
             # else: no far tiles on this grid — skip silently
         self.assertGreaterEqual(found_far_none, 0,
@@ -5762,7 +5762,7 @@ class FoldCarrierTrainingIntegrationTestCase(_CountingTestCase):
 
         With fold-carrier demodulation absorbing ghost-dominated tiles,
         the ghost gate should drop zero tiles — every tile that was
-        previously ghost-excluded now gets rho_carrier demodulation
+        previously ghost-excluded now gets rho_u_carrier demodulation
         instead.
         """
         ext_reports = [r for r in self._chart_reports
@@ -5782,19 +5782,19 @@ class FoldCarrierTrainingIntegrationTestCase(_CountingTestCase):
 
     # ---- rho_log_axis composition ----
 
-    def test_rho_carrier_and_rho_log_axis_compose(self):
-        """Every chart with rho_carrier is not None also has rho_log_axis=True.
+    def test_rho_u_carrier_and_rho_log_axis_compose(self):
+        """Every chart with rho_u_carrier is not None also has rho_log_axis=True.
 
-        The rho_carrier demodulation is applied to the log-rho axis;
+        The rho_u_carrier demodulation is applied to the log-rho axis;
         the two flags always co-occur in the production pipeline.
         """
         for chart in self._charts:
             if not isinstance(chart, ExteriorPolarChart):
                 continue
-            if chart.rho_carrier is not None:
+            if chart.rho_u_carrier is not None:
                 self.assertTrue(
                     chart.rho_log_axis,
-                    f'chart with rho_carrier must also have '
+                    f'chart with rho_u_carrier must also have '
                     f'rho_log_axis=True (gamma='
                     f'[{chart.gamma_grid[0]:.3f}, {chart.gamma_grid[-1]:.3f}])')
                 self.comparisons += 1
@@ -5819,27 +5819,29 @@ class FoldCarrierTrainingIntegrationTestCase(_CountingTestCase):
                             'non-finite imag served values')
             self.comparisons += 2
 
-    def test_rho_carrier_shape_matches_rho_grid(self):
-        """rho_carrier array shape matches rho_grid length."""
+    def test_rho_u_carrier_shape_matches_axes(self):
+        """rho_u_carrier array shape matches rho_grid length."""
         for chart in self._charts:
             if not isinstance(chart, ExteriorPolarChart):
                 continue
-            if chart.rho_carrier is not None:
+            if chart.rho_u_carrier is not None:
                 self.assertEqual(
-                    len(chart.rho_carrier), len(chart.rho_grid),
-                    f'rho_carrier shape ({len(chart.rho_carrier)}) must '
-                    f'match rho_grid ({len(chart.rho_grid)})')
+                    chart.rho_u_carrier.shape,
+                    (len(chart.rho_grid), len(chart.theta_c_grid)),
+                    f'rho_u_carrier shape {chart.rho_u_carrier.shape} must '
+                    f'be (n_rho, n_theta_c) = '
+                    f'({len(chart.rho_grid)}, {len(chart.theta_c_grid)})')
                 self.comparisons += 1
 
-    def test_rho_carrier_has_finite_values(self):
-        """When rho_carrier is not None, all its elements are finite."""
+    def test_rho_u_carrier_has_finite_values(self):
+        """When rho_u_carrier is not None, all its elements are finite."""
         for chart in self._charts:
             if not isinstance(chart, ExteriorPolarChart):
                 continue
-            if chart.rho_carrier is not None:
+            if chart.rho_u_carrier is not None:
                 self.assertTrue(
-                    np.all(np.isfinite(chart.rho_carrier)),
-                    'rho_carrier must contain only finite values')
+                    np.all(np.isfinite(chart.rho_u_carrier)),
+                    'rho_u_carrier must contain only finite values')
                 self.comparisons += 1
 
 # ---------------------------------------------------------------------------

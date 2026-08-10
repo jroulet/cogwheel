@@ -1,6 +1,27 @@
 # Test Dev Short-Term Observations
 
-2026-08-10: Extended test_lensing_surrogate_training.py (fold-carrier training, 6 new classes / ~26 tests):
+2026-08-10: Extended test_lensing_exterior_polar_fold.py (TEST 7/8, NaN-hole filling + self-falsification diagnostics, 6 new tests, 58 total):
+  - FoldCarrierSelfFalsificationTestCase (6 tests, was 4): added chart_none +
+    off-grid probe points; test_zero_carrier_off_grid_ratio (err_none/err_correct >
+    SELF_FALSIFICATION_MARGIN at off-grid (rho,theta_c)); diagnostic grouped bar
+    chart (log10(eps) for correct/wrong/none at on-grid and off-grid, with reference
+    lines for NODE_EXACT_TOL and SELF_FALSIFICATION_MARGIN).
+  - FoldCarrierFromEngineTestCase (12 tests, was 8): test_rho_u_carrier_not_all_zeros;
+    test_ghost_kernel_delay_matches_carrier_at_valid_nodes (independent ghost_kernel
+    probe with MEDIAN across gamma-band matches stored rho_u_carrier to 1e-12);
+    test_filled_nan_nodes_have_smooth_derivatives (NaN-filled nodes identified by
+    GhostDomainError at all band gammas; rho-derivative ratio vs neighbor cols < 2,
+    theta_c-derivative ratio vs neighbor rows < 2; handles boundary fills on 4×4
+    grid); test_ghost_boundary_diagnostic_heatmap (rho_u_carrier colormap with red
+    X at NaN-filled nodes, green o at ghost-valid nodes).
+  KEY FIX: ghost_kernel delay match uses MEDIAN across all gamma-band gammas
+  (production _compute_rho_u_carrier stores median) — not first-match.
+  KEY FIX: import path for geometry is `cogwheel.lensing.chang_refsdal.geometry`
+  (not `cogwheel.lensing.geometry`).
+  All 58 green. No regression on test_lensing_exterior_carrier.py (23) or
+  test_lensing_exterior_admission.py (76, 1 pre-existing skip).
+
+2026-08-10: Extended test_lensing_surrogate_training.py (fold-carrier training), 6 new classes / ~26 tests):
 
   NEW CONSTANTS: _FOLDCARRIER_N_PER_SIDE=2, _FOLDCARRIER_N_GAMMA=4,
   _FOLDCARRIER_N_RHO=4, _FOLDCARRIER_N_THETA_C=3 (bumped to 4 in
@@ -55,6 +76,80 @@
     values fail isinstance. 6 new tests, all green.
   CONFIG: n_gamma=4, n_rho=4, n_theta_c=4, n_farfield_tiles_per_side=2,
   gamma_mid=0.5, gamma_band=(0.46, 0.54).
+
+2026-08-10: Extended test_lensing_exterior_polar_fold.py (TEST 4/5/6, 10 new tests, 52 total):
+  - RhoCarrierCompositionTestCase (5 tests, was 1): COMPOSITION_HELDOUT_BAR=4e-3,
+    ~81 off-grid probes.  eps within 4e-3; phase error <1e-3 rad at w=25;
+    raw-rho-not-log-rho remodulation proof (chart with tau_c=slope*rho,
+    rho_log_axis=True: phase_served matches w*slope*rho not
+    w*slope*log(rho-1)); magnitude invariant (compares served with/without
+    carrier_rate, both share spline-on-log-rho error budget, Δmag < 5e-13);
+    phase diagnostic scatter plot.
+    KEY FIX: angular distance uses abs(np.angle(np.exp(1j*(p1-p2)))) —
+    naive abs(diff) with 2π-diff wrapping fails when diff > 2π.
+    Magnitude test compares with-k vs without-k (same rho_log_axis) not
+    analytic oracle — cubic-spline-on-log interpolation error (~1e-3)
+    dwarfs the pure-phase rotation error (~5e-13).
+  - FoldCarrierNpzRoundTripTestCase (6 tests, was 5): added
+    test_loaded_vs_source_histogram_diagnostic (histogram of |ΔE| over
+    all w-nodes, max|Δ|=0).
+  - ExteriorPolar1DArtifactBackwardCompatTestCase (5 tests, NEW):
+    V4 schema 1D rho_carrier loads, broadcasts to 2D, serves identically.
+    Uses CONSTANT-IN-u carrier (broadcast of rho_u_carrier[:,0]) because
+    the byte-identical claim requires no u-variation.
+    Tests: load, shape, broadcast equality, byte-identical serve, heatmap.
+  All 52 green. No regression on test_lensing_exterior_carrier.py (23 pass).
+
+2026-08-10: Ported test_lensing_exterior_polar_fold.py from 1D rho_carrier to 2D rho_u_carrier API (WP-1: 2D fold-carrier on ExteriorPolarChart):
+  Rewrote entire file for new production API (rho_carrier → rho_u_carrier,
+  shape (n_rho, n_theta_c)), schema tag V4→V5
+  (exterior_polar_rho_log_carrier_v1 → exterior_polar_rho_u_carrier_v2),
+  NPZ key chart0_rho_carrier → chart0_rho_u_carrier.
+  8 test classes, 42 tests, all green (no skips).
+
+  KEY MEASUREMENT: theta_to_u introduces piecewise-linear interpolation
+  error for the nonlinear theta_c→u mapping at 4 nodes (~22% in u),
+  making off-grid accuracy ~37× worse than raw-theta axis.  For smoke-scale
+  tests, avoid theta_to_u and use carrier bilinear in (rho, theta_c)
+  directly.  The cusp-adapted u-coordinate accuracy is a separate concern
+  from the carrier demodulation mechanism.
+
+  Classes:
+  - RhoCarrierNodeRoundTripTestCase (3 tests): 2D node-exact round-trip
+    to 6.1e-14 with diagnostic scatter.  Backward-compat None-carrier.
+    Storage wiring.
+  - RhoCarrierContinuityGuardTestCase (3 tests): 2D-demodulated passes
+    all axes (gamma, rho, theta_c); raw raises CarrierDiscontinuityError.
+    Diagnostic bar chart.
+  - RhoCarrierOffGridPhaseTestCase (4 tests): off-grid phase ≤1e-3 rad;
+    magnitude invariant; residual phase span ≤1.63 rad (vs >3 rad raw);
+    side-by-side diagnostic plot.
+  - RhoCarrierCompositionTestCase (2 tests): rho_u_carrier + carrier_rate
+    + rho_log_axis within 5e-2 bar.
+  - FoldCarrierSelfFalsificationTestCase (4 tests): wrong carrier > bar
+    and > 10× correct; sanity assert correct < bar; magnitude teeth.
+  - FoldCarrierNpzRoundTripTestCase (5 tests): schema V5, byte-identical
+    rho_u_carrier, carrier_rate/rho_log_axis preserved, served values
+    bit-identical after round-trip.
+  - FoldCarrierLegacySchemaHardRefusalTestCase (4 tests): V3/demod_v2
+    hard-refuse; missing axis_schema raises ValueError; V5 accepted.
+  - FoldCarrierMissingKeyBackwardCompatTestCase (2 tests): absent
+    rho_u_carrier key loads as None; None-chart round-trips unmodified.
+  - FoldCarrierFromEngineTestCase (8 tests): fold_carrier=True →
+    rho_u_carrier not None, shape=(n_rho, n_theta_c), finite, KERNEL_SUM
+    definition; heldout eps < 1e-2 node, 5e-2 off-grid; can serve.
+  - FoldCarrierFromEngineBackwardCompatTestCase (4 tests):
+    fold_carrier=False → rho_u_carrier=None, axes correct, finite
+    carrier_rate, can serve.
+  - FoldCarrierFromEngineSelfFalsificationTestCase (4 tests):
+    True/has, False/lacks, True≠False, not-all-zeros.
+
+  CONFIG: n_gamma=4, n_rho=4, n_theta_c=4, n_w=4, rho=[1.3,2.1],
+  theta_c=[0.1,0.7], log_w=[ln(5),ln(30)], coeff_rho=2.5,
+  coeff_u=-1.45 (bilinear tau_c(rho,theta_c)), from_engine
+  (0.3,0.7)x(1.3,2.0)x(0,0.5)x(10,30) WNPD=6.
+
+  No regression on test_lensing_exterior_carrier.py (23 pass).
 
 2026-08-10: Extended test_lensing_exterior_polar_fold.py (WP fold_carrier_chart + fold_carrier_training, 41 total / 26 new tests):
   CONFIG — same as existing 4×4×4×4 grid, plus new from_engine constants

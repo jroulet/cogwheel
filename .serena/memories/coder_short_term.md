@@ -38,36 +38,23 @@
 - INS-1-001: Changed np.exp(log_w_query) -> np.exp(log_w_clamped) in _evaluate_chart fold-carrier re-modulation (surrogate.py:2894). The carrier_rate re-modulation uses log_w_clamped; fold-carrier phase must match to preserve phase cancellation on low-w extrapolation queries.
 - INS-1-002: test_ghost_excluded_tiles_is_positive_integer renamed to test_ghost_excluded_tiles_is_zero, assertion changed from ghost_ct > 0 to ghost_ct == 0 (ghost-dominated tiles now rescued by fold-carrier, not dropped). Self-falsification test updated to match.
 - INS-1-003: All 6 occurrences of 'exterior_polar_rho_log_v3' in test_lensing_surrogate.py replaced with 'exterior_polar_rho_log_carrier_v1'. Added test_rho_log_v3_schema_raises_valueerror to ExteriorPolarStaleSchemaHardRefusalTestCase.
-(INCLUDED: NEW ENTRY BELOW)
-
-(fold_carrier_chart build, 2026-08-10):
-- Added rho_carrier: np.ndarray | None field to ExteriorPolarChart (after rho_log_axis, default None).
-- from_values: rho_carrier kwarg validates len==n_rho + all finite; demodulates envelope BEFORE carrier_rate: demod_fold = exp(-1j * w_grid[:,None,None,None] * rho_carrier[None,None,:,None]) then original carrier_rate demod runs on the already-fold-demodulated envelope. Passes rho_carrier to _assemble.
-- _assemble: rho_carrier kwarg with same validation, passed to cls() constructor.
-- _evaluate_chart exterior branch: after carrier_rate remodulation, if chart.rho_carrier is not None: rho_c_interp = float(np.interp(rho, chart.rho_grid, chart.rho_carrier)) then result *= np.exp(1j * np.exp(log_w_query) * rho_c_interp). Uses RAW rho (before log transform), NOT the log-transformed coordinate.
-- _chart_to_npz exterior branch: writes rho_carrier to arrays when not None (conditional, same pattern as theta_to_u).
-- _chart_from_npz exterior branch: reads via data.get(prefix+'rho_carrier') (optional, None fallback for v3 artifacts lacking key). Passes to _assemble.
-- Schema bump: _EXTERIOR_POLAR_AXIS_SCHEMA_V3 removed, _EXTERIOR_POLAR_AXIS_SCHEMA_V4 = 'exterior_polar_rho_log_carrier_v1' become sole member of _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS. _build_provenance + _chart_to_npz meta updated to V4. _validate_exterior_polar_axis_schema docstring updated.
-- Test files that import _EXTERIOR_POLAR_AXIS_SCHEMA_V3 will get ImportError — test_dev to fix.
-
-(ghost_excluded_tiles build, 2026-08-10):
-
-(ghost_excluded_tiles build, 2026-08-10):
-- Added _exclude_ghost_dominated(gamma, center, half, gamma_band=None) -> bool in surrogate_training.py, mirroring _exclude_near_cusp's gamma-band probe pattern. Maps tile corners+centre from (gamma, rho, theta_c) to eigenframe source via _from_caustic_fixed, builds macro_matrix(gamma, beta=0, kappa=0), probes ghost_kernel(w=[10.0]) at each point. GhostDomainError -> pass (retainable). contrib.delay.imag < _GHOST_DECAY_IM_THRESHOLD -> exclude. Domain refusals treated conservatively as retainable.
-- Modified _farfield_exterior_tiles: added gamma_band and ghost_drop_count params (both optional, backward-compatible). Calls _exclude_ghost_dominated after _exclude_near_cusp in tile loop, increments ghost_drop_count[0] on exclusion.
-- Wired in _train_band_charts: ghost_drop_count=[0] defined at 'exterior' in regions block, passed to _farfield_exterior_tiles with gamma_band=band, accumulated into exterior_region_report['ghost_excluded_tiles'].
-- Saddle pproad (parity==-1, uses _farfield_tiles not _farfield_exterior_tiles) is unaffected.
-- Imports _GHOST_DECAY_IM_THRESHOLD inside _exclude_ghost_dominated via `from cogwheel.lensing.chang_refsdal import channels` (lazy, avoids circular import at module level).
-
-(rho_log_axis build, 2026-08-10):
-- Renamed _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER -> _EXTERIOR_POLAR_AXIS_SCHEMA_V3 with value 'exterior_polar_rho_log_v3'. Old tag removed from _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS (hard-refuse on pre-v3 artifacts).
-- Added rho_log_axis: bool = False field to ExteriorPolarChart (after carrier_rate).
-- from_values: rho_log_axis=True validates rho_grid[0] > 1.0, computes ur_grid = log(rho_grid - 1.0), replaces the 3rd spline axis with ur_grid. Passes rho_log_axis to _assemble.
-- _assemble: new rho_log_axis param, passes through to cls(...).
-- _evaluate_chart exterior branch: when chart.rho_log_axis, v1 = math.log(v1 - 1.0) replaces raw rho.
-- _chart_to_npz: meta adds 'rho_log_axis', axis_schema uses _EXTERIOR_POLAR_AXIS_SCHEMA_V3.
-- _chart_from_npz: reads rho_log_axis = meta.get('rho_log_axis', False) for backward compat, passes to _assemble.
-- _build_provenance: axis_schema -> _EXTERIOR_POLAR_AXIS_SCHEMA_V3.
-- LensAmplificationSurrogate.from_engine: new rho_log_axis param, passed through to ExteriorPolarChart.from_values.
-- _build_farfield_chart: passes rho_log_axis=True to from_engine for both parity branches.
-- Test files importing _EXTERIOR_POLAR_AXIS_SCHEMA_CARRIER will get ImportError — test_dev to fix.
+(exterior_2d_fold_carrier build, 2026-08-10):
+- Renamed rho_carrier -> rho_u_carrier on ExteriorPolarChart (field shape (n_rho, n_theta_c) instead of 1D (n_rho,)).
+- Added _EXTERIOR_POLAR_AXIS_SCHEMA_V5 = 'exterior_polar_rho_u_carrier_v2'; V4+V5 in _KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS.
+- Extracted _probe_ghost_delay(gamma, rho, theta_c, matrix, w0) -> float|None helper.
+- Replaced _compute_rho_carrier with _compute_rho_u_carrier: 2D output, median over gamma, NaN fill along u then rho, all-NaN -> None.
+- from_values: 2D shape validation, demodulates with rho_u_carrier[None,None,:,:] (2D broadcast).
+- _assemble: 2D shape validation.
+- _evaluate_chart exterior branch: bilinear (rho, u) interpolation via searchsorted on u_axis (built from theta_c_grid via theta_to_u if present), lerp along u, np.interp along rho.
+- from_engine: calls _compute_rho_u_carrier; 2D broadcast rho_u_carrier[None,None,:,:] for continuity gate + k_chart estimation.
+- _chart_to_npz: writes 'chart{i}_rho_u_carrier' key (2D), meta uses V5.
+- _chart_from_npz: tries 'rho_u_carrier' first; falls back to 'rho_carrier' with np.broadcast_to(rho_1d[:,None], (n_rho, n_theta_c)) for old 1D artifacts.
+- _build_provenance: V5 tag.
+- _validate_exterior_polar_axis_schema docstring updated to list V4+V5.
+- All 52 'rho_carrier' references renamed to 'rho_u_carrier' except backward-compat NPZ key 'rho_carrier'.
+- _compute_rho_carrier deleted. No 'rho_carrier' field on ExteriorPolarChart. surrogate_training.py zero changes.
+- Test files will need updates (rho_carrier -> rho_u_carrier, 1D -> 2D shape assertions).
+(INS-1-001 fix, 2026-08-10):
+- Updated test_lensing_surrogate_training.py: 6 occurrences of '_compute_rho_carrier' -> '_compute_rho_u_carrier' (2 mock strings + 4 comment references).
+- zero_carrier shape: np.zeros(n_rho) -> np.zeros((n_rho, _DEFAULT_PARAM_NODES)) for 2D carrier.
+- Added _DEFAULT_PARAM_NODES to imports from cogwheel.lensing.surrogate (removed again in INS-1-001 v2 fix — replaced with literal 4).
