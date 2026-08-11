@@ -1,55 +1,27 @@
 # Librarian Short-Term Observations
 
-## 2026-08-11 -- interior cusp serving barrier post-commit sync (no-op)
+## 2026-08-11 -- bounded fixed-panel GL rule post-commit sync (no-op)
 
-Scope: commit `a8361be feat(lensing): serve interior cusp sources via
-calibration bypass + ppGO fold-band gate`. Triggered by post-commit
-`.claude/sync_issues.json`.
+Scope: Post-commit doc sync for commit 823164a "bounded fixed-panel Gauss-Legendre rule for the Schwinger QD band".
 
-### What happened
+### What I found / did
 
-The previous librarian session (same date, same build) had already done ALL
-the doc-sync work for this build and bundled it INTO commit `a8361be` itself:
-- `changelog.d/2026-08-11_interior_cusp_serving_barrier.md` (CHANGELOG.md)
-- `completed.d/2026-08-11_interior_cusp_serving_barrier.md` + `2026-08-11_mpmath_hang_fast_tier.md`
-- `spec_changelog.d/2026-08-11_interior_cusp_serving_barrier.md` (SPEC 0.37.5 -> 0.37.6)
-- SPEC.md surgical edit: ppGO gate enumeration + interior cusp serving sentence
-- Dangling wiki-link fix in `todo.d/lensing_serving_ladder_guards_are_red.md`
+All doc surfaces are clean — this is a no-op run.
 
-Triage on the new sync_issues.json:
-- `cogwheel/lensing/chang_refsdal/_pearcey_cusp.py`: internal implementation
-  change only; no new modules, no API signature changes, no new disk artifacts.
-  `docs/source/` has no mention of cusp/pearcey/serving in narrative pages —
-  confirmed NO-OP by prior session and reconfirmed this run.
-- Test files in `cogwheel/tests/` — skipped per triage rules.
-- `sync_derived_docs.py`: ran clean; only recurring `lens_amplification_surrogate`
-  test-only-consumer warnings (escalation TODO fragment already open — do NOT
-  create a duplicate). "Some issues auto-fixed" produced zero real git diff.
+- `sync_derived_docs.py` (cogwheel-newlal python): no actual file changes. Only the recurring `lens_amplification_surrogate` test-only-consumer warning (escalation fragment `todo.d/surrogate_contract_test_consumer_warning.md` is open — no duplicate created).
+- `overview.rst`: no references to schwinger/mpmath/Gauss-Legendre mechanisms — nothing to update.
+- `_schwinger.py` changes: added `_MP_PANEL_ORDER = 32` (private constant), added `_mp_gl_rule()` (private function). No new public API, no serialization artifacts — no changes to api.rst, DATA_CONTRACTS.yaml.
+- DOCSTRING CONCERN FROM LAST RUN RESOLVED: `_f_schwinger_mpmath` docstring now correctly names `_MP_PANEL_ORDER` (line 791) — the fix landed in this commit itself. No doc debt remains on that point.
+- `git diff --name-only` after sync: only pre-existing agent_state JSON files and memory files — no actual doc changes.
 
-### Outcome: no-op sync
+### Patterns / gotchas
 
-### Patterns / gotchas this run
+- A concern flagged in `librarian_short_term` as "CODE docstring inaccuracy" was resolved IN THE SAME COMMIT that introduced the mechanism — the brief said the build was CODE-complete before I wrote that note, but the doc fix landed in the same feature commit. Pattern: a docstring fix that's part of the same feature commit shows up in the diff but not as a librarian action item.
+- No `changelog.d/` directory exists in `.claude/spec/` — changelog entries for internal lensing builds go to `changelog.d/` at repo root (not `.claude/spec/changelog.d/`). The commit already created `changelog.d/2026-08-11_mpmath_fixed_panel_rule.md` directly. This split is confusing but correct per repo convention.
 
-- When the feature commit BUNDLES the doc-sync work from a preceding librarian
-  session, the post-commit hook fires again for that feature commit and creates
-  a new sync_issues.json — but no additional work is needed. Pattern: check
-  `git show --stat <hash>` to see if spec/changelog fragments are already IN
-  the commit before doing any work.
-- "Some issues auto-fixed" from `sync_derived_docs.py` with zero git diff is
-  the recurring internal-state-flush no-op (see librarian_knowledge for this
-  pattern — already documented).
+### Cross-references to watch (carried forward)
 
-### Cross-references to watch (carried forward from prior session)
-
-- SPEC.md cites `_ETA_MAX_FOLD` twice (fold-arm fence + ppGO gate leg) — if
-  a future build moves the fold-arm fence, both citations must move.
-- Interior cusp serving sentence names `radius >= radius_min` and 3-vs-1
-  stationary split — fragile if the interior/exterior serving rule changes
-  again.
-- FOLD-CARRIER SCHEMA CROSS-REF CLUSTER STILL STALE (carried from
-  2026-08-10, INS-1-002/003): SPEC.md ~line 63 and DATA_CONTRACTS.yaml ~line
-  199 still describe `exterior_polar_rho_log_carrier_v1` as "the ONLY known
-  tag" — stale since V5 shipped. Pending; do not close until fixed.
-- Lobe axis-schema contract (INS-4-002/F050): DATA_CONTRACTS.yaml still
-  describes old lobe axis schemas (raw-theta V1, sqrt-edge); production code
-  ships `lobe_caustic_relative_v1`. Pending.
+- FOLD-CARRIER SCHEMA CROSS-REF CLUSTER STILL STALE (INS-1-002/003): SPEC.md ~line 63 and DATA_CONTRACTS.yaml ~line 199 still describe `exterior_polar_rho_log_carrier_v1` as the only known tag. Pending.
+- Lobe axis-schema contract (INS-4-002/F050): DATA_CONTRACTS.yaml still describes old lobe axis schemas; production ships `lobe_caustic_relative_v1`. Pending.
+- Surrogate escalation fragment `todo.d/surrogate_contract_test_consumer_warning.md`: open, do NOT duplicate.
+- SPEC.md and completed.d now cite `_MP_PANEL_ORDER = 32`, `_PANEL_ORDER = 24` (DD path) — both constant-name clusters are fragile.
