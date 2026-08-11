@@ -49,3 +49,14 @@
   (2 blanks precede the banner), not a spacing violation. An AST-based
   unused-import checker always flags `from __future__ import annotations`
   as unused (the name is never referenced) — never strip it.
+- PRE-EXISTING LONG LINES ARE ESTABLISHED STYLE, DON'T FIX (2026-08-11): a
+  mechanical >79-char scan re-reports the SAME pre-existing lines every
+  pass (80-char f-string tails, long comment prose in
+  test_lensing_fast_path.py / test_lensing_levers.py /
+  test_lensing_airy_fold.py) — identical content, only line numbers shift
+  with the build's insertions. Only wrap lines that are genuinely NEW in
+  the current build's changed hunks AND exceed ~84 chars; deeply-indented
+  f-string failure messages inside loops are the norm — leave them.
+- Long f-string assertion messages inside deep loops: refactor to
+  precomputed locals (e.g. `new_label`/`old_label`) keeping the assertion
+  message string byte-identical, instead of wrapping the line.

@@ -410,3 +410,48 @@
   accidentally hit SIBLING test helpers (StraddlingTileTrainabilityTestCase
   line 453 + _chart_eps line 1492 were caught and fixed) — audit for
   displaced/duplicate fragments after any global replace.
+- PEARCEY RESIDUAL TABLE TEST PATTERNS (Build zero_quadrature_pearcey,
+  2026-08-11, test_lensing_levers.py): ConsultPearceyRefusalTestCase
+  (table=None -> None; table inside -> value / outside -> None; mock pearcey
+  -> no live quadrature), PearceyTableSchemaMigrationTestCase (0.2.0
+  round-trips, 0.1.0 raises ValueError), test_explicit_residual_reconstruction
+  (P_asymp + spline resid == table.evaluate). Removed
+  test_consult_routes_outside_box_to_live_quadrature (WP-2 killed the
+  fallback). KEY FINDING: P - P_asymp is DISCONTINUOUS across a caustic
+  crossing — PearceyTableCertificationTestCase (3 tests) blew to 1.9e+09
+  spline error sweeping across it; residual certs must stay INSIDE one
+  topology region. `import warnings` at top level; the git-grep helper
+  `_git_grep_cogwheel` needs -E (extended regex) and excludes
+  cogwheel/tests/ so docstring mentions don't self-trigger.
+- GIT-GREP DEAD-CODE DELETION GATE TESTS (2026-08-11, DeadCodeDeletionGate
+  TestCase in test_lensing_levers.py): gate that deleted symbols stay
+  deleted via `git grep -E 'name'` over NON-test cogwheel/ + an AST absence
+  check on the module-under-test (demodulate/remodulate/_carrier_phase/
+  _dominant_stationary_point); `_SPLIT_BASE` legitimately retained in
+  _pearcey_cusp.py. Pair with a self-falsification test grepping a LIVE
+  symbol to prove the pattern has teeth.
+- MPMATH OVERLAP-BAND CROSS-AGREEMENT (2026-08-11, OverlapBandDdMpmath
+  AgreementTestCase in test_lensing_schwinger.py): DD-vs-mpmath at w=60,
+  8 pts (gamma' ∈ {0.3,0.7,1.3,1.5} x y ∈ {(0.3,0.2),(0.7,0.4)}), gate
+  < 5e-10, worst measured 5.6e-11 at gamma'=1.5, y=(0.3,0.2). Tolerance
+  note: DD path at w=60 has e^{pi*60/4} ~ 3e20 amplification limiting DD
+  accuracy to ~1e-10. Self-falsification: mock ceil->-10 (dps=20) + relax
+  _CERTIFICATION_TOL->100 -> cross-agreement > 1e-4 (proves teeth).
+- SPEC GATE-MARGIN ESTIMATES CAN BE COPY-PASTE ERRORS (2026-08-11, ppGO
+  resolution gate): the spec claimed w*delta_min~1.9 at w=500 for the
+  saddle fixture but measured delta_min=0.644 gives 322 >> 4.0 — saddle
+  sources always resolve at w>=50. _merging_fold_pair returns None for
+  dual-saddle 2-image sources, making the resolution gate the SOLE
+  admission criterion there. Prove gate teeth by INFLATING the threshold
+  (->1000 blocks, ->0 admits, resolved w=20000 still admits) rather than
+  trusting the spec's refusal scenario.
+- _CUSP_VERTEX ROUTING FIX DOMAIN TESTS (2026-08-11, test_lensing_airy_fold
+  .py, 11 tests / 4 classes): interior cusp source serves via BOTH table
+  and live quadrature (route 'pearcey'); table-live agreement to 1e-5
+  relative (measured ~1e-7); _cusp_vertex returns source-plane-closest
+  astroid cusp (seed_theta-independent); exterior ppGO route unaffected;
+  cleared-table still serves, corrupted _cusp_vertex violates the distance
+  gate. Fixture _CUSP_FIXTURES[0] = (0.5, 0.20, 0.25π). PRE-EXISTING (not
+  these tests): 8 vertex tests red at HEAD — the coder's WP1 _cusp_vertex
+  change returns a finite wedge-tip vertex where old code returned None at
+  wedge-edge configs (multi-candidate source-distance selection).

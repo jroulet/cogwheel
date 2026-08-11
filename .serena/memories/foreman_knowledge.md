@@ -108,3 +108,18 @@
   present) when git diff shows the whole block as '+' (DIFF TRAP,
   parallel-build variant) — diff-based isolation is unusable there.
   ast.parse is the syntax check when pyflakes is absent.
+- PARTIAL-PATTERN VERIFY TRAP (2026-08-11, INS-17-001): a guard assertion
+  for "old claim gone" must match the EXACT old string from the finding — a
+  partial pattern like `< 1e-12` still matches sibling lines (e.g. the
+  PM_CERT_RTOL = 1e-12 constants at line 128). Use the full span
+  (`|F_DD - F_mpmath| / |F_mpmath| < 1e-12`) in the assertion.
+- DEAD-ASSIGNMENT CASCADE (2026-08-11, INS-18-001): after deleting an
+  algebraically-unreachable branch (a ternary whose condition is forced by
+  an enclosing guard), grep the WHOLE file for the variable it fed — a
+  leftover dead assignment (`tol_float = float(_CERTIFICATION_TOL)`) is the
+  same defect family as the deleted branch.
+- SHELL QUOTING TRAP (recurring): inline `python -c "..."` verification with
+  backticks/`<` in assertion strings is mangled by bash double-quote
+  processing and can produce a misleading AssertionError at a line that is a
+  print statement; use a heredoc'd temp script (`cat > /tmp/... << 'PYEOF'`)
+  for any inline-python verification containing backtick/`<` characters.

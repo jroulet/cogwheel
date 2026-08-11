@@ -440,3 +440,38 @@
   the -n2 retry timeout) — NOT a code failure; Inspector PASS + Professor
   PASS; salvaged manually. An infra-crash death AFTER full agent PASSes
   closes on manual salvage without a re-audit.
+
+## 2026-08-11 builds (ppGO resolution gate, Pearcey residual table, mpmath GL)
+
+- PPGO RESOLUTION GATE DESIGN (Build operator_routing_one_home): ppGO rung
+  in cusp_amplification gains a dual gate — serve via fold_ppgo_correction
+  iff (_merging_fold_pair(...) is not None) OR (w*delta_min >=
+  _PPGO_RESOLUTION_GATE = 4.0, mirroring operator.RHO_END). Fold-pair nodes
+  (Morse 0,1) serve regardless of resolution; saddle-only nodes (Morse 2,3)
+  need the resolution gate; on gate miss result=None -> falls through to the
+  Pearcey uniform form. ONE Coder WP; Professor + Simplifier lean. Professor
+  confirmed the spec's w*delta_min~1.9 estimate was a copy-paste error
+  (fixture gives 322 at w=500; saddle sources always resolve at w>=50).
+- PEARCEY RESIDUAL TABULATION (Build zero_quadrature_pearcey): R(x,y) =
+  P(x,y) - P_asymp(x,y) replaces demodulated tabulation; schema bump 0.2.0
+  hard-refuses old artifacts; demodulate/remodulate/_carrier_phase/
+  _dominant_stationary_point deleted. WATCH: P - P_asymp is DISCONTINUOUS
+  across a caustic crossing — a spline residual cert sweeping the caustic
+  blew to 1.9e+09; residual tabulation is topology-region-local.
+- INTERIOR CUSP SERVING BARRIER (Build interior_cusp_serving_barrier): skip
+  _calibration_certified for interior (3 stationary points) — uniform error
+  gate.
+- _CUSP_VERTEX ROUTING FIX (Build revert_residual_table_fix_routing): probe
+  all nearby cusps by source-plane distance; ONE Coder WP, no NPZ regen.
+  Side effect: _cusp_vertex now returns a finite wedge-tip vertex where old
+  code returned None at wedge-edge configs -> 8 pre-existing vertex tests
+  red at HEAD (separate committed build, not this one's diff).
+- FIXED-PANEL MPMATH RULE (Build mpmath_fixed_panel_rule): replace mp.quad
+  with fixed-order composite GL (mp.gauss(24), no Newton fallback —
+  Simplifier trim) in _raw_integral_mp; lru_cache on (order, dps) at module
+  level; N/2N certification stays on RECONSTRUCTED F (raw I underflows at
+  w=150). Professor: order-24 sufficient (12 nodes/wavelength; mpmath dps
+  >> dd); spot grid w∈{61,80,100,120,150} x gamma'∈{0.3,0.7,1.5} x
+  y_eig∈{(0.1,0.1),(0.4,0.3),(0.8,0.5)} = 45 pts; tol = _CERTIFICATION_TOL
+  = 3e-10 on reconstructed F; complex(raw_n) safe; O(seconds) deterministic.
+  Optional: gamma'=1.05 edge case at w=80 for near-parity boundary stress.

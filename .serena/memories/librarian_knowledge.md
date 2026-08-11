@@ -261,3 +261,24 @@
   TEST-ONLY (or a notebook) is a NO-OP — skip entirely, no doc surface
   stale, no sync script needed. Don't manufacture work for test-only
   commits.
+- GATE-CRITERION CHANGE TO A SPEC-DESCRIBED RUNG IS STALENESS even when
+  the code comment/constant docstring explains the new condition
+  (2026-08-11, ppGO resolution-gate build; spec bumped 0.37.7 -> 0.37.8
+  patch): SPEC.md enumerates firing conditions, so adding a gate condition
+  (fold-pair-existence OR w*delta_min >= _PPGO_RESOLUTION_GATE=4.0)
+  requires the SPEC sentence update. `_PPGO_RESOLUTION_GATE` is now a
+  FOURTH constant in the `_PPGO_BAR_DIVISOR`/`_R_PPGO_ERROR_CONST`/
+  `_W_PPGO_FLOOR` fragile cluster — and it MIRRORS operator.RHO_END, so if
+  RHO_END changes the mirror note breaks. Verified the new gate computes
+  `geometry.delay` per image (no table consult), so the SPEC phrase
+  "returns before any table or quadrature lookup" stays TRUE.
+- RETIRING A MULTI-ITEM PROGRAM FRAGMENT (2026-08-11): mark the last
+  STILL RED section RESOLVED inline (matching the file's existing inline
+  RESOLVED pattern), add `date:` to frontmatter, then `mv` to
+  `completed.d/<date>_<slug>.md`. Its prose name appears in FINDINGS.md and
+  other completed fragments — plain-text refs to a retired todo path must
+  be swept manually (the dangling-link checker only sees `[[...]]`).
+- `replace_content` literal-mode no-match (2026-08-11): a NEWLINE sat
+  between two words of the needle ("sitting behind\nthis one") — when a
+  literal needle reports no match, verify the raw bytes for line wraps
+  before assuming a unicode issue.

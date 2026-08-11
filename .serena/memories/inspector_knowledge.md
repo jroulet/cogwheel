@@ -400,3 +400,18 @@
   exterior tiles; doc-staleness flag, NOT a Coder defect (recurring rule).
   PRE-EXISTING (not this build): INS-1-002/003 exterior_polar_rho_log_
   carrier_v1 'ONLY known tag' staleness since V5 2D carrier shipped.
+- PPGO RESOLUTION GATE REVIEW (2026-08-11, Build operator_routing_one_home,
+  findings NONE): the dual gate correctly separates fold-pair nodes (Morse
+  0,1: fold_ppgo_correction valid regardless of resolution) from saddle-only
+  nodes (Morse 2,3: only valid above w*delta_min >= 4.0). _PPGO_RESOLUTION_
+  GATE=4.0 matches operator.RHO_END; delta_min from pairwise SORTED delays,
+  len<2 -> 0.0 (conservative); _merging_fold_pair inside try/except (can
+  raise LensDomainError) correct. Fold-pair + resolved-saddle nodes are
+  BYTE-IDENTICAL to pre-change; only unresolved saddle nodes are newly
+  refused (the brief's failing configs, w*delta_min ~1.90 < 4.0). Self-
+  falsification teeth verified: gate->1000 blocks at w=500, gate->0 admits,
+  resolved w (20000) still admits. Gate: 128 passed / 11 skipped / 2 xfailed
+  (operator + fast_path + airy_fold); all ppGO classes pass. PRE-EXISTING
+  (not this diff): 8 vertex-related tests in test_lensing_airy_fold.py red
+  at HEAD from the separate _cusp_vertex routing-fix build (already
+  committed); INS-1-001/002/003 doc staleness carried to Librarian.

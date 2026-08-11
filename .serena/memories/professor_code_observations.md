@@ -470,3 +470,21 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   u_grid within rtol*max(u_grid); mismatched-row detectable (~5e-5).
   Full-sampling validation (COGWHEEL_BRUTE_ACCURACY / COGWHEEL_STRICT_TIMING)
   remains operator-deferred (beyond fast-test scope).
+- PPGO RESOLUTION GATE PHYSICS (Build operator_routing_one_home, 2026-08-11,
+  verdict PASS — PpgoRungSelfFalsificationTestCase 3/3 in 5.06 s; broader
+  lensing suite 199 passed, 23 skipped, 4 xfailed, no regressions): the
+  cusp_amplification ppGO rung now requires (_merging_fold_pair(...) is not
+  None) OR (w*delta_min >= _PPGO_RESOLUTION_GATE = 4.0, mirroring
+  operator.RHO_END). Measured on the saddle fixture _PPGO_SADDLE_SOURCE
+  =(-0.5,0.5) at gamma=1.2: 2 images, delta_min = 0.644, nearest.distance
+  = 0.389 > _ETA_MAX_FOLD=0.3, no merging fold pair; at w=500
+  w*delta_min = 322 >> 4.0, so the gate ADMITS naturally. The spec's
+  w*delta_min~1.9 estimate was a copy-paste error from a different
+  configuration (delta_min=0.644, not ~0.0038); saddle sources always
+  resolve at w>=50. _merging_fold_pair returns None for dual-saddle
+  2-image sources, making the resolution gate the SOLE admission criterion
+  there. Test proves teeth by inflating the gate to 1000 (blocks at w=500),
+  lowering to 0 (always admits), and w=20000 with gate=1000 (12882>=1000,
+  admits) — variable isolation clean: same w for admit/refuse branches,
+  only the gate threshold varies (STRONGER than the spec's intended
+  different-w scenario).

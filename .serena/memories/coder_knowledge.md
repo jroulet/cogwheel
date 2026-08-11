@@ -599,3 +599,20 @@
   scripts/measure_saddle_cusp_arm_coverage.py mirrors the positive-parity
   measurement methodology (measure_cusp_arm_actual_boundary.py) for post-build
   calibration; left untracked.
+- PPGO RESOLUTION GATE IMPLEMENTATION (Build operator_routing_one_home,
+  2026-08-11): `_PPGO_RESOLUTION_GATE = 4.0` module constant placed after
+  `_PPGO_BAR_DIVISOR` (documents that it mirrors operator.RHO_END — a
+  circular-import barrier prevents a direct import). In the ppGO rung block
+  (inside `if (radius >= r_ppgo_min and ...)`), BEFORE the existing try,
+  compute `delta_min` from the already-available `images` list:
+  `delays = sorted(geometry.delay(image, source, matrix) for image in
+  images)`, `delta_min = min(b-a for a,b in zip(delays[:-1], delays[1:]))
+  if len(delays) >= 2 else 0.0`. The existing try/except now wraps the
+  additional guard `if (_airy_fold._merging_fold_pair(images, source,
+  matrix) is not None or w * delta_min >= _PPGO_RESOLUTION_GATE):` — the
+  fold_ppgo_correction call happens ONLY inside this new conditional
+  (_merging_fold_pair inside try/except: morse_index can raise
+  LensDomainError). On gate miss `result = None` so the rung falls through
+  to the Pearcey uniform form. Fold-pair + resolved-saddle nodes are
+  BYTE-IDENTICAL to pre-change behavior; only unresolved saddle nodes are
+  newly refused. UNVERIFIED fast-tier gate (role constraint).
