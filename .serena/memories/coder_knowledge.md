@@ -573,3 +573,29 @@
   clamped log_w the carrier_rate re-modulation uses — NOT
   np.exp(log_w_query); a mismatch breaks phase cancellation on low-w
   extrapolation queries.
+
+- SADDLE EXTERIOR CUSP-ADAPTED COORDINATE IMPLEMENTATION (Build
+  saddle_exterior_full_treatment, 238d21e, 2026-08-10): `_deltoid_cusp_axis_map`
+  in surrogate.py generalizes the cusp-adapted u=d**(2/3) map to the macro-
+  saddle deltoid cusps — an INTERIOR-anchor generalization of the edge-anchored
+  `_wedge_cusp_axis_map` (deltoid cusps sit inside the tile range, not on a
+  wedge edge). Straddle check returns None (raw-theta fallback); boundary
+  validation [0, pi/2] raises ValueError; np.clip in the left-of-cusp branch
+  guards against FP artifacts at the hi endpoint; fine-grid endpoints pinned
+  explicitly (theta_fine[0]=theta_lo, theta_fine[-1]=theta_hi). Wired into
+  `_build_farfield_chart` parity==-1 branch (surrogate_training.py): probe
+  deltoid cusp rays via `_deltoid_cusp_source_angles(gamma_mid,
+  config.n_caustic_samples)` (same median-gamma approach as parity==1's waist),
+  pick the nearest to the tile centre, build the map ONLY when the nearest cusp
+  ray is at a tile boundary (nearest == theta_lo or == theta_hi) — an interior
+  nearest cusp would straddle and return None; fall through to theta_to_u=None
+  when no candidates / interior cusp. `_subdivide_farfield_tile` children
+  inherit automatically via `_build_farfield_chart`. Fixed stale 'Positive-
+  parity only' docstrings in `_exclude_ghost_dominated` + `_needs_fold_carrier`
+  (now both parities). WP2 parity-gated cusp-window: `_SADDLE_CUSP_ARM_COVERAGE
+  =0.0` placed right after `_CUSP_ARM_COVERAGE`; `_tube_serves` dispatches
+  coverage = _SADDLE_CUSP_ARM_COVERAGE if chart.parity==-1 else
+  _CUSP_ARM_COVERAGE — positive-parity path byte-identical to HEAD.
+  scripts/measure_saddle_cusp_arm_coverage.py mirrors the positive-parity
+  measurement methodology (measure_cusp_arm_actual_boundary.py) for post-build
+  calibration; left untracked.

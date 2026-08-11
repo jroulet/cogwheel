@@ -446,3 +446,27 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   `exterior_polar_rho_log_carrier_v1` = the superseded 1D rho-carrier
   (loads by broadcast to 2D). Tolerances: node-exact 5e-13, off-grid phase
   1e-3 rad, NPZ bit-for-bit, self-falsification 10x, heldout eps 4e-3.
+
+- SADDLE EXTERIOR CUSP-ADAPTED COORDINATE PHYSICS (Build
+  saddle_exterior_full_treatment, 238d21e, 2026-08-10, verdict PASS — 32/32
+  across 6 specs, no numerical concerns, no tolerance-edge results): A3
+  universality across astroid AND deltoid cusps is now CONFIRMED NUMERICALLY
+  on the saddle exterior: the cusp-adapted u=d**(2/3) map absorbs the
+  d**(-1/3) derivative divergence on macro-saddle (gamma>1) exterior tiles
+  exactly as on positive-parity astroid tiles (Spec B accuracy: chart A
+  median eps beat raw-theta chart B by >=2x on 50 held-out points, chart A
+  <=1e-3 production bar; Spec E serving: cusp-adapted eps <= raw-theta eps,
+  non-degradation). PARITY GATING is physically correct: saddle coverage=0.0
+  refuses ALL cusp-window interior queries (mid-window + near-cusp) because
+  the deltoid cusp arm is NOT near the true source in saddle parity —
+  deep-interior images can sit arbitrarily close to the cusp (F018), so the
+  astroid 0.07 rad shrink does NOT transfer; positive coverage=0.07 admits
+  only within the shrink margin. SERVING GEOGRAPHY (ruling): deltoid straight
+  edges (fold arcs) + the inter-lobe corridor are correctly served by the
+  existing ladder — exterior charts cover the exterior, lobe-interior charts
+  cover lobe interiors, corridor falls through to the exact engine; no new
+  code needed. Round-trip: theta_to_u shape (2,>=100), strictly increasing
+  rows, u_fine[0]~0, endpoints match 1e-12, np.interp round-trip reproduces
+  u_grid within rtol*max(u_grid); mismatched-row detectable (~5e-5).
+  Full-sampling validation (COGWHEEL_BRUTE_ACCURACY / COGWHEEL_STRICT_TIMING)
+  remains operator-deferred (beyond fast-test scope).

@@ -408,3 +408,35 @@
   invariants), then the Librarian post-commit sync, then the manual
   test-fix pass — same family as the quota-death salvage pattern; never
   close on the pre-crash partial pass.
+
+## Saddle exterior full treatment (2026-08-10)
+
+- CUSP-ADAPTED U TRANSFERS ACROSS PARITIES (Build saddle_exterior_full_treatment,
+  238d21e): the deltoid cusp is the SAME A3 catastrophe as the astroid cusp
+  (universal 2/3 exponent, d**(-1/3) divergence), so the cusp-adapted
+  u=d**(2/3) coordinate transfers from the parity==1 astroid tiles to the
+  macro-saddle (gamma>1) exterior — which previously trained raw-theta and
+  failed 91/154 tiles at the 1e-3 heldout bar. RULE: before mirroring a
+  coordinate treatment to the opposite parity, confirm the catastrophe class
+  matches (both A3 here); if it does, the coordinate transfers — but the
+  edge-anchored wedge map needs an interior-anchor generalization
+  (`_deltoid_cusp_axis_map`) since the deltoid cusp sits inside the tile
+  range, not on a wedge edge.
+- PARITY-GATE CONSTANTS WHEN THE PHYSICS DIFFERS BY PARITY: the astroid's
+  `_CUSP_ARM_COVERAGE=0.07` cusp-window shrink does NOT transfer to the
+  saddle — saddle deep-interior images can sit arbitrarily close to the cusp
+  (F018), so coverage ~0. Ship a parity-gated twin constant
+  (`_SADDLE_CUSP_ARM_COVERAGE=0.0` placeholder) pending post-build
+  calibration; never reuse the opposite parity's value. Acceptance bar
+  1e-3 heldout + angular-uniformity test.
+- SERVING-GEOGRAPHY RULING (Professor, same build): the deltoid straight
+  edges (fold arcs) and the inter-lobe corridor need NO new serving code —
+  exterior charts cover the exterior, lobe-interior charts cover lobe
+  interiors, corridor falls through to the exact engine. Get the ruling
+  before building.
+- TREE-GATE INFRA-CRASH DEATH PATTERN (new build-death family, distinct from
+  quota-death and stranded-build): this build died at the TREE gate on a
+  pytest teardown INFRA crash (Pluggy 'cannot send (already closed?)' after
+  the -n2 retry timeout) — NOT a code failure; Inspector PASS + Professor
+  PASS; salvaged manually. An infra-crash death AFTER full agent PASSes
+  closes on manual salvage without a re-audit.

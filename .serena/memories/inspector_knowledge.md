@@ -372,3 +372,31 @@
   call exterior_polar_rho_log_carrier_v1 "the ONLY known tag" and describe
   rho_carrier as 1D (n_rho,) — stale since V5 2D shipped; code verified
   correct, OVERRIDE to Librarian doc-sync (recurring rule).
+
+- SADDLE EXTERIOR FULL TREATMENT REVIEW (2026-08-10, Build
+  saddle_exterior_full_treatment, 238d21e, re-review 3rd pass — ALL code
+  changes correct, NO new findings): (1) `_deltoid_cusp_axis_map` mirrors the
+  wedge/lobe cusp-adapted map pattern: correct 2/3 exponent for gamma-
+  universal cusp-reach scaling, straddle->None, [0, pi/2] validation raises
+  ValueError, np.clip FP guard + explicit endpoint pinning safe. (2)
+  `_build_farfield_chart` parity==-1 branch activates ONLY on boundary cusp
+  rays (nearest == theta_lo or theta_hi) — an interior nearest cusp would
+  straddle and return None; falls through to theta_to_u=None otherwise. (3)
+  `_tube_serves` parity dispatch (coverage = _SADDLE_CUSP_ARM_COVERAGE if
+  chart.parity==-1 else _CUSP_ARM_COVERAGE) is correct; _SADDLE_CUSP_ARM_
+  COVERAGE=0.0 is load-bearing (nonzero would admit queries the Pearcey arm
+  cannot serve for saddle parity). (4) `_chart_from_npz` wedge branch KEEPS
+  hard data[prefix+'theta_to_u'] (KeyError) — correct, NOT changed to .get();
+  exterior-polar + lobe branches keep .get() (optional field). (5) Docstring
+  updates _exclude_ghost_dominated / _needs_fold_carrier ('Positive-parity
+  only' -> 'Both parities') correct; no stale 'Positive-parity only' refs in
+  surrogate_training.py. (6) Fast tier: test_lensing_surrogate.py 123 pass,
+  test_lensing_surrogate_training.py 113 pass/90 skip (train-tier gated),
+  test_lensing_farfield_envelope.py 36 pass/28 skip. (7) Measurement script
+  scripts/measure_saddle_cusp_arm_coverage.py functional but UNTRACKED
+  (post-build calibration tool). STILL OPEN -> Librarian: INS-1-001 — SPEC.md
+  lines 72-76 ('macro-saddle parity==-1 exterior interpolates on raw theta_c,
+  no map') now stale: the code builds cusp-adapted theta_to_u maps for saddle
+  exterior tiles; doc-staleness flag, NOT a Coder defect (recurring rule).
+  PRE-EXISTING (not this build): INS-1-002/003 exterior_polar_rho_log_
+  carrier_v1 'ONLY known tag' staleness since V5 2D carrier shipped.

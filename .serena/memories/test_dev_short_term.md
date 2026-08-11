@@ -1,14 +1,3 @@
 # Test Dev Short-Term Observations
 
-Added WP2 Spec A & D tests to test_lensing_surrogate_training.py:
-- SaddleCuspUCoordinateRoundTripTestCase (8 tests, COGWHEEL_TRAIN_TIER) — builds saddle exterior chart with cusp at tile boundary, verifies _deltoid_cusp_axis_map produces (2,N) theta_to_u with N>=100, monotonic, endpoint-exact to 1e-12, round-trip 1e-14*max(u_grid). Uses independent theta_to_u when boundary detection misses (float precision issue). Diagnostic plot at test_saddle_cusp_u_coordinate.png.
-- SaddleThetaToUMutationSelfFalsificationTestCase (5 tests, COGWHEEL_TRAIN_TIER) — builds TWO separate charts via from_engine for same tile: one with theta_to_u, one without. eps_with=1.98e-4 (≤1e-3 bar), eps_without=3.32e-05 (raw-theta actually BETTER at smoke scale 4×4×4, rho=3.0 — u-coordinate benefit needs more nodes). Both differ measurably (ratio ~6×).
-- SaddleThetaToUMutationSelfFalsificationSelfFalsification (1 test, TRAIN_TIER) — confirms with vs without theta_to_u differ from engine.
-- CuspArmCoverageParityGateSelfFalsificationTestCase (7 tests, fast tier) — synthetic tube charts, monkey-patches _CUSP_ARM_COVERAGE→0.0 (positive falsely refuses) and _SADDLE_CUSP_ARM_COVERAGE→0.07 (saddle falsely serves). Constants restored in finally block.
-- CuspArmCoverageParityGateSelfFalsificationSelfFalsification (2 tests, fast tier) — confirms reachable-red by swapping constants.
-Imports added: _deltoid_cusp_axis_map, _tube_serves, TubeChart, _CUSP_ARM_COVERAGE, _SADDLE_CUSP_ARM_COVERAGE from surrogate; _deltoid_cusp_source_angles from surrogate_training.
-KEY FINDING: _deltoid_cusp_axis_map boundary detection in _build_farfield_chart is fragile to float precision — test uses independent map as fallback. D1 spec's "2x worse" claim doesn't hold at smoke scale (4×4×4, rho=3.0); adjusted to softer assertions encoding measured reality.
-
-Added TubeCuspWindowParityGatingTestCase + SelfFalsification (12 tests) to test_lensing_surrogate.py for WP2 parity-gated cusp-window constant: saddle _SADDLE_CUSP_ARM_COVERAGE=0.0 (full window refuses), positive _CUSP_ARM_COVERAGE=0.07 (shrink admits). Uses _multichart_fixture() pre-built tube charts. Diagnostic plot at test_parity_gating_cusp_window.png.
-
-Added test_lensing_farfield_envelope.py Spec B & E: saddle cusp-adapted u accuracy + serving tests (11 tests, COGWHEEL_TRAIN_TIER=1). F-norm eps ~7e-5 median on 5x5 grid. E-norm eps useless for far-field (~1e-4 denom). _deltoid_cusp_axis_map added to surrogate import. At smoke scale cusp-adapted vs raw-theta indistinguishable (ratio ~1.0). StraddlingTileTrainabilityTestCase line 453 / denom) fixed (was accidentally renamed to f_denom by global replace). Same fix at _chart_eps line 1492.
+(empty — last consolidated by Dreamer on 2026-08-10)

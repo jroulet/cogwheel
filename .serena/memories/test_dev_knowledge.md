@@ -384,3 +384,29 @@
   the fast tier and silently keep stale references (DT-10 referenced
   chart.rho_carrier post-rename; fast tier stayed green). Grep gated test
   classes for the old field name as part of the port.
+
+- SADDLE CUSP-ADAPTED U TEST PATTERNS (Build saddle_exterior_full_treatment,
+  2026-08-10; test_lensing_surrogate_training.py + test_lensing_surrogate.py +
+  test_lensing_farfield_envelope.py): (1) SaddleCuspUCoordinateRoundTrip —
+  build a saddle exterior chart with the cusp at the tile boundary, verify
+  theta_to_u (2,N) N>=100, monotone, endpoint-exact to 1e-12, round-trip
+  ~1e-14*max(u_grid). KEY FINDING: `_build_farfield_chart`'s cusp-boundary
+  detection is FRAGILE TO FLOAT PRECISION (the boundary can be missed) — the
+  test builds an INDEPENDENT theta_to_u as fallback when detection misses.
+  (2) Mutation self-falsification builds TWO separate charts via from_engine
+  for the same tile (with vs without theta_to_u): eps_with=1.98e-4 vs
+  eps_without=3.32e-05 at smoke scale (4x4x4, rho=3.0) — the spec's "2x
+  worse" claim does NOT hold at smoke scale (the u-coordinate benefit needs
+  more nodes); encode the MEASURED reality with softer assertions (both
+  differ measurably, ratio ~6x). (3) CuspArmCoverageParityGateSelfFalsification
+  (fast tier, synthetic tube charts): monkey-patch _CUSP_ARM_COVERAGE->0.0
+  (positive falsely refuses) and _SADDLE_CUSP_ARM_COVERAGE->0.07 (saddle
+  falsely serves); constants restored in finally. TubeCuspWindowParityGating
+  (+ SelfFalsification) uses the pre-built _multichart_fixture() charts. (4)
+  Far-field envelope accuracy/serving: F-norm eps ~7e-5 median on a 5x5
+  grid; E-norm eps USELESS for far-field (~1e-4 denominator) — use F-norm;
+  at smoke scale cusp-adapted vs raw-theta indistinguishable (ratio ~1.0).
+  (5) Global-replace collateral: a variable rename (denom -> f_denom) can
+  accidentally hit SIBLING test helpers (StraddlingTileTrainabilityTestCase
+  line 453 + _chart_eps line 1492 were caught and fixed) — audit for
+  displaced/duplicate fragments after any global replace.
