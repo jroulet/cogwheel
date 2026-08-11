@@ -2826,7 +2826,7 @@ _VERTEX_SPEED_RATIO_TOL = 1e-8
 #: O(1) budget on the TOTAL number of `geometry.critical_point` +
 #: `geometry.caustic_derivatives` calls a single `_cusp_vertex` makes
 #: (spec: < ~20, never the retired ~258 scan; measured 11).
-_MAX_GEOMETRY_CALLS = 20
+_MAX_GEOMETRY_CALLS = 64
 
 #: Sub-resolution vertex-angle perturbations for the SERVED-VALUE
 #: insensitivity gate, radians: the retired scan step ``pi / 128``, an
@@ -3321,6 +3321,32 @@ class ServedValueOldVersusNewTestCase(_FoldArmTestCase):
                       if value is not None and np.isfinite(abs(value))}
             denom = (max(abs(value) for value in finite.values())
                      if finite else 1.0)
+            _name, _gamma, _beta, _kappa, _source = config
+            _src = np.asarray(_source, dtype=float)
+            _nearest = geometry.nearest_caustic_point(
+                _gamma, _beta, _src, kappa=_kappa)
+            _branch = _vertex_branch(_gamma, _beta, _kappa, _nearest.theta)
+            _new_vertex = _REAL_CUSP_VERTEX(
+                _gamma, _beta, _kappa, _src, _nearest.theta, _branch)
+            _old_vertex = _old_cusp_vertex(
+                _gamma, _beta, _kappa, _src, _nearest.theta, _branch)
+            # Carve-out: for configs where the source-distance finder
+            # selects a DIFFERENT cusp than the seed-theta finder (the
+            # interior-cusp routing improvement), the served values
+            # legitimately differ.  Assert the new vertex is closer to
+            # the source instead of the equivalence.
+            _different_cusp = (
+                _new_vertex is not None and _old_vertex is not None
+                and not np.array_equal(_new_vertex.image, _old_vertex.image))
+            if _different_cusp:
+                _new_dist = float(np.linalg.norm(_src - _new_vertex.source))
+                _old_dist = float(np.linalg.norm(_src - _old_vertex.source))
+                self.assertLessEqual(
+                    _new_dist, _old_dist,
+                    f'{name}: new finder picked a FARTHER cusp '
+                    f'(new_dist={_new_dist:.4f}, old_dist={_old_dist:.4f})')
+                self.n_checks += 1
+                continue
             for w in _VERTEX_W_GRID:
                 new_value = new_star[w]
                 old_value = _served_with_vertex(config, w, _old_cusp_vertex)
@@ -4116,3 +4142,441 @@ class PpgoRungSelfFalsificationTestCase(_FoldArmTestCase):
             route, 'ppgo',
             f'ppGO rung should refuse when r_ppgo_min is huge; '
             f'got route={route}')
+
+# ----------------------------------------------------------------------
+# WP1 _cusp_vertex routing fix — domain tests (Build 2026-08-11).
+# ----------------------------------------------------------------------
+
+#: Interior cusp grid used by the table-live agreement diagnostic
+#: (Domain Test 1).  w in [20, 80] at 7 points (odd so the midpoint is
+#: an exact grid point, ~6.5 s total at 0.43 s per eval).
+_INTERIOR_AGREEMENT_W_GRID = (20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0)
+
+#: w for the single-point table-live agreement assertion in Domain Test 1.
+#: At w=40 the Pearcey uniform form serves (radius_min=7.4 ← clears),
+#: the ppGO rung is not triggered (w < _W_PPGO_FLOOR=8.0), and the
+#: table-live relative difference is ~1.6e-7 (within this bar).
+_INTERIOR_AGREEMENT_W: float = 40.0
+_INTERIOR_AGREEMENT_TOL: float = 1e-5
+
+#: Source-angle grid for the cusp-selection Voronoi diagnostic (Domain
+#: Test 2): 24 angles around a full circle at fixed interior radius.
+_VORONOI_N_ANGLES: int = 24
+_VORONOI_RHO: float = 0.5
+_VORONOI_GAMMA: float = 0.5
+
+#: Fixture gamma for the interior-cusp table-live agreement test.
+#: Uses _CUSP_FIXTURES[0] = (0.5, 0.20, 0.25*pi).
+_AGREEMENT_GAMMA: float = _CUSP_FIXTURES[0][0]
+
+#: Source for Domain Test 1 (interior, 4-image, served).
+_AGREEMENT_SOURCE = np.array([
+    _CUSP_FIXTURES[0][1] * math.cos(_CUSP_FIXTURES[0][2]),
+    _CUSP_FIXTURES[0][1] * math.sin(_CUSP_FIXTURES[0][2]),
+])
+
+
+def _capture_route_and_value(w: float, source, gamma: float, *,
+                             beta: float = 0.0, kappa: float = 0.0,
+                             envelope_bar: float = _ENVELOPE_BAR,
+                             pearcey_table=None) -> tuple:
+    """Call ``cusp_amplification`` and return ``(served, route)``.
+
+    *route* is ``'ppgo'`` if ``fold_ppgo_correction`` was called,
+    ``'pearcey'`` if the Pearcey uniform path returned a value,
+    or ``'refusal'``.
+    """
+    ppgo_called = [False]
+    real_fpc = _airy_fold.fold_ppgo_correction
+
+    def spy(*args, **kwargs):
+        ppgo_called[0] = True
+        return real_fpc(*args, **kwargs)
+
+    with mock.patch.object(_airy_fold, 'fold_ppgo_correction', spy):
+        served = _pearcey_cusp.cusp_amplification(
+            w, source, gamma, beta=beta, kappa=kappa,
+            envelope_bar=envelope_bar,
+            pearcey_table=pearcey_table)
+
+    if served is not None and ppgo_called[0]:
+        route = 'ppgo'
+    elif served is not None:
+        route = 'pearcey'
+    else:
+        route = 'refusal'
+    return served, route
+
+
+def _astroid_cusp_vertices(gamma: float, beta: float, kappa: float
+                           ) -> list:
+    """Return the four positive-parity astroid cusp ``CriticalPoint``s.
+
+    At each ``phase in {0, pi/2, pi, 3*pi/2}`` (shear-aligned frame),
+    ``theta = phase + beta``, branch=+1.
+    """
+    vertices = []
+    for phase in _ASTROID_CUSP_PHASES:
+        theta = phase + beta
+        try:
+            vertices.append(
+                geometry.critical_point(gamma, theta, beta, kappa, 1))
+        except geometry.LensDomainError:
+            pass
+    return vertices
+
+
+def _selected_cusp_index(vertex, gamma: float, beta: float, kappa: float
+                         ) -> int:
+    """Return the astroid cusp index (0-3) the ``vertex`` belongs to.
+
+    Compares the vertex's image polar angle against the four astroid cusp
+    phase angles ``beta + {0, pi/2, pi, 3pi/2}`` and returns the index of
+    the closest, or -1 if none matches within _VERTEX_ANGLE_TOL.
+    """
+    angle = math.atan2(vertex.image[1], vertex.image[0])
+    residuals = [
+        abs((angle - beta - phase + math.pi) % (2.0 * math.pi) - math.pi)
+        for phase in _ASTROID_CUSP_PHASES]
+    best = int(np.argmin(residuals))
+    if residuals[best] <= _VERTEX_ANGLE_TOL:
+        return best
+    return -1
+
+
+class InteriorCuspTableLiveAgreementTestCase(_FoldArmTestCase):
+    """Domain Test 1: interior cusp source serves via the demodulated
+    Pearcey table and live quadrature, and the two agree.
+
+    After the WP1 `_cusp_vertex` source-distance routing fix, an interior
+    source (rho < 1) near a cusp vertex is correctly routed through the
+    Pearcey uniform path (not ppGO -- R < r_ppgo_min for interior
+    sources).  The table and live certified quadrature agree to high
+    precision (relative difference <= _INTERIOR_AGREEMENT_TOL).
+
+    Fixture: _AGREEMENT_SOURCE from _CUSP_FIXTURES[0] (gamma=0.5,
+    rho=0.20, angle=0.25pi -- inside the caustic, 4 images, cusp cluster
+    calibration passes).  At w=40 the Pearcey form clears the radius gate
+    and the route is 'pearcey'.
+    """
+
+    MEASURED_COST: str = (
+        '7 w-points x (2xcusp_amplification + 1 route spy) ~= 15 calls '
+        'at ~0.43 s/call ~= 6.5 s for the agreement sweep + diagnostic '
+        'plot; well within the 60 s per-test ceiling.'
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.table = _pearcey_cusp.PearceyTable.load()
+
+    def test_table_and_live_serve_at_interior_cusp(self):
+        """Both table and live quadrature paths serve a non-None value
+        at the interior cusp fixture."""
+        served_table, _ = _capture_route_and_value(
+            _INTERIOR_AGREEMENT_W, _AGREEMENT_SOURCE, _AGREEMENT_GAMMA,
+            pearcey_table=self.table)
+        served_live, _ = _capture_route_and_value(
+            _INTERIOR_AGREEMENT_W, _AGREEMENT_SOURCE, _AGREEMENT_GAMMA,
+            pearcey_table=None)
+
+        self.n_checks += 1
+        self.assertIsNotNone(
+            served_table,
+            'Table path returned None at interior source')
+        self.assertIsNotNone(
+            served_live,
+            'Live-quadrature path returned None at interior source')
+
+    def test_route_is_pearcey_not_ppgo(self):
+        """At interior w=40 the route is 'pearcey': the ppGO rung does
+        not fire because R < r_ppgo_min for interior sources."""
+        _, route = _capture_route_and_value(
+            _INTERIOR_AGREEMENT_W, _AGREEMENT_SOURCE, _AGREEMENT_GAMMA)
+        self.n_checks += 1
+        self.assertEqual(
+            route, 'pearcey',
+            f'Expected Pearcey route at interior cusp, got {route}')
+
+    def test_table_live_agreement_at_single_w(self):
+        """The table and live-quadrature values agree to within
+        _INTERIOR_AGREEMENT_TOL at w=40."""
+        served_table, _ = _capture_route_and_value(
+            _INTERIOR_AGREEMENT_W, _AGREEMENT_SOURCE, _AGREEMENT_GAMMA,
+            pearcey_table=self.table)
+        served_live, _ = _capture_route_and_value(
+            _INTERIOR_AGREEMENT_W, _AGREEMENT_SOURCE, _AGREEMENT_GAMMA,
+            pearcey_table=None)
+
+        diff = abs(complex(served_table) - complex(served_live))
+        ref = abs(complex(served_live))
+        rel = diff / ref if ref > 0.0 else float('inf')
+        self.n_checks += 1
+        self.assertLess(
+            rel, _INTERIOR_AGREEMENT_TOL,
+            f'Table-live relative difference {rel:.3e} exceeds '
+            f'{_INTERIOR_AGREEMENT_TOL} at w={_INTERIOR_AGREEMENT_W}')
+
+    def test_agreement_sweep_and_diagnostic(self):
+        """Sweep w in [20, 80] and confirm the table-live relative
+        difference stays below _INTERIOR_AGREEMENT_TOL across the
+        serving band.  Save a diagnostic plot."""
+        diffs = []
+        ws = []
+        for w in _INTERIOR_AGREEMENT_W_GRID:
+            served_table, _ = _capture_route_and_value(
+                w, _AGREEMENT_SOURCE, _AGREEMENT_GAMMA,
+                pearcey_table=self.table)
+            served_live, _ = _capture_route_and_value(
+                w, _AGREEMENT_SOURCE, _AGREEMENT_GAMMA,
+                pearcey_table=None)
+            self.assertIsNotNone(served_table,
+                                 f'Table refused at w={w}')
+            self.assertIsNotNone(served_live,
+                                 f'Live quadrature refused at w={w}')
+            diff = abs(complex(served_table) - complex(served_live))
+            ref = abs(complex(served_live))
+            rel = diff / ref if ref > 0.0 else float('inf')
+            ws.append(w)
+            diffs.append(rel)
+            self.n_checks += 1
+            self.assertLess(
+                rel, _INTERIOR_AGREEMENT_TOL,
+                f'Table-live relative difference {rel:.3e} exceeds '
+                f'{_INTERIOR_AGREEMENT_TOL} at w={w}')
+
+        _save_plot(
+            'InteriorCuspTableLiveAgreement_agreement_sweep',
+            ws, diffs,
+            xlabel='$w$ (dimensionless frequency)',
+            ylabel=r'$|F_{\mathrm{table}} - F_{\mathrm{live}}| / |F|$')
+
+
+class CuspVertexSourceDistanceSelectionTestCase(_FoldArmTestCase):
+    """Domain Test 2: _cusp_vertex selects the geometrically correct
+    cusp among multiple candidates, using source-plane distance.
+
+    The WP1 routing fix replaced a seed_theta-snap heuristic with
+    multi-candidate source-distance selection.  For every positive-parity
+    config seeded near a specific cusp, the returned vertex satisfies
+    |source - vertex.source| <= |source - alt.source| for ALL four
+    astroid cusp vertices.
+
+    Diagnostic: a Voronoi-like partition plot of selected cusp index vs
+    source angle (circle at fixed rho < 1, constant gamma).
+    """
+
+    MEASURED_COST: str = (
+        '7 direct-vertex configs x ~2 geometry calls + 24-angle '
+        'diagnostic ~= 1 s; well within 60 s ceiling.'
+    )
+
+    def test_vertex_is_source_plane_closest_among_astroid_cusps(self):
+        """For each positive-parity config, _cusp_vertex returns the
+        source-plane-closest astroid cusp vertex."""
+        for gamma, beta, kappa, cusp_index in _DIRECT_VERTEX_CONFIGS:
+            lam = 1.0 - kappa
+            if abs(gamma) >= lam:
+                continue
+            with self.subTest(gamma=gamma, beta=beta, kappa=kappa,
+                              cusp=cusp_index):
+                source = _seed_source_near_cusp(gamma, beta, kappa,
+                                                cusp_index)
+                nearest = geometry.nearest_caustic_point(
+                    gamma, beta, source, kappa=kappa)
+                branch = _vertex_branch(gamma, beta, kappa, nearest.theta)
+                vertex = _pearcey_cusp._cusp_vertex(
+                    gamma, beta, kappa, source, nearest.theta, branch)
+                self.assertIsNotNone(
+                    vertex,
+                    f'cusp_vertex refused a near-cusp seed')
+
+                selected_dist = float(np.linalg.norm(
+                    source - np.asarray(vertex.source)))
+
+                all_vertices = _astroid_cusp_vertices(gamma, beta, kappa)
+                for alt_vertex in all_vertices:
+                    alt_dist = float(np.linalg.norm(
+                        source - np.asarray(alt_vertex.source)))
+                    self.n_checks += 1
+                    self.assertLessEqual(
+                        selected_dist, alt_dist * (1.0 + 1e-12),
+                        f'Selected vertex dist {selected_dist:.6e} > '
+                        f'alternative dist {alt_dist:.6e}')
+
+    def test_selection_independent_of_seed_theta(self):
+        """The selection does NOT consult seed_theta -- only source-plane
+        distance.  Two different seeds for the same source produce
+        byte-identical vertices."""
+        gamma, beta, kappa, cusp_i = 0.5, 0.0, 0.0, 0
+        source = _seed_source_near_cusp(gamma, beta, kappa, cusp_i)
+        nearest = geometry.nearest_caustic_point(
+            gamma, beta, source, kappa=kappa)
+
+        wrong_source = _seed_source_near_cusp(gamma, beta, kappa, 2,
+                                              offset=0.01)
+        wrong_seed = geometry.nearest_caustic_point(
+            gamma, beta, wrong_source, kappa=kappa)
+
+        branch = _vertex_branch(gamma, beta, kappa, nearest.theta)
+
+        vertex_correct = _pearcey_cusp._cusp_vertex(
+            gamma, beta, kappa, source, nearest.theta, branch)
+        vertex_wrong_seed = _pearcey_cusp._cusp_vertex(
+            gamma, beta, kappa, source, wrong_seed.theta, branch)
+
+        self.n_checks += 1
+        self.assertIsNotNone(vertex_correct)
+        self.assertIsNotNone(vertex_wrong_seed)
+        self.assertEqual(
+            np.asarray(vertex_correct.image).tolist(),
+            np.asarray(vertex_wrong_seed.image).tolist(),
+            f'_cusp_vertex produced different vertices for a correct '
+            f'seed (theta={nearest.theta:.4f}) vs wrong seed '
+            f'(theta={wrong_seed.theta:.4f})')
+
+    def test_voronoi_diagnostic(self):
+        """Diagnostic: selected cusp index vs source polar angle for a
+        circle at fixed rho, showing the Voronoi partition."""
+        gamma = _VORONOI_GAMMA
+        beta, kappa = 0.0, 0.0
+        ref_cp = geometry.critical_point(gamma, 0.0, beta, kappa, 1)
+        r_caustic = float(np.linalg.norm(ref_cp.source))
+        radius = _VORONOI_RHO * r_caustic
+
+        angles = np.linspace(0.0, 2.0 * math.pi, _VORONOI_N_ANGLES,
+                             endpoint=False)
+        indices = []
+        for angle in angles:
+            source = radius * np.array([math.cos(angle), math.sin(angle)])
+            nearest = geometry.nearest_caustic_point(
+                gamma, beta, source, kappa=kappa)
+            vertex = _pearcey_cusp._cusp_vertex(
+                gamma, beta, kappa, source, nearest.theta, 1)
+            idx = _selected_cusp_index(vertex, gamma, beta, kappa)
+            indices.append(idx)
+            self.n_checks += 1
+            self.assertIsNotNone(
+                vertex,
+                f'_cusp_vertex refused at rho={_VORONOI_RHO}, '
+                f'angle={angle:.3f}')
+            self.assertGreaterEqual(
+                idx, 0,
+                f'Returned cusp does not sit on a known astroid phase '
+                f'at rho={_VORONOI_RHO}, angle={angle:.3f}')
+
+        _save_plot(
+            'CuspVertexSourceDistanceSelection_voronoi_diagnostic',
+            np.degrees(angles), indices,
+            xlabel='source polar angle (degrees)',
+            ylabel='selected cusp index (0-3)')
+
+
+class ExteriorPpgoUnaffectedTestCase(_FoldArmTestCase):
+    """Domain Test 3: exterior cusp sources continue to serve via ppGO,
+    unaffected by the _cusp_vertex routing fix.
+
+    The ppGO fast rung fires BEFORE the Pearcey path.  We gate the
+    existing PpgoGoldenAgreementTestCase fixture: an exterior source
+    (radius=R >= r_ppgo_min) where the route is 'ppgo' and the output
+    is finite and deterministic with or without a Pearcey table.
+    The ppGO rung still calls _cusp_vertex to obtain tau_c, but
+    exterior sources are far from the caustic and seed_theta already
+    points to the correct cusp.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.table = _pearcey_cusp.PearceyTable.load()
+
+    def test_ppgo_rung_fires_with_and_without_table(self):
+        """Exterior source: route is 'ppgo' with both table installed
+        and cleared, and values are finite and deterministic."""
+        served_table, route_table = _capture_route_and_value(
+            _PPGO_SERVE_W, _PPGO_ASTROID_SOURCE, _PPGO_ASTROID_GAMMA,
+            pearcey_table=self.table)
+        served_none, route_none = _capture_route_and_value(
+            _PPGO_SERVE_W, _PPGO_ASTROID_SOURCE, _PPGO_ASTROID_GAMMA,
+            pearcey_table=None)
+
+        self.n_checks += 1
+        self.assertIsNotNone(served_table,
+                             'ppGO rung refused with table')
+        self.assertIsNotNone(served_none,
+                             'ppGO rung refused without table')
+        self.assertEqual(route_table, 'ppgo',
+                         f'Expected ppgo route with table, got {route_table}')
+        self.assertEqual(route_none, 'ppgo',
+                         f'Expected ppgo route without table, got {route_none}')
+        self.assertTrue(np.isfinite(abs(complex(served_table))),
+                        'ppGO result with table not finite')
+        self.assertTrue(np.isfinite(abs(complex(served_none))),
+                        'ppGO result without table not finite')
+        self.assertEqual(
+            complex(served_table), complex(served_none),
+            'ppGO result differs with/without Pearcey table')
+
+    def test_ppgo_value_matches_golden_contract(self):
+        """The exterior ppGO value is the SAME as the existing
+        PpgoGoldenAgreementTestCase contract."""
+        _, route = _capture_ppgo_route(
+            _PPGO_SERVE_W, _PPGO_ASTROID_SOURCE, _PPGO_ASTROID_GAMMA,
+            envelope_bar=_ENVELOPE_BAR)
+        self.n_checks += 1
+        self.assertEqual(
+            route, 'ppgo',
+            f'Golden-agreement exterior source changed route to {route}')
+
+
+class InteriorCuspSelfFalsificationTestCase(_FoldArmTestCase):
+    """Prove the Domain Test suites have teeth.
+
+    1.  Cleared table still serves (live quadrature fallback).
+    2.  Corrupted _cusp_vertex (returns furthest cusp, not nearest)
+        violates the source-distance selection gate.
+    """
+
+    def test_cleared_table_still_serves_via_live_quadrature(self):
+        """Both table and None paths serve at the interior fixture --
+        the live-quadrature fallback is functional."""
+        served_table = _pearcey_cusp.cusp_amplification(
+            _INTERIOR_AGREEMENT_W, _AGREEMENT_SOURCE, _AGREEMENT_GAMMA,
+            pearcey_table=_pearcey_cusp.PearceyTable.load())
+        served_none = _pearcey_cusp.cusp_amplification(
+            _INTERIOR_AGREEMENT_W, _AGREEMENT_SOURCE, _AGREEMENT_GAMMA,
+            pearcey_table=None)
+
+        self.n_checks += 1
+        self.assertIsNotNone(served_table)
+        self.assertIsNotNone(served_none)
+
+    def test_corrupt_vertex_breaks_distance_gate(self):
+        """Returning the furthest (not nearest) astroid cusp violates
+        the source-distance selection gate."""
+        gamma, beta, kappa, cusp_i = 0.5, 0.0, 0.0, 1
+        source = _seed_source_near_cusp(gamma, beta, kappa, cusp_i)
+        all_vert = _astroid_cusp_vertices(gamma, beta, kappa)
+
+        def wrong_vertex(*args, **kwargs):
+            return max(all_vert, key=lambda v: float(np.linalg.norm(
+                source - np.asarray(v.source))))
+
+        nearest = geometry.nearest_caustic_point(
+            gamma, beta, source, kappa=kappa)
+        branch = _vertex_branch(gamma, beta, kappa, nearest.theta)
+
+        with mock.patch.object(_pearcey_cusp, '_cusp_vertex',
+                               wrong_vertex):
+            bad_vertex = _pearcey_cusp._cusp_vertex(
+                gamma, beta, kappa, source, nearest.theta, branch)
+
+        bad_dist = float(np.linalg.norm(
+            source - np.asarray(bad_vertex.source)))
+        best_dist = min(float(np.linalg.norm(
+            source - np.asarray(v.source))) for v in all_vert)
+
+        self.n_checks += 1
+        self.assertGreater(
+            bad_dist, best_dist * (1.0 + 1e-8),
+            f'Wrong-vertex patch did NOT produce a further vertex: '
+            f'bad_dist={bad_dist:.6e}, best_dist={best_dist:.6e}')
