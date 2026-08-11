@@ -1,31 +1,46 @@
 # Librarian Short-Term Observations
 
-## 2026-08-11 -- post-commit sync for e1158cc (NO-OP)
+## 2026-08-11 -- post-commit sync for 3de70a2 (NO-OP)
 
-Scope: docs: todo + brief for zero-quadrature Pearcey hot path build.
+Scope: docs: todo + brief for revert-residual-table / fix-cusp-routing build.
 
-Changed files:
-- `.claude/handoff/brief_zero_quadrature_pearcey.md` — build brief (agent-only path)
-- `.claude/spec/TODO.md` — already regenerated in the commit itself
-- `.claude/spec/todo.d/lensing_zero_quadrature_pearcey.md` — source fragment
+Changed files in trigger commit:
+- `.claude/handoff/brief_revert_residual_table_fix_routing.md` — agent-only path
+- `.claude/spec/todo.d/lensing_revert_residual_table_fix_routing.md` — todo fragment
 
 No `cogwheel/` Python files changed. No new modules, no new disk artifacts, no public API
-changes, no Sphinx doc updates needed. TODO.md was already rendered as part of the commit.
+changes. `TODO.md` was already regenerated as part of the commit.
 
-POST-COMMIT SYNC NO-OP RULE applies: agent/spec-only commit with no downstream doc
-surface impact. "Record no-op sync runs as a commit rather than skipping silently" — sync
-commit carries only the sync_issues.json deletion + this memory write.
+Also checked `bed77b8` (style: remove shadowed `_KNOWN_ENVELOPE_DEFINITIONS` alias from
+`cogwheel/lensing/surrogate.py`): the alias name appears only in `completed.d/` history,
+not in any living doc surface. NO-OP.
 
-Pre-existing dirty files `.claude/agent_state/librarian.json` and
-`.claude/tidy_advisory.json` were present before this run (render_fragments.py side
-effects from a prior session) — not committed.
+### FOLD-CARRIER SCHEMA CROSS-REF (INS-1-002/003) — NOW CONFIRMED FIXED
 
-## Previous session carry-forwards (still pending):
+Previous short-term memory carried this as "Still pending" — WRONG. Both surfaces are
+already correct:
+- SPEC.md ~line 62: "tag `'exterior_polar_rho_log_carrier_v1'` (`_EXTERIOR_POLAR_AXIS_SCHEMA_V4`)
+  — retained for backward compatibility — and the current write tag
+  `'exterior_polar_rho_u_carrier_v2'` (`_EXTERIOR_POLAR_AXIS_SCHEMA_V5`) are the two
+  known tags"
+- DATA_CONTRACTS.yaml line 198: "Each such record MUST carry one of the two known
+  axis_schema tags: 'exterior_polar_rho_log_carrier_v1' ... or
+  'exterior_polar_rho_u_carrier_v2' ... the current write tag"
+Neither says "ONLY known tag" for V4 anymore. Fix was applied in a prior session not
+captured in the short-term memory. DO NOT re-apply this fix.
 
-- FOLD-CARRIER SCHEMA CROSS-REF CLUSTER (INS-1-002/003): SPEC.md ~line 63
-  and DATA_CONTRACTS.yaml ~line 199 still describe
-  exterior_polar_rho_log_carrier_v1 as "the ONLY known tag" -- stale since
-  V5 2D tag shipped. Both surfaces need updating. Still pending.
-- Lobe axis-schema DATA_CONTRACTS.yaml rows (INS-4-002/F050) deferred.
-- lensing_farfield_sd_coordinate_degenerates + name_spans_three_regimes open.
-- surrogate_contract_test_consumer_warning escalation fragment open; no dup.
+### Lobe axis schema INS-4-002 — CONFIRMED CORRECT
+
+DATA_CONTRACTS.yaml already correctly describes `lobe_caustic_relative_v1` as the ONLY
+known lobe tag, with the two old lobe tags dropped. Nothing stale here.
+
+### sync_derived_docs.py
+
+Ran clean (5 checks). Test-consumer warnings for `lens_amplification_surrogate` recurred
+identically — the escalation fragment `todo.d/surrogate_contract_test_consumer_warning.md`
+still exists and is open. DO NOT create a duplicate. "Auto-fixed" claim was the known
+false-positive state flush; `git diff` showed only pre-existing dirty agent state, no doc
+surface changes.
+
+POST-COMMIT SYNC NO-OP RULE applies: no doc surfaces were stale, no files committed
+(beyond sync_issues.json deletion + this memory write).
