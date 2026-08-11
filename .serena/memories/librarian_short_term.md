@@ -1,46 +1,44 @@
 # Librarian Short-Term Observations
 
-## 2026-08-11 -- post-commit sync for 3de70a2 (NO-OP)
+## 2026-08-11 -- post-commit sync for b64480c / b9a9ee5 (NO-OP)
 
-Scope: docs: todo + brief for revert-residual-table / fix-cusp-routing build.
+Scope: cusp-arm routing fix + interior-cusp-serving-barrier TODO/brief.
 
-Changed files in trigger commit:
-- `.claude/handoff/brief_revert_residual_table_fix_routing.md` — agent-only path
-- `.claude/spec/todo.d/lensing_revert_residual_table_fix_routing.md` — todo fragment
+### Commits triaged
 
-No `cogwheel/` Python files changed. No new modules, no new disk artifacts, no public API
-changes. `TODO.md` was already regenerated as part of the commit.
+**b64480c** (feat(lensing): cusp-arm routing fix):
+- Changed `cogwheel/lensing/chang_refsdal/_pearcey_cusp.py` and
+  `cogwheel/tests/test_lensing_airy_fold.py`.
+- Only change is to `_cusp_vertex` — a private function (underscore prefix).
+  Implementation changed from seed_theta-nearest-cusp selection to
+  source-plane-distance-nearest across all candidate cusps. Public
+  behavior (Pearcey arm serves sources within `_CUSP_ARM_COVERAGE` of cusp
+  vertex) is unchanged; only the WHICH vertex is selected was fixed.
+- SPEC.md does not describe the internal `_cusp_vertex` selection mechanism —
+  it only documents the coverage window and the arm's serve contract.
+  No staleness. Test file is test-only (per the post-commit NO-OP rule).
+- NO doc surface changes required.
 
-Also checked `bed77b8` (style: remove shadowed `_KNOWN_ENVELOPE_DEFINITIONS` alias from
-`cogwheel/lensing/surrogate.py`): the alias name appears only in `completed.d/` history,
-not in any living doc surface. NO-OP.
+**b9a9ee5** (docs: todo + brief for interior cusp serving barrier build):
+- Added `.claude/handoff/brief_interior_cusp_serving_barrier.md` (agent-only).
+- Added `.claude/spec/todo.d/lensing_interior_cusp_serving_barrier.md`.
+- TODO.md was regenerated as part of the commit (render_fragments.py ran).
+  Verified: "Interior cusp sources still refuse" appears once in TODO.md.
+- No cogwheel/ Python changes. NO-OP.
 
-### FOLD-CARRIER SCHEMA CROSS-REF (INS-1-002/003) — NOW CONFIRMED FIXED
-
-Previous short-term memory carried this as "Still pending" — WRONG. Both surfaces are
-already correct:
-- SPEC.md ~line 62: "tag `'exterior_polar_rho_log_carrier_v1'` (`_EXTERIOR_POLAR_AXIS_SCHEMA_V4`)
-  — retained for backward compatibility — and the current write tag
-  `'exterior_polar_rho_u_carrier_v2'` (`_EXTERIOR_POLAR_AXIS_SCHEMA_V5`) are the two
-  known tags"
-- DATA_CONTRACTS.yaml line 198: "Each such record MUST carry one of the two known
-  axis_schema tags: 'exterior_polar_rho_log_carrier_v1' ... or
-  'exterior_polar_rho_u_carrier_v2' ... the current write tag"
-Neither says "ONLY known tag" for V4 anymore. Fix was applied in a prior session not
-captured in the short-term memory. DO NOT re-apply this fix.
-
-### Lobe axis schema INS-4-002 — CONFIRMED CORRECT
-
-DATA_CONTRACTS.yaml already correctly describes `lobe_caustic_relative_v1` as the ONLY
-known lobe tag, with the two old lobe tags dropped. Nothing stale here.
+**572b452** — prior no-op sync commit, not stale.
 
 ### sync_derived_docs.py
 
-Ran clean (5 checks). Test-consumer warnings for `lens_amplification_surrogate` recurred
-identically — the escalation fragment `todo.d/surrogate_contract_test_consumer_warning.md`
-still exists and is open. DO NOT create a duplicate. "Auto-fixed" claim was the known
-false-positive state flush; `git diff` showed only pre-existing dirty agent state, no doc
-surface changes.
+Ran cleanly. The recurring `lens_amplification_surrogate` test-only consumer
+warnings appeared again (same 4 warnings from test_lensing_surrogate.py).
+The escalation fragment `todo.d/surrogate_contract_test_consumer_warning.md`
+is already open — did NOT create a duplicate. "Auto-fixed" was the known
+false-positive state flush; `git diff` confirmed no doc surface changes.
 
-POST-COMMIT SYNC NO-OP RULE applies: no doc surfaces were stale, no files committed
-(beyond sync_issues.json deletion + this memory write).
+### Pattern note
+
+Private-function implementation fixes (underscore-prefixed, no API
+surface change, no new disk artifact) are librarian no-ops even when the
+diff is substantial. Only check SPEC.md if the function is NAMED there or
+the fix changes a documented constant/coverage window.
