@@ -99,14 +99,21 @@ section: Backlog
     (the old ``62`` sat in the mpmath band, where the wave evaluator now
     CERTIFIES instead of refusing).  Green.
 
-  ## STILL RED — two genuine production issues (NOT parameter-fixable)
+  ## RESOLVED 2026-08-11 (production fix): `test_refusal_precedes_coherent_score`
 
-  - `test_lensing_marginalized_likelihood.py::RefusalContractTestCase::
-    test_refusal_precedes_coherent_score` — the `CANCELLATION_LENS` has
-    hard-core nodes in ``(60, 150]`` that the engine evaluates via the
-    mpmath path (no mass choice avoids the band; the engine processes all
-    in-band nodes before refusing).  Needs the deferred production fix in
-    `lensing_mpmath_band_fixed_panel_rule.md`.
+  The deferred production fix tracked in
+  `lensing_mpmath_band_fixed_panel_rule` landed (completed 2026-08-11,
+  see [[2026-08-11_mpmath_fixed_panel_rule]]): the Schwinger QD band
+  (`60 < w <= 150`)
+  now runs a fixed-order composite Gauss-Legendre rule at
+  `_MP_PANEL_ORDER = 32` per panel instead of the unbounded adaptive
+  `mp.quad`, so the `CANCELLATION_LENS` hard-core nodes in the band complete
+  in O(seconds) and the refusal-precedes-coherent-score spy runs to
+  completion.  Green — resolved by the production fix, NOT by a parameter
+  choice.
+
+  ## STILL RED — one genuine production issue (NOT parameter-fixable)
+
   - `test_lensing_operator.py::BranchGateTestCase::
     test_thresholds_have_one_home` — `select_branch` says 'wave' for a
     saddle node (``w*delta_min < RHO_END``) but the grid serves the cusp
@@ -114,4 +121,5 @@ section: Backlog
     bit-identity probe then sees 'geometric'.  Pre-existing at HEAD
     (verified), unrelated to the cusp-arm changes (nearest.distance = 0.84
     passes the new ppGO gate either way).  A routing/bit-identity
-    adjudication, not a parameter fix.
+    adjudication, not a parameter fix.  Tracked separately in
+    `lensing_one_home_routing_disagreement.md`.

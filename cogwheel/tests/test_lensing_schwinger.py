@@ -2634,5 +2634,128 @@ class SaddleWCeilingWiringTestCase(SchwingerTestCase):
         self.n_checks += 1
 
 
+
+
+# =====================================================================
+# WP-1: Fixed-panel Gauss-Legendre rule in _f_schwinger_mpmath
+# Overlap-band DD-vs-mpmath cross-agreement.
+# =====================================================================
+
+#: Overlap-band DD-vs-mpmath cross-agreement fixtures.  ``w = 60`` sits
+#: at the DD ceiling (routed to `f_schwinger`'s DD path) but is below the
+#: mpmath QD ceiling (``W_CEILING_SCHWINGER_QD = 150``), so
+#: ``_f_schwinger_mpmath`` is DIRECTLY callable — the dispatch gate lives
+#: in `f_schwinger`, not in ``_f_schwinger_mpmath`` itself.
+CROSS_AGREEMENT_W = 60.0
+CROSS_AGREEMENT_GAMMAS = (0.3, 0.7, 1.3, 1.5)
+CROSS_AGREEMENT_YS = ((0.3, 0.2), (0.7, 0.4))
+#: Cross-agreement tolerance: the DD path at ``w = 60`` operates at the
+#: ceiling of the double-double arithmetic — the ``e^{pi w/4} ≈ 3e20``
+#: amplification of ``eps_f64 ≈ 1e-16`` residual gives a ~3e-4 noise floor,
+#: which the DD arithmetic (~106-bit, ~3 extra decimal digits) suppresses to
+#: ~1e-10.  Worst measured 5.6e-11 (gamma'=1.5, y=(0.3,0.2), saddle parity
+#: near parity-boundary pinch); the 5e-10 gate provides ~9x headroom.
+CROSS_AGREEMENT_RTOL = 5e-10
+
+#: Self-falsification: ``_schwinger.math.ceil`` is mocked to return
+#: ``-10``, driving ``dps = 30 + (-10) = 20`` at ``w = 60``, starving
+#: the mpmath quadrature to ~20 digits (the ``e^{pi w/4}`` cancellation
+#: alone eats ~21 digits).  ``_CERTIFICATION_TOL`` is relaxed so the
+#: starved path always passes its internal N/2N gate.
+CORRUPTED_CEIL_RETURN = -10
+CORRUPTION_FAILURE_BOUND = 1e-4
+
+
+class OverlapBandDdMpmathAgreementTestCase(SchwingerTestCase):
+    """
+    Overlap-band DD-vs-mpmath cross-agreement at ``w = 60``.
+
+    ``f_schwinger(60, ...)`` dispatches to the double-double path
+    (``w <= W_CEILING_SCHWINGER = 60``), while ``_f_schwinger_mpmath``
+    is the mpmath QD path callable directly (the ceiling gate at
+    ``w > 60`` is in `f_schwinger`'s dispatch, not in
+    ``_f_schwinger_mpmath`` itself).  Both paths are independently
+    oracle-validated; this cross-agreement is belt-and-suspenders.
+
+    Grid: ``w = 60``, ``gamma'`` in ``{0.3, 0.7, 1.3, 1.5}``, ``y`` in
+    ``{(0.3, 0.2), (0.7, 0.4)}`` (8 points total).  The positive-parity
+    (``0.3, 0.7``) and saddle (``1.3, 1.5``) columns exercise both
+    topologies; the two source positions span on- and off-axis.
+
+    Cost: 8 mpmath evaluations at ``w = 60`` (dps = 90 each).  < 1 s.
+    """
+
+    def test_cross_agreement_8_points(self):
+        """
+        ``|F_DD - F_mpmath| / |F_mpmath| < 5e-10`` (worst measured
+        5.6e-11) at all 8 overlap-band points, spanning both positive-
+        parity and saddle columns.
+        """
+        for gamma_prime in CROSS_AGREEMENT_GAMMAS:
+            for y in CROSS_AGREEMENT_YS:
+                y_eig = np.array(y)
+                with self.subTest(gamma_prime=gamma_prime, y=y):
+                    f_dd = f_schwinger(CROSS_AGREEMENT_W, y_eig,
+                                       gamma_prime)
+                    f_mp = _schwinger._f_schwinger_mpmath(
+                        CROSS_AGREEMENT_W, y_eig, gamma_prime)
+                    self.assert_close(
+                        f_dd, f_mp, CROSS_AGREEMENT_RTOL,
+                        f'DD-vs-mpmath cross-agreement at '
+                        f'w={CROSS_AGREEMENT_W}, '
+                        f"gamma'={gamma_prime}, y={y}")
+
+
+class OverlapBandSelfFalsificationTestCase(SchwingerTestCase):
+    """
+    Prove the DD-vs-mpmath cross-agreement test can go red.
+
+    Corrupt the mpmath dps formula (``30 + ceil(w)`` → ``30 - 10 = 20``
+    at ``w = 60``) and relax the certification tolerance so the starved
+    quadrature always passes its internal N/2N gate.  The cross-agreement
+    must degrade above ``CORRUPTION_FAILURE_BOUND``, proving the gate
+    has teeth.
+    """
+
+    def test_corrupted_dps_degrades_cross_agreement(self):
+        """
+        Clean agreement is tight; lowering the mpmath dps base from
+        ``30`` to effectively ``dps = 20`` at ``w = 60`` drives
+        the cross-agreement above the failure bound.
+        """
+        y_eig = np.array(CROSS_AGREEMENT_YS[0])
+        gamma_prime = CROSS_AGREEMENT_GAMMAS[0]
+
+        # Precondition: clean agreement is well below the failure bound
+        f_dd = f_schwinger(CROSS_AGREEMENT_W, y_eig, gamma_prime)
+        f_mp_clean = _schwinger._f_schwinger_mpmath(
+            CROSS_AGREEMENT_W, y_eig, gamma_prime)
+        clean_rel = float(
+            abs(mpmath.mpc(f_dd) - mpmath.mpc(f_mp_clean))
+            / abs(mpmath.mpc(f_mp_clean)))
+        self.n_checks += 1
+        self.assertLess(
+            clean_rel, CORRUPTION_FAILURE_BOUND,
+            f'clean cross-agreement {clean_rel:.3e} already above '
+            f'{CORRUPTION_FAILURE_BOUND}; self-falsification '
+            f'precondition broken')
+
+        # Corrupt: dps = 30 + (-10) = 20; relax cert tol so starved
+        # quadrature always passes internal N/2N certification.
+        with mock.patch.object(_schwinger, '_CERTIFICATION_TOL', 100.0), \
+             mock.patch.object(_schwinger.math, 'ceil',
+                               lambda x: CORRUPTED_CEIL_RETURN):
+            f_mp_corrupted = _schwinger._f_schwinger_mpmath(
+                CROSS_AGREEMENT_W, y_eig, gamma_prime)
+
+        corrupted_rel = float(
+            abs(mpmath.mpc(f_dd) - mpmath.mpc(f_mp_corrupted))
+            / abs(mpmath.mpc(f_mp_corrupted)))
+        self.n_checks += 1
+        self.assertGreater(
+            corrupted_rel, CORRUPTION_FAILURE_BOUND,
+            f'corrupted dps cross-agreement {corrupted_rel:.3e} '
+            f'<= {CORRUPTION_FAILURE_BOUND}; the dps corruption has '
+            f'no teeth (the mpmath path is not load-bearing at w=60)')
 if __name__ == '__main__':
     main()

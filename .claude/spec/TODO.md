@@ -1100,6 +1100,146 @@ Tag conventions:
   identical values; and the saddle interior charts one half-lobe.
 
 
+- **Deltoid (saddle) exterior cusp region just outside the tip is UNSERVED — no rung certifies**
+  `[→ spec]` — measured 2026-08-11 by the driver (user-flagged exterior coverage).
+
+  For gamma=1.3, sources just OUTSIDE the deltoid cusp tip (rho 1.0-1.2, on
+  and off the lobe axis, e.g. (-2.0, 0.05), (-1.8, 0), (-1.72, 0)) refuse on
+  EVERY rung at w up to 5000:
+  - cusp arm: R < r_ppgo_min (71) so ppGO does not fire; the uniform form
+    does not certify (measured R=26 at w=500, 44 at w=1000 for (-2.0,0.05)).
+  - fold arm: outside the fold band / not a fold.
+  - full ladder `operator.F_op`: REFUSED (SchwingerCertificationError) at
+    w=200/500/1000 — NOT served by the exact engine either.
+  Only FAR deltoid sources serve (rho ~ 1.46, |src-tip| large enough that
+  R >= 71) via ppGO at w >= 500.
+
+  Compare ASTROID exterior (gamma=0.5): the mid-w band (radius_min < R <
+  r_ppgo_min) falls through to the EXACT ENGINE and is served (measured
+  F_op = 1.50/0.99/1.49 at w=200/300/500 for (1.5,0.05)) — served WITH
+  quadrature but not a hard gap; high w serves via ppGO quadrature-free.
+
+  So the deltoid exterior-cusp-neighbourhood has a genuine coverage hole:
+  near the tip it is neither served by a fast path NOR by the exact engine.
+
+  ROOT (hypothesis to verify): the saddle exact path (w > 150 above the QD
+  ceiling, or the mpmath band) refuses because `f_schwinger` for the saddle
+  at these near-cusp-exterior parameters does not certify (or w*delta_min
+  < RHO_END so geometric refuses, and the arms decline).  Needs a serving-
+  ladder investigation: which rung SHOULD own the deltoid just-outside-tip
+  region, and why it refuses.
+
+  ACCEPTANCE: deltoid exterior sources just outside the cusp tip (rho 1.0
+  to ~1.2) are served by SOME rung (fast path preferred: ppGO or the
+  exterior surrogate / Born rung / fold-ppGO; exact engine acceptable as
+  fallback but must serve, not refuse) across the w band; no live
+  quadrature in the fast path; refusal-conservative.
+
+  ## Driver verification (2026-08-11): the ppGO gate is NOT the blocker
+
+  The build's ppGO fold-band gate (nearest.distance >= 0.3) does not cause
+  this gap: at (-2.0,0.05) nearest.distance = 0.290 < 0.3, so the gate
+  correctly defers to the fold arm — but the FOLD ARM ALSO REFUSES (all
+  tested sources, even fold_dist=0.086 inside the band).  The cusp uniform
+  form does not certify at these R, and the exact engine (operator.F_op)
+  refuses (SchwingerCertificationError).  Pre-existing, not build-caused.
+
+  ## DESIGN CROSSING (driver, 2026-08-11): the surrogate does NOT own this region
+
+  The demodulated/ghost-handled exterior surrogate charts do NOT cover the
+  cusp neighbourhood: `_exclude_near_cusp` drops tiles within
+  `_CUSP_EXCLUSION_DISTANCE = 0.35` of ANY cusp vertex (both parities),
+  because "near-cusp tiles induce oscillatory E_ff labels that a polar
+  chart cannot resolve" (surrogate_training.py:2154).  The intended owner
+  of the exterior cusp window is the CUSP ARM, per the design comment at
+  surrogate.py:295-308:
+  - astroid: `_CUSP_ARM_COVERAGE = 0.07 rad` (small window, cusp arm owns it)
+  - saddle:  `_SADDLE_CUSP_ARM_COVERAGE = 0.0` (explicitly zero; "saddle
+    deep-interior images can be arbitrarily close to the cusp (F018)")
+
+  So the deltoid exterior cusp window is a design hole: the surrogate
+  excludes it (can't resolve), the cusp arm has ZERO coverage for the
+  saddle, the fold arm refuses, and the exact engine refuses.  The astroid
+  window is owned by the cusp arm but has a mid-w exact-engine flashback
+  (R between radius_min and r_ppgo_min, where the uniform form does not
+  certify and F_op falls to the exact engine) — served, but WITH
+  quadrature, contradicting the zero-quadrature serving goal.
+
+  This is the same cusp-neighbourhood family as `lensing_fold_pair_drops_
+  third_cusp_image` (on-axis) and `lensing_saddle_interior_cusp_serving`
+  (deltoid interior): the cusp arm's certified reach does not cover the
+  full cusp neighbourhood, and `_SADDLE_CUSP_ARM_COVERAGE = 0.0` documents
+  that the saddle was never calibrated.  Fix directions: (a) calibrate the
+  saddle cusp arm coverage (scripts/measure_saddle_cusp_arm_coverage.py is
+  the stub), (b) extend a cusp-adapted chart (u = d^{2/3}) into the
+  exclusion window, or (c) gate the mid-w astroid flashback to keep it
+  quadrature-free (ppGO threshold or a table-only uniform serve).
+
+  ## DESIGN QUESTION (user, 2026-08-11): who SHOULD serve the exterior cusp
+  ## window — the demodulated/ghost surrogate or the Pearcey arm?  THIS is
+  ## the open decision to resolve; do not let it drop.
+
+  The user posed the explicit design choice for the cusp-EXTERIOR region
+  (just outside the caustic, on/near the cusp axis, BOTH parities):
+
+  (A) EXTEND THE DEMODULATED/GHOST SURROGATE to serve outside the cusp too:
+      the real-demodulated / imaginary-ghost-subtracted exterior charts
+      (fold-carrier `rho_u_carrier` + ghost handling) were built for the
+      region OUTSIDE THE FOLDS and already avoid exact-engine flashback
+      there.  The question: can the SAME machinery serve the cusp-exterior
+      window (rho 1.0 - ~2.1, on/near the cusp axis) where it currently
+      flashes back to the exact engine (astroid) or refuses (deltoid)?
+      The blocker is `_CUSP_EXCLUSION_DISTANCE = 0.35` (surrogate_training
+      drops near-cusp tiles: "near-cusp tiles induce oscillatory E_ff labels
+      that a polar chart cannot resolve").  If a cusp-adapted coordinate
+      (u = d^{2/3}) or the ghost/demodulation machinery can resolve those
+      labels, the surrogate could own the window quadrature-free.
+
+  (B) MAKE THE PEARCEY ARM SERVE THERE: the design already hands the cusp
+      window to the cusp arm (`_CUSP_ARM_COVERAGE = 0.07 rad` astroid;
+      `_SADDLE_CUSP_ARM_COVERAGE = 0.0` saddle — the latter a documented
+      placeholder pending calibration).  The arm serves high-w via ppGO
+      (quadrature-free) but has a MID-W gap: at radius_min < R < r_ppgo_min
+      the uniform form does not certify, so the astroid falls to the exact
+      engine (served WITH quadrature — the "bad exact flashback") and the
+      deltoid refuses outright.  Measured: astroid just-outside-cusp within
+      0.07 rad serves via pearcey only at w=500 (ppGO); w=100-300 refuse or
+      flash to exact.  Deltoid (saddle coverage 0.0): nothing serves near
+      the tip at any w.
+
+  DECISION REQUIRED: (A) surrogate-extends-to-cusp vs (B) pearcey-fix
+  (calibrate saddle coverage + close the mid-w uniform-form gap), vs a
+  hybrid.  Whichever wins, the ACCEPTANCE is: exterior cusp window (both
+  parities, rho 1.0 - ~2.1, on/near axis) served QUADRATURE-FREE by a fast
+  path across the w band; no exact-engine flashback in the window;
+  refusal-conservative.  This decision gates the fix, so it must be made
+  explicitly (Professor adjudication recommended) — do not silently pick one.
+
+  ## DRIVER MANDATE (user, 2026-08-11): EXACT-ENGINE SERVING IN THE CUSP
+  ## WINDOWS IS ACCEPTANCE OF FAILURE — the fast path must own the region.
+
+  The user's directive: the exact engine serving ANYWHERE in the cusp
+  neighbourhood (interior or exterior, astroid or deltoid) is a fast-path
+  failure — the point of the demodulated/ghost-subtraction surrogate (and
+  of the Pearcey arm) is that the exact engine is NEVER the serving rung
+  in a region a fast path can own.  The serving ladder must be:
+  surrogate (incl. cusp-extended, ghost-subtracted) -> Pearcey arm ->
+  ppGO -> [exact engine ONLY as a certified refusal fallback, never a
+  regular serve].  The mid-w exact flashback (radius_min < R < r_ppgo_min)
+  and the deltoid refusal are BOTH violations.
+
+  ACCEPTANCE (hardened): NO serving path may deliver an exact-engine value
+  in the cusp neighbourhood.  Either (A) the demodulated/ghost-subtracted
+  surrogate is extended to the cusp windows (real-demodulated +
+  imaginary-ghost-subtracted labels resolved there, dropping the
+  `_CUSP_EXCLUSION_DISTANCE` carve-out for those tiles via a cusp-adapted
+  `u = d^{2/3}` axis), or (B) the Pearcey arm is made to certify the
+  mid-w window (ppGO-like geometric limit extended below r_ppgo_min, or a
+  non-degenerate on-axis control).  The exact engine must be LEFT as a
+  named-refusal fallback only.  This is the acceptance for the build that
+  resolves this gap; do not ship a fix that leaves exact-serving in place.
+
+
 - **EXTERIOR FOLLOW-UP: ghost label, cusp exclusion, node-budget test, ppGO
   fallback** `[→ spec]` — owner-directed 2026-08-06, following
   [[2026-08-07_polar_rechart]]. Four coupled items; the
@@ -1313,6 +1453,70 @@ Tag conventions:
   higher-order uniform form, not a patched cubic one.
 
 
+- **Fold arm's `_merging_fold_pair` drops the third coalescing image on the cusp symmetry axis**
+  `[→ spec]` — measured 2026-08-11 by the driver (user-flagged).
+
+  On the astroid cusp SYMMETRY AXIS (delta_parallel = 0), an interior source
+  with rho ~ 0.42-0.57 has THREE coalescing images (e.g. gamma=0.5,
+  src=(0.7,0): tau=1.182 [min], 1.193 [saddle], 1.193 [saddle] — the two
+  saddles are the degenerate symmetric pair).  This is the CUSP catastrophe
+  (3 comparable images), not a fold.
+
+  `_merging_fold_pair` (`_airy_fold.py`) picks the delay-adjacent
+  min/saddle pair (1.182, 1.193) and SILENTLY DROPS the third image (the
+  symmetric saddle at the same tau).  The fold arm then certifies a 2-image
+  Airy uniform form against a 3-image reality; the uniform-error estimate
+  blows up (measured 12.5 vs bar 0.05 at w=200) and it refuses.  The refusal
+  is "correct for a fold" but the source is a CUSP — it should be served by
+  the Pearcey arm.
+
+  The cusp arm ALSO refuses on the axis: `delta_parallel = 0` makes the
+  Pearcey control x = 0, mapping the source to the 1-stationary EXTERIOR
+  regime (n_stat = 1), so the interior calibration bypass (len==3) never
+  fires.  Measured: on-axis (0.7,0) refuses via both arms at all w; a
+  small off-axis kick (0.7, 0.05) serves via both arms.
+
+  So the cusp-symmetry-axis "teardrop neck" is a measure-zero serving gap
+  where BOTH uniform arms decline and the node falls to the exact engine.
+  Root causes: (a) fold pair selection does not detect a 3-image cusp
+  cluster, (b) the cusp arm's x=0 control degeneracy on-axis.
+
+  PRE-EXISTING: the build only touched `_pearcey_cusp.py` calibration
+  bypass + ppGO gate; `_airy_fold.py` is untouched, and the cusp-arm
+  degeneracy predates the bypass.  Not caused by the build.
+
+  ACCEPTANCE: an interior source on the cusp symmetry axis (the teardrop
+  neck) is served by a fast path (Pearcey arm, with a non-degenerate
+  control mapping for delta_parallel ~ 0), OR the fold arm correctly
+  detects the 3-image cluster and declines to the cusp arm, OR the gap is
+  documented as an accepted exact-engine fall-through with a value-pinned
+  test.  Refusal-conservative; no live quadrature.
+
+  ## MORAL FINDING (driver, 2026-08-11): the on-axis cusp SHOULD serve, but the
+  ## current control mapping CANNOT represent it — the refusal is protective.
+
+  The user pressed the moral case: an interior source on the cusp symmetry
+  axis (3 coalescing images) should be served by the Pearcey arm.  Verified
+  with a forced-serve experiment: building the cusp uniform form at x=0
+  (bypassing the n_stat refusal) gives |F| = 4.33 vs exact 3.52 at w=40
+  (23% error), 2.54 vs 1.92 at w=60 (32%), and the reduced cluster-matching
+  FAILS (matched = 0/4: the single real stationary phase -1.641 matches no
+  image delay; the cluster phases are -0.14/+0.27/+0.27).
+
+  ROOT: `delta_parallel = 0` on the axis makes the Pearcey control
+  `x = delta_parallel·w^{1/2}/sqrt(|C4|) = 0`, forcing P(0, y) onto its
+  1-stationary EXTERIOR branch — structurally incapable of representing the
+  3-image interior cluster.  So the cusp arm's refusal is CORRECT given the
+  mapping; the MAPPING is the defect.
+
+  FIX DIRECTION (follow-up): a non-degenerate on-axis control — e.g. the
+  cusp-adapted angular coordinate `u = d^{2/3}` used by the surrogate's
+  wedge/lobe charts (`_wedge_cusp_axis_map` / `_lobe_cusp_axis_map`), or a
+  2nd-order/rotated control that keeps `x` off zero when
+  `delta_parallel ~ 0`.  Acceptance: on-axis interior cusp sources serve
+  with the same tolerance as the off-axis generic case.
+
+
 - **THE TIER-GATED TRAINING SUITE IS BROKEN AT HEAD — 16 failed, 16 errors,
   every one vacuous** `[housekeeping]` — measured 2026-08-06, PRE-EXISTING
   (not caused by the interior-wedge build).
@@ -1498,56 +1702,35 @@ Tag conventions:
   not a repair of `InteriorWedgeChart`.
 
 
-- **Schwinger mpmath band (60 < w <= 150) uses unbounded adaptive `mp.quad` — replace with a fixed-panel rule**
-  `[→ spec]` — measured 2026-08-11 by the driver while fixing the fast-tier hang cluster.
+- **`test_thresholds_have_one_home` — `select_branch` vs served routing disagreement (one-home pin RED)**
+  `[→ spec]` — measured 2026-08-11 by the driver.  Build brief written:
+  `.claude/handoff/brief_operator_routing_one_home.md`.
 
-  The exact Schwinger evaluator's DD path (`w <= 60`) is fast and bounded
-  (~0.5 s) because it uses a FIXED 24-point Gauss-Legendre composite rule
-  (`_dd_gl_rule`, `_PANEL_ORDER = 24`) over `n_panels` panels.  The mpmath
-  path (`60 < w <= 150`) instead runs `mp.quad(..., maxdegree=5)` — adaptive
-  tanh-sinh — PER PANEL at `dps = 30 + w` on a strongly oscillatory
-  integrand (`e^{iwu/2}·kernel`).  Cost is dominated by two compounding
-  factors:
+  `cogwheel/tests/test_lensing_operator.py::BranchGateTestCase::
+  test_thresholds_have_one_home` fails at HEAD (verified pre-existing, not
+  build-caused).  Saddle node `gamma=1.2, kappa=0, y=(0.04,0.03), beta=0.7,
+  w=500` (also w=1000 and gamma=2.0): `select_branch(w, delta_min, inf,
+  eta) == 'wave'` (w*delta_min = 1.90 < RHO_END = 4.0) but the grid SERVES
+  via the cusp arm's ppGO rung a value 1 ULP from `geometric_amplification`;
+  the test's no-mock `_observed_branch` (served bit-equal to geometric
+  ⇒ 'geometric') reads 'geometric' after numba warmup, so the pin fails.
 
-  * **Panel count grows ~w²**: `margin = πw/4 + 34`, panel width `= 8π/w`,
-    so `n_panels ≈ w²/32` (309 at w=80, 907 at w=150).
-  * **Adaptive refinement never converges at some (w, y)** — the 
-    "6-hour freeze" documented in `lensing_fast_tier_hangs_in_mpmath.md` is
-    a genuine divergence at isolated points, not mere slowness.  Measured:
-    `f_schwinger(w=80, y=[0.106,0.146], γ'=0.5)` ≈ 160 s; `w=61,70,100`
-    exceed 60 s.
+  OPTIONS (Professor adjudication required — see the brief): (a) the grid is
+  wrong to serve an UNRESOLVED node (w*delta_min < RHO_END) via cusp ppGO —
+  add a resolution guard to the ppGO rung; (b) the test probe is stale —
+  cusp ppGO legitimately equals the geometric limit, sharpen
+  `_observed_branch`; (c) hybrid.  Refusal-conservative; do NOT weaken the
+  other ~40 one-home checks or the byte-identity contracts.
 
-  ## Driver decision (2026-08-11): TEST-LEVEL fix only, production fix postponed
+  ACCEPTANCE: the test passes with a non-zero comparison count; the chosen
+  option is physics-justified; `test_lensing_operator.py`,
+  `test_lensing_fast_path.py`, `test_lensing_airy_fold.py` green; no
+  regression in the eta-leg-live assertion.
 
-  The fast-tier hang cluster was fixed at the TEST level by parameter choice
-  (move ladder-node frequencies above the QD ceiling `w=150` so the engine
-  hard-refuses instantly instead of entering the mpmath band):
-
-  * `_CUSP_NODE_W` 80 → 160 (`test_lensing_airy_fold.py`)
-  * `_GEOMETRIC_NODE` w 100 → 200 (`test_lensing_airy_fold.py`)
-  * `FOP_REFUSALS` / supra grids 63 → 160 (`test_lensing_fast_path.py`)
-
-  This retires `lensing_fast_tier_hangs_in_mpmath.md` (its four named tests
-  are green/skipped) and 9 of 11 items in `lensing_serving_ladder_guards_are_red.md`.
-  The USER asked to defer the PRODUCTION fix here.
-
-  ## The postponed production fix
-
-  Replace the adaptive per-panel `mp.quad` in `_f_schwinger_mpmath`
-  (`cogwheel/lensing/chang_refsdal/_schwinger.py`, `_raw_integral_mp`) with a
-  FIXED-panel Gauss-Legendre rule evaluated at mpmath precision — the same
-  composite structure the DD path uses, but with mpmath nodes/weights so the
-  `e^{πw/4}` cancellation stays certified above `w=60`.  This makes the band
-  bounded and O(n_panels·order) like the DD path, eliminating the adaptive
-  divergence.  The N/2N paired-rule certification must be preserved and
-  re-validated against the DD path in the overlap band (`w` 55–60) and
-  against brute force across the band.
-
-  ACCEPTANCE: `f_schwinger` for every `w in (60, 150]` and y in the served
-  box completes in O(seconds); `test_lensing_airy_fold.py` ladder tests can
-  return to in-band `w` (revert the `_CUSP_NODE_W`/`_GEOMETRIC_NODE`/`FOP_REFUSALS`
-  parameter changes) and still finish fast; paired-rule certification agrees
-  with the current adaptive result to `_CERTIFICATION_TOL` on a spot grid.
+  This is now the ONLY remaining item in `lensing_serving_ladder_guards_are_red`
+  — `test_refusal_precedes_coherent_score` was resolved by the mpmath
+  fixed-panel-rule build (completed 2026-08-11).  SCHEDULED: launch as its
+  own build using the existing brief.
 
 
 - **SERVE ppGO WHERE THE EXACT ENGINE CANNOT REACH, INSTEAD OF REFUSING**
@@ -1813,6 +1996,38 @@ Tag conventions:
   wedge was, and still carries the normalised-radius disease.
 
 
+- **Saddle deltoid interior cusp region is NOT served by the Pearcey arm**
+  `[→ spec]` — measured 2026-08-11 by the driver (A/B at a8361be).
+
+  The interior-cusp serving build made the ASTROID interior serve via the
+  calibration bypass (3-stationary sources skip the per-image certificate),
+  but the SADDLE deltoid interior is effectively unaffected.  For a deltoid
+  cusp source (gamma=1.3, beta=0.37, src=(1.200,-0.173), rho=0.707),
+  `_cusp_vertex` finds the deltoid tip but the source offset projects onto
+  the HARD (radial) axis — the Pearcey controls land in the 1-stationary
+  EXTERIOR regime, so `len(stationary_values) == 3` never fires and the
+  calibration bypass is not reached.  Serving at w=40/60 is the
+  PRE-EXISTING exterior Pearcey path (calibration-certified; forcing the
+  certificate false refuses it).  At w>=80 the saddle deltoid interior
+  refuses and falls to the exact engine.
+
+  Root geometry: the astroid cusp soft axis points TOWARD the caustic
+  interior (interior sources → 3 stationary points); the deltoid cusp soft
+  axis is TANGENTIAL to the lobe ("interior" toward lobe centre is along
+  the hard axis → 1 stationary point).  The build's new interior/exterior
+  test configs are all gamma < 1, so the gap was not flagged.
+
+  The ppGO fold-band gate IS parity-agnostic (nearest.distance is the fold
+  arm's own admission, applies to both parities).
+
+  ACCEPTANCE: the saddle deltoid interior (rho < 1, 4-image region) near a
+  deltoid cusp vertex is served by a fast path (Pearcey arm, likely with a
+  lobe-local coordinate like `surrogate._lobe_boundary_radius` /
+  `_deltoid_cusp_axis_map`) at w >= 80 where it currently refuses;
+  refusal-conservative; exterior saddle cusp sources unaffected; no live
+  quadrature in the hot path.
+
+
 - **ELEVEN SERVING-LADDER / CERTIFICATION GUARDS ARE RED AT HEAD — and have
   been shipping unnoticed** `[→ spec]` — measured 2026-08-06, PRE-EXISTING
   (established by A/B, not inferred).
@@ -1910,14 +2125,21 @@ Tag conventions:
     (the old ``62`` sat in the mpmath band, where the wave evaluator now
     CERTIFIES instead of refusing).  Green.
 
-  ## STILL RED — two genuine production issues (NOT parameter-fixable)
+  ## RESOLVED 2026-08-11 (production fix): `test_refusal_precedes_coherent_score`
 
-  - `test_lensing_marginalized_likelihood.py::RefusalContractTestCase::
-    test_refusal_precedes_coherent_score` — the `CANCELLATION_LENS` has
-    hard-core nodes in ``(60, 150]`` that the engine evaluates via the
-    mpmath path (no mass choice avoids the band; the engine processes all
-    in-band nodes before refusing).  Needs the deferred production fix in
-    `lensing_mpmath_band_fixed_panel_rule.md`.
+  The deferred production fix tracked in
+  `lensing_mpmath_band_fixed_panel_rule` landed (completed 2026-08-11,
+  see [[2026-08-11_mpmath_fixed_panel_rule]]): the Schwinger QD band
+  (`60 < w <= 150`)
+  now runs a fixed-order composite Gauss-Legendre rule at
+  `_MP_PANEL_ORDER = 32` per panel instead of the unbounded adaptive
+  `mp.quad`, so the `CANCELLATION_LENS` hard-core nodes in the band complete
+  in O(seconds) and the refusal-precedes-coherent-score spy runs to
+  completion.  Green — resolved by the production fix, NOT by a parameter
+  choice.
+
+  ## STILL RED — one genuine production issue (NOT parameter-fixable)
+
   - `test_lensing_operator.py::BranchGateTestCase::
     test_thresholds_have_one_home` — `select_branch` says 'wave' for a
     saddle node (``w*delta_min < RHO_END``) but the grid serves the cusp
@@ -1925,7 +2147,8 @@ Tag conventions:
     bit-identity probe then sees 'geometric'.  Pre-existing at HEAD
     (verified), unrelated to the cusp-arm changes (nearest.distance = 0.84
     passes the new ppGO gate either way).  A routing/bit-identity
-    adjudication, not a parameter fix.
+    adjudication, not a parameter fix.  Tracked separately in
+    `lensing_one_home_routing_disagreement.md`.
 
 - **Restore the surrogate structural tests once the serving schema settles**
   `[housekeeping]` — three classes were DELETED from

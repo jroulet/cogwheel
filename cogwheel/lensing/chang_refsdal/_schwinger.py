@@ -129,6 +129,16 @@ W_CEILING_SCHWINGER_QD = 150.0
 #: Paired-rule relative-difference threshold on the RAW ``t``-integral.
 _CERTIFICATION_TOL = 3e-10
 
+#: Gauss-Legendre order per composite panel for the mpmath QD path
+#: (`60 < w <= 150`).  Higher than the DD path's `_PANEL_ORDER` (24):
+#: order-24 under-resolves the upper band (measured N/2N disagreement
+#: ~3e-4 > `_CERTIFICATION_TOL` at w=100), which would REGRESS serving
+#: coverage in the cusp-exterior windows where the exact engine is the
+#: last rung (the surrogate declines those by design).  Order-32 certifies
+#: across the band (measured) and is still cheap on this fallback-only
+#: path.
+_MP_PANEL_ORDER = 32
+
 #: Fixed Gauss-Legendre order per composite panel.  The (node, weight)
 #: pairs are Newton-refined to double-double ONCE (`_dd_gl_rule`) and
 #: reused across every panel: the raw ``t``-integral is exponentially
@@ -754,6 +764,21 @@ def _reconstruct(w: float, y_eig: np.ndarray, integral: complex) -> complex:
     return prefactor * exp_y * inv_gamma * integral
 
 
+@functools.lru_cache(maxsize=None)
+def _mp_gl_rule(order: int, dps: int) -> tuple[list, list]:
+    """Return the cached mpmath Gauss-Legendre ``(nodes, weights)``.
+
+    Cache key is ``(order, dps)`` because ``mp.gauss_quadrature``
+    snapshots the global mpmath precision.  Called only from the
+    mpmath QD path where ``mpmath`` is already imported.
+    """
+    global _mpmath
+    if _mpmath is None:
+        import mpmath as _mpmath
+    nodes, weights = _mpmath.gauss_quadrature(order, 'legendre')
+    return list(nodes), list(weights)
+
+
 def _f_schwinger_mpmath(w: float, y_eig: np.ndarray,
                         gamma_prime: float) -> complex:
     """
@@ -763,11 +788,12 @@ def _f_schwinger_mpmath(w: float, y_eig: np.ndarray,
     Follows the IDENTICAL IBP structure as the double-double path:
     split at ``T = w (|a| + |b| + 2) / 2``, integration by parts on
     ``[0, T]`` (removing the ``t^{s-1}`` singularity), direct tail on
-    ``[T, inf)``, both in ``u = ln t``.  The composite-panel breakpoints
-    are fed to `mpmath.quad` (tanh-sinh) at ``maxdegree=5`` per panel.
+    ``[T, inf)``, both in ``u = ln t``.  Each panel is evaluated with a
+    fixed-order ``_MP_PANEL_ORDER`` Gauss-Legendre rule.
 
-    Certification is N/2N paired-rule on the RECONSTRUCTED ``F``:
-    if ``|F_N - F_2N| / |F_2N| > _CERTIFICATION_TOL``, raises
+    Certification is N/2N paired-rule on the RECONSTRUCTED ``F``
+    (computed in mpmath): if
+    ``|F_N - F_2N| / |F_2N| > _CERTIFICATION_TOL``, raises
     `SchwingerCertificationError`.
 
     Parameters
@@ -837,22 +863,36 @@ def _f_schwinger_mpmath(w: float, y_eig: np.ndarray,
         _MIN_PANELS,
         int(mp.ceil(margin / (_WAVELENGTHS_PER_PANEL * wavelength))))
 
+    # Cached Gauss-Legendre rule for this order and precision
+    gl_nodes, gl_weights = _mp_gl_rule(_MP_PANEL_ORDER, mp.mp.dps)
+
     def _raw_integral_mp(n_side):
-        """Compute the raw t-integral with n_side panels per side."""
+        """Compute the raw t-integral with ``n_side`` panels per side
+        using a fixed-order ``_MP_PANEL_ORDER`` Gauss-Legendre rule."""
+        panel_width = margin / n_side
+        hw = mp.mpf(panel_width) / 2
+
         # Part A: Int_{u_lo}^{u_mid} t^{s+1} h'(t) du  (IBP piece)
         u_lo = u_mid - margin
-        breakpoints_a = mp.linspace(u_lo, u_mid, n_side + 1)
-        part_a = mp.quad(
-            lambda u: (mp.exp((s + 1) * u)
-                       * kernel_derivative(mp.exp(u))),
-            breakpoints_a, maxdegree=5)
+        u_a = u_lo + hw  # first panel centre
+        part_a = mp.mpf(0)
+        for i in range(n_side):
+            panel_centre = u_a + mp.mpf(i) * mp.mpf(panel_width)
+            for x_k, w_k in zip(gl_nodes, gl_weights):
+                u_k = panel_centre + hw * x_k
+                part_a += w_k * mp.exp((s + 1) * u_k) * kernel_derivative(mp.exp(u_k))
+        part_a *= hw
 
         # Tail B: Int_{u_mid}^{u_hi} t^s h(t) du
         u_hi = u_mid + margin
-        breakpoints_b = mp.linspace(u_mid, u_hi, n_side + 1)
-        tail = mp.quad(
-            lambda u: mp.exp(s * u) * kernel(mp.exp(u)),
-            breakpoints_b, maxdegree=5)
+        u_b = u_mid + hw  # first panel centre
+        tail = mp.mpf(0)
+        for i in range(n_side):
+            panel_centre = u_b + mp.mpf(i) * mp.mpf(panel_width)
+            for x_k, w_k in zip(gl_nodes, gl_weights):
+                u_k = panel_centre + hw * x_k
+                tail += w_k * mp.exp(s * u_k) * kernel(mp.exp(u_k))
+        tail *= hw
 
         # Endpoint: T^s h(T) / s
         endpoint = t_cap ** s * kernel(t_cap) / s
@@ -861,21 +901,35 @@ def _f_schwinger_mpmath(w: float, y_eig: np.ndarray,
         raw = endpoint - part_a / s + tail
         return raw
 
-    # Paired N/2N certification
+    # Paired N/2N certification (reconstructed F compared in mpmath)
     raw_n = _raw_integral_mp(n_panels)
     raw_2n = _raw_integral_mp(2 * n_panels)
 
-    # Reconstruct F from each raw integral and compare
-    integral_n = complex(raw_n)
-    integral_2n = complex(raw_2n)
-    f_n = _reconstruct(w, y_eig, integral_n)
-    f_2n = _reconstruct(w, y_eig, integral_2n)
+    y1_mp = mp.mpf(y_eig[0])
+    y2_mp = mp.mpf(y_eig[1])
 
-    ref_mag = abs(f_2n)
-    diff_mag = abs(f_n - f_2n)
+    def _mp_reconstruct(integral_mp):
+        """Reconstruct F from the raw t-integral using mpmath arithmetic."""
+        prefactor = mp.mpc(0, -0.5 * w_)
+        phase_y = 0.5 * w_ * (y1_mp ** 2 + y2_mp ** 2)
+        exp_y = mp.exp(mp.mpc(0, phase_y))
+        log_gamma = mp.loggamma(mp.mpc(0, 0.5 * w_))
+        inv_gamma_mag = mp.exp(-log_gamma.real)
+        inv_gamma_phase = mp.exp(mp.mpc(0, -log_gamma.imag))
+        return prefactor * exp_y * inv_gamma_mag * inv_gamma_phase * integral_mp
+
+    f_n_mp = _mp_reconstruct(raw_n)
+    f_2n_mp = _mp_reconstruct(raw_2n)
+
+    ref_mag = abs(f_2n_mp)
+    diff_mag = abs(f_n_mp - f_2n_mp)
 
     if ref_mag == 0.0 or diff_mag > _CERTIFICATION_TOL * ref_mag:
-        relative = math.inf if ref_mag == 0.0 else diff_mag / ref_mag
+        if ref_mag == 0.0:
+            relative = math.inf
+        else:
+            relative_mag = diff_mag / ref_mag
+            relative = float(relative_mag)
         raise SchwingerCertificationError(
             f'Saddle wave branch (mpmath QD path) refused at w = {w}, '
             f'y_eig = ({y_eig[0]}, {y_eig[1]}), '
@@ -883,7 +937,7 @@ def _f_schwinger_mpmath(w: float, y_eig: np.ndarray,
             f'{relative:.3e} on the reconstructed F, above the '
             f'{_CERTIFICATION_TOL:.0e} threshold.')
 
-    return f_2n
+    return complex(f_2n_mp)
 
 
 def _dd_complex_magnitude(value: tuple[float, float, float, float]) -> float:
