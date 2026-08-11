@@ -64,6 +64,7 @@ from cogwheel.lensing.surrogate import (
     _from_lobe_fixed, _lobe_boundary_radius, LobeInteriorChart,
     InteriorWedgeChart, _from_wedge_fixed,
     _wedge_theta_waist, _wedge_cusp_axis_map, _lobe_cusp_axis_map,
+    _deltoid_cusp_axis_map,
     _uniform_axis, CarrierDiscontinuityError)
 
 #: Engine refusals treated conservatively as "do not serve here" during
@@ -1811,9 +1812,8 @@ def _exclude_ghost_dominated(gamma: float, center: tuple[float, float],
                              ) -> bool:
     """Return True when any tile corner lies in the ghost-transition zone.
 
-    Positive-parity only: the ghost does not exist for most saddle configs,
-    so saddle-invoked tiles passed through the non-exterior tiler are
-    unaffected.
+    Both parities: the ghost exists for astroid (γ<1) and near-saddle
+    (γ just above 1) exterior tiles.
 
     Maps tile corners and centre from ``(gamma, rho, theta_c)`` to eigenframe
     source coordinates via `_from_caustic_fixed`, builds
@@ -1878,7 +1878,8 @@ def _needs_fold_carrier(gamma: float, center: tuple[float, float],
                         ) -> bool:
     """Return True when a ghost EXISTS at any probed tile corner or centre.
 
-    Positive-parity only: the ghost does not exist for most saddle configs.
+    Both parities: the ghost exists for astroid (γ<1) and near-saddle
+    (γ just above 1) exterior tiles.
     Maps tile corners and centre from ``(gamma, rho, theta_c)`` to eigenframe
     source coordinates via `_from_caustic_fixed`, builds
     ``macro_matrix(gamma, beta=0, kappa=0)``, and probes
@@ -2977,8 +2978,7 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
                      float(theta_c_center + half_theta_c))
     # For positive-parity exterior tiles (astroid, gamma < 1): build the
     # cusp-adapted u = d**(2/3) angular map so the spline absorbs the
-    # d**(-1/3) near-cusp divergence in dE/dtheta_c.  Macro-saddle exterior
-    # (parity == -1) uses raw-theta (theta_to_u=None, u_grid=None).
+    # d**(-1/3) near-cusp divergence in dE/dtheta_c.
     if parity == 1:
         waist = _wedge_theta_waist(
             np.median(np.exp(np.linspace(
@@ -2991,8 +2991,42 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
             _uniform_axis(theta_c_range, config.n_rho, 'theta_c'),
             theta_fine, u_fine)
     else:
-        theta_to_u = None
-        u_grid = None
+        # Macro-saddle exterior (parity == -1): probe for deltoid cusp
+        # rays inside the tile's theta_c range.  When a cusp ray falls
+        # inside and the tile is entirely on one side, build the
+        # cusp-adapted u = d**(2/3) map via _deltoid_cusp_axis_map.
+        # When multiple cusp rays are in range, pick the closest to the
+        # tile centre (largest divergence).  When none, or the tile
+        # straddles a cusp, fall back to raw-theta (None).
+        gamma_mid = float(np.median(np.exp(np.linspace(
+            np.log(gamma_band[0]), np.log(gamma_band[1]), n_gamma))))
+        cusp_angles = _deltoid_cusp_source_angles(
+            gamma_mid, config.n_caustic_samples)
+        theta_lo, theta_hi = theta_c_range
+        candidates: list[float] = [
+            a for a in cusp_angles if theta_lo <= a <= theta_hi]
+        if candidates:
+            nearest = min(candidates,
+                          key=lambda a: abs(a - theta_c_center))
+            if nearest == theta_lo or nearest == theta_hi:
+                result = _deltoid_cusp_axis_map(
+                    theta_lo, theta_hi, nearest)
+                if result is not None:
+                    theta_fine, u_fine = result
+                    theta_to_u = np.vstack([theta_fine, u_fine])
+                    u_grid = np.interp(
+                        _uniform_axis(theta_c_range, config.n_rho,
+                                      'theta_c'),
+                        theta_fine, u_fine)
+                else:
+                    theta_to_u = None
+                    u_grid = None
+            else:
+                theta_to_u = None
+                u_grid = None
+        else:
+            theta_to_u = None
+            u_grid = None
     try:
         single = LensAmplificationSurrogate.from_engine(
             gamma_range=gamma_band, rho_range=rho_range,

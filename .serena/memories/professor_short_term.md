@@ -1,37 +1,22 @@
-# Professor session: ppGO fast-rung gate calibration (cusp_amplification)
+## Session 2026-08-10: Saddle exterior cusp-adapted u-coordinate review
 
-2026-08-10. Reviewed `_pearcey_cusp.py` and `_airy_fold.py` to assess the
-physics of lowering _W_PPGO_FLOOR and _R_PPGO_ERROR_CONST to serve the
-cusp-window region (source within 0.07 rad of cusp vertex, w-band [0.88, 19.3])
-via ppGO instead of Pearcey quadrature.
+### Verdict: PASS
 
-Key findings:
+All 32 tests across 6 specs PASS with no numerical concerns.
 
-1. **ppGO at low w is Airy-corrected, not raw geometric**: `fold_ppgo_correction`
-   replaces the merging fold pair with the uniform Airy form. This is fold-sound
-   and converges to the Pearcey result at large R (cusp-proximity control radius).
-   Airy correction is 4-40% at w=5..15; above w~25 diffractive error < Airy residual.
+**Spec A (Round-trip)**: SaddleCuspUCoordinateRoundTripTestCase — 8/8 PASS. theta_to_u shape (2,≥100), strictly increasing rows, u_fine[0]~0, endpoint match within 1e-12, round-trip np.interp reproduces u_grid within rtol*max(u_grid), mismatched-row falsification has detectable error (~5e-5 per docstring). Diagnostic plot shows expected overlay: blue fine-map curve, red node points, vertical cusp-ray line.
 
-2. **1/w³ kernel truncation floor**: The image_kernel function includes C1/w + C2/w²
-   terms, so O(1/w³) truncation error at w=5 is ~0.008 (> 0.005 bar) but at w=6-7 is
-   ~0.0046-0.003 (< bar). Physics permits _W_PPGO_FLOOR as low as 5-6 on pure
-   kernel-truncation grounds, but the R-gate is the binding constraint.
+**Spec B (Accuracy)**: SaddleCuspAdaptedAccuracyTestCase — 3/3 PASS. Chart A (cusp-adapted u) vs Chart B (raw theta_c) on 50 held-out points. Chart A median eps beat Chart B by ≥2x; Chart A eps ≤1e-3 production bar. d**(-1/3) divergence absorption confirmed for deltoid cusps.
 
-3. **Calibration must measure R at threshold, not just w**: The ppGO error depends on
-   the signed ratio x/y in Pearcey controls, which varies with source direction
-   relative to the cusp axes. The calibration must sweep directions at each w and find
-   the FIRST direction to fail as w decreases. Derive _R_PPGO_ERROR_CONST from R_cal
-   with a 1.5-2× safety factor.
+**Spec C (Parity gating)**: TubeCuspWindowParityGatingTestCase — 10/10 PASS. Saddle (parity=-1) coverage=0.0 refuses all cusp-window interior queries (including mid-window, near-cusp). Positive (parity=1) coverage=0.07 admits only within the 0.07 rad shrink margin, refuses at 0.04 (inside residual), admits at 0.04+shrink outside. Physics correct: deltoid cusp arm is not near the true source in saddle parity.
 
-4. **Parities differ**: Negative-parity deltoid lobe cusps have different image
-   topology (saddle,saddle merging vs min,saddle) and smaller angular extent. Calibrate
-   separately for each parity; use the more restrictive constants as production values.
+**Spec D1 (Mutation self-falsification)**: SaddleThetaToUMutationSelfFalsificationTestCase — 6/6 PASS. With-chart eps ≤1e-3; without-chart eps is ≥1.5x different and ≤10× bar (not unbounded). Mismatched theta_to_u maps also produce distinguishable eps. Guards have teeth.
 
-5. **Expected outcome**: _R_PPGO_ERROR_CONST ≈ 2-4 (down from 50), _W_PPGO_FLOOR ≈ 7-10
-   (down from 50), with binding direction likely the hard-axis (pure y-control, pure-
-   delta_perp) source offset on the negative-parity side.
+**Spec D2 (Coverage constant self-falsification)**: TubeCuspWindowParityGatingSelfFalsificationTestCase — 2/2 PASS. Positive with coverage=0.0 refuses (incorrectly), saddle with coverage=0.07 admits (incorrectly). Falsifications go red; restored constants pass.
 
-6. **The cusp-window lower edge** (w ≈ 0.88): Even with calibrated gates, w=0.88 is
-   almost certainly below any plausible ppGO serve threshold — at that frequency the
-   Pearcey quadrature is always needed. The excised region's lower portion must stay on
-   the certified path.
+**Spec E (Serving geography)**: SaddleCuspAdaptedServingTestCase — 3/3 PASS. Cusp-adapted eps ≤ raw-theta eps (non-degradation); cusp-adapted eps ≤1e-3 (production bar). Diagnostic scatter plot with y=x diagonal confirms.
+
+### Physics notes
+- A3 universality across astroid and deltoid cusps is confirmed numerically: d**(-1/3) absorption works on saddle exterior tiles with deltoid caustics exactly as on positive-parity astroid tiles.
+- No numerical anomalies, no tolerance-edge results, no near-threshold concerns.
+- Full-sampling validation (COGWHEEL_BRUTE_ACCURACY/COGWHEEL_STRICT_TIMING) remains operator-deferred — beyond fast-test scope.

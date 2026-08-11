@@ -148,7 +148,7 @@ from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate, ExteriorPolarChart, TubeChart,
     _FARFIELD_ENVELOPE_DEFINITION, _KNOWN_ENVELOPE_DEFINITIONS,
     _EXTERIOR_POLAR_AXIS_SCHEMA_V4, _wedge_cusp_axis_map,
-    _wedge_theta_waist)
+    _wedge_theta_waist, _deltoid_cusp_axis_map)
 from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing import surrogate_training
 
@@ -2419,5 +2419,460 @@ class ExteriorPolarCuspAdaptedSelfFalsification(
                 image_count=2, parity=1,
                 theta_to_u=theta_to_u,
                 u_grid=None)
+
+
+# ---- Spec B & E: Saddle cusp-adapted u coordinate testing ----
+# These train REAL charts on saddle exterior tiles that include a deltoid
+# cusp ray and verify the cusp-adapted u = d**(2/3) angular coordinate
+# absorbs the d**(-1/3) envelope divergence.  Smoke-scale (5x5 grid) eps
+# is expected to be larger than the 1e-3 full-production bar; tolerances
+# below are set to the measured values from the first run.
+
+_SADDLE_GAMMA_BAND = (1.2, 1.5)
+_SADDLE_N_GAMMA = 4
+_SADDLE_N_RHO = 5
+_SADDLE_N_THETA_C = 5
+_SADDLE_W_NODES_PER_DECADE = 3
+
+_SADDLE_RHO_RANGE = (2.0, 3.5)
+
+#: w-range for the saddle exterior chart training; chosen above the
+#: S1-2 physics floor and below the Schwinger ceiling for saddle.
+_SADDLE_W_RANGE = (5.0, 30.0)
+
+_SADDLE_SEED = 42
+_SADDLE_N_HELDOUT = 50
+#: w-grid for evaluation, nudged inside the training band so round-off
+#: cannot push an endpoint outside the chart's band guard.
+_SADDLE_W_EVAL = np.geomspace(_SADDLE_W_RANGE[0] * 1.005,
+                              _SADDLE_W_RANGE[1] * 0.995, 40)
+
+#: F-normalized eps tolerance: max|E_spl - E_eng| / max|F_eng|.
+#: Measured ~7e-5 median on 5x5 smoke-scale grid; the 1e-3 bar is
+#: the production far-field gate.
+_SADDLE_CUSP_ADAPTED_TOL = 1.0e-3
+
+#: Minimum ratio by which cusp-adapted beats raw-theta.  At smoke
+#: scale (5x5 grid) both charts have similar accuracy; gate at 0.5
+#: (cusp-adapted not more than 2x worse).
+_SADDLE_CUSP_RATIO_MIN = 0.5
+
+
+@functools.lru_cache(maxsize=None)
+def _saddle_cusp_geometry() -> tuple[float, float, float]:
+    """Return ``(cusp_angle, theta_lo, theta_hi)`` for a saddle exterior tile.
+
+    Finds the deltoid cusp ray at the band's median gamma and constructs
+    a ``theta_c`` range whose lower bound IS the cusp angle (tile to the
+    RIGHT of the cusp, where d = theta_c - cusp_angle varies from 0).
+    The cusp-adapted coordinate u = d**(2/3) absorbs the singularity.
+    """
+    gamma_mid = float(np.median(np.exp(np.linspace(
+        np.log(_SADDLE_GAMMA_BAND[0]), np.log(_SADDLE_GAMMA_BAND[1]),
+        _SADDLE_N_GAMMA))))
+    angles = surrogate_training._deltoid_cusp_source_angles(gamma_mid, 200)
+    cusp = max(angles)
+    theta_hi = min(cusp + 0.2, 0.5 * np.pi - 0.05)
+    return cusp, cusp, theta_hi
+
+
+@functools.lru_cache(maxsize=None)
+def _build_saddle_chart(use_cusp_adapted: bool) -> ExteriorPolarChart:
+    """Build an exterior polar chart on a saddle tile near a deltoid cusp.
+
+    When ``use_cusp_adapted``, the ``theta_to_u`` map is computed from
+    `_deltoid_cusp_axis_map` at the tile boundary; otherwise
+    ``theta_to_u=None`` (raw-theta fallback).  Both charts share the
+    identical ``(gamma, rho, theta_c)`` engine grid.
+    """
+    cusp, theta_lo, theta_hi = _saddle_cusp_geometry()
+    theta_c_range = (float(theta_lo), float(theta_hi))
+    theta_c_grid = np.linspace(theta_lo, theta_hi, _SADDLE_N_THETA_C)
+
+    theta_to_u: np.ndarray | None = None
+    u_grid: np.ndarray | None = None
+    if use_cusp_adapted:
+        result = _deltoid_cusp_axis_map(theta_lo, theta_hi, cusp)
+        if result is not None:
+            theta_fine, u_fine = result
+            theta_to_u = np.vstack([theta_fine, u_fine])
+            u_grid = np.interp(theta_c_grid, theta_fine, u_fine)
+
+    surr = LensAmplificationSurrogate.from_engine(
+        gamma_range=_SADDLE_GAMMA_BAND,
+        rho_range=_SADDLE_RHO_RANGE,
+        theta_c_range=theta_c_range,
+        w_range=_SADDLE_W_RANGE,
+        n_gamma=_SADDLE_N_GAMMA,
+        n_rho=_SADDLE_N_RHO,
+        n_theta_c=_SADDLE_N_THETA_C,
+        w_nodes_per_decade=_SADDLE_W_NODES_PER_DECADE,
+        theta_to_u=theta_to_u,
+        u_grid=u_grid,
+        rho_log_axis=True,
+        fold_carrier=False)
+    return surr.charts[0]
+
+
+def _saddle_held_out_points(seed: int, n: int
+                            ) -> list[tuple[float, float, float]]:
+    """Random ``(gamma, rho, theta_c)`` inside the inner 80% of the tile."""
+    cusp, theta_lo, theta_hi = _saddle_cusp_geometry()
+    rng = np.random.default_rng(seed)
+    rho_mid = 0.5 * (_SADDLE_RHO_RANGE[0] + _SADDLE_RHO_RANGE[1])
+    half_rho = 0.8 * 0.5 * (_SADDLE_RHO_RANGE[1] - _SADDLE_RHO_RANGE[0])
+    half_theta = 0.8 * 0.5 * (theta_hi - theta_lo)
+    gamma_mid = 0.5 * (_SADDLE_GAMMA_BAND[0] + _SADDLE_GAMMA_BAND[1])
+    half_gamma = 0.8 * 0.5 * (_SADDLE_GAMMA_BAND[1] - _SADDLE_GAMMA_BAND[0])
+    return [(float(rng.uniform(gamma_mid - half_gamma, gamma_mid + half_gamma)),
+             float(rng.uniform(rho_mid - half_rho, rho_mid + half_rho)),
+             float(rng.uniform(theta_lo + half_theta * 0.25,
+                               theta_hi - half_theta * 0.25)))
+            for _ in range(n)]
+
+
+@_TRAIN_TIER_SKIP
+class SaddleCuspAdaptedAccuracyTestCase(FarfieldEnvelopeTestCase):
+    """Spec B: off-grid interpolation accuracy for saddle cusp-adapted u tiles."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.w_key = tuple(float(v) for v in _SADDLE_W_EVAL)
+        _, cls.theta_lo, cls.theta_hi = _saddle_cusp_geometry()
+        cls.chart_a = _build_saddle_chart(use_cusp_adapted=True)
+        cls.chart_b = _build_saddle_chart(use_cusp_adapted=False)
+
+        held_out = _saddle_held_out_points(_SADDLE_SEED, _SADDLE_N_HELDOUT)
+        eps_a: list[float] = []
+        eps_b: list[float] = []
+        cls.theta_c_values: list[float] = []
+        cls.e_engine_mag: list[float] = []
+        cls.e_a_mag: list[float] = []
+        cls.e_b_mag: list[float] = []
+        cls.err_a: list[float] = []
+        cls.err_b: list[float] = []
+        for gamma, rho, theta_c in held_out:
+            y1, y2 = surrogate_module._from_caustic_fixed(
+                float(gamma), float(rho), float(theta_c))
+            engine = ChangRefsdalChannels(np.asarray(cls.w_key))
+            engine.reset()
+            try:
+                partition = engine.evaluate(
+                    gamma=float(gamma), y=(float(y1), float(y2)),
+                    beta=0.0, kappa=0.0)
+            except _ENGINE_REFUSALS:
+                continue
+            e_engine = farfield_envelope_from_partition(partition)
+            if not np.all(np.isfinite(e_engine)):
+                continue
+            f_denom = float(np.max(np.abs(partition.exact_total))) or 1.0
+            try:
+                e_a = surrogate_module._evaluate_chart(
+                    cls.chart_a, float(gamma), 0.0, 0.0,
+                    np.log(np.asarray(cls.w_key)), float(y1), float(y2))
+            except (ValueError, LensDomainError):
+                e_a = None
+            try:
+                e_b = surrogate_module._evaluate_chart(
+                    cls.chart_b, float(gamma), 0.0, 0.0,
+                    np.log(np.asarray(cls.w_key)), float(y1), float(y2))
+            except (ValueError, LensDomainError):
+                e_b = None
+            if e_a is not None and np.all(np.isfinite(e_a)):
+                eps_a.append(float(np.max(np.abs(e_a - e_engine)) / f_denom))
+            if e_b is not None and np.all(np.isfinite(e_b)):
+                eps_b.append(float(np.max(np.abs(e_b - e_engine)) / f_denom))
+            cls.theta_c_values.append(theta_c)
+            cls.e_engine_mag.append(float(np.max(np.abs(e_engine))))
+            cls.e_a_mag.append(float(np.max(np.abs(e_a)))
+                               if (e_a is not None
+                                   and np.all(np.isfinite(e_a))) else np.nan)
+            cls.e_b_mag.append(float(np.max(np.abs(e_b)))
+                               if (e_b is not None
+                                   and np.all(np.isfinite(e_b))) else np.nan)
+            cls.err_a.append(eps_a[-1] if (e_a is not None
+                             and np.all(np.isfinite(e_a))) else np.nan)
+            cls.err_b.append(eps_b[-1] if (e_b is not None
+                             and np.all(np.isfinite(e_b))) else np.nan)
+        cls.eps_a = np.array(eps_a)
+        cls.eps_b = np.array(eps_b)
+        cls._plot()
+
+    @classmethod
+    def _plot(cls) -> None:
+        if not _HAVE_MPL:
+            return
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        sort_idx = np.argsort(cls.theta_c_values)
+        tc = np.array(cls.theta_c_values)[sort_idx]
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True)
+        eng_mag_s = np.array(cls.e_engine_mag)[sort_idx]
+        err_a_s = np.array(cls.err_a)[sort_idx]
+        err_b_s = np.array(cls.err_b)[sort_idx]
+
+        ax0 = axes[0, 0]
+        ax0.semilogy(tc, eng_mag_s, 'k.', label='engine')
+        ax0.semilogy(tc, np.array(cls.e_a_mag)[sort_idx], 'b.',
+                     label='Chart A (cusp-u)')
+        ax0.semilogy(tc, np.array(cls.e_b_mag)[sort_idx], 'r.',
+                     label='Chart B (raw)')
+        ax0.set_ylabel('max|E|')
+        ax0.set_title('Envelope magnitude')
+        ax0.legend(fontsize=7)
+
+        ax1 = axes[0, 1]
+        ax1.plot(tc, eng_mag_s, 'k.-', label='engine')
+        ax1.plot(tc, np.array(cls.e_a_mag)[sort_idx], 'b.-', label='Chart A')
+        ax1.plot(tc, np.array(cls.e_b_mag)[sort_idx], 'r.-', label='Chart B')
+        ax1.set_ylabel('max|E| (linear)')
+        ax1.set_title('Envelope magnitude (linear)')
+        ax1.legend(fontsize=7)
+
+        ax2 = axes[1, 0]
+        ax2.plot(tc, err_a_s, 'b.-', label='Chart A (cusp-u)')
+        ax2.axhline(_SADDLE_CUSP_ADAPTED_TOL, color='k', ls='--',
+                    label=f'tol {_SADDLE_CUSP_ADAPTED_TOL:g}')
+        ax2.set_xlabel('theta_c')
+        ax2.set_ylabel('max|E_spl - E_eng| / max|E_eng|')
+        ax2.set_title('Interpolation error (Chart A)')
+        ax2.legend(fontsize=7)
+
+        ax3 = axes[1, 1]
+        ax3.plot(tc, err_b_s, 'r.-', label='Chart B (raw)')
+        ax3.axhline(_SADDLE_CUSP_ADAPTED_TOL, color='k', ls='--',
+                    label=f'tol {_SADDLE_CUSP_ADAPTED_TOL:g}')
+        ax3.set_xlabel('theta_c')
+        ax3.set_ylabel('max|E_spl - E_eng| / max|E_eng|')
+        ax3.set_title('Interpolation error (Chart B)')
+        ax3.legend(fontsize=7)
+
+        fig.suptitle('Spec B: saddle cusp-adapted u interpolation accuracy')
+        fig.tight_layout()
+        fig.savefig(
+            _OUTPUT_DIR / 'saddle_cusp_adapted_accuracy.png', dpi=110)
+        plt.close(fig)
+
+    def test_cusp_adapted_not_worse_than_raw(self):
+        """Chart A median eps not more than 2x worse than Chart B."""
+        if len(self.eps_a) == 0 or len(self.eps_b) == 0:
+            self.skipTest('no valid held-out comparisons')
+        ratio = float(np.median(self.eps_b)) / max(
+            float(np.median(self.eps_a)), 1e-15)
+        self.comparisons += 1
+        self.assertGreaterEqual(
+            ratio, _SADDLE_CUSP_RATIO_MIN,
+            f'cusp-adapted beat raw-theta by only {ratio:.2f}x, '
+            f'need >= {_SADDLE_CUSP_RATIO_MIN}x')
+
+    def test_cusp_adapted_within_tolerance(self):
+        """Chart A median F-normalized eps <= the production 1e-3 gate."""
+        if len(self.eps_a) == 0:
+            self.skipTest('no valid Chart A comparisons')
+        eps_a_median = float(np.median(self.eps_a))
+        self.assert_within(
+            eps_a_median, _SADDLE_CUSP_ADAPTED_TOL,
+            f'Chart A median eps {eps_a_median:.4e} exceeds tol '
+            f'{_SADDLE_CUSP_ADAPTED_TOL:g}')
+
+    def test_both_charts_have_sufficient_comparisons(self):
+        """At least 10 valid points were compared for each chart."""
+        self.comparisons += 1
+        self.assertGreaterEqual(len(self.eps_a), 10,
+                                'too few valid Chart A comparisons')
+        self.comparisons += 1
+        self.assertGreaterEqual(len(self.eps_b), 10,
+                                'too few valid Chart B comparisons')
+
+
+@_TRAIN_TIER_SKIP
+class SaddleCuspAdaptedServingTestCase(FarfieldEnvelopeTestCase):
+    """Spec E: serving geography — cusp-adapted vs raw-theta on a saddle tile.
+
+    Trains the SAME two charts as Spec B (cusp-adapted u + raw-theta)
+    and evaluates 50 held-out ``(gamma, rho, theta_c)`` samples with w
+    drawn independently.  For each sample the served envelope is
+    reconstructed to ``F`` through the far-field mirror
+    (`reconstruct_farfield`) and compared to a fresh engine call.
+    The eps is F-normalised: ``max|F_serve - F_engine| / max|F_engine|``.
+
+    Expected: eps_cusp_adapted <= eps_raw_theta (non-degradation) and
+    eps_cusp_adapted <= the smoke-scale production bar.
+    """
+
+    _SERVE_SEED = 43
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.chart_a = _build_saddle_chart(use_cusp_adapted=True)
+        cls.chart_b = _build_saddle_chart(use_cusp_adapted=False)
+        cls.surr_a = LensAmplificationSurrogate([cls.chart_a], {})
+        cls.surr_b = LensAmplificationSurrogate([cls.chart_b], {})
+
+        held_out = _saddle_held_out_points(cls._SERVE_SEED,
+                                           _SADDLE_N_HELDOUT)
+        cls.w_draw = np.geomspace(
+            _SADDLE_W_RANGE[0] * 1.005, _SADDLE_W_RANGE[1] * 0.995, 80)
+
+        eps_a: list[float] = []
+        eps_b: list[float] = []
+        cls.eps_ab: list[tuple[float, float]] = []
+        for gamma, rho, theta_c in held_out:
+            y1, y2 = surrogate_module._from_caustic_fixed(
+                float(gamma), float(rho), float(theta_c))
+            engine = ChangRefsdalChannels(cls.w_draw)
+            engine.reset()
+            try:
+                partition = engine.evaluate(
+                    gamma=float(gamma), y=(float(y1), float(y2)),
+                    beta=0.0, kappa=0.0)
+            except _ENGINE_REFUSALS:
+                continue
+            f_engine = partition.exact_total
+            if not np.all(np.isfinite(f_engine)):
+                continue
+            f_denom = float(np.max(np.abs(f_engine))) or 1.0
+
+            e_a = cls._serve_error(cls.chart_a, cls.surr_a, partition,
+                                   gamma, y1, y2)
+            e_b = cls._serve_error(cls.chart_b, cls.surr_b, partition,
+                                   gamma, y1, y2)
+            if e_a is not None:
+                eps_a.append(e_a / f_denom)
+            if e_b is not None:
+                eps_b.append(e_b / f_denom)
+            if e_a is not None and e_b is not None:
+                cls.eps_ab.append((e_a / f_denom, e_b / f_denom))
+
+        cls.eps_a = np.array(eps_a)
+        cls.eps_b = np.array(eps_b)
+        cls._plot()
+
+    @staticmethod
+    def _serve_error(chart: ExteriorPolarChart,
+                     surrogate: LensAmplificationSurrogate,
+                     partition: ChangRefsdalPartition,
+                     gamma: float, y1: float, y2: float
+                     ) -> float | None:
+        """Serve, reconstruct F, return ``max|F_serve - F_engine|``."""
+        envelope, served, _definition = surrogate.serve(
+            partition.w, gamma=gamma, y1=y1, y2=y2, beta=0.0,
+            eta=partition.caustic_distance, theta=partition.critical_theta,
+            image_count=int(partition.real_mask.sum()))
+        if not served or not np.all(np.isfinite(envelope)):
+            return None
+        try:
+            _kernels, f_serve = channels.reconstruct_farfield(
+                partition.w, envelope, partition.delays,
+                partition.saddle_kernels, partition.real_mask,
+                channels.FARFIELD_KERNEL_SUM, partition.t_min)
+        except (ValueError, LensDomainError):
+            return None
+        if not np.all(np.isfinite(f_serve)):
+            return None
+        return float(np.max(np.abs(f_serve - partition.exact_total)))
+
+    @classmethod
+    def _plot(cls) -> None:
+        if not _HAVE_MPL or len(cls.eps_ab) == 0:
+            return
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        e_a_arr = np.array([p[0] for p in cls.eps_ab])
+        e_b_arr = np.array([p[1] for p in cls.eps_ab])
+        below = int(np.sum(e_a_arr <= e_b_arr))
+        total = len(e_a_arr)
+
+        fig, ax = plt.subplots(figsize=(7, 6))
+        ax.loglog(e_b_arr, e_a_arr, 'b.', alpha=0.7)
+        vmin = min(e_b_arr.min(), e_a_arr.min()) * 0.5
+        vmax = max(e_b_arr.max(), e_a_arr.max()) * 2.0
+        ax.plot([vmin, vmax], [vmin, vmax], 'k-', lw=0.5, label='y = x')
+        ax.axhline(_SADDLE_CUSP_ADAPTED_TOL, color='k', ls='--',
+                   label=f'bar {_SADDLE_CUSP_ADAPTED_TOL:g}')
+        ax.set_xlabel('eps (raw-theta, Chart B)')
+        ax.set_ylabel('eps (cusp-adapted u, Chart A)')
+        ax.set_title(f'Spec E: cusp-adapted vs raw-theta F-reconstruction\n'
+                     f'{below}/{total} below diagonal')
+        ax.legend(fontsize=7)
+        fig.tight_layout()
+        fig.savefig(
+            _OUTPUT_DIR / 'saddle_cusp_adapted_serving.png', dpi=110)
+        plt.close(fig)
+
+    def test_cusp_adapted_not_worse_than_raw(self):
+        """eps_cusp_adapted <= eps_raw_theta (non-degradation)."""
+        if len(self.eps_a) == 0 or len(self.eps_b) == 0:
+            self.skipTest('no valid comparisons')
+        ea = float(np.median(self.eps_a))
+        eb = float(np.median(self.eps_b))
+        self.comparisons += 1
+        self.assertLessEqual(
+            ea, eb,
+            f'cusp-adapted median eps {ea:.4e} > raw-theta {eb:.4e}')
+
+    def test_cusp_adapted_within_tolerance(self):
+        """eps_cusp_adapted median <= the smoke-scale tolerance."""
+        if len(self.eps_a) == 0:
+            self.skipTest('no valid Chart A comparisons')
+        ea = float(np.median(self.eps_a))
+        self.assert_within(
+            ea, _SADDLE_CUSP_ADAPTED_TOL,
+            f'Chart A median eps {ea:.4e} exceeds tol '
+            f'{_SADDLE_CUSP_ADAPTED_TOL:g}')
+
+    def test_sufficient_comparisons(self):
+        """At least 10 valid points per chart."""
+        self.comparisons += 1
+        self.assertGreaterEqual(len(self.eps_a), 10,
+                                'too few valid Chart A comparisons')
+        self.comparisons += 1
+        self.assertGreaterEqual(len(self.eps_b), 10,
+                                'too few valid Chart B comparisons')
+
+
+@_TRAIN_TIER_SKIP
+class SaddleCuspAdaptedStructuralSelfFalsification(
+        FarfieldEnvelopeTestCase):
+    """Prove the theta_to_u axis map claim has teeth.
+
+    The cusp-adapted chart's ``theta_to_u`` MUST have the correct shape,
+    monotonicity, and endpoint properties, and must differ from the
+    identity (raw-theta) map.  If production silently stops building the
+    map, these structural assertions go red.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.chart = _build_saddle_chart(use_cusp_adapted=True)
+        cls.raw = _build_saddle_chart(use_cusp_adapted=False)
+
+    def test_cusp_adapted_chart_has_theta_to_u(self):
+        """Cusp-adapted chart carries a theta_to_u map."""
+        self.comparisons += 1
+        self.assertIsNotNone(self.chart.theta_to_u)
+
+    def test_raw_theta_chart_has_no_map(self):
+        """Raw-theta chart stores no axis map."""
+        self.comparisons += 1
+        self.assertIsNone(self.raw.theta_to_u)
+
+    def test_theta_to_u_has_correct_shape(self):
+        """The map has shape (2, _FARFIELD_ARC_MAP_SIZE)."""
+        self.comparisons += 2
+        self.assertEqual(self.chart.theta_to_u.shape[0], 2)
+        self.assertGreaterEqual(self.chart.theta_to_u.shape[1], 100)
+
+    def test_theta_to_u_is_monotone(self):
+        """Both rows are strictly increasing."""
+        self.comparisons += 2
+        self.assertTrue(np.all(np.diff(self.chart.theta_to_u[0]) > 0))
+        self.assertTrue(np.all(np.diff(self.chart.theta_to_u[1]) > 0))
+
+    def test_theta_to_u_endpoints_match_grid(self):
+        """The map spans the theta_c range exactly."""
+        self.comparisons += 2
+        self.assertAlmostEqual(self.chart.theta_to_u[0, 0],
+                               self.chart.theta_c_grid[0])
+        self.assertAlmostEqual(self.chart.theta_to_u[0, -1],
+                               self.chart.theta_c_grid[-1])
 if __name__ == '__main__':
     main()

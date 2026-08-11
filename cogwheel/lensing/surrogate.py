@@ -298,6 +298,14 @@ _MACRO_SADDLE_IMAGE_COUNT = 4
 # Measured by scripts/measure_cusp_arm_actual_boundary.py: minimum
 # image-theta offset from cusp at which cusp_amplification serves,
 # across (gamma, w) grid, floored to 2dp (conservative).
+
+# Cusp-arm Pearcey coverage for saddle deltoid cusps.  Set to zero
+# because saddle deep-interior images can be arbitrarily close to the
+# cusp (F018); the existing measure_cusp_arm_actual_boundary.py documents
+# convergence toward zero for saddle parity.  The value is a conservative
+# placeholder pending post-build calibration via
+# scripts/measure_saddle_cusp_arm_coverage.py.
+_SADDLE_CUSP_ARM_COVERAGE = 0.0
 _CUSP_ARM_COVERAGE = 0.07
 
 # Default package-data artifact name (under ``cogwheel/data/``).  The
@@ -699,6 +707,98 @@ def _lobe_cusp_axis_map(theta_lo: float, theta_hi: float,
         theta_fine = cusp_angle - np.clip(base_lo - u_fine, 0.0, None) ** 1.5
     else:
         raise ValueError(f"side must be 'left' or 'right'; got {side!r}.")
+    theta_fine[0] = theta_lo
+    theta_fine[-1] = theta_hi
+    return theta_fine, u_fine
+
+def _deltoid_cusp_axis_map(theta_lo: float, theta_hi: float,
+                           cusp_angle: float
+                           ) -> tuple[np.ndarray, np.ndarray] | None:
+    """Build the cusp-adapted angular spline-axis map for a saddle exterior
+    tile containing a deltoid cusp ray.
+
+    Reparametrises the exterior polar angle ``theta_c`` by ``u = d**(2/3)``
+    where ``d`` is the angular distance to the nearest deltoid cusp ray
+    (``|theta_c - cusp_angle|``).  The ``2/3`` exponent is the exact,
+    gamma-universal caustic-reach cusp scaling
+    (``r_caustic ~ const - c * d**(2/3)``), so charting the exterior
+    envelope in ``u`` absorbs that power and keeps the spline coordinate
+    smooth instead of diverging as ``d**(-1/3)`` along the raw ``theta_c``
+    axis.
+
+    Both per-side forms are monotone INCREASING in ``theta_c`` and offset so
+    ``u(theta_lo) = 0`` (``np.interp`` is translation-invariant in the
+    tabulated ordinate).  The fine map is built UNIFORM IN ``u`` — its
+    ``theta`` nodes are the inverse images of an evenly spaced ``u`` grid —
+    so serve-time ``np.interp`` error is equidistributed near the cusp,
+    where ``u'' ~ d**(-4/3)`` is largest.
+
+    Returns ``None`` when the tile straddles the cusp
+    (``theta_lo < cusp_angle < theta_hi``) — the envelope derivative
+    diverges on BOTH sides of a straddling tile, making a single monotone
+    ``u`` map ill-posed.  Callers fall back to raw-theta
+    (``theta_to_u=None``).
+
+    Parameters
+    ----------
+    theta_lo, theta_hi : float
+        Exterior polar angle tile bounds, radians,
+        ``0 <= theta_lo < theta_hi <= pi/2``.
+    cusp_angle : float
+        D₂-folded deltoid cusp ray angle in ``[0, pi/2]``; must lie
+        strictly outside ``(theta_lo, theta_hi)`` (caller checks the
+        straddle case before calling).
+
+    Returns
+    -------
+    theta_fine : np.ndarray or None
+        Shape ``(_FARFIELD_ARC_MAP_SIZE,)`` strictly increasing exterior
+        polar angles spanning ``[theta_lo, theta_hi]`` exactly at the
+        endpoints.  ``None`` when the tile straddles the cusp.
+    u_fine : np.ndarray or None
+        Matching strictly increasing cusp-adapted coordinate with
+        ``u_fine[0] = 0``.  ``None`` when the tile straddles.
+
+    Raises
+    ------
+    ValueError
+        If bounds are malformed or outside the D₂-folded
+        fundamental domain ``[0, pi/2]``.
+    """
+    theta_lo = float(theta_lo)
+    theta_hi = float(theta_hi)
+    if not (0.0 <= theta_lo and theta_hi <= np.pi / 2.0):
+        raise ValueError(
+            f'Exterior polar tile bounds (theta_lo={theta_lo}, '
+            f'theta_hi={theta_hi}) must lie within the D₂-folded '
+            f'fundamental domain [0, pi/2].')
+    if not theta_lo < theta_hi:
+        raise ValueError(
+            f'theta_lo ({theta_lo}) must be strictly below theta_hi '
+            f'({theta_hi}).')
+
+    cusp_angle = float(cusp_angle)
+    # Straddle: tile spans the cusp on both sides, no single monotone map.
+    if theta_lo < cusp_angle < theta_hi:
+        return None
+
+    exponent = 2.0 / 3.0
+    if cusp_angle <= theta_lo:
+        # Tile is entirely right of the cusp; d = theta_c - cusp_angle.
+        d_lo = theta_lo - cusp_angle
+        d_hi = theta_hi - cusp_angle
+        base_lo = d_lo ** exponent
+        u_max = d_hi ** exponent - base_lo
+        u_fine = np.linspace(0.0, u_max, _FARFIELD_ARC_MAP_SIZE)
+        theta_fine = cusp_angle + (u_fine + base_lo) ** 1.5
+    else:
+        # Tile is entirely left of the cusp; d = cusp_angle - theta_c.
+        d_lo = cusp_angle - theta_lo
+        d_hi = cusp_angle - theta_hi
+        base_lo = d_lo ** exponent
+        u_max = base_lo - d_hi ** exponent
+        u_fine = np.linspace(0.0, u_max, _FARFIELD_ARC_MAP_SIZE)
+        theta_fine = cusp_angle - np.clip(base_lo - u_fine, 0.0, None) ** 1.5
     theta_fine[0] = theta_lo
     theta_fine[-1] = theta_hi
     return theta_fine, u_fine
@@ -2546,7 +2646,9 @@ def _tube_serves(chart: TubeChart, gamma: float, log_w_min: float,
         # each window by that amount.  The chart schema is untouched --
         # the shrink is applied at query time from the module constant,
         # not stored.
-        residual = max(0.0, delta_theta - _CUSP_ARM_COVERAGE)
+        coverage = (_SADDLE_CUSP_ARM_COVERAGE if chart.parity == -1
+                     else _CUSP_ARM_COVERAGE)
+        residual = max(0.0, delta_theta - coverage)
         if abs((theta - theta_cusp + np.pi) % two_pi - np.pi) < residual:
             return False
     return True
