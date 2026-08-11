@@ -170,6 +170,7 @@ import dataclasses
 import functools
 import inspect
 import itertools
+import json
 import math
 import os
 import re
@@ -187,7 +188,6 @@ from cogwheel.lensing.surrogate import ExteriorPolarChart, select_chart
 from cogwheel.lensing.surrogate import _wedge_cusp_axis_map, _uniform_axis
 from cogwheel.lensing.surrogate import _deltoid_cusp_axis_map
 from cogwheel.lensing.surrogate import _tube_serves, TubeChart
-from cogwheel.lensing.surrogate import _CUSP_ARM_COVERAGE, _SADDLE_CUSP_ARM_COVERAGE
 from cogwheel.lensing.surrogate import LensAmplificationSurrogate
 from cogwheel.lensing import surrogate_training as training
 from cogwheel.lensing.chang_refsdal import geometry
@@ -343,10 +343,6 @@ _TRAIN_TIER_SKIP = unittest.skipUnless(
     os.environ.get('COGWHEEL_TRAIN_TIER'),
     'engine-backed training tier: set COGWHEEL_TRAIN_TIER=1 (builds real '
     'surrogate charts, minutes per class; the driver runs these post-build)')
-
-
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -1807,8 +1803,6 @@ def _census_result() -> dict:
             'beyond_served': beyond_served, 'n': _CENSUS_N_DRAWS}
 
 
-
-
 @_TRAIN_TIER_SKIP
 class SelfFalsificationTestCase(_CountingTestCase):
     """Corrupt each contract and prove the green checks would go red.
@@ -3266,7 +3260,6 @@ def _wp1_normalized_arclength(gamma: float, arc):
     return theta_fine, s_fine / s_fine[-1]
 
 
-
 class AiryEtaUniformizingCoordinateTestCase(_CountingTestCase):
     """DRY test (1e-eta): u = sqrt(eta) is the correct w-independent axis.
 
@@ -3742,7 +3735,6 @@ _TERMINAL_RESULTS = frozenset(
     {'packed', 'recorded_gated', 'carrier_flip', 'disk_excluded'})
 
 
-
 # ---------------------------------------------------------------------------
 # Build 8h-b-cusp  WP1: ExteriorPolarChart cusp-adapted u = d**(2/3) coordinate
 # ---------------------------------------------------------------------------
@@ -3927,7 +3919,6 @@ def _terminal_leaves(summary, chart_reports, parent_tag='ROOT'):
             for tag, depth, entry in _all_entries(summary, parent_tag,
                                                   chart_reports)
             if entry['result'] in _TERMINAL_RESULTS]
-
 
 
 # ---------------------------------------------------------------------------
@@ -4749,7 +4740,6 @@ class FarfieldSubdividerSelfFalsificationTestCase(TestCase):
         self.assertEqual(len(gap_charts), 0)
 
 
-
 # ===========================================================================
 # Rho Log Axis — log(rho-1) reparametrization WP
 # ===========================================================================
@@ -4767,16 +4757,6 @@ class FarfieldSubdividerSelfFalsificationTestCase(TestCase):
 # - surrogate.py :3941-3945 (_validate_exterior_polar_axis_schema)
 # - surrogate.py :4225-4236 (_chart_from_npz exterior-polar branch)
 # - surrogate_training.py :2865 (_build_farfield_chart →rho_log_axis=True)
-
-import json
-import tempfile
-from pathlib import Path
-from unittest import TestCase
-import numpy as np
-
-from cogwheel.lensing import surrogate as surrogate_module
-from cogwheel.lensing.surrogate import (
-    ExteriorPolarChart, LensAmplificationSurrogate, _uniform_axis)
 
 # ---------------------------------------------------------------------------
 # Constants for the rho-log-axis WP
@@ -6116,7 +6096,6 @@ class FoldCarrierNeedsGhostSelfFalsificationTestCase(_CountingTestCase):
         self.comparisons += 1
 
 
-
 # ---------------------------------------------------------------------------
 # WP2 Spec A: Saddle exterior cusp-adapted u-coordinate round-trip accuracy
 # ---------------------------------------------------------------------------
@@ -6326,7 +6305,6 @@ def _compute_heldout_eps_for_chart(
         config=config, rng=rng)
     provenance: dict = {}
     return _heldout_eps(chart, samples, provenance)
-
 
 
 @_TRAIN_TIER_SKIP

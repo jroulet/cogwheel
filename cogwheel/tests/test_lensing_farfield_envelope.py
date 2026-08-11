@@ -114,18 +114,12 @@ from __future__ import annotations
 
 import dataclasses
 import functools
-import importlib.util
-import inspect
 import json
 import os
 import pathlib
-import subprocess
-import sys
 import tempfile
-import types
 import unittest
-from contextlib import ExitStack
-from unittest import TestCase, main, mock
+from unittest import TestCase, main
 
 import numpy as np
 
@@ -146,9 +140,8 @@ from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate, ExteriorPolarChart, TubeChart,
-    _FARFIELD_ENVELOPE_DEFINITION, _KNOWN_ENVELOPE_DEFINITIONS,
-    _EXTERIOR_POLAR_AXIS_SCHEMA_V4, _wedge_cusp_axis_map,
-    _wedge_theta_waist, _deltoid_cusp_axis_map)
+    _FARFIELD_ENVELOPE_DEFINITION, _EXTERIOR_POLAR_AXIS_SCHEMA_V4,
+    _wedge_cusp_axis_map, _wedge_theta_waist, _deltoid_cusp_axis_map)
 from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing import surrogate_training
 
@@ -2220,7 +2213,6 @@ class StaleFarfieldAxisSchemaRefusalTestCase(FarfieldEnvelopeTestCase):
         self.comparisons += 1
         self.assertIn(_EXTERIOR_POLAR_AXIS_SCHEMA_V4,
                       surrogate_module._KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS)
-
 
 
 #: Tolerance for cusp-adapted serving: the u-coordinate reparametrization

@@ -101,7 +101,6 @@ import os
 import pathlib
 import pickle
 import tempfile
-import time
 import unittest
 from unittest import TestCase, mock
 
@@ -121,14 +120,12 @@ from cogwheel.lensing.chang_refsdal import operator as operator_module
 from cogwheel.lensing.chang_refsdal import _schwinger as schwinger_module
 from cogwheel.lensing.chang_refsdal.operator import F_op, F_op_grid
 from cogwheel.lensing.chang_refsdal._schwinger import (
-    SchwingerCertificationError, W_CEILING_SCHWINGER,
-    W_CEILING_SCHWINGER_QD)
+    SchwingerCertificationError, W_CEILING_SCHWINGER_QD)
 from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing import ppgo_map
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate, _rotate_to_eigenframe,
-    _FARFIELD_ENVELOPE_DEFINITION, _ASTROID_CUSP_ANGLES,
-    CarrierDiscontinuityError)
+    _FARFIELD_ENVELOPE_DEFINITION, _ASTROID_CUSP_ANGLES)
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, LensedBinningError,
     dimensionless_frequency)
@@ -3920,7 +3917,6 @@ class ExteriorPolarCuspAdaptedSerializationTestCase(SurrogateTestCase):
             err_msg='imag_coeffs changed after npz round-trip')
 
 
-
 class ExteriorPolarStaleSchemaHardRefusalTestCase(SurrogateTestCase):
     """Old (retired) schemas hard-refuse; new fields preserved through NPZ.
 
@@ -4223,8 +4219,6 @@ class ExteriorPolarCuspAdaptedServingTestCase(SurrogateTestCase):
                         'no-map serve produced non-finite values')
 
 
-
-
 class ExteriorPolarCuspAdaptedFromEngineTestCase(SurrogateTestCase):
     """``from_engine`` wires theta_to_u through training and returns it.
 
@@ -4400,7 +4394,6 @@ class ExteriorPolarCuspAdaptedSelfFalsificationTestCase(SurrogateTestCase):
                 image_count=2, parity=1,
                 theta_to_u=_CUSP_THETA_TO_U, u_grid=None)
         self.n_checks += 1
-
 
 
 class ExteriorPolarRhoLogAxisFromValuesTestCase(SurrogateTestCase):
@@ -4946,7 +4939,6 @@ class ExteriorPolarRhoLogAxisSerializationTestCase(SurrogateTestCase):
         self.n_checks += 1
 
 
-
 class TubeCuspWindowParityGatingTestCase(SurrogateTestCase):
     """Parity-gated cusp-window constant: saddle uses full *delta_theta*,
     positive parity uses the ``_CUSP_ARM_COVERAGE = 0.07`` shrink.
@@ -5197,4 +5189,3 @@ class TubeCuspWindowParityGatingSelfFalsificationTestCase(SurrogateTestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
