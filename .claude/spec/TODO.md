@@ -1285,76 +1285,6 @@ Tag conventions:
   matches a fresh engine evaluation to tolerance.
 
 
-- **THE FAST FULL-SUITE GATE CANNOT COMPLETE — FOUR tests hang in mpmath**
-  `[housekeeping]` — diagnosed 2026-08-06 by py-spy, twice: on a gate run
-  frozen at 99% for six hours, and on a controlled reproduction that stalled
-  at 89% with ALL FOUR xdist workers wedged.
-
-  This is NOT "a test forgot its tier gate" (the framing of the first
-  diagnosis, now superseded). Four tests in four different files reach
-  `_f_schwinger_mpmath` and never return:
-
-  | test | file:line |
-  |---|---|
-  | `test_prior_draws_are_finite_or_exact_neg_inf` | `test_lensing_marginalized_likelihood.py:839` |
-  | `test_mutation_narrowing_except_turns_neginf_red` | `test_lensing_prior.py:1064` |
-  | `test_band_limit_refusal_precedes_coherent_score` | `test_lensing_saddle_likelihood.py:463` |
-  | `setUpClass` (whole class dies) | `test_lensing_wedge_dd_arclength.py:119` |
-
-  All four sit in `mpmath.quad` summation under
-  `_raw_integral_mp` -> `_f_schwinger_mpmath` -> `f_schwinger`
-  (`cogwheel/lensing/chang_refsdal/_schwinger.py:845/866/940`), reached
-  variously through `_saddle_grid`, `_positive_parity_grid` and
-  `Posterior.lnposterior` -> `_evaluate_envelope` -> `_exact_total`.
-
-  Because four independent tests land there, the defect is in `f_schwinger`'s
-  ROUTING, not in any one fixture: some parameter regime these tests naturally
-  produce selects arbitrary-precision quadrature, which is unbounded here.
-
-  ## FIXED so far (one of five)
-
-  `test_lensing_surrogate_census.py::LnlTierTestCase::
-  test_real_likelihood_tiers_within_bars` now carries `@_TRAIN_TIER_SKIP` (the
-  file's existing `COGWHEEL_TRAIN_TIER` gate at :535). Applied per-METHOD: its
-  two siblings are cheap and stay in the fast tier. VERIFIED: that class went
-  from unbounded to 2 passed / 1 skipped in 3.70 s.
-
-  ## Why this is the highest-priority item in the repo
-
-  The tree-wide fast gate is the COMMIT PRECONDITION for every SDK build. On
-  2026-08-06 it hit its own 3600 s timeout at ~88% and STRANDED the
-  interior-wedge build, which had already passed Inspector and Professor. So
-  this is not merely wasted CPU: it blocks shipping.
-
-  It also means "full suite green" has not been established for some time.
-  The post-build tally for the Born residual chart build (`849e580`, shipped
-  2026-08-04) was never obtained — the gate meant to verify it is the run
-  killed here. See [[lensing_serving_ladder_guards_are_red]] for 11 real
-  failures that went unnoticed behind this.
-
-  ## Work, in order
-
-  1. Install `pytest-timeout` (NOT currently available — `--timeout` is an
-     unrecognized argument) and add a per-test timeout to
-     `.claude/sdk/run_full_suite.sh` AND to the SDK's tree gate. Highest
-     value: an unbounded test then fails LOUDLY and NAMES ITSELF instead of
-     needing a py-spy autopsy. The gate self-emits `[beat] n/N` on progress,
-     which is exactly why hours of no beats read as "still running".
-  2. Establish which condition in `f_schwinger` (`_schwinger.py:940`) selects
-     `_f_schwinger_mpmath` over the fast branch, and why these four cross it.
-     The DD product cap and the mpmath ceiling are different thresholds and
-     may disagree.
-  3. Fix at the routing level if the regime is legitimate but the
-     implementation is unbounded; otherwise shrink the four fixtures. Prefer
-     shrinking a fixture over tier-gating it: `setUpClass` of a whole class
-     and a `prior draws are finite` smoke check are fast-tier guarantees, and
-     a test moved behind an opt-in env var stops guarding anything.
-
-  ACCEPTANCE: `run_full_suite.sh` completes end to end and reports a tally;
-  no fast-tier test enters `_f_schwinger_mpmath` (assert it directly — patch
-  the symbol and fail if called during the fast tier).
-
-
 - **Tighten the fold arm's caustic fence; the `b4` route is CLOSED
   [→ spec].** F028 defect 2. Defect 1 (admission routing) closed by the
   authoritative-gate work; the arm is now fenced to `eta < _ETA_MAX_FOLD`
@@ -1566,6 +1496,58 @@ Tag conventions:
 
   RELATED: [[lensing_wedge_angular_axis_is_cusp_singular]]. Note this is a NEW chart class,
   not a repair of `InteriorWedgeChart`.
+
+
+- **Schwinger mpmath band (60 < w <= 150) uses unbounded adaptive `mp.quad` — replace with a fixed-panel rule**
+  `[→ spec]` — measured 2026-08-11 by the driver while fixing the fast-tier hang cluster.
+
+  The exact Schwinger evaluator's DD path (`w <= 60`) is fast and bounded
+  (~0.5 s) because it uses a FIXED 24-point Gauss-Legendre composite rule
+  (`_dd_gl_rule`, `_PANEL_ORDER = 24`) over `n_panels` panels.  The mpmath
+  path (`60 < w <= 150`) instead runs `mp.quad(..., maxdegree=5)` — adaptive
+  tanh-sinh — PER PANEL at `dps = 30 + w` on a strongly oscillatory
+  integrand (`e^{iwu/2}·kernel`).  Cost is dominated by two compounding
+  factors:
+
+  * **Panel count grows ~w²**: `margin = πw/4 + 34`, panel width `= 8π/w`,
+    so `n_panels ≈ w²/32` (309 at w=80, 907 at w=150).
+  * **Adaptive refinement never converges at some (w, y)** — the 
+    "6-hour freeze" documented in `lensing_fast_tier_hangs_in_mpmath.md` is
+    a genuine divergence at isolated points, not mere slowness.  Measured:
+    `f_schwinger(w=80, y=[0.106,0.146], γ'=0.5)` ≈ 160 s; `w=61,70,100`
+    exceed 60 s.
+
+  ## Driver decision (2026-08-11): TEST-LEVEL fix only, production fix postponed
+
+  The fast-tier hang cluster was fixed at the TEST level by parameter choice
+  (move ladder-node frequencies above the QD ceiling `w=150` so the engine
+  hard-refuses instantly instead of entering the mpmath band):
+
+  * `_CUSP_NODE_W` 80 → 160 (`test_lensing_airy_fold.py`)
+  * `_GEOMETRIC_NODE` w 100 → 200 (`test_lensing_airy_fold.py`)
+  * `FOP_REFUSALS` / supra grids 63 → 160 (`test_lensing_fast_path.py`)
+
+  This retires `lensing_fast_tier_hangs_in_mpmath.md` (its four named tests
+  are green/skipped) and 9 of 11 items in `lensing_serving_ladder_guards_are_red.md`.
+  The USER asked to defer the PRODUCTION fix here.
+
+  ## The postponed production fix
+
+  Replace the adaptive per-panel `mp.quad` in `_f_schwinger_mpmath`
+  (`cogwheel/lensing/chang_refsdal/_schwinger.py`, `_raw_integral_mp`) with a
+  FIXED-panel Gauss-Legendre rule evaluated at mpmath precision — the same
+  composite structure the DD path uses, but with mpmath nodes/weights so the
+  `e^{πw/4}` cancellation stays certified above `w=60`.  This makes the band
+  bounded and O(n_panels·order) like the DD path, eliminating the adaptive
+  divergence.  The N/2N paired-rule certification must be preserved and
+  re-validated against the DD path in the overlap band (`w` 55–60) and
+  against brute force across the band.
+
+  ACCEPTANCE: `f_schwinger` for every `w in (60, 150]` and y in the served
+  box completes in O(seconds); `test_lensing_airy_fold.py` ladder tests can
+  return to in-band `w` (revert the `_CUSP_NODE_W`/`_GEOMETRIC_NODE`/`FOP_REFUSALS`
+  parameter changes) and still finish fast; paired-rule certification agrees
+  with the current adaptive result to `_CERTIFICATION_TOL` on a spot grid.
 
 
 - **SERVE ppGO WHERE THE EXACT ENGINE CANNOT REACH, INSTEAD OF REFUSING**
@@ -1891,13 +1873,13 @@ Tag conventions:
 
   These are fast-tier tests that genuinely run and genuinely fail. They went
   unseen because the tree gate has been unable to COMPLETE (see
-  [[lensing_fast_tier_hangs_in_mpmath]]) — it wedges around 88%, so its
+  [[2026-08-11_mpmath_hang_fast_tier]]) — it wedges around 88%, so its
   summary never prints and the red never surfaces. A gate that cannot finish
   hides ordinary failures as effectively as it hides the hang.
 
   ## Work
 
-  - Do [[lensing_fast_tier_hangs_in_mpmath]] FIRST — without a completing
+  - Do [[2026-08-11_mpmath_hang_fast_tier]] FIRST — without a completing
     gate there is no way to confirm a fix here.
   - Then bisect: these witnesses were green when written, so `git log` on
     `_schwinger.py` / `operator.py` / the serving-ladder thresholds since the
@@ -1912,6 +1894,38 @@ Tag conventions:
   ACCEPTANCE: all 11 green with a non-zero comparison count, and for each
   refusal guard a mutation check showing it still FAILS when the threshold is
   moved.
+
+  ## RESOLVED 2026-08-11 (parameter choice, driver + agents)
+
+  The mpmath-band frequency leak was the common cause of most items: ladder
+  nodes at ``w in (60, 150]`` entered the slow/divergent exact-engine path.
+  Moving them above the QD ceiling (instant hard-refuse) fixed 10 of the 12
+  items, WITHOUT touching production code:
+
+  - `test_lensing_airy_fold.py` (6): `_CUSP_NODE_W` 80→160,
+    `_GEOMETRIC_NODE` w 100→200.  All green.
+  - `test_lensing_fast_path.py` (3): `FOP_REFUSALS`/supra grids 63→160.
+    All green.
+  - `test_lensing_levers.py` (1+1 error): `LEVER5_ABOVE_CEILING_W` 62→160
+    (the old ``62`` sat in the mpmath band, where the wave evaluator now
+    CERTIFIES instead of refusing).  Green.
+
+  ## STILL RED — two genuine production issues (NOT parameter-fixable)
+
+  - `test_lensing_marginalized_likelihood.py::RefusalContractTestCase::
+    test_refusal_precedes_coherent_score` — the `CANCELLATION_LENS` has
+    hard-core nodes in ``(60, 150]`` that the engine evaluates via the
+    mpmath path (no mass choice avoids the band; the engine processes all
+    in-band nodes before refusing).  Needs the deferred production fix in
+    `lensing_mpmath_band_fixed_panel_rule.md`.
+  - `test_lensing_operator.py::BranchGateTestCase::
+    test_thresholds_have_one_home` — `select_branch` says 'wave' for a
+    saddle node (``w*delta_min < RHO_END``) but the grid serves the cusp
+    arm's ppGO value, 1 ULP below `geometric_amplification`; the test's
+    bit-identity probe then sees 'geometric'.  Pre-existing at HEAD
+    (verified), unrelated to the cusp-arm changes (nearest.distance = 0.84
+    passes the new ppGO gate either way).  A routing/bit-identity
+    adjudication, not a parameter fix.
 
 - **Restore the surrogate structural tests once the serving schema settles**
   `[housekeeping]` — three classes were DELETED from
@@ -2350,38 +2364,6 @@ Tag conventions:
   ACCEPTANCE: interior cusp sources (3 comparable images) serve via the
   demodulated table (not exact engine); exterior cusp sources serve via ppGO;
   no live quadrature in the hot path; the table artifact is shipped.
-
-
-- **Interior cusp sources still refuse — investigate the certification barrier**
-  `[→ spec]` — identified 2026-08-11.
-
-  The `_cusp_vertex` routing fix (source-plane-nearest cusp) is necessary
-  but NOT sufficient: interior cusp sources (inside the caustic near a
-  cusp, 3 comparable images) STILL refuse at all w (measured w up to 300,
-  R~11, even with relaxed envelope_bar=0.5). The refusal is in the arm's
-  CERTIFICATION (calibration certificate / normal-form stationary-phase
-  check), not the routing or radius gate. ppGO returns a finite value at
-  those sources, so the physics is evaluable — the Pearcey path just
-  refuses to certify.
-
-  The user suggests possibly resurrecting the F - F_ppgo residual idea
-  with correct limits (the earlier residual attempt blew up near the fold
-  caustic |P_asymp|~1e9 — but bounded limits may work), or a different
-  treatment.
-
-  **Investigate + fix**: why does the Pearcey arm refuse interior cusp
-  sources, and what serves them? Candidates: (a) relax/fix the calibration
-  certificate for interior configs, (b) a bounded F - F_ppgo residual
-  table limited to the interior regime, (c) the wedge/tube interior charts
-  with the cusp-adapted u should handle the interior cusp (verify), (d)
-  exact engine for the interior cusp neighborhood. The interior cusp is
-  the diffraction regime (R < 71) where Pearcey is the correct physics —
-  it should serve, not refuse.
-
-  ACCEPTANCE: interior cusp sources (3 comparable images) are served by a
-  fast path (table or ppGO or wedge/tube), not the exact engine; the
-  refusal barrier is understood and fixed; no live quadrature in the hot
-  path; exterior cusp sources continue via ppGO.
 
 # Envelope surrogate + micro-levers — close the lensed/unlensed per-eval gap [→ spec]
 

@@ -62,13 +62,13 @@ section: Backlog
 
   These are fast-tier tests that genuinely run and genuinely fail. They went
   unseen because the tree gate has been unable to COMPLETE (see
-  [[lensing_fast_tier_hangs_in_mpmath]]) — it wedges around 88%, so its
+  [[2026-08-11_mpmath_hang_fast_tier]]) — it wedges around 88%, so its
   summary never prints and the red never surfaces. A gate that cannot finish
   hides ordinary failures as effectively as it hides the hang.
 
   ## Work
 
-  - Do [[lensing_fast_tier_hangs_in_mpmath]] FIRST — without a completing
+  - Do [[2026-08-11_mpmath_hang_fast_tier]] FIRST — without a completing
     gate there is no way to confirm a fix here.
   - Then bisect: these witnesses were green when written, so `git log` on
     `_schwinger.py` / `operator.py` / the serving-ladder thresholds since the
@@ -83,3 +83,35 @@ section: Backlog
   ACCEPTANCE: all 11 green with a non-zero comparison count, and for each
   refusal guard a mutation check showing it still FAILS when the threshold is
   moved.
+
+  ## RESOLVED 2026-08-11 (parameter choice, driver + agents)
+
+  The mpmath-band frequency leak was the common cause of most items: ladder
+  nodes at ``w in (60, 150]`` entered the slow/divergent exact-engine path.
+  Moving them above the QD ceiling (instant hard-refuse) fixed 10 of the 12
+  items, WITHOUT touching production code:
+
+  - `test_lensing_airy_fold.py` (6): `_CUSP_NODE_W` 80→160,
+    `_GEOMETRIC_NODE` w 100→200.  All green.
+  - `test_lensing_fast_path.py` (3): `FOP_REFUSALS`/supra grids 63→160.
+    All green.
+  - `test_lensing_levers.py` (1+1 error): `LEVER5_ABOVE_CEILING_W` 62→160
+    (the old ``62`` sat in the mpmath band, where the wave evaluator now
+    CERTIFIES instead of refusing).  Green.
+
+  ## STILL RED — two genuine production issues (NOT parameter-fixable)
+
+  - `test_lensing_marginalized_likelihood.py::RefusalContractTestCase::
+    test_refusal_precedes_coherent_score` — the `CANCELLATION_LENS` has
+    hard-core nodes in ``(60, 150]`` that the engine evaluates via the
+    mpmath path (no mass choice avoids the band; the engine processes all
+    in-band nodes before refusing).  Needs the deferred production fix in
+    `lensing_mpmath_band_fixed_panel_rule.md`.
+  - `test_lensing_operator.py::BranchGateTestCase::
+    test_thresholds_have_one_home` — `select_branch` says 'wave' for a
+    saddle node (``w*delta_min < RHO_END``) but the grid serves the cusp
+    arm's ppGO value, 1 ULP below `geometric_amplification`; the test's
+    bit-identity probe then sees 'geometric'.  Pre-existing at HEAD
+    (verified), unrelated to the cusp-arm changes (nearest.distance = 0.84
+    passes the new ppGO gate either way).  A routing/bit-identity
+    adjudication, not a parameter fix.

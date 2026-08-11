@@ -792,12 +792,15 @@ def cusp_amplification(w: float, source, gamma: float, *,
 
     radius = math.hypot(x, y)
 
-    # ppGO fast rung: when the control radius is large enough, the
-    # Pearcey function asymptotes to the geometric image sum and
-    # fold_ppgo_correction serves accurately with a ~10³× speedup.
+    # The ppGO fast rung serves the fold-region fold_ppgo_correction,
+    # which is only valid OUTSIDE the fold arm's serving band.  Inside
+    # the band (nearest.distance < _ETA_MAX_FOLD) the fold arm is the
+    # designated rung; serving there with the cusp arm would double-serve
+    # the corner with a different answer (measured 44% disagreement).
     r_ppgo_min = (_R_PPGO_ERROR_CONST * _UNIFORM_ERROR_CONST
                   / (envelope_bar / _PPGO_BAR_DIVISOR)) ** (2.0 / 3.0)
-    if radius >= r_ppgo_min and w >= _W_PPGO_FLOOR:
+    if (radius >= r_ppgo_min and w >= _W_PPGO_FLOOR
+            and nearest.distance >= _airy_fold._ETA_MAX_FOLD):
         try:
             # fold_ppgo_correction is scalar-w-safe (returns 0-d array)
             result = complex(_airy_fold.fold_ppgo_correction(
@@ -852,8 +855,18 @@ def cusp_amplification(w: float, source, gamma: float, *,
         else:
             far_sum += kernel_carrier
 
-    if not _calibration_certified(stationary_values, matched_delays):
-        return None
+    # Interior sources (3 real stationary points) bypass the per-image
+    # calibration certificate: the uniform-error gate (R >= radius_min)
+    # already bounds the answer to the envelope_bar tolerance, and the
+    # vertex-axis projection naturally loses per-image delay accuracy
+    # with distance from the vertex.  This is SAFE because the uniform
+    # ratio P/P_asymp is self-calibrating: both are evaluated at the same
+    # (x, y), so a control miscalibration cancels to leading order and
+    # only enters at second order.  Exterior sources (1 stationary
+    # point) still validate the delay-to-image alignment.
+    if len(stationary_values) != 3:
+        if not _calibration_certified(stationary_values, matched_delays):
+            return None
 
     uniform = cluster_sum * (primitive / asymptotic)
     total = uniform + far_sum

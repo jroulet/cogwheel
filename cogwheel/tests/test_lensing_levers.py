@@ -1183,10 +1183,13 @@ LEVER5_GEOMETRIC_W = (50.0, 55.0, 60.0)
 #: route it to geometric optics.
 LEVER5_INACCURATE_W = 28.0
 
-#: An above-ceiling frequency (``w > 60``): geometric-servable but the wave
-#: branch refuses, so a too-high ``L_MAX`` (routing it to wave) loses
-#: availability.
-LEVER5_ABOVE_CEILING_W = 62.0
+#: An above-ceiling frequency (``w > W_CEILING_SCHWINGER_QD = 150``):
+#: geometric-servable but the wave branch hard-refuses, so a too-high
+#: ``L_MAX`` (routing it to wave) loses availability.  NOT ``62`` -- the
+#: mpmath QD path certifies ``w in (60, 150]`` (measured), so ``62`` would
+#: not raise; ``160`` sits above the QD ceiling where the named refusal is
+#: immediate.
+LEVER5_ABOVE_CEILING_W = 160.0
 
 #: Nonzero-gauge drift point for the lever-5 wave-vs-geometric comparison.
 #: The default sweep runs at ``beta == kappa == 0``, which makes the
