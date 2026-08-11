@@ -3479,7 +3479,7 @@ Professor, without naming a single test. Both gates now pass
 `DDWCeilingTestCase` now errors in 92 s naming all six tests, while the other
 14 tests in its file pass. A gate that cannot COMPLETE hides ordinary red as
 effectively as it hides the hang — 11 unrelated failures were sitting behind
-this one (see `todo.d/lensing_serving_ladder_guards_are_red.md`).
+this one (see `completed.d/2026-08-11_serving_ladder_guards_are_red.md`, all eleven now resolved).
 
 ## F062 — careful staging never protected the commit message, because `git commit -m` takes the whole index (2026-08-07)
 

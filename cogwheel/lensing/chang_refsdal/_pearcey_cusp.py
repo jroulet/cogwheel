@@ -440,6 +440,14 @@ _W_PPGO_FLOOR = 8.0
 #: ppGO rung applies a tighter bar than the Pearcey uniform-form gate so
 #: the asymptotic regime is entered cleanly.
 _PPGO_BAR_DIVISOR = 10
+
+#: Resolution gate for the ppGO fast rung: the rung fires only when a fold
+#: pair exists (``_merging_fold_pair is not None``) OR the node is
+#: geometrically resolved (``w * delta_min >= this gate``), so
+#: `geometric_amplification` is accurate.  Mirrors ``operator.RHO_END``
+#: (cannot import directly — ``operator.py`` imports ``_pearcey_cusp`` at
+#: module level, creating a circular import).
+_PPGO_RESOLUTION_GATE = 4.0
 def _real_stationary_points(x: float, y: float) -> list[float]:
     """Real roots ``t`` of ``phi'(t) = 4 t^3 + 2 x t + y = 0``, sorted."""
     roots = np.roots([4.0, 0.0, 2.0 * x, y])
@@ -801,10 +809,19 @@ def cusp_amplification(w: float, source, gamma: float, *,
                   / (envelope_bar / _PPGO_BAR_DIVISOR)) ** (2.0 / 3.0)
     if (radius >= r_ppgo_min and w >= _W_PPGO_FLOOR
             and nearest.distance >= _airy_fold._ETA_MAX_FOLD):
+        delays = sorted(geometry.delay(image, source, matrix)
+                        for image in images)
+        delta_min = min(b - a for a, b in zip(delays[:-1], delays[1:])) \
+            if len(delays) >= 2 else 0.0
         try:
-            # fold_ppgo_correction is scalar-w-safe (returns 0-d array)
-            result = complex(_airy_fold.fold_ppgo_correction(
-                w, source, gamma, beta=beta, kappa=kappa))
+            if (_airy_fold._merging_fold_pair(images, source, matrix)
+                    is not None
+                    or w * delta_min >= _PPGO_RESOLUTION_GATE):
+                # fold_ppgo_correction is scalar-w-safe (returns 0-d array)
+                result = complex(_airy_fold.fold_ppgo_correction(
+                    w, source, gamma, beta=beta, kappa=kappa))
+            else:
+                result = None
         except geometry.LensDomainError:
             result = None
         if result is not None and np.isfinite(abs(result)):

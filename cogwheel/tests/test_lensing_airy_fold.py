@@ -4249,7 +4249,69 @@ class PpgoRungSelfFalsificationTestCase(_FoldArmTestCase):
             f'ppGO rung should refuse when r_ppgo_min is huge; '
             f'got route={route}')
 
-# ----------------------------------------------------------------------
+    def test_resolution_gate_isolated_admit_and_refuse(self):
+        """The ppGO dual gate admits via ``_merging_fold_pair`` or from
+        the resolution ``w * delta_min >= _PPGO_RESOLUTION_GATE``.  The
+        saddle fixture ``_PPGO_SADDLE_SOURCE`` at gamma=1.2 yields two
+        saddle-type images (no fold pair), so the resolution gate decides
+        alone.  Raising the threshold above ``w * delta_min`` blocks the
+        rung; lowering it to 0 always admits; restoring it admits the
+        resolved case (``w = 20000`` where ``w * delta_min`` ≫ 4.0).
+
+        Cost: 4 calls to ``_capture_ppgo_route`` (∼ 0.2 s total)."""
+        gamma = _PPGO_SADDLE_GAMMA
+        source = _PPGO_SADDLE_SOURCE
+        w_nominal = 500.0
+
+        # (a) Gate intact (4.0): rung fires (w * delta_min ≫ 4.0).
+        served_a, route_a = _capture_ppgo_route(
+            w_nominal, source, gamma,
+            envelope_bar=_ENVELOPE_BAR)
+        self.n_checks += 1
+        self.assertEqual(
+            route_a, 'ppgo',
+            f'ppGO rung should fire at w={w_nominal} with gate intact; '
+            f'got route={route_a}')
+
+        # (b) Gate raised to a huge value: rung refuses (w*delta_min too
+        #     small for the inflated threshold).
+        with mock.patch.object(_pearcey_cusp, '_PPGO_RESOLUTION_GATE',
+                               1000.0):
+            served_b, route_b = _capture_ppgo_route(
+                w_nominal, source, gamma,
+                envelope_bar=_ENVELOPE_BAR)
+        self.n_checks += 1
+        # Pearcey may or may not serve — what matters is ppGO refused.
+        self.assertNotEqual(
+            route_b, 'ppgo',
+            f'ppGO rung should refuse at high gate=1000; '
+            f'got route={route_b}, served={served_b}')
+
+        # (c) Gate disabled (0.0): rung always fires.
+        with mock.patch.object(_pearcey_cusp, '_PPGO_RESOLUTION_GATE', 0.0):
+            served_c, route_c = _capture_ppgo_route(
+                w_nominal, source, gamma,
+                envelope_bar=_ENVELOPE_BAR)
+        self.n_checks += 1
+        self.assertIsNotNone(
+            served_c,
+            f'ppGO rung should serve when gate is disabled (0.0)')
+        self.assertEqual(
+            route_c, 'ppgo',
+            f'Expected ppgo route with gate=0.0, got {route_c}')
+
+        # (d) Resolved w with the inflated gate still admits.
+        w_resolved = 20000.0
+        with mock.patch.object(_pearcey_cusp, '_PPGO_RESOLUTION_GATE',
+                               1000.0):
+            served_d, route_d = _capture_ppgo_route(
+                w_resolved, source, gamma,
+                envelope_bar=_ENVELOPE_BAR)
+        self.n_checks += 1
+        self.assertEqual(
+            route_d, 'ppgo',
+            f'ppGO rung should fire at resolved w={w_resolved} even with '
+            f'gate=1000; got route={route_d}')
 # WP1 _cusp_vertex routing fix — domain tests (Build 2026-08-11).
 # ----------------------------------------------------------------------
 

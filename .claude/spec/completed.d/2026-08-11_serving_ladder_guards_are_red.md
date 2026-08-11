@@ -1,4 +1,5 @@
 ---
+date: 2026-08-11
 section: Backlog
 ---
 
@@ -112,14 +113,17 @@ section: Backlog
   completion.  Green — resolved by the production fix, NOT by a parameter
   choice.
 
-  ## STILL RED — one genuine production issue (NOT parameter-fixable)
+  ## RESOLVED 2026-08-11 (production fix): `test_thresholds_have_one_home`
 
-  - `test_lensing_operator.py::BranchGateTestCase::
-    test_thresholds_have_one_home` — `select_branch` says 'wave' for a
-    saddle node (``w*delta_min < RHO_END``) but the grid serves the cusp
-    arm's ppGO value, 1 ULP below `geometric_amplification`; the test's
-    bit-identity probe then sees 'geometric'.  Pre-existing at HEAD
-    (verified), unrelated to the cusp-arm changes (nearest.distance = 0.84
-    passes the new ppGO gate either way).  A routing/bit-identity
-    adjudication, not a parameter fix.  Tracked separately in
-    `lensing_one_home_routing_disagreement.md`.
+  The one-home routing disagreement tracked in
+  `lensing_one_home_routing_disagreement` was resolved by the ppGO
+  fold-pair-existence-or-resolution gate (completed 2026-08-11, see
+  [[2026-08-11_ppgo_fold_pair_resolution_gate]]): `cusp_amplification`'s
+  ppGO fast rung now serves `fold_ppgo_correction` only when a merging
+  min/saddle fold pair exists OR the node is geometrically resolved
+  (`w * delta_min >= _PPGO_RESOLUTION_GATE = 4.0`), so an unresolved node
+  is no longer served the geometric limit and the served route matches
+  `select_branch` again.  Green — resolved by the production fix, NOT by
+  a parameter choice.
+
+  ## ALL ELEVEN ITEMS RESOLVED — fragment retired 2026-08-11
