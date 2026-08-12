@@ -58,7 +58,14 @@ if [ ! -f "$LOG" ]; then
 fi
 
 seen="$(_count)"
-echo "build_monitor: watching $(basename "$LOG") (baseline $seen markers)"
+if [ -n "$BUILD_PID" ]; then
+  echo "build_monitor: watching $(basename "$LOG") (baseline $seen markers, pid $BUILD_PID)"
+else
+  # Say it out loud. A silent degradation to the coarse check is the same bug
+  # class this script exists to close: any other running build would keep this
+  # monitor alive at a dead log.
+  echo "build_monitor: watching $(basename "$LOG") (baseline $seen markers) — WARNING: no build_pid given, liveness falls back to matching ANY sdk/build.py; pass the PID (launch_build.sh prints it)"
+fi
 stall=0
 
 while :; do
