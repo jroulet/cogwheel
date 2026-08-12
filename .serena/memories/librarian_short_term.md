@@ -1,44 +1,27 @@
 # Librarian Short-Term Observations
 
-## Run: 2026-08-12 — post-commit sync for {897bff8, 26d088a, cfc4377}
+## Run: 2026-08-12 — post-commit sync for {27e458b}
 
-**Scope**: three commits in .claude/sync_issues.json
+**Scope**: one commit in `.claude/sync_issues.json`
 
 **Result: NO-OP — no doc surfaces stale**
 
-**Commit-by-commit triage**:
+**Commit triage**:
 
-1. `897bff8` — "docs: post-commit sync (c8cad0c deltoid exterior cusp gap + mid-w ppGO band)"
-   - This IS the previous librarian's own post-commit sync commit. SPEC.md changes
-     (ppGO full mid-w band, saddle CUSP-EXCLUSION now ADMITS, corridor parity guard)
-     were already propagated in this commit itself.
-   - `overview.rst` search for `cusp|ppGO|ppgo|FARFIELD|KERNEL_SUM|exclusion|high-w|mid-w|saddle corridor|force_minus_ghost` → zero matches. Not stale. Consistent with previous librarian's finding.
-   - No new cogwheel modules, no dependency changes, no Sphinx RST edits needed.
+1. `27e458b` — "docs: record deltoid exterior geometry bugs (lobe-local coords, negative corridor rho, cusp exclusion frame, disconnected exterior topology)"
+   - Changed files: `.claude/spec/TODO.md` and `.claude/spec/todo.d/lensing_deltoid_exterior_geometry.md`
+   - This is a pure spec/TODO bookkeeping commit: added a new `todo.d` fragment recording four deltoid exterior geometry bugs (origin-based coords, negative corridor rho, wrong cusp exclusion frame, topologically disconnected exterior). Also regenerated `TODO.md`.
+   - No `cogwheel/` Python changes, no dependency changes, no API changes, no data contract changes.
+   - Triage result: skip per "spec/TODO-only change" rule (analogous to test-only rule).
 
-2. `26d088a` — test-only change (`cogwheel/tests/test_lensing_airy_fold.py`)
-   - Skip per triage rules: test-only → no-op.
-
-3. `cfc4377` — spec housekeeping only (COMPLETED.md, TODO.md, completed.d/todo.d fragments)
-   - Closes "consolidate duplicate routing pins" TODO (resolved in 26d088a).
-   - No Sphinx RST, no data contracts, no cogwheel code → no-op.
-
-**sync_derived_docs.py**: ran cleanly (via cogwheel-newlal python). "Some issues auto-fixed"
-was a no-op state flush — confirmed by `git diff --name-only` showing only agent_state +
-memory files, not doc files. (Known pattern: "auto-fixed" with no actual diff = internal flush.)
-
-**Surrogate escalation TODO**: `.claude/spec/todo.d/surrogate_contract_test_consumer_warning.md`
-EXISTS and is open — repeated `lens_amplification_surrogate` test-only-consumer warning from
-sync_derived_docs.py is covered; no duplicate created, per escalation rule.
+**sync_derived_docs.py**: ran cleanly (no-op state flush; git diff showed only unrelated agent_state + other agents' memory files). The known `lens_amplification_surrogate` test-only-consumer warnings are the pre-existing ones; escalation TODO fragment exists and is open — no duplicate created.
 
 **What was NOT stale**:
-- `overview.rst`: pitched at architecture level; none of the implementation details from
-  these builds (ppGO gates, cusp exclusion d_exclude, FARFIELD_KERNEL_SUM_MINUS_GHOST,
-  saddle corridor parity guards) appear there.
-- `api.rst`, `crash_course.rst`, `installation.rst`: no relevant changes
+- `overview.rst`, `api.rst`, `crash_course.rst`, `installation.rst`: no relevant changes
 - `DATA_CONTRACTS.yaml`: no new disk artifacts
-- `SPEC.md`: already correct (897bff8 was the previous librarian's fix commit)
+- `SPEC.md`: not touched by this commit
+- `FINDINGS.md`: bugs recorded in `todo.d`, not yet in FINDINGS.md (correct: they are open/unresolved bugs, not findings)
 
-**Pattern confirmed**: the post-commit hook fires again after a librarian's own doc-sync
-commit — the next librarian run triggered by that commit is always a no-op (the sync was
-already done). This is expected; just verify overview.rst hasn't grown implementation detail
-and move on.
+**Pattern confirmed**: post-commit hooks fire after spec/TODO-only internal commits too (not just code commits). These are always no-ops for doc surfaces. Just verify `git diff --name-only` is clean after `sync_derived_docs.py` and move on.
+
+**New TODO fragment to watch**: `lensing_deltoid_exterior_geometry.md` tracks four deltoid exterior bugs; when the fix lands, the Librarian will need to propagate any SPEC.md updates and check for DATA_CONTRACTS.yaml changes (if a new lobe-centered exterior chart type ships with a new disk artifact).
