@@ -357,8 +357,14 @@ FLIP_CONFIGS = (
 #: ceiling (``w > W_CEILING_SCHWINGER_QD = 150``): the production path
 #: must refuse with a NAMED `SchwingerCertificationError`, never a
 #: silent nan.  (The mpmath extension serves 60 < w <= 150.)
+#:
+#: RE-BASELINE (cusp-arm interior extension): the former config
+#: (``gamma=0.20, y=(0.20, 0)``) is 4-image interior and is now cusp-
+#: served at w=160.  Moved to a 2-image EXTERIOR host at low shear
+#: (``gamma=0.10, y=(0.26, 0)``) where both uniform arms genuinely
+#: decline, so F_op raises at w=160 > 150.
 FLIP_REFUSAL_W = 160.0
-FLIP_REFUSAL_CONFIG = dict(gamma=0.20, y1=0.20, y2=0.00)
+FLIP_REFUSAL_CONFIG = dict(gamma=0.10, y1=0.26, y2=0.00)
 
 #: Shear-free point lens (``gamma == 0`` exactly -> ``gamma' == 0``): the
 #: Schwinger integrand degenerates at eigenvalue coincidence so it must

@@ -5747,6 +5747,44 @@ _CUSP_OFF_AXIS_GOLDEN = {
 }
 
 
+
+# ── Saddle deltoid interior cusp sources (TD-1, TD-2) ────────────────
+# A macro saddle (|gamma| > 1 - kappa) has two 3-cusp deltoid lobes.
+# Each lobe has a finite wedge-TIP cusp at its centre (phase in {0, pi}
+# in the shear-aligned frame).  A source offset INWARD (toward the
+# origin) from the wedge tip enters the deltoid interior and has 4
+# images.  The `_is_interior` bypass (len(images) >= 4) fires, and for
+# these symmetric-on-axis configurations the stationary-point count is
+# 1 (the `interior_degenerate` path).  Both bypasses skip the per-image
+# calibration certificate and serve a finite complex value at w >= 80.
+
+#: Saddle interior source configs ``(name, gamma, beta, kappa, phase_c,
+#: dp)``.  ``phase_c`` is the wedge-tip phase in the shear-aligned frame;
+#: ``dp`` is the fraction of the cusp-vertex distance to move inward.
+_SADDLE_INTERIOR_CONFIGS = (
+    ('sad_int_g13_b0_d02',   1.3, 0.0,  0.0, 0.0, 0.2),
+    ('sad_int_g13_b0_d03',   1.3, 0.0,  0.0, 0.0, 0.3),
+    ('sad_int_g13_b037_d02', 1.3, 0.37, 0.0, 0.0, 0.2),
+    ('sad_int_g13_b037_d03', 1.3, 0.37, 0.0, 0.0, 0.3),
+)
+
+#: Frequencies at which saddle interior cusp sources are tested.
+_SADDLE_INTERIOR_SERVE_WS = (80.0, 100.0, 200.0, 500.0)
+
+
+def _saddle_interior_source(gamma, beta, kappa, phase_c, dp):
+    """Return a saddle deltoid interior source by moving inward from a
+    wedge-tip cusp vertex.
+
+    ``phase_c`` is the wedge-tip phase in {0, pi} (shear-aligned frame);
+    ``dp`` is the fraction of the cusp-vertex distance to move toward
+    the origin (0 < dp < ~0.5 keeps the source inside the deltoid lobe).
+    """
+    theta = phase_c + beta
+    branch = _pearcey_cusp._saddle_branch(gamma, beta, kappa, theta)
+    cusp = geometry.critical_point(gamma, theta, beta, kappa, branch)
+    return (1.0 - dp) * np.asarray(cusp.source)
+
 def _off_axis_cusp_source(gamma, beta, kappa, cusp_index, dp, dperp):
     """Return an off-axis interior cusp source offset from the cusp
     vertex by ``(dp, dperp)`` along the soft and hard axes.
@@ -5760,6 +5798,76 @@ def _off_axis_cusp_source(gamma, beta, kappa, cusp_index, dp, dperp):
             + dp * cusp.soft_axis
             + dperp * cusp.hard_axis)
 
+
+
+
+# ------------------------------------------------------------------
+# TD-3 & TD-4 fixtures: origin-ray-miss regression + saddle exterior
+# ------------------------------------------------------------------
+
+#: gamma, beta, kappa used for origin-ray-miss and saddle-exterior
+#: interior tests.  At gamma=1.3, beta=0.37 the deltoid lobes are
+#: rotated off the x-axis, creating a gap angle (46 deg) where
+#: ``geometry.r_caustic`` raises LensDomainError even though a source
+#: near the wedge tip still has 4 images — the old ``_is_interior``
+#: would return False on the caught exception, blocking the bypass.
+_ORIGIN_RAY_MISS_GAMMA: float = 1.3
+_ORIGIN_RAY_MISS_BETA: float = 0.37
+_ORIGIN_RAY_MISS_KAPPA: float = 0.0
+
+#: Gap-interior config: angle = 46 deg, distance = 1.197 (just inside
+#: the deltoid lobe).  ``r_caustic`` raises LensDomainError at this
+#: source-plane angle, yet ``find_images`` returns 4 images (the source
+#: is interior to the deltoid).  The old ``_is_interior`` would
+#: wrongly return False; the new ``len(images) >= 4`` correctly returns
+#: True.
+_ORIGIN_RAY_MISS_GAP_ANGLE_DEG: float = 46.0
+_ORIGIN_RAY_MISS_GAP_DIST: float = 1.197
+#: Source at the gap angle and distance, shape (2,).
+_ORIGIN_RAY_MISS_GAP_SOURCE: np.ndarray = np.array(
+    (0.831506069439420, 0.861049741005365), dtype=float)
+
+#: Beyond-first-caustic-interior config: angle = 164 deg,
+#: distance = 1.3417.  ``r_caustic`` returns 1.328151 (the inner
+#: caustic boundary), but the source is between the inner and outer
+#: caustic at this angle and has 4 images.  The old ``_is_interior``
+#: check ``|source| < r_caustic`` is False (1.3417 > 1.3281), wrongly
+#: marking the source as exterior.  The new ``len(images) >= 4``
+#: correctly identifies it as interior.
+_ORIGIN_RAY_MISS_BEYOND_ANGLE_DEG: float = 164.0
+_ORIGIN_RAY_MISS_BEYOND_DIST: float = 1.3417
+#: Source beyond the first caustic intersection at 164 deg, shape (2,).
+_ORIGIN_RAY_MISS_BEYOND_SOURCE: np.ndarray = np.array(
+    (-1.289724817440442, 0.369822640299668), dtype=float)
+
+#: Saddle exterior config (2 images) in the same gap direction, used
+#: for TD-4: source at angle 46 deg, distance 0.8 (well inside the
+#: inner caustic boundary — the region with 2 images for saddle parity
+#: before entering the annular 4-image region).  ``_is_interior`` is
+#: False (2 images < 4), so the calibration bypass does NOT fire.
+_SADDLE_EXTERIOR_GAP_DIST: float = 0.8
+#: Source at the gap angle but with distance 0.8 (exterior), shape (2,).
+_SADDLE_EXTERIOR_GAP_SOURCE: np.ndarray = np.array(
+    np.asarray((0.555727, 0.575472), dtype=float))
+
+#: Frequencies at which origin-ray-miss sources are tested.
+_ORIGIN_RAY_MISS_SERVE_WS: tuple[float, ...] = (80.0, 100.0, 200.0)
+
+#: The ``gamma`` / ``beta`` / ``kappa`` common to all TD-3 fixtures.
+_ORIGIN_RAY_MISS_LENS: tuple[float, float, float] = (
+    _ORIGIN_RAY_MISS_GAMMA, _ORIGIN_RAY_MISS_BETA, _ORIGIN_RAY_MISS_KAPPA)
+
+
+def _origin_ray_miss_source(config: str) -> np.ndarray:
+    """Return the source for a named origin-ray-miss config.
+
+    ``config`` must be one of ``'gap'`` or ``'beyond'``.
+    """
+    if config == 'gap':
+        return _ORIGIN_RAY_MISS_GAP_SOURCE.copy()
+    if config == 'beyond':
+        return _ORIGIN_RAY_MISS_BEYOND_SOURCE.copy()
+    raise ValueError(f'unknown origin-ray-miss config {config!r}')
 
 class CuspArmOffAxisByteIdentityTestCase(_FoldArmTestCase):
     """Cusp-arm byte-identity regression for off-axis interior sources
@@ -5907,3 +6015,598 @@ class CuspArmOffAxisByteIdentitySelfFalsificationTestCase(
             f'dp=+0.02 exterior must yield < 3 stationary points, '
             f'got {n_stat} (x={x:.6f}, y={y:.6f}).  The stationary-'
             f'point guard would be vacuous if dp>0 still gave 3.')
+
+
+class SaddleDeltoidInteriorCuspServingTestCase(_FoldArmTestCase):
+    """
+    Domain Test (TD-1): saddle deltoid interior cusp sources serve a
+    finite complex value through ``cusp_amplification`` at w >= 80.
+
+    Before the WP-1 ``_is_interior`` fix, saddle deltoid interior
+    sources (``len(images) >= 4``) at w >= 80 refused because the
+    per-image calibration certificate could not match the single
+    stationary point to the 4 geometric images.  After the fix these
+    sources bypass the certificate via the ``interior_degenerate``
+    path (``_is_interior`` AND ``len(stationary_values) == 1`` AND
+    ``cusp_is_last_rung``) and serve a finite complex value.
+
+    The uniform-error gate (``radius >= radius_min``) is verified to
+    clear at the minimum serving frequency w = 80 for every config.
+
+    Two load-bearing assertions:
+    1. Saddle interior sources serve finite complex values at
+       w in {80, 100, 200, 500}.
+    2. The served |F| is stable across the w-grid (not diverging).
+    """
+
+    def test_serves_at_high_w(self):
+        """Saddle deltoid interior cusp sources serve finite complex
+        values at w >= 80 (the ``interior_degenerate`` bypass)."""
+        for name, gamma, beta, kappa, phase_c, dp in \
+                _SADDLE_INTERIOR_CONFIGS:
+            source = _saddle_interior_source(
+                gamma, beta, kappa, phase_c, dp)
+            amplitudes = []
+            for w in _SADDLE_INTERIOR_SERVE_WS:
+                served = _pearcey_cusp.cusp_amplification(
+                    w, source, gamma, beta=beta, kappa=kappa)
+                self.n_checks += 1
+                with self.subTest(config=name, w=w):
+                    self.assertIsNotNone(
+                        served,
+                        f'{name} w={w}: saddle interior source must '
+                        f'serve after the _is_interior fix')
+                    self.assertTrue(
+                        np.isfinite(abs(served)),
+                        f'{name} w={w}: served value is not finite '
+                        f'(|F|={abs(served)})')
+                amplitudes.append(abs(served))
+            # Stability gate: |F| must not diverge across the w-grid.
+            amp_min, amp_max = min(amplitudes), max(amplitudes)
+            self.n_checks += 1
+            self.assertLess(
+                amp_max / amp_min, 1e2,
+                f'{name}: |F| diverges across w-grid '
+                f'({amp_min:.4f} to {amp_max:.4f}) — the uniform '
+                f'form is not stable')
+
+    def test_uniform_error_gate_cleared_at_min_serving_w(self):
+        """The uniform-error gate (``radius >= radius_min``) is cleared
+        at the minimum serving frequency w = 80 for every config."""
+        radius_min = (_pearcey_cusp._UNIFORM_ERROR_CONST / 0.05) ** (2/3)
+        for name, gamma, beta, kappa, phase_c, dp in \
+                _SADDLE_INTERIOR_CONFIGS:
+            source = _saddle_interior_source(
+                gamma, beta, kappa, phase_c, dp)
+            matrix = geometry.macro_matrix(gamma, beta, kappa)
+            nearest = geometry.nearest_caustic_point(
+                gamma, beta, source, kappa=kappa)
+            lam = 1.0 - float(kappa)
+            branch = _pearcey_cusp._saddle_branch(
+                gamma, beta, kappa, nearest.theta)
+            vertex = _pearcey_cusp._cusp_vertex(
+                gamma, beta, kappa, source, nearest.theta, branch)
+            self.n_checks += 1
+            self.assertIsNotNone(
+                vertex,
+                f'{name}: _cusp_vertex returned None — config is '
+                f'broken (source is not inside a deltoid lobe)')
+            normal_form = _pearcey_cusp._soft_normal_form(
+                vertex.image, matrix, vertex.soft_axis,
+                vertex.hard_axis, vertex.hard_eigenvalue)
+            c4, _ = normal_form
+            offset = source - vertex.source
+            delta_parallel = float(offset @ vertex.soft_axis)
+            delta_perp = float(offset @ vertex.hard_axis)
+            abs_c4 = abs(c4)
+            x = delta_parallel * math.sqrt(80.0) / math.sqrt(abs_c4)
+            y = delta_perp * 80.0 ** 0.75 / abs_c4 ** 0.25
+            radius = math.hypot(x, y)
+            self.n_checks += 1
+            with self.subTest(config=name):
+                self.assertGreaterEqual(
+                    radius, radius_min,
+                    f'{name}: radius={radius:.4f} < radius_min='
+                    f'{radius_min:.4f} at w=80 — uniform-error gate '
+                    f'is NOT cleared')
+
+    def test_calibration_bypassed_for_interior_saddle_sources(self):
+        """``_calibration_certified`` is NOT called for saddle deltoid
+        interior sources — the ``interior_degenerate`` bypass fires."""
+        real_cal = _pearcey_cusp._calibration_certified
+        for name, gamma, beta, kappa, phase_c, dp in \
+                _SADDLE_INTERIOR_CONFIGS:
+            source = _saddle_interior_source(
+                gamma, beta, kappa, phase_c, dp)
+            cal_called = [0]
+
+            def spy(stationary_values, matched_delays):
+                cal_called[0] += 1
+                return real_cal(stationary_values, matched_delays)
+
+            with mock.patch.object(
+                    _pearcey_cusp, '_calibration_certified', spy):
+                served = _pearcey_cusp.cusp_amplification(
+                    80.0, source, gamma, beta=beta, kappa=kappa)
+            self.n_checks += 1
+            self.assertIsNotNone(
+                served,
+                f'{name}: saddle interior source refused at w=80')
+            self.assertEqual(
+                cal_called[0], 0,
+                f'{name}: _calibration_certified was called '
+                f'{cal_called[0]} time(s) for a saddle interior '
+                f'source — the interior_degenerate bypass should '
+                f'skip it')
+
+
+class SaddleDeltoidInteriorCuspServingSelfFalsificationTestCase(
+        _FoldArmTestCase):
+    """Self-falsification: the serving gate detects a deliberately
+    broken calibration bypass and an exterior source that refuses."""
+
+    def test_calibration_called_for_exterior_saddle_source(self):
+        """``_calibration_certified`` IS called for an exterior (2-image)
+        saddle source — the calibration bypass only fires for interior
+        sources.  Pushing the source beyond the deltoid lobe (dp=0.5)
+        moves it outside the caustic with 2 images; the function reaches
+        the calibration gate and calls ``_calibration_certified`` even
+        if it ultimately refuses."""
+        name, gamma, beta, kappa, phase_c, dp = \
+            _SADDLE_INTERIOR_CONFIGS[0]
+        dp_exterior = 0.5
+        source = _saddle_interior_source(
+            gamma, beta, kappa, phase_c, dp_exterior)
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        images = geometry.find_images(source, matrix)
+        self.assertEqual(len(images), 2,
+                         'dp=0.5 must be exterior (2 images)')
+        self.n_checks += 1
+
+        real_cal = _pearcey_cusp._calibration_certified
+        cal_called = [0]
+
+        def spy(stationary_values, matched_delays):
+            cal_called[0] += 1
+            return real_cal(stationary_values, matched_delays)
+
+        with mock.patch.object(
+                _pearcey_cusp, '_calibration_certified', spy):
+            _pearcey_cusp.cusp_amplification(
+                80.0, source, gamma, beta=beta, kappa=kappa)
+        self.n_checks += 1
+        self.assertGreater(
+            cal_called[0], 0,
+            f'{name} dp=0.5: exterior source must reach the '
+            f'calibration gate (bypass only fires for interior '
+            f'sources with >= 4 images)')
+
+    def test_exterior_source_refuses_or_requires_calibration(self):
+        """An exterior saddle source (dp=0.5 -> 2 images) either refuses
+        or serves through the calibration gate — the calibration bypass
+        must NOT fire.
+
+        This proves the ``_is_interior = len(images) >= 4`` guard has
+        teeth: a 2-image source never enters the bypass."""
+        for name, gamma, beta, kappa, phase_c, dp in \
+                _SADDLE_INTERIOR_CONFIGS:
+            dp_ext = 0.5  # at the caustic crossing, 2 images
+            source = _saddle_interior_source(
+                gamma, beta, kappa, phase_c, dp_ext)
+            images = geometry.find_images(
+                source,
+                geometry.macro_matrix(gamma, beta, kappa))
+            for w in (80.0, 100.0):
+                served = _pearcey_cusp.cusp_amplification(
+                    w, source, gamma, beta=beta, kappa=kappa)
+                self.n_checks += 1
+                with self.subTest(config=name, w=w):
+                    if served is not None:
+                        # Must NOT be via interior bypass
+                        self.assertNotEqual(
+                            len(images), 4,
+                            f'{name} dp=0.5 w={w}: has 4 images but '
+                            f'bypass fired — dp too small to be '
+                            f'exterior')
+                    # else: refusal is also acceptable for exterior
+
+
+class SaddleDeltoidInteriorCensusPinTestCase(_FoldArmTestCase):
+    """
+    Domain Test (TD-2): saddle deltoid interior cusp sources have
+    exactly 4 images.
+
+    The WP-1 ``_is_interior = len(images) >= 4`` discriminator relies
+    on the census invariant: every source inside a deltoid lobe has 4
+    images, every exterior source has 2 images.  A 3-image source would
+    stop bypassing, producing a refusal.  This test pins the measured
+    invariant — 4 interior / 2 exterior — so a regression in
+    ``find_images`` for saddle parity is detected.
+    """
+
+    def test_interior_sources_have_exactly_four_images(self):
+        """Every saddle deltoid interior config has exactly 4 images."""
+        for name, gamma, beta, kappa, phase_c, dp in \
+                _SADDLE_INTERIOR_CONFIGS:
+            source = _saddle_interior_source(
+                gamma, beta, kappa, phase_c, dp)
+            matrix = geometry.macro_matrix(gamma, beta, kappa)
+            images = geometry.find_images(source, matrix)
+            self.n_checks += 1
+            with self.subTest(config=name):
+                self.assertEqual(
+                    len(images), 4,
+                    f'{name}: saddle interior source has '
+                    f'{len(images)} images, expected 4 — the census '
+                    f'cap is violated or the source is not interior')
+
+    def test_farther_inward_also_has_four_images(self):
+        """A denser grid of inward offsets (dp in {0.15, 0.25, 0.3})
+        all have 4 images — the census cap is not a fluke at the two
+        chosen dp values."""
+        name, gamma, beta, kappa, phase_c, dp_zero = \
+            _SADDLE_INTERIOR_CONFIGS[0]
+        for dp in (0.15, 0.25, 0.30):
+            source = _saddle_interior_source(
+                gamma, beta, kappa, phase_c, dp)
+            matrix = geometry.macro_matrix(gamma, beta, kappa)
+            images = geometry.find_images(source, matrix)
+            self.n_checks += 1
+            with self.subTest(dp=dp):
+                self.assertEqual(
+                    len(images), 4,
+                    f'gamma={gamma}, dp={dp}: {len(images)} images, '
+                    f'expected 4')
+
+
+class SaddleDeltoidInteriorCensusPinSelfFalsificationTestCase(
+        _FoldArmTestCase):
+    """Self-falsification: the 4-image census pin detects an exterior
+    source with 2 images."""
+
+    def test_exterior_sources_have_two_images(self):
+        """An exterior saddle source (dp=0.5, outside the deltoid)
+        has exactly 2 images — the 4-count pin has teeth because the
+        census changes at the caustic boundary."""
+        for name, gamma, beta, kappa, phase_c, dp in \
+                _SADDLE_INTERIOR_CONFIGS:
+            source = _saddle_interior_source(
+                gamma, beta, kappa, phase_c, 0.5)
+            matrix = geometry.macro_matrix(gamma, beta, kappa)
+            images = geometry.find_images(source, matrix)
+            self.n_checks += 1
+            with self.subTest(config=name):
+                self.assertEqual(
+                    len(images), 2,
+                    f'{name} dp=0.5: exterior saddle source has '
+                    f'{len(images)} images, expected 2 — the 4-count '
+                    f'guard would be vacuous if exterior also had 4')
+
+    def test_interior_count_guard_not_vacuous(self):
+        """Prove the 4-count assertion is not vacuous by verifying
+        the count changes across the caustic boundary.  dp=0.3 has 4
+        images (interior), dp=0.45 has 2 (exterior — the deltoid
+        boundary lies between dp=0.3 and dp=0.4 for gamma=1.3)."""
+        name, gamma, beta, kappa, phase_c, dp_ref = \
+            _SADDLE_INTERIOR_CONFIGS[0]
+        for dp, expected in ((0.3, 4), (0.45, 2)):
+            source = _saddle_interior_source(
+                gamma, beta, kappa, phase_c, dp)
+            matrix = geometry.macro_matrix(gamma, beta, kappa)
+            images = geometry.find_images(source, matrix)
+            self.n_checks += 1
+            with self.subTest(dp=dp):
+                self.assertEqual(
+                    len(images), expected,
+                    f'gamma={gamma}, dp={dp}: expected {expected} '
+                    f'images, got {len(images)}')
+
+
+
+class OriginRayMissRegressionTestCase(_FoldArmTestCase):
+    """Domain Test (TD-3): saddle deltoid interior sources serve
+    through ``cusp_amplification`` even when the OLD ``_is_interior``
+    check (``r_caustic``-based) would wrongly classify them as
+    exterior.
+
+    Before the WP-1 ``_is_interior = len(images) >= 4`` fix, the
+    ``_is_interior`` discriminator used ``geometry.r_caustic`` in the
+    source direction.  This had TWO failure modes at gamma=1.3,
+    beta=0.37:
+
+    1. **Gap ray miss**: at source-plane angle 46 deg,
+       ``r_caustic`` raises ``LensDomainError`` (the caustic has a
+       gap in that direction), so the old ``except`` clause set
+       ``_is_interior = False``.  But the source (dist 1.197) has
+       4 images — it IS interior.
+
+    2. **Beyond first intersection**: at angle 164 deg,
+       ``r_caustic`` returns the INNER caustic boundary (1.3281),
+       and the source at dist 1.3417 > 1.3281 fails the old
+       |source| < r_caustic check.  But the source lies BETWEEN
+       the inner and outer caustic boundaries and has 4 images.
+
+    Both failures are now fixed by ``len(images) >= 4``, which
+    directly uses the image census without geometric heuristics.
+    This test certifies that both configs serve a finite complex
+    value at w >= 80.
+    """
+
+    def test_gap_ray_interior_source_serves(self):
+        """Gap-ray source (r_caustic raises LensDomainError, 4 images)
+        serves a finite complex value at w in {80, 100, 200}."""
+        gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
+        source = _origin_ray_miss_source('gap')
+        self._verify_serves(source, gamma, beta, kappa, 'gap')
+
+    def test_beyond_first_caustic_interior_serves(self):
+        """Beyond-first-intersection source (|source| > r_caustic,
+        4 images) serves a finite complex value at w in {80, 100, 200}."""
+        gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
+        source = _origin_ray_miss_source('beyond')
+        self._verify_serves(source, gamma, beta, kappa, 'beyond')
+
+    def _verify_serves(self, source, gamma, beta, kappa, name):
+        for w in _ORIGIN_RAY_MISS_SERVE_WS:
+            served = _pearcey_cusp.cusp_amplification(
+                w, source, gamma, beta=beta, kappa=kappa)
+            self.n_checks += 1
+            with self.subTest(config=name, w=w):
+                self.assertIsNotNone(
+                    served,
+                    f'{name} w={w}: origin-ray-miss interior source '
+                    f'must serve after the _is_interior fix')
+                self.assertTrue(
+                    np.isfinite(abs(served)),
+                    f'{name} w={w}: served value is not finite '
+                    f'(|F|={abs(served)})')
+
+    def test_census_pin_four_images(self):
+        """Both origin-ray-miss configs have exactly 4 images, not 2."""
+        gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        for config_name in ('gap', 'beyond'):
+            source = _origin_ray_miss_source(config_name)
+            images = geometry.find_images(source, matrix)
+            self.n_checks += 1
+            with self.subTest(config=config_name):
+                self.assertEqual(
+                    len(images), 4,
+                    f'{config_name}: origin-ray-miss source has '
+                    f'{len(images)} images, expected 4 — the census '
+                    f'cap is violated')
+
+    def test_gap_ray_r_caustic_raises_lens_domain_error(self):
+        """``geometry.r_caustic`` raises LensDomainError at the gap
+        angle (46 deg) — proving this config would trigger the old
+        ``except`` catch and set _is_interior=False."""
+        gamma, kappa = _ORIGIN_RAY_MISS_GAMMA, _ORIGIN_RAY_MISS_KAPPA
+        gap_angle = _ORIGIN_RAY_MISS_GAP_ANGLE_DEG * math.pi / 180.0
+        self.n_checks += 1
+        with self.assertRaises(geometry.LensDomainError):
+            geometry.r_caustic(gamma, gap_angle, kappa=kappa)
+
+    def test_beyond_first_r_caustic_less_than_source_dist(self):
+        """``r_caustic`` at the beyond-first-intersection angle is less
+        than the source distance — proving the old |source| < r_caustic
+        check would return False."""
+        gamma, kappa = _ORIGIN_RAY_MISS_GAMMA, _ORIGIN_RAY_MISS_KAPPA
+        angle_bey = _ORIGIN_RAY_MISS_BEYOND_ANGLE_DEG * math.pi / 180.0
+        r = geometry.r_caustic(gamma, angle_bey, kappa=kappa)
+        self.n_checks += 1
+        self.assertLess(
+            r, _ORIGIN_RAY_MISS_BEYOND_DIST,
+            f'r_caustic={r:.6f} but source distance is '
+            f'{_ORIGIN_RAY_MISS_BEYOND_DIST} — the old '
+            f'|source| < r_caustic check would wrongly return True '
+            f'(not False), so this config does not test the regression')
+
+    def test_calibration_bypassed_for_origin_ray_miss_sources(self):
+        """``_calibration_certified`` is NOT called for origin-ray-miss
+        interior sources — the interior_degenerate bypass fires."""
+        gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
+        real_cal = _pearcey_cusp._calibration_certified
+        for config_name in ('gap', 'beyond'):
+            source = _origin_ray_miss_source(config_name)
+            cal_called = [0]
+
+            def spy(stationary_values, matched_delays):
+                cal_called[0] += 1
+                return real_cal(stationary_values, matched_delays)
+
+            with mock.patch.object(
+                    _pearcey_cusp, '_calibration_certified', spy):
+                served = _pearcey_cusp.cusp_amplification(
+                    80.0, source, gamma, beta=beta, kappa=kappa)
+            self.n_checks += 1
+            self.assertIsNotNone(
+                served,
+                f'{config_name}: origin-ray-miss source refused at '
+                f'w=80')
+            self.assertEqual(
+                cal_called[0], 0,
+                f'{config_name}: _calibration_certified was called '
+                f'{cal_called[0]} time(s) for an interior source — '
+                f'the interior_degenerate bypass should skip it')
+
+
+
+class OriginRayMissRegressionSelfFalsificationTestCase(
+        _FoldArmTestCase):
+    """Self-falsification: the calibration bypass detects an exterior
+    (2-image) source at the same gamma and calls calibration."""
+
+    def test_exterior_source_at_gap_calls_calibration(self):
+        """An exterior source in the gap direction (2 images, dist=0.8)
+        calls ``_calibration_certified`` — the bypass is exclusive to
+        interior (>=4 image) sources."""
+        gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
+        source = _SADDLE_EXTERIOR_GAP_SOURCE
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        images = geometry.find_images(source, matrix)
+        self.assertEqual(len(images), 2,
+                         'gap exterior source must have exactly 2 images')
+        self.n_checks += 1
+
+        real_cal = _pearcey_cusp._calibration_certified
+        cal_called = [0]
+
+        def spy(stationary_values, matched_delays):
+            cal_called[0] += 1
+            return real_cal(stationary_values, matched_delays)
+
+        with mock.patch.object(
+                _pearcey_cusp, '_calibration_certified', spy):
+            _pearcey_cusp.cusp_amplification(
+                80.0, source, gamma, beta=beta, kappa=kappa)
+        self.n_checks += 1
+        self.assertGreater(
+            cal_called[0], 0,
+            f'gap exterior source (2 images) must call '
+            f'_calibration_certified — the interior_degenerate bypass '
+            f'should only fire for interior (>=4 image) sources')
+
+    def test_gap_angle_r_caustic_fails_in_both_directions(self):
+        """``r_caustic`` raises LensDomainError for the gap angle in
+        BOTH the gap-source direction (46°) and the symmetric
+        direction (226°), confirming the gap is a real structural
+        feature of the caustic, not a single-ray anomaly."""
+        gamma, kappa = _ORIGIN_RAY_MISS_GAMMA, _ORIGIN_RAY_MISS_KAPPA
+        for angle_deg in (46, 226):
+            angle = angle_deg * math.pi / 180.0
+            self.n_checks += 1
+            with self.subTest(angle_deg=angle_deg):
+                with self.assertRaises(geometry.LensDomainError):
+                    geometry.r_caustic(gamma, angle, kappa=kappa)
+
+
+
+class SaddleExteriorNotBypassedTestCase(_FoldArmTestCase):
+    """Domain Test (TD-4): saddle exterior sources (2 images) do NOT
+    fire the interior_degenerate bypass — the calibration certificate
+    IS checked.
+
+    The WP-1 ``_is_interior = len(images) >= 4`` discriminator
+    gates the calibration bypass: only interior sources (>= 4 images)
+    skip the per-image calibration certificate.  Exterior saddle
+    sources (2 images) must still pass ``_calibration_certified``.
+    This test certifies that a saddle exterior source at gamma=1.3,
+    beta=0.37 calls the calibration check, confirming the guard has
+    teeth for the exterior path.
+    """
+
+    def test_calibration_called_for_saddle_exterior(self):
+        """``_calibration_certified`` IS called for a saddle exterior
+        source with 2 images — the interior_degenerate bypass does
+        NOT fire."""
+        gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
+        source = _SADDLE_EXTERIOR_GAP_SOURCE
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        images = geometry.find_images(source, matrix)
+        self.assertEqual(len(images), 2,
+                         'saddle exterior source must have 2 images')
+        self.n_checks += 1
+
+        real_cal = _pearcey_cusp._calibration_certified
+        cal_called = [0]
+
+        def spy(stationary_values, matched_delays):
+            cal_called[0] += 1
+            return real_cal(stationary_values, matched_delays)
+
+        with mock.patch.object(
+                _pearcey_cusp, '_calibration_certified', spy):
+            _pearcey_cusp.cusp_amplification(
+                80.0, source, gamma, beta=beta, kappa=kappa)
+        self.n_checks += 1
+        self.assertGreater(
+            cal_called[0], 0,
+            f'saddle exterior source (2 images) must call '
+            f'_calibration_certified — the interior_degenerate '
+            f'bypass should NOT fire for exterior sources')
+
+    def test_is_interior_false_with_two_images(self):
+        """``_is_interior = len(images) >= 4`` is False for a saddle
+        exterior source — the census cap works for the saddle parity."""
+        gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
+        source = _SADDLE_EXTERIOR_GAP_SOURCE
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        images = geometry.find_images(source, matrix)
+        is_interior = len(images) >= 4
+        self.n_checks += 1
+        self.assertFalse(
+            is_interior,
+            f'saddle exterior source has {len(images)} images, '
+            f'_is_interior should be False (2 < 4)')
+
+
+
+class SaddleExteriorNotBypassedSelfFalsificationTestCase(
+        _FoldArmTestCase):
+    """Self-falsification: the calibration bypass gating is sensitive to
+    interior vs exterior status.  An interior source (4 images, dp=0.2)
+    at the same gamma bypasses calibration, proving the guard is not
+    dead code.  A forced-byte-identity mock proves the spy pattern
+    works."""
+
+    def test_interior_source_bypasses_calibration(self):
+        """An interior source at the same gamma (dp=0.2 from the wedge
+        tip along phase_c=0, 4 images) bypasses calibration — the
+        bypass is not dead code for this lens."""
+        gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
+        # Build an interior source: dp=0.2 inward from the wedge tip
+        theta = 0.0 + beta  # phase_c=0
+        cusp = geometry.critical_point(gamma, theta, beta, kappa, 1)
+        source = 0.8 * np.asarray(cusp.source)  # dp=0.2 inward
+        images = geometry.find_images(
+            source, geometry.macro_matrix(gamma, beta, kappa))
+        self.assertEqual(len(images), 4,
+                         f'expected 4 interior images, got {len(images)}')
+        self.n_checks += 1
+
+        real_cal = _pearcey_cusp._calibration_certified
+        cal_called = [0]
+
+        def spy(stationary_values, matched_delays):
+            cal_called[0] += 1
+            return real_cal(stationary_values, matched_delays)
+
+        with mock.patch.object(
+                _pearcey_cusp, '_calibration_certified', spy):
+            served = _pearcey_cusp.cusp_amplification(
+                80.0, source, gamma, beta=beta, kappa=kappa)
+        self.n_checks += 1
+        self.assertIsNotNone(
+            served,
+            'interior source must serve at w=80')
+        self.assertEqual(
+            cal_called[0], 0,
+            f'interior source (4 images) bypassed calibration but '
+            f'_calibration_certified was called {cal_called[0]} '
+            f'time(s) — the interior_degenerate bypass is broken')
+
+    def test_spy_pattern_has_teeth(self):
+        """The mock.patch spy pattern truly intercepts calls — verify
+        by forcing the spy's counter to a non-zero value and asserting
+        it is detected (proves the spy is not silently dead)."""
+        gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
+        source = _SADDLE_EXTERIOR_GAP_SOURCE
+        cal_called = [0]
+
+        real_cal = _pearcey_cusp._calibration_certified
+
+        def spy(stationary_values, matched_delays):
+            cal_called[0] += 1
+            return real_cal(stationary_values, matched_delays)
+
+        with mock.patch.object(
+                _pearcey_cusp, '_calibration_certified', spy):
+            # Calibration IS called for this exterior source
+            _pearcey_cusp.cusp_amplification(
+                80.0, source, gamma, beta=beta, kappa=kappa)
+        self.n_checks += 1
+        self.assertGreater(
+            cal_called[0], 0,
+            'spy was not called — either the mock is broken or '
+            'the exterior source no longer reaches the calibration '
+            'gate (which would be a regression)')

@@ -649,13 +649,17 @@ class GateFallthroughTestCase(_PpgoCeilingTestCase):
     Cost: 2 geometry_partition calls + 1 engine call.  < 1 s.
     """
 
-    #: gamma=0.5, source at rho=0.05 on y2 axis gives delta_tau ~ 0.1155.
-    #: With w_lo=0.87, w_lo*delta_tau ~ 0.10 < RHO_END=4.0.
-    #: Measured 2026-08-08 at HEAD.
-    _GAMMA = 0.5
-    _RHO = 0.05
-    _ANGLE = np.pi / 2  # y2 axis
-    _W_LO = 0.87  # chosen so w_lo * delta_tau ≈ 0.1
+    #: Low-shear 2-image EXTERIOR config: gamma=0.10, rho=2.6, angle=0
+    #: gives source ~(0, 0.50) which is well outside the gamma=0.10
+    #: astroid caustic of extent ~0.19.  Both uniform arms decline
+    #: (no merging fold pair, no 3-stationary-point Pearcey form), so
+    #: the engine raises SchwingerCertificationError at w > 150.
+    #: With w_lo=0.87 and min_dt~0.95, w_lo*min_dt ~ 0.83 < RHO_END,
+    #: so the ppGO gate returns None (unresolved for test_a).
+    _GAMMA = 0.1
+    _RHO = 2.6
+    _ANGLE = 0.0
+    _W_LO = 0.87
     _W_MAX = 200.0
 
     @classmethod

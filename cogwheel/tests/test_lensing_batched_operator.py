@@ -181,11 +181,17 @@ XOR_BAND_LS = np.linspace(24.0, 54.0, 22)
 #: ``L = 54 > L_MAX`` and ``|y| = 0.9`` sits ``eta ~ 0.45`` outside a
 #: caustic of extent ``0.447``, the ``2e-7`` regime of F029.  The named
 #: refusal now fires only where the gate says 'wave' above the QD ceiling
-#: (w > 150) and BOTH uniform arms decline, which needs an UNRESOLVED
-#: host: ``w * delta_min = 160 * 0.01286 = 2.06 < RHO_END``.
-XOR_REFUSING_GAMMA = 0.8722
-XOR_REFUSING_Y = (0.80786, 0.28183)
-XOR_REFUSING_W = 160.0
+#: (w > 150) and BOTH uniform arms decline.
+#:
+#: RE-BASELINE (cusp-arm interior extension): the previous host
+#: (``gamma=0.8722, y=(0.80786,0.28183)``) was 4-image interior and is
+#: now cusp-served.  Moved to a 2-image EXTERIOR host at low shear
+#: (``gamma=0.10, y=(0.26, 0.0)``) where the fold arm finds no merging
+#: pair and the cusp arm cannot build a 3-stationary-point Pearcey form,
+#: so F_op_grid raises `SchwingerCertificationError` at w=200.
+XOR_REFUSING_GAMMA = 0.10
+XOR_REFUSING_Y = (0.26, 0.0)
+XOR_REFUSING_W = 200.0
 
 #: Accuracy gate on the ABOVE-CEILING geometric serve, against the same
 #: independent mpmath `_oracle_fop` used below the ceiling.
@@ -754,14 +760,15 @@ class BatchedContractionCertificationTestCase(BatchedOperatorTestCase):
             decisions[float(XOR_BAND_LS[0])],
             f'the lowest band point L={XOR_BAND_LS[0]:.0f} did not certify')
 
-        # The refusal half of the XOR, on an UNRESOLVED above-ceiling host.
+        # The refusal half of the XOR, on an EXTERIOR (2-image) above-ceiling
+        # host that both uniform arms genuinely decline.
         refusing_certified = self._solo(
             XOR_REFUSING_W, np.array(XOR_REFUSING_Y), XOR_REFUSING_GAMMA,
             0.0, 0.0)[0]
         self.n_checks += 1
         self.assertFalse(
             refusing_certified,
-            f'the unresolved above-ceiling host gamma={XOR_REFUSING_GAMMA}, '
+            f'the exterior above-ceiling host gamma={XOR_REFUSING_GAMMA}, '
             f'y={XOR_REFUSING_Y}, w={XOR_REFUSING_W} certified; the named '
             f'refusal never fires, so the certified-or-refuse contract has '
             f'no refusing witness left')

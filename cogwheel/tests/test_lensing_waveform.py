@@ -206,16 +206,19 @@ BAND_EDGE = _LensConfig(
     name='band-edge', y=(0.50, 0.25), gamma=0.25, beta=0.0, kappa=0.5,
     w_probes=(30.0, 40.0, 59.9))
 
-#: HARD-CORE positive-parity companion (Build 8e serving ladder): a
-#: near-caustic 4-image source whose above-QD-ceiling probe
-#: (``w = 151 > 150``) is refused by BOTH uniform arms -- the fold
-#: argument xi and Pearcey radius are both too small to certify -- so
-#: the named `SchwingerCertificationError` still stands.  The
-#: sub-ceiling probe (``w = 30``) is Schwinger-served.  This is the
-#: refusing branch of the conditional serving contract that BAND_EDGE
-#: (now arm-served at w=151) no longer exercises.
+#: HARD-CORE positive-parity companion (Build 8e serving ladder,
+#: RE-BASELINE after cusp-arm interior extension): a low-shear
+#: (``gamma = 0.10``) 2-image EXTERIOR source (``|y| = 0.26``, well
+#: outside the ``gamma = 0.10`` astroid caustic of extent ~0.2) whose
+#: above-QD-ceiling probe (``w = 151 > 150``) is refused by BOTH uniform
+#: arms -- the fold arm finds no merging pair (2-image exterior) and the
+#: cusp arm cannot build a 3-stationary-point Pearcey form -- so the
+#: named `SchwingerCertificationError` still stands.  The sub-ceiling
+#: probe (``w = 30``) is Schwinger-served (well inside the certified
+#: ``w <= 60`` DD band at ``L = w*|y'| = 7.8``).  This is the refusing
+#: branch of the conditional serving contract.
 HARD_CORE = _LensConfig(
-    name='hard-core', y=(0.10, 0.10), gamma=0.47, beta=0.0, kappa=0.0,
+    name='hard-core', y=(0.26, 0.00), gamma=0.10, beta=0.0, kappa=0.0,
     w_probes=(30.0, 151.0))
 
 #: Weak-lens configuration for the unlensed-limit floor sweep.
@@ -600,10 +603,11 @@ class MacroSaddleControlTestCase(WaveformTestCase):
         The HARD-CORE companion raises a NAMED wave-branch refusal at the
         waveform layer -- the (b) branch of the conditional serving
         contract that BAND_EDGE (now arm-served) no longer exercises.  Its
-        above-ceiling probe (``w = 61 > 60``) is refused by BOTH uniform
-        arms, so ``amplification`` over the probe grid propagates the
-        `SchwingerCertificationError` unswallowed (never a ``nan`` or a
-        finite-but-wrong factor).
+        above-QD-ceiling probe (``w = 151 > 150``) is refused by BOTH
+        uniform arms (exterior 2-image source: no merging fold pair, no
+        3-stationary-point Pearcey form), so ``amplification`` over the
+        probe grid propagates the `SchwingerCertificationError` unswallowed
+        (never a ``nan`` or a finite-but-wrong factor).
         """
         refusals = [w for w in HARD_CORE.w_probes
                     if not _f_op_returns(HARD_CORE, w)]
@@ -629,11 +633,10 @@ class MacroSaddleControlTestCase(WaveformTestCase):
         """
         A refusal identifies the offending configuration so a caller can
         tell which was refused, not merely that one was.  RE-BASELINE
-        (Build 8e serving ladder): the message contract is UNCHANGED for
-        genuine refusals, but the band-edge companion now SERVES via an
-        arm, so this pin moves to the HARD-CORE companion whose
-        above-ceiling probe (``w = 61 > 60``) no arm certifies.  Its
-        refusal is the Schwinger w-ceiling (y-independent, F013), so the
+        (cusp-arm interior extension): the HARD-CORE companion is a 2-image
+        exterior source ``(gamma=0.10, |y|=0.26)`` whose above-QD-ceiling
+        probe (``w = 151 > 150``) no arm certifies.  Its refusal is the
+        Schwinger w-ceiling (y-independent, F013), so the
         `SchwingerCertificationError` message names the offending ``w`` and
         the ceiling -- the complete identifier for a w-keyed refusal.
         """
