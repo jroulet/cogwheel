@@ -113,6 +113,22 @@ tag `[housekeeping]`.
 The driver reviews plans autonomously; escalate to the human user only when
 genuinely unsure.
 
+Monitor authoring: emit on a NEW OCCURRENCE, never on "the newest matching
+line differs from the last one I emitted". Track the COUNT of matching lines
+and print the ones past the previous count. Repeated identical events are real
+events, and the `[file-based]` log lines carry NO timestamp to tell them
+apart — `[file-based] Plan written to <dir>/plan.json` is byte-identical on a
+replan. MEASURED 2026-08-12: a last-line-comparison monitor stayed silent
+through the second plan_ready of a rejected-then-resubmitted plan, and the
+build sat waiting on driver approval for 8 minutes with the watchdog staleness
+clock running; a tighter threshold would have killed a healthy build because
+the watcher could not see a repeat. Two monitor blind spots are now on record
+— this one, and self-matching the monitor's own command echoed into the log
+(filter it with `grep -av "Monitor(persistent"`).
+When verifying a monitor fix, reproduce the miss on the REAL line format
+first: a probe built from synthetic timestamped lines does not recreate a
+byte-identical-repeat bug and will "pass" against a fix that does nothing.
+
 ### Quiet build monitoring (Codex / OpenCode)
 - Never create a persistent goal to monitor a build. Never model-poll a log.
   The driver acts only after an escalation or terminal callback.
