@@ -47,6 +47,8 @@ FILTER='Phase [0-9]:|Triage:|plan_ready|Plan written|Waiting for a decision|Wait
 TERMINAL='^(\[[^]]*\])?[[:space:]]*(===[[:space:]]*)?(BUILD REPORT|Build failed|Build cancelled|KILLED BY WATCHDOG|GATE FAILURE|BUILD STRANDED)'
 # The build process pattern. Bracket idiom so the check cannot match itself.
 BUILD_PAT='sdk/[b]uild.py'
+# The tree gate writes here while the build log is silent.
+GATE_LOG="${GATE_LOG:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null)/.claude/sdk/logs/tree_gate.log}"
 
 # Strip the harness's echo of a Monitor command (blind spot 1).
 _matches() { grep -av 'Monitor(persistent' "$LOG" 2>/dev/null | grep -aE "$FILTER"; }
@@ -90,8 +92,18 @@ while :; do
     # 12 min into a healthy WP1 whose log was advancing every few seconds.
     # Health is the LOG ADVANCING (AGENTS.md: "health = log mtime, not
     # pgrep"), so gate the stall on mtime and let markers drive emission only.
+    # Health is EITHER log advancing: the BUILD log legitimately freezes for
+    # the whole tree gate (20+ min) while the gate writes to ITS own log, so
+    # watching only the build log cries stall on every gated build. Take the
+    # NEWEST mtime of the two. (Caught 2026-08-12 while the deltoid build's
+    # gate was running -- this script's own header documented the freeze and
+    # its stall check ignored it.)
     now=$(date +%s)
-    mtime=$(stat -c '%Y' "$LOG" 2>/dev/null || stat -f '%m' "$LOG" 2>/dev/null || echo "$now")
+    _mt() { stat -c '%Y' "$1" 2>/dev/null || stat -f '%m' "$1" 2>/dev/null || echo 0; }
+    mtime=$(_mt "$LOG")
+    gate_mtime=$(_mt "$GATE_LOG")
+    [ "$gate_mtime" -gt "$mtime" ] && mtime="$gate_mtime"
+    [ "$mtime" -eq 0 ] && mtime="$now"
     quiet=$(( now - mtime ))
     if [ "$quiet" -ge "$(( 6 * POLL ))" ]; then
       stall=$((stall + 1))
