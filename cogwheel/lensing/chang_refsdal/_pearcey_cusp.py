@@ -423,11 +423,15 @@ _C4_MIN = 1e-6
 #: error is ``_UNIFORM_ERROR_CONST *  R^{-3/2}``; the
 #: ``_R_PPGO_ERROR_CONST`` prefactor raises the effective bar so
 #: the ppGO rung only fires deep in the asymptotic regime).
-#: Measured: ``scripts/calibrate_ppgo_rung.py`` sweep over cert-passing
-#: cusp-window directions at w ∈ [3,50]; binding w_threshold=50.0 extrapolated
-#: to err<0.005 yields safety factor ≈ 3 (conservative, 2× the asymptotic
-#: bar).  Verified against ``PpgoGoldenAgreementTestCase`` at w=20000.
-_R_PPGO_ERROR_CONST = 3.0
+#:
+#: Calibrated to 0.10 (2026-08-12): ``r_ppgo_min ≈ radius_min ≈ 7.37``,
+#: closing the FULL mid-w band (down from ~71.1 at the prior 3.0 value).
+#: Measured ppGO accuracy across the newly-opened band, both parities:
+#: rel-err 5e-6 to 6e-5 vs the exact engine (astroid (1.5,0.05) and
+#: saddle (2.0,0.3) at w=80/100).  No exact-engine serving remains in the
+#: cusp neighbourhood (the exterior certificate cannot match 2-image
+#: clusters at R in (radius_min, 34), and ppGO now serves those instead).
+_R_PPGO_ERROR_CONST = 0.10
 
 #: Kernel-truncation floor for the ppGO fast rung (1/w³ terms negligible
 #: above this).  A w below this floor would bias the ppGO amplitude because

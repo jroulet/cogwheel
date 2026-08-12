@@ -2439,14 +2439,30 @@ class FfinRetirementInvariantsTestCase(unittest.TestCase):
 
     def test_interior_branch_builds_wedge_not_farfield_label(self):
         """The interior is built by `_build_wedge_chart` on INTERIOR_SACR_C;
-        `_build_farfield_chart` never trains on the interior label."""
+        `_build_farfield_chart` never trains on the interior label.
+
+        ``_build_farfield_chart`` stores the envelope definition via a
+        ternary ``definition=(FARFIELD_KERNEL_SUM_MINUS_GHOST if
+        force_minus_ghost else FARFIELD_KERNEL_SUM)``, so the source
+        carries ``FARFIELD_KERNEL_SUM`` and the ``force_minus_ghost``
+        guard but not ``definition=FARFIELD_KERNEL_SUM`` as a contiguous
+        literal.
+        """
         wedge_src = inspect.getsource(_build_wedge_chart)
         ff_src = inspect.getsource(_build_farfield_chart)
         self.assertIn('definition=INTERIOR_SACR_C', wedge_src,
                       'the wedge builder must store the INTERIOR_SACR_C '
                       'envelope.')
-        self.assertIn('definition=FARFIELD_KERNEL_SUM', ff_src,
-                      'the far-field builder must store FARFIELD_KERNEL_SUM.')
+        # ``FARFIELD_KERNEL_SUM`` appears inside the ternary (the
+        # ``else`` branch) and ``FARFIELD_KERNEL_SUM_MINUS_GHOST`` in
+        # the ``if`` branch.
+        self.assertIn('FARFIELD_KERNEL_SUM', ff_src,
+                      'the far-field builder must reference '
+                      'FARFIELD_KERNEL_SUM.')
+        self.assertIn('FARFIELD_KERNEL_SUM_MINUS_GHOST', ff_src,
+                      'the far-field builder must reference '
+                      'FARFIELD_KERNEL_SUM_MINUS_GHOST '
+                      '(the force_minus_ghost branch).')
         self.assertNotIn('definition=INTERIOR_SACR_C', ff_src,
                          'no FarFieldChart may be trained on the interior '
                          'INTERIOR_SACR_C label after ffin retirement.')

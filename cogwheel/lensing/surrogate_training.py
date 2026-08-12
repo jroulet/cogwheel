@@ -53,7 +53,7 @@ from cogwheel.lensing.waveform import dimensionless_frequency
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels, farfield_envelope_from_partition, farfield_w_floor,
-    INTERIOR_SACR_C, FARFIELD_KERNEL_SUM)
+    INTERIOR_SACR_C, FARFIELD_KERNEL_SUM, FARFIELD_KERNEL_SUM_MINUS_GHOST)
 from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
 from cogwheel.lensing.ppgo_map import (
     CertifiedPpgoMap, UNKNOWN, caustic_rho, get_certified_ppgo_map)
@@ -1185,7 +1185,8 @@ def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int,
                     *,
                     cusp_angles: list[float] | None = None,
                     gamma: float | None = None,
-                    gamma_band: tuple[float, float] | None = None
+                    gamma_band: tuple[float, float] | None = None,
+                    d_exclude: float = _CUSP_EXCLUSION_DISTANCE,
                     ) -> list[tuple[tuple[float, float],
                                     tuple[float, float], int, int]]:
     """Rectangular exterior tiles of a caustic-fixed ``(rho, theta_c)``
@@ -1222,9 +1223,14 @@ def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int,
         If provided together with ``cusp_angles`` and ``gamma``, the cusp-
         exclusion check evaluates at ``(gamma_band[0], gamma,
         gamma_band[1])`` so a tile is dropped when ANY band-edge gamma
-        places a corner within ``_CUSP_EXCLUSION_DISTANCE`` of a cusp
+        places a corner within ``d_exclude`` of a cusp
         vertex.  When ``None`` the check uses only the single ``gamma``
         (backward-compatible single-gamma behaviour).
+    d_exclude : float, optional
+        Exclusion distance in physical source-plane units.  Defaults to
+        ``_CUSP_EXCLUSION_DISTANCE`` (0.35).  Pass 0.0 to admit
+        near-cusp tiles (e.g. saddle parity where the MINUS_GHOST label
+        handles the near-cusp oscillation).
 
     Returns
     -------
@@ -1250,6 +1256,7 @@ def _farfield_tiles(rho_inner: float, rho_outer: float, n_per_side: int,
             if (gamma is not None and cusp_angles
                     and _exclude_near_cusp(gamma, center, half,
                                            cusp_angles,
+                                           d_exclude=d_exclude,
                                            gamma_band=gamma_band)):
                 continue
             tiles.append((center, half, i, j))
@@ -2938,7 +2945,8 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
                           half: tuple[float, float],
                           w_range: tuple[float, float], config: TrainingConfig,
                           w_nodes_per_decade: int | None = None,
-                          fold_carrier: bool = False
+                          fold_carrier: bool = False,
+                          force_minus_ghost: bool = False,
                           ) -> tuple[ExteriorPolarChart, int, int]:
     """Build one exterior-polar chart in caustic-fixed ``(rho, theta_c)``.
 
@@ -2950,8 +2958,11 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
     ``(gamma, rho, theta_c)`` is mapped to a physical eigenframe source via
     `_from_caustic_fixed` at that node's OWN gamma before the engine call.
 
-    The chart is always trained on the exterior far-field kernel-sum label
-    (`FARFIELD_KERNEL_SUM`); the interior is charted in wedge caustic-relative
+    The chart is trained on the exterior far-field kernel-sum label
+    (`FARFIELD_KERNEL_SUM` by default) or, when ``force_minus_ghost`` is True,
+    on the ghost-subtracted label (`FARFIELD_KERNEL_SUM_MINUS_GHOST`), which
+    is valid closer to a cusp vertex where the raw kernel-sum label is
+    oscillatory.  The interior is charted in wedge caustic-relative
     coordinates by `_build_wedge_chart` / `InteriorWedgeChart`.
 
     Both positive-parity astroid (``gamma < 1``) and macro-saddle
@@ -3034,7 +3045,8 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
             n_gamma=n_gamma, n_rho=config.n_theta_c,
             n_theta_c=config.n_rho,
             w_nodes_per_decade=nodes_per_decade,
-            definition=FARFIELD_KERNEL_SUM,
+            definition=(FARFIELD_KERNEL_SUM_MINUS_GHOST
+                       if force_minus_ghost else FARFIELD_KERNEL_SUM),
             theta_to_u=theta_to_u, u_grid=u_grid,
             rho_log_axis=True,
             fold_carrier=fold_carrier)
@@ -4256,7 +4268,8 @@ def _subdivide_tile(
                 'lobe_cusps': tile.get('lobe_cusps'),
                 'w_range': tile['w_range'], 'region': region,
                 'si': tile['si'], 'm_lo': tile['m_lo'], 'm_hi': tile['m_hi'],
-                'w_nodes_per_decade': tile.get('w_nodes_per_decade')}
+                'w_nodes_per_decade': tile.get('w_nodes_per_decade'),
+                'force_minus_ghost': tile.get('force_minus_ghost')}
             sub = _subdivide_tile(
                 tile=child_tile, parent_tag=child_tag, band=band,
                 parity=parity, config=config, rng=rng, outdir=outdir,
@@ -4381,7 +4394,8 @@ def _subdivide_farfield_tile(
         chart, calls, refused = _build_farfield_chart(
             gamma_band=band, parity=parity, box_center=center, half=half,
             w_range=subtile['w_range'], config=config,
-            w_nodes_per_decade=w_nodes)
+            w_nodes_per_decade=w_nodes,
+            force_minus_ghost=subtile.get('force_minus_ghost', False))
         samples = _farfield_heldout_samples(band, center, half, config, rng)
         eps = _heldout_eps(chart, samples, {'schema': 'heldout-probe'})
         return chart, calls, refused, {
@@ -4893,13 +4907,16 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     # lies inside the prior box for its direction.
                     tiles = exterior_tiles
                 else:
-                    # Macro saddle: scalar-reach exterior tiler with
-                    # deltoid cusp-exclusion filtering.
+                    # Macro saddle: scalar-reach exterior tiler.
+                    # Near-cusp tiles are admitted (d_exclude=0.0) and
+                    # flagged force_minus_ghost=True below — the
+                    # MINUS_GHOST label resolves the near-cusp
+                    # oscillation that the KERNEL_SUM label cannot.
                     tiles = _farfield_tiles(
                         exclusion_rho, rho_outer_region,
                         config.n_farfield_tiles_per_side,
                         cusp_angles=cusp_angles, gamma=gamma_mid,
-                        gamma_band=band)
+                        gamma_band=band, d_exclude=0.0)
                 # Per-window node reprovision (w-axis ONLY): probe the innermost
                 # tile (largest w_floor, hardest fit) for the minimal w-node
                 # density N_rec still clearing the eps bar; the rho/theta_c tiling
@@ -4920,11 +4937,18 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     fold_carrier = _needs_fold_carrier(
                         gamma=gamma_mid, center=center, half=half,
                         gamma_band=band)
+                    force_minus_ghost: bool = False
+                    if parity == -1 and cusp_angles:
+                        force_minus_ghost = _exclude_near_cusp(
+                            gamma_mid, center, half, cusp_angles,
+                            d_exclude=_CUSP_EXCLUSION_DISTANCE,
+                            gamma_band=band)
                     admitted.append({
                         'si': 0, 'i': i, 'j': j, 'center': center, 'half': half,
                         'm_lo': m_lo_region, 'm_hi': m_hi_region,
                         'w_range': window, 'w_nodes_per_decade': int(n_rec),
                         'fold_carrier': fold_carrier,
+                        'force_minus_ghost': force_minus_ghost,
                         'region': 'exterior'})
                 exterior_region_report.update({
                     'window': [round(float(w_floor), 6),
@@ -5401,15 +5425,18 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         path = outdir / f'{tag}.npz'
 
         fold_carrier = tile.get('fold_carrier', False)
+        force_minus_ghost = tile.get('force_minus_ghost', False)
         def build_ff(band=band, center=center, half=half, w_range=w_range,
                      si=si, m_lo=m_lo, m_hi=m_hi, region=region, kind=kind,
                      w_nodes=eff_w_nodes, eff_w_nodes=eff_w_nodes,
-                     fold_carrier=fold_carrier):
+                     fold_carrier=fold_carrier,
+                     force_minus_ghost=force_minus_ghost):
             chart, calls, refused = _build_farfield_chart(
                 gamma_band=band, parity=parity, box_center=center,
                 half=half, w_range=w_range, config=config,
                 w_nodes_per_decade=w_nodes,
-                fold_carrier=fold_carrier)
+                fold_carrier=fold_carrier,
+                force_minus_ghost=force_minus_ghost)
             samples = _farfield_heldout_samples(
                 band, center, half, config, rng)
             eps = _heldout_eps(chart, samples,
@@ -5430,7 +5457,26 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         try:
             chart, report, reused = _load_or_build(
                 path, build_ff, {'schema': 'build8c-chart', 'parity': parity})
-        except CarrierDiscontinuityError as exc:
+        except (CarrierDiscontinuityError,
+                        geometry.GhostDomainError) as exc:
+            if isinstance(exc, geometry.GhostDomainError):
+                # Ghost-gate refusal: the force_minus_ghost tile is so
+                # close to a cusp vertex that every grid node fails the
+                # ghost-separation gate (min_a |x_a - x_c| < 0.7 or
+                # Im(tau_c) < 0.4).  This is a geometric disease -- the
+                # ghost COALESCES with a real image at the cusp, not a
+                # resolution disease -- so subdivision cannot cure it.
+                # Record as a ladder-served gap and move on cleanly.
+                ghost_report = {'name': tag, 'parity': parity,
+                                'file': str(path), 'region': region,
+                                'ghost_gate_refused': True,
+                                'gate_reason': 'minus_ghost_unresolvable',
+                                'ghost_gate_detail': str(exc),
+                                'carrier_flip': True,
+                                'subdivided': False,
+                                'ladder_served_gap': True}
+                chart_reports.append(ghost_report)
+                continue
             # Interpolator hygiene: the exterior far-field tile straddles a
             # critical-basin (``tau_c``) flip, so a single spline cannot
             # represent the phase-kinked envelope.  Resolve by

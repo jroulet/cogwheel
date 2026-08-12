@@ -672,18 +672,22 @@ njit nearest-caustic search; certified by the new
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
 
-- `0.11.10` ():
+- `0.11.11` ():
 SPEC.md engine row: certified-by list gains `test_lensing_saddle_rho_guards.py`
 (parity-and-image-count guards preventing saddle corridor sources from
 entering the ppGO map / fold-ppGO interior handoff / Born classification).
 
-- `0.11.9` ():
+- `0.11.10` ():
 SPEC.md Born rung: `classify_fallthrough` born-attribution sentence updated —
 the census now marks saddle corridor sources (`gamma > 1`, `image_count == 2`)
 as 'born' in addition to `rho > 1` (exterior-to-caustic), since the deltoid
 caustic does not enclose the origin so `rho < 1` does not imply interior on
 the saddle. Fix for 288f37c which patched `surrogate_census.py` but left the
 SPEC sentence describing only the `rho > 1` criterion.
+
+- `0.11.9` ():
+SPEC.md engine row: certified-by list gains `test_lensing_ppgo_midw_and_minus_ghost.py`
+(mid-w ppGO serving + FARFIELD_KERNEL_SUM_MINUS_GHOST saddle exterior window).
 
 - `0.11.8` ():
 Update the REGISTRATION GATE description in Key abstractions (surrogate

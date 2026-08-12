@@ -3261,12 +3261,12 @@ class LensAmplificationSurrogate:
                             gamma=float(gamma),
                             y=(y1_eig, y2_eig),
                             beta=0.0, kappa=0.0)
+                        env = farfield_envelope_from_partition(
+                            partition, definition)
                     except _REFUSAL_ERRORS:
                         refused.append(
                             (float(gamma), float(rho), float(theta_c)))
                         continue
-                    env = farfield_envelope_from_partition(
-                        partition, definition)
                     if not np.all(np.isfinite(env)):
                         refused.append(
                             (float(gamma), float(rho), float(theta_c)))

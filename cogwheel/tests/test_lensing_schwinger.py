@@ -2422,32 +2422,46 @@ class SaddleRoutingMpmathStructuralTestCase(SchwingerTestCase):
     """
 
     def test_mpmath_band_nodes_routed_to_f_schwinger(self):
-        """Nodes with 60 < w <= 150 are dispatched to f_schwinger (mpmath)."""
+        """Nodes with 60 < w <= 150 are dispatched to f_schwinger (mpmath).
+
+        Since the uniform-asymptotic arms are offered FIRST in the
+        mpmath band, nodes that an arm certifies are served BEFORE
+        reaching `f_schwinger`.  With the current calibrations
+        (``_R_PPGO_ERROR_CONST=0.10``) the cusp arm (ppGO rung)
+        serves all tested nodes at this saddle fixture, so none
+        fall through to `f_schwinger`.
+
+        This test patches ``_R_PPGO_ERROR_CONST`` to 1e30 to disable
+        the ppGO rung, forcing all nodes to decline the cusp arm and
+        fall through to `f_schwinger`, proving the mpmath-band routing
+        is structurally intact.
+        """
         # Track which w values f_schwinger is called with.
-        # operator.py accesses `_schwinger.f_schwinger` — patching the
-        # attribute on the module object suffices.
         called_ws: list[float] = []
 
         def tracking_f(w, y_eig, gamma_prime):
             called_ws.append(float(w))
-            # Return a plausible finite complex to avoid refusal logic
             return complex(0.1, 0.2)
 
+        w_all = SADDLE_ROUTING_WS.copy()  # [80.0, 100.0, 120.0]
         with mock.patch.object(_schwinger, 'f_schwinger',
-                               side_effect=tracking_f):
+                               side_effect=tracking_f), \
+             mock.patch.object(
+                _pearcey_cusp, '_R_PPGO_ERROR_CONST', 1e30):
             from cogwheel.lensing.chang_refsdal.operator import _saddle_grid
             result = _saddle_grid(
-                SADDLE_ROUTING_WS, SADDLE_ROUTING_Y,
+                w_all, SADDLE_ROUTING_Y,
                 SADDLE_ROUTING_GAMMA, beta=0.0, kappa=0.0)
 
-        # All three w values should have been passed to f_schwinger
         self.n_checks += 1
+        # With ppGO disabled, all nodes should fall through to f_schwinger.
         for w in SADDLE_ROUTING_WS:
             with self.subTest(w=w):
                 self.assertIn(
                     float(w), called_ws,
                     f'w={w} was NOT dispatched to f_schwinger '
-                    f'(mpmath route missing). Called ws: {called_ws}')
+                    f'(ppGO disabled — arm should decline). '
+                    f'Called ws: {called_ws}')
                 self.n_checks += 1
 
     def test_mpmath_band_returns_finite(self):
@@ -2473,8 +2487,11 @@ class SaddleRoutingMpmathStructuralTestCase(SchwingerTestCase):
     def test_dd_band_not_affected_by_mpmath_routing(self):
         """DD-band nodes (w<=60) still use the parallel batch, not f_schwinger.
 
-        Adding w=50 (DD band) alongside mpmath-band nodes: f_schwinger
-        mock should NOT be called at w=50 (DD batch is separate).
+        Adding w=50 (DD band) alongside mpmath-band nodes.  With ppGO
+        disabled (``_R_PPGO_ERROR_CONST=1e30``), the cusp arm declines
+        for all nodes, so w=80 and w=100 fall through to f_schwinger.
+        w=50 goes through the DD parallel batch and never reaches
+        f_schwinger.
         """
         called_ws: list[float] = []
 
@@ -2484,7 +2501,9 @@ class SaddleRoutingMpmathStructuralTestCase(SchwingerTestCase):
 
         w_mixed = np.array([50.0, 80.0, 100.0])
         with mock.patch.object(_schwinger, 'f_schwinger',
-                               side_effect=tracking_f):
+                               side_effect=tracking_f), \
+             mock.patch.object(
+                _pearcey_cusp, '_R_PPGO_ERROR_CONST', 1e30):
             from cogwheel.lensing.chang_refsdal.operator import _saddle_grid
             result = _saddle_grid(
                 w_mixed, SADDLE_ROUTING_Y,
@@ -2495,9 +2514,14 @@ class SaddleRoutingMpmathStructuralTestCase(SchwingerTestCase):
         self.assertNotIn(
             50.0, called_ws,
             'w=50 was dispatched to f_schwinger instead of DD batch')
-        # w=80 and w=100 SHOULD appear
-        self.assertIn(80.0, called_ws, 'w=80 not routed to f_schwinger')
-        self.assertIn(100.0, called_ws, 'w=100 not routed to f_schwinger')
+        # w=80 SHOULD appear (ppGO disabled → cusp arm declines → falls through)
+        self.assertIn(80.0, called_ws,
+                      'w=80 not routed to f_schwinger '
+                      '(ppGO disabled — arm should decline this node)')
+        # w=100 SHOULD appear (ppGO disabled → cusp arm declines → falls through)
+        self.assertIn(100.0, called_ws,
+                      'w=100 not routed to f_schwinger '
+                      '(ppGO disabled — arm should decline this node)')
         self.n_checks += 1
 
 

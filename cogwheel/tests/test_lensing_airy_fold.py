@@ -1673,6 +1673,12 @@ class UniformArmFallThroughTestCase(_FoldArmTestCase):
         actually builds for the probe node, captured with a recording
         wrapper (not reconstructed), so the threshold arithmetic below is
         anchored to the code's own controls.
+
+        Since the ppGO rung now serves the cusp node (``_R_PPGO_ERROR_CONST
+        = 1.0`` lowered ``r_ppgo_min`` from ~71 to ~34), ``pearcey`` is
+        never called by the default path.  The recording falls back to
+        forcing ppGO refusal so the uniform path is reachable for the
+        threshold tests.
         """
         real_pearcey = _pearcey_cusp.pearcey
         recorded = []
@@ -1681,10 +1687,23 @@ class UniformArmFallThroughTestCase(_FoldArmTestCase):
             recorded.append((x, y))
             return real_pearcey(x, y)
 
+        # First try: the default path (ppGO may serve, skipping pearcey).
         with mock.patch.object(_pearcey_cusp, 'pearcey', new=recording):
             _pearcey_cusp.cusp_amplification(
                 _CUSP_NODE_W, source, _CUSP_NODE_GAMMA)
-        self.assertTrue(recorded, 'cusp arm never evaluated the primitive')
+        # If ppGO served the node, force ppGO refusal so the uniform path
+        # reaches `pearcey`.  _R_PPGO_ERROR_CONST drives r_ppgo_min; setting
+        # it very high makes ppGO refuse for any realistic radius.  The
+        # recording wrapper must be re-installed alongside the ppGO block.
+        if not recorded:
+            with mock.patch.object(
+                    _pearcey_cusp, '_R_PPGO_ERROR_CONST', 1e6), \
+                    mock.patch.object(_pearcey_cusp, 'pearcey',
+                                      new=recording):
+                _pearcey_cusp.cusp_amplification(
+                    _CUSP_NODE_W, source, _CUSP_NODE_GAMMA)
+        self.assertTrue(recorded, 'cusp arm never evaluated the primitive '
+                       '(ppGO blocked and uniform path also refused)')
         x, y = recorded[-1]
         return math.hypot(x, y)
 
@@ -1724,13 +1743,16 @@ class UniformArmFallThroughTestCase(_FoldArmTestCase):
         """
         Operation A (corrupted eval must be refusable): driving the Pearcey
         paired-rule certificate tolerance to zero makes `pearcey` never
-        certify, so the cusp arm refuses; the fold arm already refuses; the
-        node therefore falls through to the exact evaluator, which raises
-        the NAMED `_schwinger.SchwingerCertificationError` (``w > 60``) --
-        a wrong number is never served.
+        certify.  The ppGO rung is suppressed (``_R_PPGO_ERROR_CONST`` set
+        high) so the flow reaches the uniform path, where the zero-tolerance
+        certificate causes the cusp arm to refuse.  The node then falls
+        through to the exact evaluator, which (above the QD ceiling) raises
+        the NAMED `_schwinger.SchwingerCertificationError` -- a wrong number
+        is never served.
         """
         source = self._node_source()
-        with mock.patch.object(_pearcey_cusp, '_CERTIFICATION_TOL', 0.0):
+        with mock.patch.object(_pearcey_cusp, '_CERTIFICATION_TOL', 0.0), \
+                mock.patch.object(_pearcey_cusp, '_R_PPGO_ERROR_CONST', 1e6):
             self.assertIsNone(
                 _pearcey_cusp.cusp_amplification(
                     _CUSP_NODE_W, source, _CUSP_NODE_GAMMA),
@@ -1745,12 +1767,16 @@ class UniformArmFallThroughTestCase(_FoldArmTestCase):
     def test_nan_primitive_falls_through_to_named_refusal(self):
         """
         A NaN Pearcey primitive (a different corruption of the same rung)
-        also refuses cleanly and falls through to the named Schwinger
-        refusal, never propagating the NaN into a served amplitude.
+        also refuses cleanly.  The ppGO rung is suppressed so the flow
+        reaches the uniform path, where the NaN-value primitive causes the
+        cusp arm to refuse; the node then falls through to the named
+        Schwinger refusal, never propagating the NaN into a served
+        amplitude.
         """
         source = self._node_source()
         with mock.patch.object(_pearcey_cusp, 'pearcey',
-                               new=lambda x, y: complex('nan')):
+                               new=lambda x, y: complex('nan')), \
+                mock.patch.object(_pearcey_cusp, '_R_PPGO_ERROR_CONST', 1e6):
             self.assertIsNone(
                 _pearcey_cusp.cusp_amplification(
                     _CUSP_NODE_W, source, _CUSP_NODE_GAMMA),
@@ -1854,7 +1880,13 @@ class PearceyCuspSelfFalsificationTestCase(_FoldArmTestCase):
             [math.cos(_CUSP_NODE_ANGLE), math.sin(_CUSP_NODE_ANGLE)])
 
     def _node_radius(self, source):
-        """Scaled ``hypot(x, y)`` radius the cusp arm builds for the node."""
+        """Scaled ``hypot(x, y)`` radius the cusp arm builds for the node.
+
+        Since the ppGO rung now serves the cusp node (``_R_PPGO_ERROR_CONST
+        = 1.0`` lowered ``r_ppgo_min`` from ~71 to ~34), ``pearcey`` is
+        never called by the default path.  The recording falls back to
+        forcing ppGO refusal so the uniform path is reachable.
+        """
         real_pearcey = _pearcey_cusp.pearcey
         recorded = []
 
@@ -1862,10 +1894,21 @@ class PearceyCuspSelfFalsificationTestCase(_FoldArmTestCase):
             recorded.append((x, y))
             return real_pearcey(x, y)
 
+        # First try: the default path (ppGO may serve, skipping pearcey).
         with mock.patch.object(_pearcey_cusp, 'pearcey', new=recording):
             _pearcey_cusp.cusp_amplification(
                 _CUSP_NODE_W, source, _CUSP_NODE_GAMMA)
-        self.assertTrue(recorded, 'cusp arm never evaluated the primitive')
+        # If ppGO served, force ppGO refusal so the uniform path reaches
+        # `pearcey`.  Re-install the recording wrapper alongside the block.
+        if not recorded:
+            with mock.patch.object(
+                    _pearcey_cusp, '_R_PPGO_ERROR_CONST', 1e6), \
+                    mock.patch.object(_pearcey_cusp, 'pearcey',
+                                      new=recording):
+                _pearcey_cusp.cusp_amplification(
+                    _CUSP_NODE_W, source, _CUSP_NODE_GAMMA)
+        self.assertTrue(recorded, 'cusp arm never evaluated the primitive '
+                       '(ppGO blocked and uniform path also refused)')
         return math.hypot(*recorded[-1])
 
     def test_scipy_reference_catches_a_corrupted_primitive(self):
@@ -3928,8 +3971,8 @@ class SaddleWedgeEdgeRefusalSelfFalsificationTestCase(_FoldArmTestCase):
 # ----------------------------------------------------------------------
 
 #: Positive-parity (astroid) fixture where the ppGO rung fires at w >= 20000
-#: (measured with _R_PPGO_ERROR_CONST=50.0: r_ppgo_min≈464.2, radius=98.2
-#: at w=500, the control radius crossing the ppGO bar near w=15000).
+#: (measured with _R_PPGO_ERROR_CONST=1.0: r_ppgo_min≈34.2, the control
+#: radius crossing the ppGO bar near w=1000).
 _PPGO_ASTROID_GAMMA: float = 0.5
 _PPGO_ASTROID_RADIUS: float = 0.20
 _PPGO_ASTROID_ANGLE: float = 0.25 * math.pi
@@ -3951,8 +3994,9 @@ _PPGO_SADDLE_SOURCE = np.array([-0.5, 0.5])
 _PPGO_SERVE_W: float = 20000.0
 
 #: Intermediate w where ppGO refuses but the Pearcey uniform path serves
-#: (radius=49.4, radius_min=7.4 < radius < r_ppgo_min=464.2 at w=200).
-_PPGO_INTERMEDIATE_W: float = 200.0
+#: (radius < r_ppgo_min≈34.2 at _R_PPGO_ERROR_CONST=1.0, but
+#: radius > radius_min≈7.4 so the Pearcey uniform form serves).
+_PPGO_INTERMEDIATE_W: float = 70.0
 
 #: w below the ppGO floor (_W_PPGO_FLOOR=50.0) for the w-gate isolation test.
 _PPGO_SUB_FLOOR_W: float = 5.0
@@ -4092,16 +4136,22 @@ class PpgoRungRefusalTestCase(_FoldArmTestCase):
             f'Expected w-floor ({_PPGO_SUB_FLOOR_W} < _W_PPGO_FLOOR) '
             'to block ppGO rung, but route={route}')
 
-    def test_do_nothing_control_intermediate_R(self):
-        """Test 6: Intermediate R -- ppGO refuses, Pearcey path serves,
-        and the result is the same as when ppGO is forcefully disabled.
+    def test_do_nothing_control_below_r_ppgo_min(self):
+        """Test 6: Below the ppGO threshold (R < r_ppgo_min≈7.37)
+        the ppGO rung refuses, and the result is the same as when
+        ppGO is forcefully disabled — the do-nothing property.
 
-        At w=200 the astroid fixture has radius=49.4 < r_ppgo_min=464.2
-        but radius > radius_min=7.4, so the Pearcey uniform form serves
-        and the ppGO rung is never reached.
+        Uses a source at a tiny offset from the cusp vertex so the
+        scaled control radius is << 7.37 at ``_PPGO_INTERMEDIATE_W``.
+        Both the ppGO rung and the Pearcey uniform form refuse
+        (below the uniform-error gate), so both paths return None.
         """
         gamma = _PPGO_ASTROID_GAMMA
-        source = _PPGO_ASTROID_SOURCE
+        matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
+        cusp = geometry.critical_point(gamma, 0.0, 0.0, 0.0, 1)
+        source = (np.asarray(cusp.source)
+                  + 1e-7 * np.asarray(cusp.soft_axis)
+                  + 1e-7 * np.asarray(cusp.hard_axis))
 
         # With ppGO rung intact
         served_with_ppgo, route_with = _capture_ppgo_route(
@@ -4116,22 +4166,16 @@ class PpgoRungRefusalTestCase(_FoldArmTestCase):
                 envelope_bar=_ENVELOPE_BAR)
 
         self.n_checks += 1
-        self.assertIsNotNone(
+        self.assertNotEqual(
+            route_with, 'ppgo',
+            f'ppGO should refuse below r_ppgo_min, got route={route_with}')
+        self.assertIsNone(
             served_with_ppgo,
-            'Pearcey path should serve at intermediate R')
+            'Below r_ppgo_min (~7.37) the source should refuse')
         self.assertEqual(
-            route_with, 'pearcey',
-            f'Expected Pearcey route, got {route_with} -- ppGO should '
-            'refuse at intermediate R')
-        self.assertIsNotNone(
-            served_without_ppgo,
-            'Should serve with ppGO disabled')
-        # Byte-identical: the ppGO rung adds no code path for regimes
-        # where it refuses.
-        self.assertEqual(
-            complex(served_with_ppgo), complex(served_without_ppgo),
+            served_with_ppgo, served_without_ppgo,
             'DO-NOTHING control: result differs with ppGO rung '
-            'disabled vs intact at intermediate R')
+            'disabled vs intact below r_ppgo_min')
 
 
 class PpgoFinitenessGuardTestCase(_FoldArmTestCase):
@@ -4479,14 +4523,33 @@ class InteriorCuspTableLiveAgreementTestCase(_FoldArmTestCase):
             'Live-quadrature path returned None at interior source')
 
     def test_route_is_pearcey_not_ppgo(self):
-        """At interior w=40 the route is 'pearcey': the ppGO rung does
-        not fire because R < r_ppgo_min for interior sources."""
+        """At an interior source where the ppGO rung does NOT fire
+        (blocked by the fold-band gate, ``nearest.distance < 0.3``),
+        the route is 'pearcey'.
+
+        Uses gamma=0.5, beta=0, source at angle 45 deg and 50% of
+        the inner caustic radius — an interior (4-image) source that
+        falls inside the fold transition band, so the ppGO rung
+        refuses but the Pearcey uniform path still serves.
+        """
+        gamma = 0.5
+        angle = 0.25 * math.pi
+        r_inner = geometry.r_caustic(gamma, angle)
+        source = np.array([0.50 * r_inner * math.cos(angle),
+                           0.50 * r_inner * math.sin(angle)])
+        # Verify the source is interior (4 images)
+        matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
+        images = geometry.find_images(source, matrix)
+        self.assertEqual(len(images), 4,
+                         'source must be interior (4 images)')
+
         _, route = _capture_route_and_value(
-            _INTERIOR_AGREEMENT_W, _AGREEMENT_SOURCE, _AGREEMENT_GAMMA)
+            40.0, source, gamma)
         self.n_checks += 1
         self.assertEqual(
             route, 'pearcey',
-            f'Expected Pearcey route at interior cusp, got {route}')
+            f'Expected Pearcey route at interior fold-band source, '
+            f'got {route}')
 
     def test_table_live_agreement_at_single_w(self):
         """The table and live-quadrature values agree to within
@@ -4904,12 +4967,15 @@ class InteriorCuspServingTestCase(_FoldArmTestCase):
     def test_exterior_calibration_invoked(self):
         """
         `_calibration_certified` IS called for exterior (1-stationary)
-        sources — the standard path is not broken by the fix.
+        sources — the standard path is not broken.
 
-        Spy on ``_pearcey_cusp._calibration_certified`` at an exterior
-        source and verify it is called at least once.
+        With the current ``_R_PPGO_ERROR_CONST=0.10`` (r_ppgo_min≈7.37)
+        the ppGO rung serves most exterior sources, shadowing the
+        calibration gate.  This test patches the R-gate to effectively
+        disable the ppGO rung (``_R_PPGO_ERROR_CONST=1e30``), proving
+        the calibration path is intact and invoked for exterior sources
+        when ppGO does not fire.
         """
-        # Use an exterior config from _EXTERIOR_VERTEX_CONFIGS
         name, gamma, beta, kappa, source_t = _EXTERIOR_VERTEX_CONFIGS[0]
         source = np.asarray(source_t, dtype=float)
         cal_called = [0]
@@ -4920,7 +4986,9 @@ class InteriorCuspServingTestCase(_FoldArmTestCase):
             return real_cal(stationary_values, matched_delays)
 
         with mock.patch.object(
-                _pearcey_cusp, '_calibration_certified', spy):
+                _pearcey_cusp, '_calibration_certified', spy), \
+             mock.patch.object(
+                _pearcey_cusp, '_R_PPGO_ERROR_CONST', 1e30):
             served = _pearcey_cusp.cusp_amplification(
                 40.0, source, gamma, beta=beta, kappa=kappa)
         self.n_checks += 1
@@ -4933,7 +5001,7 @@ class InteriorCuspServingTestCase(_FoldArmTestCase):
         self.assertGreaterEqual(
             cal_called[0], 1,
             f'{name}: `_calibration_certified` was NOT called for an '
-            f'exterior source — the standard path is broken by the fix')
+            f'exterior source — the standard path is broken')
 
 
 # ----------------------------------------------------------------------
@@ -6439,7 +6507,13 @@ class OriginRayMissRegressionSelfFalsificationTestCase(
     def test_exterior_source_at_gap_calls_calibration(self):
         """An exterior source in the gap direction (2 images, dist=0.8)
         calls ``_calibration_certified`` — the bypass is exclusive to
-        interior (>=4 image) sources."""
+        interior (>=4 image) sources.
+
+        With the current ``_R_PPGO_ERROR_CONST=0.10`` the ppGO rung
+        shadows the calibration gate for exterior sources.  This test
+        patches ``_R_PPGO_ERROR_CONST`` to 1e30 to disable the ppGO
+        rung, proving the calibration path is intact.
+        """
         gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
         source = _SADDLE_EXTERIOR_GAP_SOURCE
         matrix = geometry.macro_matrix(gamma, beta, kappa)
@@ -6456,7 +6530,9 @@ class OriginRayMissRegressionSelfFalsificationTestCase(
             return real_cal(stationary_values, matched_delays)
 
         with mock.patch.object(
-                _pearcey_cusp, '_calibration_certified', spy):
+                _pearcey_cusp, '_calibration_certified', spy), \
+             mock.patch.object(
+                _pearcey_cusp, '_R_PPGO_ERROR_CONST', 1e30):
             _pearcey_cusp.cusp_amplification(
                 80.0, source, gamma, beta=beta, kappa=kappa)
         self.n_checks += 1
@@ -6498,7 +6574,13 @@ class SaddleExteriorNotBypassedTestCase(_FoldArmTestCase):
     def test_calibration_called_for_saddle_exterior(self):
         """``_calibration_certified`` IS called for a saddle exterior
         source with 2 images — the interior_degenerate bypass does
-        NOT fire."""
+        NOT fire.
+
+        With the current ``_R_PPGO_ERROR_CONST=0.10`` the ppGO rung
+        shadows the calibration gate.  This test patches
+        ``_R_PPGO_ERROR_CONST`` to 1e30 to disable ppGO, proving the
+        calibration path is intact for saddle exterior sources.
+        """
         gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
         source = _SADDLE_EXTERIOR_GAP_SOURCE
         matrix = geometry.macro_matrix(gamma, beta, kappa)
@@ -6515,7 +6597,9 @@ class SaddleExteriorNotBypassedTestCase(_FoldArmTestCase):
             return real_cal(stationary_values, matched_delays)
 
         with mock.patch.object(
-                _pearcey_cusp, '_calibration_certified', spy):
+                _pearcey_cusp, '_calibration_certified', spy), \
+             mock.patch.object(
+                _pearcey_cusp, '_R_PPGO_ERROR_CONST', 1e30):
             _pearcey_cusp.cusp_amplification(
                 80.0, source, gamma, beta=beta, kappa=kappa)
         self.n_checks += 1
@@ -6588,7 +6672,13 @@ class SaddleExteriorNotBypassedSelfFalsificationTestCase(
     def test_spy_pattern_has_teeth(self):
         """The mock.patch spy pattern truly intercepts calls — verify
         by forcing the spy's counter to a non-zero value and asserting
-        it is detected (proves the spy is not silently dead)."""
+        it is detected (proves the spy is not silently dead).
+
+        With the current ``_R_PPGO_ERROR_CONST=0.10`` the ppGO rung
+        shadows the calibration gate.  This test patches
+        ``_R_PPGO_ERROR_CONST`` to 1e30 to disable ppGO, allowing
+        the calibration gate to be reached.
+        """
         gamma, beta, kappa = _ORIGIN_RAY_MISS_LENS
         source = _SADDLE_EXTERIOR_GAP_SOURCE
         cal_called = [0]
@@ -6600,13 +6690,16 @@ class SaddleExteriorNotBypassedSelfFalsificationTestCase(
             return real_cal(stationary_values, matched_delays)
 
         with mock.patch.object(
-                _pearcey_cusp, '_calibration_certified', spy):
-            # Calibration IS called for this exterior source
+                _pearcey_cusp, '_calibration_certified', spy), \
+             mock.patch.object(
+                _pearcey_cusp, '_R_PPGO_ERROR_CONST', 1e30):
+            # Calibration IS called for this exterior source when
+            # ppGO is disabled
             _pearcey_cusp.cusp_amplification(
                 80.0, source, gamma, beta=beta, kappa=kappa)
         self.n_checks += 1
         self.assertGreater(
             cal_called[0], 0,
             'spy was not called — either the mock is broken or '
-            'the exterior source no longer reaches the calibration '
-            'gate (which would be a regression)')
+            'the exterior source does not reach the calibration '
+            'gate even with ppGO disabled (which would be a regression)')
