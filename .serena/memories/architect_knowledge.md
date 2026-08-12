@@ -376,9 +376,15 @@
   composable with envelope_bar, source-independent. Dual gate: R >=
   r_ppgo_min AND w >= w_floor (kernel-truncation guard).
   r_ppgo_min = (_R_PPGO_ERROR_CONST * _UNIFORM_ERROR_CONST / bar_ppgo)^(2/3)
-  with bar_ppgo = envelope_bar/10 (calibration target). SHIPPED constants:
-  _R_PPGO_ERROR_CONST=50.0 (PROVISIONAL — post-build driver measurement
-  owed to tighten), _W_PPGO_FLOOR=50.0, _PPGO_BAR_DIVISOR=10.
+  with bar_ppgo = envelope_bar/10 (calibration target). SHIPPED (as of the
+  original build) with _R_PPGO_ERROR_CONST=50.0 (PROVISIONAL), _W_PPGO_FLOOR
+  =50.0, _PPGO_BAR_DIVISOR=10. SUPERSEDED VALUE (2026-08-12,
+  deltoid_exterior_cusp_gap WP-1): _R_PPGO_ERROR_CONST progressively
+  tightened 50.0 -> 3.0 (undocumented intermediate) -> 1.0, dropping
+  r_ppgo_min from ~464 to ~71.1 to ~34.2 — opens the mid-w ppGO band for
+  both parities. Still PROVISIONAL; post-build driver calibration sweep
+  remains owed at the current 1.0 value. _W_PPGO_FLOOR/_PPGO_BAR_DIVISOR
+  unchanged.
   DO-NOTHING: fold_ppgo_correction already has internal guards;
   LensDomainError caught -> fall through to the Pearcey path. Professor
   confirms: Pearcey -> geometric image sum as (x,y)->inf; fold_ppgo_correction
@@ -475,3 +481,86 @@
   y_eig∈{(0.1,0.1),(0.4,0.3),(0.8,0.5)} = 45 pts; tol = _CERTIFICATION_TOL
   = 3e-10 on reconstructed F; complex(raw_n) safe; O(seconds) deterministic.
   Optional: gamma'=1.05 edge case at w=80 for near-parity boundary stress.
+
+## 2026-08-12 builds (lobe_exterior region wiring, deltoid exterior geometry, cusp gap)
+
+- LOBE_EXTERIOR REGION WIRING (Build lobe_exterior_region_wiring, Option A —
+  COMPLETE): `lobe_exterior` shipped as a NEW first-class training region
+  alongside tube/exterior/wedge_interior/lobe_interior. ONE Coder WP, 5
+  edits: `_self_estimate` default region tuple + per-region cost dict
+  (cost=1, same as lobe_interior); `_train_band_charts` default region
+  tuple; saddle/lobe admissions gate widened from {'exterior'} to
+  {'lobe_interior','lobe_exterior'}; packing-loop tile-block gate widened
+  'exterior'->'lobe_exterior'; positive-parity exterior block left BYTE-
+  IDENTICAL. CLI: scripts/train_lens_surrogate.py --regions choices
+  extended. NPZ tag infix is `_fflobeext_`, decoded FIRST in `_tag_kind`
+  (before `_ff_`, since neither is a substring of the other — avoids
+  substring-leak false positives). Test Dev: 2 disjoint shards (A = region-
+  filter tag/estimate tests incl. rewriting test_exterior_only_saddle to
+  EMPTY since exterior far-field is parity==1-only and adding
+  test_lobe_exterior_only_saddle; B = slow-operation-guard pin-tuple
+  extension). Foreman-Lite fixed one stale doc-comment (INS-7-001: the
+  LobeExteriorChart `theta_to_u` load is a SOFT read via `data.get()`,
+  mirroring LobeInteriorChart's convention — NOT a hard `data[...]` read
+  like the wedge loader; earlier in-flight comment wrongly called it "wedge
+  convention... read hard"). Inspector PASS (3 passes); Professor PASS
+  (54 tests, 13.7s). Carry-forward to Librarian (non-Coder, doc-sync):
+  SPEC.md + DATA_CONTRACTS.yaml have ZERO mention of the lobe_exterior/
+  lobe_interior/wedge_interior region vocabulary despite lobe_exterior now
+  being a public --regions CLI choice + NPZ kind + training-region contract.
+- DELTOID EXTERIOR GEOMETRY FIX (Build deltoid_exterior_geometry_fix,
+  re-planned 2026-08-12 — an earlier plan draft was explicitly superseded,
+  discard any prior note referencing corridor_half exclusion or origin-
+  centered corridor coords): corrected design charts the deltoid exterior
+  in LOBE-LOCAL coordinates `(rho_lobe, u=d**(2/3))`, reusing
+  `_lobe_cusp_axis_map` rather than inventing a new map. The inter-lobe
+  corridor is served directly by the +y1 lobe's exterior chart — no
+  separate corridor_half exclusion band needed. Cusp exclusion reuses the
+  existing `caustic_cloud` nearest-distance test with
+  `eta_max = f_max * R_c` (same currency as the tube-shell admission gate,
+  not a bespoke frame). Admission is image_count==2, KERNEL_SUM label only
+  (no ghost term at this stage — that's the follow-on cusp-gap build).
+  Oracle = Schwinger engine. New `LobeExteriorChart` dataclass carries
+  `theta_to_u` from construction (not retrofitted); `_SaddleLobeAdmission`
+  gains an `admits_exterior` method — 2-ARG signature `(center, half)`,
+  DISTINCT from `_InteriorAdmission.admits_exterior`'s 3-arg
+  `(center, half, source_magnitude_max)` — never conflate the two when
+  reusing/extending admission logic. WP1 surrogate.py (chart class), WP2
+  surrogate_training.py (tiler/packing), WP3 census (routed to
+  Foreman-Lite, not Coder — census-only fallthrough-category work).
+- DELTOID EXTERIOR CUSP GAP — OPTION C HYBRID (Build
+  deltoid_exterior_cusp_gap, planned + executed 2026-08-12): Professor's
+  recommended hybrid closes the near-cusp exterior coverage gap left by the
+  geometry-fix build. WP-1: lower `r_ppgo_min` by tightening
+  `_R_PPGO_ERROR_CONST` (50->3->1.0, see the ppGO fast-rung section above
+  for the superseded-value history) — closes the astroid mid-w exact-
+  flashback gap and serves saddle sources outside the fold band; one-
+  constant change in `_pearcey_cusp.py`, calibration sweep owed post-build.
+  WP-2: extends the surrogate to the saddle exterior cusp window via a new
+  MINUS_GHOST label (`force_minus_ghost` flag threaded through
+  `_build_farfield_chart` -> `build_ff` closure -> `_subdivide_farfield_tile`
+  .build_child -> `_subdivide_tile` child dict) with a REDUCED
+  `_CUSP_EXCLUSION_DISTANCE` for near-cusp saddle-parity tiles (set to 0.0
+  at the tiler; the per-node ghost-gate + eps bar decide admission instead
+  of a blanket radius exclusion — "let label gates + eps bar decide", not
+  YAGNI since MINUS_GHOST=0.35 is a real KERNEL_SUM-invalidating measurement
+  near cusps). No serve-side changes needed (MINUS_GHOST already handled at
+  serve). Saddle sources strictly inside the fold band (nearest.distance <
+  0.3) stay excluded from the ppGO rung even after WP-1 — WP-2 is required
+  for those; WP-1 alone closes most of the gap for BOTH parities. WPs are
+  independent (different files/layers), WP-1 sequenced first; no second
+  ppGO rung needed (Simplifier).
+  TRIAGE INS-1-001 (coder_fix, 2026-08-12): WP-2's `force_minus_ghost`
+  training crashed with a per-node `GhostDomainError` because
+  `farfield_envelope_from_partition` (the function that implements
+  MINUS_GHOST) was called OUTSIDE the node-level `except _REFUSAL_ERRORS`
+  guard in `from_engine` — the tile-level far-field except clause only
+  caught `CarrierDiscontinuityError`. Fix, two parts: (1) PRIMARY — move
+  the ghost-gate call inside the node-level try/except so a refusal becomes
+  a per-point refused-node (preserves partial-tile coverage, matching the
+  "let label gates decide" design intent); (2) SAFETY NET — also add
+  `GhostDomainError` to the tile-level except tuple alongside
+  `CarrierDiscontinuityError`, routing a whole-tile miss to the
+  ladder-served gap — NEVER route a ghost-gate refusal into
+  `_subdivide_farfield_tile`, since the refusal is a GEOMETRIC boundary
+  (near-cusp), not a resolution problem that subdivision could cure.

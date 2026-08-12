@@ -455,3 +455,47 @@
   these tests): 8 vertex tests red at HEAD — the coder's WP1 _cusp_vertex
   change returns a finite wedge-tip vertex where old code returned None at
   wedge-edge configs (multi-candidate source-distance selection).
+
+## 2026-08-12 builds (saddle interior-ring fix, saddle rho-origin misclassification, ppGO mid-w + MINUS_GHOST)
+
+- SADDLE INTERIOR IS A RING, NOT A DISK (Build "fix _is_interior
+  discriminator", test_lensing_airy_fold.py): the origin-ray-based
+  `r_caustic` check fails (LensDomainError) at certain gap angles (e.g.
+  gamma=1.3, beta=0.37, ~46deg/226deg) where the source still has 4
+  images — old `_is_interior` (r_caustic + |source|<r_caustic) mis-read
+  these as exterior/errored. Fixed via an image-count discriminator
+  (`len(images)>=4`). The saddle deltoid interior is a RING (4 images ->
+  2 at the inner boundary -> 4 again in an annular lobe -> 2 past the
+  outer boundary), not a simple disk — never assume monotone
+  interior/exterior by radius alone for saddle parity.
+- SADDLE ORIGIN-RHO MISCLASSIFICATION BACKWARD-COMPAT (Build "fix saddle
+  origin-rho misclassification", test_lensing_saddle_rho_guards.py, 5
+  parity-gated guard sites across likelihood.py/surrogate_census.py/
+  ppgo_map.py): adding a `gamma>1 AND image_count==2 -> 'born'` census
+  guard breaks pre-existing tests (test_lensing_born.py,
+  test_lensing_surrogate_census.py) that had pinned the OLD broken
+  saddle 2-image classification as 'out-of-box' — before treating
+  pre-existing suite reds as alarming, verify a backward-compat break is
+  the INTENDED fix (it pins the bug being fixed, not a regression). All
+  guard sites are parity-conditional; positive-parity path stays
+  byte-identical.
+- ppGO MID-W + MINUS_GHOST CHART TEST PATTERNS (Build "lower ppGO radius
+  gate + MINUS_GHOST exterior chart", test_lensing_ppgo_midw_and_minus_
+  ghost.py): (1) lowering `_R_PPGO_ERROR_CONST` opens the ppGO rung for
+  BOTH parities at mid-w; on-axis 4-image sources with
+  `_merging_fold_pair=None` and `w*delta_min=0` still correctly fail the
+  resolution gate and fall through to Pearcey, byte-identical to
+  old-code fallthrough. (2) A MINUS_GHOST-labeled farfield chart
+  (force_minus_ghost=True) produces a genuinely DIFFERENT envelope than
+  the same tile's KERNEL_SUM chart (max|diff|>1e-15) — proves ghost
+  subtraction is non-trivial. (3) MINUS_GHOST serve round-trip (chart
+  eval -> ghost re-add -> reconstruct_farfield) reconstructs to ~5e-3 at
+  smoke scale vs a 2e-2 bar; omitting the ghost re-addition step changes
+  the reconstructed F (self-falsification teeth). (4) SYMMETRIC
+  TRAIN/SERVE GATE REFUSAL: near a cusp vertex (Im(tau_c) and separation
+  gates both marginal), `farfield_envelope_from_partition(MINUS_GHOST)`
+  (train) and `farfield_ghost_term` (serve) raise the SAME
+  GhostDomainError for the same source — confirms the ghost-admission
+  gate decision is train/serve-consistent; the plain KERNEL_SUM label
+  (no ghost subtraction) succeeds for the identical source, showing
+  refusal is ghost-label-specific, not a general source refusal.

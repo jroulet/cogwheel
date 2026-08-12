@@ -476,6 +476,9 @@
   regions). `train()` threads the kwarg; `scripts/train_lens_surrogate.py`
   gains `--regions` nargs='*'. Combined with `m_lens_range` this makes a
   per-region probe a REAL single-stratum production-path call.
+  EXTENDED 2026-08-12 (lobe_exterior region wiring build): default tuple
+  grows to a 5-tuple adding 'lobe_exterior'; see the dedicated 2026-08-12
+  section below for the full edit list.
 - PROBE ARTIFACT READING (driver probes, post-strand): chart.provenance
   in-memory LACKS heldout_eps after an NPZ load — read heldout_eps from
   the NPZ provenance (on-disk artifact), never the in-memory object; an
@@ -541,11 +544,11 @@
   the ppGO fast rung lives in `_pearcey_cusp.cusp_amplification`, positioned
   AFTER `radius = math.hypot(x, y)`, calling `fold_ppgo_correction` (via a
   lazy `_airy_fold` import) with a LensDomainError guard -> falls through to
-  the Pearcey path. `_R_PPGO_ERROR_CONST=50.0` coordinated with
-  `_UNIFORM_ERROR_CONST` (moves r_ppgo_min 54.3 -> 464.16). INS-5/INS-6
-  fixes: raised `_PPGO_SERVE_W` to 20000.0, saddle-parity test fixtures to
-  w in [5000, 20000], corrected stale comments. OWED: post-build driver
-  measurement to tighten `_R_PPGO_ERROR_CONST`.
+  the Pearcey path. `_R_PPGO_ERROR_CONST` coordinated with
+  `_UNIFORM_ERROR_CONST` to set r_ppgo_min; shipped at 50.0, progressively
+  tightened 2026-08-12 (3.0 -> 1.0, see the 2026-08-12 section below).
+  INS-5/INS-6 fixes: raised `_PPGO_SERVE_W` to 20000.0, saddle-parity test
+  fixtures to w in [5000, 20000], corrected stale comments.
 - EXTERIOR 2D (rho, u) FOLD-CARRIER (Build exterior_2d_fold_carrier,
   2026-08-10): ExteriorPolarChart field is `rho_u_carrier` (2D
   (n_rho, n_theta_c), default None) — Re(tau_c(rho,u)) at EVERY node, not a
@@ -573,7 +576,6 @@
   clamped log_w the carrier_rate re-modulation uses — NOT
   np.exp(log_w_query); a mismatch breaks phase cancellation on low-w
   extrapolation queries.
-
 - SADDLE EXTERIOR CUSP-ADAPTED COORDINATE IMPLEMENTATION (Build
   saddle_exterior_full_treatment, 238d21e, 2026-08-10): `_deltoid_cusp_axis_map`
   in surrogate.py generalizes the cusp-adapted u=d**(2/3) map to the macro-
@@ -615,4 +617,120 @@
   LensDomainError). On gate miss `result = None` so the rung falls through
   to the Pearcey uniform form. Fold-pair + resolved-saddle nodes are
   BYTE-IDENTICAL to pre-change behavior; only unresolved saddle nodes are
-  newly refused. UNVERIFIED fast-tier gate (role constraint).
+  newly refused.
+
+## 2026-08-12 builds (lobe_exterior region wiring, deltoid exterior geometry, cusp gap)
+
+- LOBE_EXTERIOR REGION WIRING IMPLEMENTATION (Build
+  lobe_exterior_region_wiring, Option A): ONE Coder WP, 5 edits in
+  surrogate_training.py: `_self_estimate` default region tuple grows to a
+  5-tuple + per-region cost dict entry `'lobe_exterior': 1` (same cost as
+  lobe_interior); `_train_band_charts` default region tuple grows to match;
+  saddle/lobe admissions gate widened `{'exterior'}` -> `{'lobe_interior',
+  'lobe_exterior'}`; packing-loop tile-block gate widened
+  `'exterior'` -> `'lobe_exterior'`; the parity==1 exterior block is
+  UNCHANGED (byte-identical). scripts/train_lens_surrogate.py --regions
+  choices extended to include 'lobe_exterior'. `_tag_kind` decodes the
+  emitted NPZ infix `_fflobeext_` -> 'lobe_exterior' checked FIRST, before
+  `_ff_` — neither string is a substring of the other so there is no
+  leak risk, but ORDER still matters if a future tag is added that IS a
+  substring of another.
+- ADMITS_EXTERIOR NAME COLLISION (2-arg vs 3-arg, cross-referenced from
+  both the geometry_fix and region_wiring builds): `_SaddleLobeAdmission.
+  admits_exterior(center, half)` (2-arg, lobe-exterior packing) is a
+  DIFFERENT METHOD with a DIFFERENT SIGNATURE from `_InteriorAdmission.
+  admits_exterior(center, half, source_magnitude_max)` (3-arg, positive-
+  parity exterior packing) — same method NAME on two different admission
+  classes, not a shared/overridden method. Never copy call-site arg counts
+  across the two classes.
+- DELTOID EXTERIOR GEOMETRY FIX IMPLEMENTATION (Build
+  deltoid_exterior_geometry_fix, re-planned 2026-08-12 — supersedes an
+  earlier abandoned corridor_half-exclusion draft, do not resurrect it):
+  new `LobeExteriorChart` dataclass charts the deltoid exterior in
+  LOBE-LOCAL `(rho_lobe, u=d**(2/3))` coordinates, reusing
+  `_lobe_cusp_axis_map` (not a new map). `theta_to_u` is present from
+  construction and is a SOFT NPZ read (`data.get(...)`, may be None),
+  mirroring LobeInteriorChart's convention exactly — NOT the wedge
+  loader's hard `data[...]` read (a build-time doc comment briefly
+  mis-stated this as "wedge convention... read hard"; corrected by
+  Foreman-Lite, INS-7-001). The inter-lobe corridor is served directly by
+  the +y1 lobe's exterior chart — no separate corridor-half exclusion
+  band. Cusp exclusion reuses the existing `caustic_cloud` nearest-
+  distance test with `eta_max = f_max * R_c` (same currency as the
+  tube-shell admission gate). Admission: image_count==2, KERNEL_SUM label
+  only (no ghost term — that is the separate cusp-gap build). Oracle =
+  Schwinger engine, matching every other far-field-family chart.
+- LOBE_EXTERIOR MINUS_GHOST + LOWERED-PPGO-RADIUS IMPLEMENTATION (Build
+  deltoid_exterior_cusp_gap, Option C hybrid, 2026-08-12, WP-1 + WP-2):
+  WP-1 tightened `_R_PPGO_ERROR_CONST` in `_pearcey_cusp.py` from 3.0 to
+  1.0 (r_ppgo_min ~71.1 -> ~34.2), opening the mid-w ppGO band for both
+  parities; docstring notes a post-build calibration sweep is still owed;
+  the ppGO rung block is otherwise byte-identical. WP-2 added
+  `force_minus_ghost: bool = False` to `_build_farfield_chart` and
+  `d_exclude: float = _CUSP_EXCLUSION_DISTANCE` to `_farfield_tiles`; in
+  the saddle branch of `_train_band_charts`, `_farfield_tiles` is called
+  with `d_exclude=0.0` (no blanket radius exclusion) and the packing loop
+  instead checks `_exclude_near_cusp(d_exclude=_CUSP_EXCLUSION_DISTANCE)`
+  per-tile to set `force_minus_ghost=True` on near-cusp tiles only —
+  letting the ghost-gate + eps bar decide admission rather than a coarse
+  radius cutoff. The flag threads through the `build_ff` closure,
+  `_subdivide_farfield_tile`'s `build_child`, and the `_subdivide_tile`
+  child-tile dict, so subdivided children inherit it. When True, uses the
+  FARFIELD_KERNEL_SUM_MINUS_GHOST envelope definition instead of
+  FARFIELD_KERNEL_SUM. Astroid (parity==1) path is byte-identical to HEAD
+  throughout.
+- TRIAGE INS-1-001 FIX (deltoid_exterior_cusp_gap, 2026-08-12): WP-2's
+  `force_minus_ghost` training was crashing on a per-node `GhostDomainError`
+  because `farfield_envelope_from_partition` (which implements MINUS_GHOST)
+  was called OUTSIDE the node-level `except _REFUSAL_ERRORS` guard in
+  `from_engine` — only the tile-level far-field except clause caught
+  `CarrierDiscontinuityError`. Fix, two parts, both required: (1) PRIMARY —
+  move the ghost-gate call inside the existing per-node try/except so a
+  `GhostDomainError` there becomes a refused POINT (preserves partial-tile
+  coverage — the actual design goal); (2) SAFETY NET — also add
+  `GhostDomainError` to the tile-level except tuple alongside
+  `CarrierDiscontinuityError`, so a whole-tile miss routes to the
+  ladder-served gap. CRITICAL: a ghost-gate refusal must NEVER be routed
+  into `_subdivide_farfield_tile` — the refusal is a GEOMETRIC boundary
+  condition (near-cusp), not a resolution problem; subdivision cannot cure
+  it and would recurse pointlessly to the depth cap.
+- SADDLE-ORIGIN-RHO-MISCLASSIFICATION 5-SITE GUARD FAMILY (Build WP-1,
+  2026-08-12): saddle (gamma>1) sources with rho<1 near the origin were
+  being misclassified by code that assumed rho<1 <=> astroid interior. Five
+  parity-conditional guards added, ALL of the form "if parity is saddle AND
+  [some rho/image-count condition], refuse/reclassify" — positive-parity
+  paths are byte-identical at every site: SITE1 `likelihood.py
+  _ppgo_cell_coords`: `parity=='saddle' and rho<1.0` -> return None. SITE2
+  `likelihood.py` fold-ppGO interior handoff: `gamma>1.0 and
+  image_count!=4` -> return None (skip handoff, fall through to exact
+  engine). SITE3 `surrogate_census.py classify_fallthrough`: after the
+  existing rho>1 "born" check, add `gamma>1.0 and image_count==2` ->
+  'born' (saddle 2-image corridor sources are genuinely out-of-box, not a
+  distinct category). SITE4 `surrogate_census.py characterize_sample`:
+  after rho computation, saddle rho<1.0 -> rho=None (mirrors SITE1's
+  refusal so census band-splitting can't see a bogus rho). SITE5
+  `ppgo_map.py w_cert`: saddle rho<1.0 -> UNKNOWN (defense-in-depth; the
+  shipped w_cert map DOES have certified values in this cell region, so
+  the guard is load-bearing, not vacuous).
+- SADDLE-INTERIOR-CUSP `_is_interior` DISCRIMINATOR FIX (Build WP-1,
+  2026-08-12): replaced a broken origin-centered-polar `r_caustic`
+  interior/exterior check (which fails near a deltoid cusp gap-angle where
+  `r_caustic` itself can raise `LensDomainError`, or return the wrong
+  caustic-boundary branch for a ring-shaped saddle interior) with an
+  IMAGE-COUNT discriminator: `_is_interior = len(images) >= 4`. The
+  saddle deltoid interior is topologically a RING (4 images), not a disk —
+  a source can transition 4->2->4->2 images as gamma/theta sweep, so any
+  origin-radius-based check is fundamentally wrong there; image count is
+  the correct, cheap, always-available discriminator. DRY'd the sibling
+  `interior_degenerate` check to reuse the same `_is_interior` flag instead
+  of a separate inline `len(images) > 2`.
+- REMOVED — DO NOT REINTRODUCE (2026-08-11, superseded within the same
+  build): an "effective-x delay-gap fallback" was added to
+  `cusp_amplification` to handle off-axis sources where
+  `_real_stationary_points` yields fewer than 3 SPs (computing an effective
+  x from the min Morse-0/Morse-1 delay gap). It was TOO BROAD — it also
+  fired for conventional on-axis sources that correctly yield 3 SPs,
+  corrupting them (17 test failures). Reverted whole-block to HEAD
+  (71a7f73); the underlying off-axis interior-cusp gap this was meant to
+  close is still open and needs a narrower, correctly-gated redesign, not
+  a revival of this fallback.

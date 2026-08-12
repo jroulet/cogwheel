@@ -415,3 +415,18 @@
   (not this diff): 8 vertex-related tests in test_lensing_airy_fold.py red
   at HEAD from the separate _cusp_vertex routing-fix build (already
   committed); INS-1-001/002/003 doc staleness carried to Librarian.
+
+## 2026-08-12 build (lobe_exterior region wiring, pass-3 PASS)
+
+- LOBE_EXTERIOR REGION WIRING FINAL REVIEW (Build lobe_exterior_region_
+  wiring, pass-3 PASS): INS-7-001 (stale doc comment claiming lobe_exterior
+  NPZ theta_to_u followed the wedge hard-read convention) resolved by a
+  doc-only reword; re-confirmed all wiring (default region tuples, per_region
+  cost dict, packing/admissions gates, build-loop dispatch, CLI --regions
+  choices) correct and unchanged since pass-1/2. NEW -> Librarian (INS-5-001,
+  doc staleness, not a Coder defect): SPEC.md + DATA_CONTRACTS.yaml have ZERO
+  mention of lobe_exterior / lobe_interior / wedge_interior even though this
+  build makes lobe_exterior a PUBLIC --regions CLI choice + NPZ
+  kind='lobe_exterior' + training-region contract — the spec never names the
+  region vocabulary the trainer/CLI now exposes (bidirectional divergence,
+  joins the INS-1-001/002/003 doc-staleness lineage carried to Librarian).

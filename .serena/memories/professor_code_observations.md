@@ -413,9 +413,10 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   _W_PPGO_FLOOR. Gate math: r_ppgo_min = (_R_PPGO_ERROR_CONST *
   _UNIFORM_ERROR_CONST / bar_ppgo)^(2/3) with exponent 2/3 correctly
   inverting the R^(-3/2) cusp-proximity error scaling; _R_PPGO_ERROR_CONST
-  = 50.0 (PROVISIONAL — post-build driver calibration owed), _PPGO_BAR_
-  DIVISOR = 10 -> bar_ppgo = 0.005, r_ppgo_min ~ 464.2. _W_PPGO_FLOOR=50
-  independently gates kernel-truncation error O(1/w^3). Finiteness guard
+  = 50.0 originally (PROVISIONAL — post-build driver calibration owed),
+  progressively tightened 2026-08-12 to 1.0 (see coder/architect knowledge);
+  _PPGO_BAR_DIVISOR = 10 -> bar_ppgo = 0.005. _W_PPGO_FLOOR=50 independently
+  gates kernel-truncation error O(1/w^3). Finiteness guard
   np.isfinite(abs(result)) catches all 4 NaN/Inf variants; do-nothing
   control byte-identical at intermediate R; self-falsification corrupts
   both gate directions. Asymptotic soundness: the rung is FOLD-corrected
@@ -488,3 +489,17 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   admits) — variable isolation clean: same w for admit/refuse branches,
   only the gate threshold varies (STRONGER than the spec's intended
   different-w scenario).
+
+- LOBE_EXTERIOR REGION FILTER TAG-DECODE + COST-PARITY (2026-08-12, Build
+  lobe_exterior_region_wiring, verdict PASS): the real emitted farfield tag
+  infix for lobe_exterior tiles is `_fflobeext_` (surrogate_training.py
+  ~L5613, `chart_{label}_s{si}_fflobeext_{i}_{j}`) — CONFIRMED against the
+  shipping code, not assumed. `_tag_kind`'s decoder must check
+  `_fflobeext_` BEFORE `_ff_` (ordering matters: `_fflobeext_` is not a
+  substring collision with `_fflobe_`/`_ff_` since both need a trailing
+  '_' that `_fflobeext_` doesn't supply at that position, but decode order
+  is still the safe convention to preserve). lobe_exterior carries the SAME
+  per-region training cost weight (1 eval/(gamma,w)) as lobe_interior in
+  `_self_estimate`'s per_region dict — confirms the two lobe-adjacent
+  regions are priced identically, useful context if a future build adds a
+  6th region and needs a cost-model precedent.
