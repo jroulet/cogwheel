@@ -1,26 +1,36 @@
 # Librarian Short-Term Observations
 
-## Run: 2026-08-12 — post-commit sync for 16aacc0
+## Run: 2026-08-12 — post-commit sync for 288f37c
 
-**Scope**: commit `16aacc0` — "feat(lensing): serve saddle deltoid interior cusp sources + fix stale refusal fixtures"
+**Scope**: commit `288f37c` — "fix(lensing): saddle corridor origin-rho misclassification in ppGO/Born serving"
 
-**Changed files (non-test)**: `_pearcey_cusp.py`, `.claude/spec/TODO.md`, `.claude/spec/todo.d/lensing_saddle_origin_rho_assumption.md`
+**Partially pre-done**: Two other commits preceded this librarian run:
+- `288f37c` already updated SPEC.md certified-by list (added `test_lensing_saddle_rho_guards.py`) and the spec_changelog fragment (`2026-08-12_saddle_origin_rho_guards.md`).
+- `ba7a2e9` (a separate docs commit between the fix and this librarian run) already retired the `lensing_saddle_origin_rho_assumption.md` TODO fragment to `completed.d/2026-08-12_saddle_origin_rho_assumption.md` and regenerated TODO.md/COMPLETED.md.
+
+So when this librarian run started, MOST of the sync was already done by the builder and the separate retire commit.
 
 **What was stale and why**:
-- SPEC.md INTERIOR CUSP SERVING section described the interior discriminator as `rho < 1` (origin-based directional `r_caustic` check). The code changed to `_is_interior = len(images) >= 4` — the parity-correct discriminator for both astroid and deltoid. The deltoid caustic does not enclose the origin, so `r_caustic` raised `LensDomainError` for saddle corridor rays and defaulted to `_is_interior = False`, blocking deltoid interior cusp serving. The new discriminator enables it.
-- Stale references updated: "(1) generic interior case (3 real stationary points, `rho < 1`)" → "`len(stationary_values) == 3`"; "(2) interior degenerate cluster (`rho < 1`, `len(images) > 2`, ...)" → "`len(images) >= 4`, `len(stationary_values) == 1`"; "Exterior sources (1 stationary point, `rho > 1`)" → "`len(images) < 4`".
+- SPEC.md Born rung section, lines 147-149: described `classify_fallthrough` as attributing 'born' by checking `rho > 1` only. The fix commit (`288f37c`) added a second criterion at lines 290-291 of `surrogate_census.py`:
+  ```python
+  if gamma > 1.0 and image_count == 2:
+      return 'born'
+  ```
+  This marks saddle corridor sources (deltoid corridor where `rho < 1` but `image_count == 2`) as 'born'. The SPEC sentence was left with only `rho > 1` — the builder updated the certified-by list but missed this prose sentence.
+- Fixed to: "by `rho > 1` (exterior-to-caustic) OR, for the saddle (`gamma > 1`), `image_count == 2` (corridor source -- the deltoid caustic does not enclose the origin, so `rho < 1` does not imply interior on the saddle)"
 
-**New TODO fragment**: `lensing_saddle_origin_rho_assumption.md` — open bug in ppGO/Born interior handoff (likelihood.py:1396/1681) that misclassifies saddle corridor sources. No doc surface update needed for a newly-opened TODO.
+**Fragment created**: `.claude/spec/spec_changelog.d/2026-08-12_saddle_born_census_criterion.md` (patch bump)
 
-**Fragments created**:
-- `.claude/spec/spec_changelog.d/2026-08-12_saddle_deltoid_interior_cusp_image_count.md` (patch bump)
+**render_fragments.py output**: SPEC_CHANGELOG.md updated; spec_version bumped (now includes new patch fragment).
 
-**render_fragments.py output**: updated SPEC_CHANGELOG.md and SPEC.md spec_version → 0.37.10. Also re-rendered TODO.md (20 lines added — likely formatting/ordering update from the todo.d fragment landing in the canonical). Side effects to watch: agent_state/*.json and tidy_advisory.json also show dirty from render_fragments.py; caller should stage only the spec files.
+**DATA_CONTRACTS.yaml**: No census born-category description there; no changes needed.
 
-**Skipped**: all 6 test file changes (test-only per triage table). No new disk artifacts in this commit. DATA_CONTRACTS.yaml not touched.
+**Skipped**: All 4 test-only files (born, ppgo_map, saddle_rho_guards, surrogate_census tests — triage table: notebook/test-only = skip entirely).
 
-**Fragile cross-refs in INTERIOR CUSP SERVING**: `_is_interior = len(images) >= 4` and `_merging_fold_pair` and `_CUSP_TIE_EPS = 1e-12` all cited in SPEC — if any rename, SPEC goes stale.
+**sync_derived_docs.py**: Only the pre-existing `lens_amplification_surrogate` test-consumer warning (same as last run, escalated via open TODO `surrogate_contract_test_consumer_warning.md`). No new issues.
 
-**Pattern noted**: the `lensing_saddle_origin_rho_assumption` TODO is an open production bug in likelihood.py that spans multiple sites (1396, 1681, surrogate_census.py, surrogate_training.py). When a future build fixes it, expect SPEC.md's "FOLD-PPGO INTERIOR HANDOFF" section (which currently says `rho <= 1.0` for positive parity interior) and DATA_CONTRACTS.yaml consumer entries to need simultaneous updates.
+**Fragile cross-refs created**: The born-attribution sentence now cites both `gamma > 1` and `image_count == 2`. If a future build changes either condition in `classify_fallthrough`, the sentence goes stale. The `classify_fallthrough` docstring (line 244 in surrogate_census.py) still says "rho = |y| / caustic_reach > 1" only — this is a code docstring (read-only for Librarian), so it was left for Inspector/Coder to update.
 
-**sync_derived_docs.py**: only the pre-existing `lens_amplification_surrogate` test-consumer warning (already escalated via open todo fragment `surrogate_contract_test_consumer_warning.md`). No new issues.
+**Pattern noted**: The builder who committed 288f37c updated the SPEC certified-by list but left the 'born' prose sentence stale. This is a recurring pattern: SPEC prose sentences that describe runtime behavior (not just module locations or test coverage) are missed when a quick "SPEC bump patch" adds only to the certified-by list. Watch for: any commit that says "SPEC bump patch" + adds a test + changes runtime behavior — the prose description of that behavior may also need updating.
+
+**Pre-existing wt dirty files NOT touched**: `.claude/agent_state/*.json`, `.claude/tidy_advisory.json`, other agents' `.serena/memories/*.md` — these are from other agents' uncommitted state, correctly excluded from this commit.

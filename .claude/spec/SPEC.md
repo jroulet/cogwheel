@@ -145,8 +145,11 @@ Docs). Packaging: setuptools + setuptools_scm, GPL-3.0-or-later, Python >=3.9.
   geometric-optics sum with the complex ghost explicitly REFUSED (`det A <
   0` is not a regime `farfield_ghost_term`'s sqrt branch is derived for).
   The census (`surrogate_census.classify_fallthrough`) attributes both
-  arms to the `'born'` category by checking `rho > 1` (exterior-to-caustic),
-  independent of `born_gate` (no `w` available at census time). The
+  arms to the `'born'` category by `rho > 1` (exterior-to-caustic) OR,
+  for the saddle (`gamma > 1`), `image_count == 2` (corridor source --
+  the deltoid caustic does not enclose the origin, so `rho < 1` does not
+  imply interior on the saddle); both checks are independent of `born_gate`
+  (no `w` available at census time). The
   fact-4 slot in `likelihood._surrogate_coefficients` is now wired: when
   a `BornResidualChart` (frozen 3-D interpolation dataclass in
   `cogwheel/lensing/born_residual_chart.py`) is attached to the likelihood
