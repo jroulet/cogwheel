@@ -29,11 +29,48 @@ REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
 # Provider selection — defaults to claude; set AGENT_PROVIDER in the shell
 # or in .env to use codex/opencode. Exports so build.py inherits it.
-if [[ -z "${AGENT_PROVIDER:-}" && -f "$REPO_ROOT/.env" ]]; then
-  _prov="$(grep -E '^AGENT_PROVIDER=' "$REPO_ROOT/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")"
-  [[ -n "$_prov" ]] && AGENT_PROVIDER="$_prov"
+#
+# Precedence is shell > .env > "claude", matching load_dotenv(override=False).
+# That precedence is correct but its failure mode was SILENT: an exported
+# AGENT_PROVIDER (or OPENCODE_MODEL_PROVIDER) outranks the file, so you could
+# edit .env, launch, and get the other backend with nothing in the output
+# saying so. Measured 2026-08-12: a stale exported OPENCODE_MODEL_PROVIDER=go
+# in one shell kept selecting deepseek models after .env had been set to the
+# Claude models. So: resolve, then SAY what won and why.
+_prov_shell="${AGENT_PROVIDER:-}"
+_prov_env=""
+if [[ -f "$REPO_ROOT/.env" ]]; then
+  _prov_env="$(grep -E '^AGENT_PROVIDER=' "$REPO_ROOT/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")"
+fi
+if [[ -z "$_prov_shell" && -n "$_prov_env" ]]; then
+  AGENT_PROVIDER="$_prov_env"
 fi
 export AGENT_PROVIDER="${AGENT_PROVIDER:-claude}"
+if [[ -n "$_prov_shell" ]]; then
+  _prov_src="shell env"
+  if [[ -n "$_prov_env" && "$_prov_env" != "$_prov_shell" ]]; then
+    echo "WARNING: AGENT_PROVIDER='$_prov_shell' from the SHELL overrides" \
+         "'$_prov_env' in .env — the file is being ignored. unset it to use" \
+         ".env." >&2
+  fi
+elif [[ -n "$_prov_env" ]]; then
+  _prov_src=".env"
+else
+  _prov_src="default"
+fi
+echo "provider: $AGENT_PROVIDER (from $_prov_src)"
+
+# Same silent-override hazard for the OpenCode model tier, which decides
+# whether roles run on Claude or DeepSeek models.
+if [[ "$AGENT_PROVIDER" == "opencode" && -n "${OPENCODE_MODEL_PROVIDER:-}" \
+      && -f "$REPO_ROOT/.env" ]]; then
+  _omp_env="$(grep -E '^OPENCODE_MODEL_PROVIDER=' "$REPO_ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  if [[ "$_omp_env" != "${OPENCODE_MODEL_PROVIDER}" ]]; then
+    echo "WARNING: OPENCODE_MODEL_PROVIDER='${OPENCODE_MODEL_PROVIDER}' from" \
+         "the SHELL overrides '${_omp_env}' in .env — role models come from" \
+         "the shell value." >&2
+  fi
+fi
 
 # Ensure provider CLIs are on PATH (opencode installs to ~/.opencode/bin,
 # codex to ~/.local/bin or similar — non-interactive shells may miss them).
@@ -176,17 +213,21 @@ fi
 
 # Sync .opencode/agents/*.md frontmatter models from the env-selected role
 # maps so interactive subagents match the build provider.  Single source of
-# Sync .opencode/agents/*.md frontmatter models from the env-selected role
-# maps so interactive subagents match the build provider.  Single source of
 # truth: runtime_opencode.py; no manual frontmatter edits ever needed.
 if [[ "$AGENT_PROVIDER" == "opencode" ]]; then
-  "$PYBIN" "$REPO_ROOT/scripts/sync_opencode_agents.py" 2>/dev/null || true
+  # Do NOT swallow stderr: the sync script's only output is the line naming
+  # the resolved model provider AND its source, added in 4c16ca4 precisely to
+  # expose a silent ai-commons/go mis-selection. Discarding it here left that
+  # fix working only for a bare manual run and broken on the automated path
+  # that actually runs before every build (found 2026-08-12).
+  "$PYBIN" "$REPO_ROOT/scripts/sync_opencode_agents.py" || true
 fi
 
 # Same for Codex: sync .codex/agents/*.toml model fields from the role maps
 # in runtime_codex.py so interactive Codex subagents match SDK builds.
 if [[ "$AGENT_PROVIDER" == "codex" ]]; then
-  "$PYBIN" "$REPO_ROOT/scripts/sync_codex_agents.py" 2>/dev/null || true
+  # stderr kept for the same reason as the OpenCode sync above.
+  "$PYBIN" "$REPO_ROOT/scripts/sync_codex_agents.py" || true
 fi
 "$PYBIN" "$REPO_ROOT/.claude/sdk/build.py" build --provider "$AGENT_PROVIDER" \
   "${APPROVE_ARGS[@]}" --log "$LOG" "@$PROMPT" > /dev/null 2>&1 &
