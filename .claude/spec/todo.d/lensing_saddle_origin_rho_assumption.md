@@ -102,3 +102,23 @@ depends_on: []
   caustic_rho scalar reach is correct (astroid encloses origin).  The
   fix must branch on parity: astroid keeps caustic_rho, saddle uses
   image-count (or lobe-local rho).
+
+  ## DESIGN PRINCIPLE (user, 2026-08-11): exploit the D2 4-fold symmetry — do NOT classify over the whole plane
+
+  Both parities have 4-fold symmetry; the fix must use it, not waste
+  effort on the entire plane.  The surrogate ALREADY does this: the wedge
+  chart folds the astroid into the canonical first quadrant `[0, pi/2]`
+  (surrogate.py:968-995, hard-raises on an unfolded source at :590), and
+  the lobe charts use D2-folded deltoid cusp rays (surrogate.py:747).
+  But `caustic_rho` takes ONLY `y_magnitude = |y|` — a direction-blind
+  radial scalar — so it cannot exploit the fold, and cannot distinguish
+  the deltoid corridor (a direction-specific region) at all.
+
+  The fix MUST align with the D2 convention already in the surrogate:
+  fold the source into the fundamental domain (first quadrant for the
+  astroid; the D2-folded lobe-local frame for the deltoid) before any
+  interior/exterior classification or rho computation.  The image-count
+  discriminator (len(images)==4/2) is inherently symmetry-consistent
+  (image count is fold-invariant); a lobe-local rho must fold the source
+  like the lobe charts do.  Never classify over the full plane when the
+  fold makes one fundamental domain sufficient.
