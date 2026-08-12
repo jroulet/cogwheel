@@ -50,7 +50,10 @@ BUILD_PAT='sdk/[b]uild.py'
 
 # Strip the harness's echo of a Monitor command (blind spot 1).
 _matches() { grep -av 'Monitor(persistent' "$LOG" 2>/dev/null | grep -aE "$FILTER"; }
-_count()   { _matches | grep -ac '' 2>/dev/null || echo 0; }
+# wc -l, NOT `grep -c ... || echo 0`: grep -c prints 0 AND exits 1 on no
+# match, so the || fires too and the function returns "0\n0", which then blows
+# up the integer test. wc always exits 0 and prints exactly one number.
+_count()   { _matches | wc -l | tr -d '[:space:]'; }
 
 for _ in $(seq 30); do [ -f "$LOG" ] && break; sleep 10; done
 if [ ! -f "$LOG" ]; then
@@ -81,10 +84,23 @@ while :; do
     seen="$cur"
     stall=0
   else
-    stall=$((stall + 1))
-    # Announce a stall ONCE on entering it, then stay quiet.
-    if [ "$stall" -eq 6 ]; then
-      echo "STALL: no new marker in ~$((6 * POLL / 60)) min (count $seen) — investigate, do not wait"
+    # A quiet MARKER count is not a stall. Markers are coarse phase/gate
+    # events; a Coder legitimately works 20+ min inside one WP without
+    # emitting any. Measured 2026-08-12: a marker-count stall rule cried wolf
+    # 12 min into a healthy WP1 whose log was advancing every few seconds.
+    # Health is the LOG ADVANCING (AGENTS.md: "health = log mtime, not
+    # pgrep"), so gate the stall on mtime and let markers drive emission only.
+    now=$(date +%s)
+    mtime=$(stat -c '%Y' "$LOG" 2>/dev/null || stat -f '%m' "$LOG" 2>/dev/null || echo "$now")
+    quiet=$(( now - mtime ))
+    if [ "$quiet" -ge "$(( 6 * POLL ))" ]; then
+      stall=$((stall + 1))
+      # Announce ONCE on entering the stall, then stay quiet.
+      if [ "$stall" -eq 1 ]; then
+        echo "STALL: log has not advanced in ~$(( quiet / 60 )) min (count $seen) — investigate, do not wait"
+      fi
+    else
+      stall=0
     fi
   fi
 
