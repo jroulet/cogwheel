@@ -425,14 +425,16 @@ class OperatorOracleTestCase(OperatorTestCase):
         mpmath extension (Build QD) serves ``60 < w <= 150``; only
         ``w > 150`` is unconditionally refused.
 
-        F028 re-point: both fixtures are small-radius on-axis sources
-        (``|y| = 0.05`` and ``0.08``) that are genuinely hard-core --
-        unresolved (``w*delta_min < RHO_END``) and declined by BOTH
-        uniform arms -- so `select_branch` stays on the WAVE branch and
-        the named refusal fires.
+        F028 re-point: the fixtures are EXTERIOR on-axis sources
+        (``|y| = 0.26`` and ``0.36``, rho > 1) that are genuinely
+        hard-core -- unresolved (``w*delta_min < RHO_END``) and declined
+        by BOTH uniform arms (the earlier ``|y| = 0.05/0.08`` INTERIOR
+        on-axis sources are now served accurately by the cusp arm per the
+        on-axis serving fix) -- so `select_branch` stays on the WAVE
+        branch and the named refusal fires.
         """
         w_above = _schwinger.W_CEILING_SCHWINGER_QD + 10.0
-        for y in (np.array([0.05, 0.0]), np.array([0.08, 0.0])):
+        for y in (np.array([0.26, 0.0]), np.array([0.36, 0.0])):
             with self.subTest(y=tuple(y)):
                 with self.assertRaises(
                         _schwinger.SchwingerCertificationError):

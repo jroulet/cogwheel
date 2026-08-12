@@ -156,6 +156,10 @@ _DEFAULT_ENVELOPE_BAR = 0.05
 #: `operator.ETA_MIN_GEOMETRIC`; a literal, not an import, because
 #: `operator` imports this module.  Pinned equal by test.  F028, F031, F032.
 _ETA_MAX_FOLD = 0.3
+#: Delay-equality tolerance for detecting cusp-cluster degeneracy in
+#: ``_merging_fold_pair``: two saddles at equal delay signal a 3-image
+#: cusp catastrophe, not a fold pair.
+_CUSP_TIE_EPS = 1e-12
 
 
 # ----------------------------------------------------------------------
@@ -309,6 +313,15 @@ def _merging_fold_pair(images: list[np.ndarray], source: np.ndarray,
             if 0.0 < gap < best_gap:
                 best_gap = gap
                 best = (tau_low, tau_high)
+
+    if best is not None:
+        _, tau_high = best
+        tie_count = sum(
+            1 for tau, _ in entries
+            if abs(tau - tau_high) <= _CUSP_TIE_EPS)
+        if tie_count >= 2:
+            return None
+
     return best
 
 

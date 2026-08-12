@@ -911,6 +911,18 @@ def _saddle_grid(w_array: np.ndarray, y: np.ndarray, gamma: float, *,
     mpmath_refusers: list[int] = []
     for node in mpmath_batch_index:
         w_node = float(w_array[node])
+        # Offer the uniform-asymptotic rung (fold then cusp arm) FIRST,
+        # before the exact engine: the cusp arm serves the on-axis /
+        # interior-degenerate cusp sources fast and accurately (self-
+        # calibrating uniform ratio), and the exact mpmath path may REFUSE
+        # at order-32 where the arm certifies.  Only nodes both arms
+        # decline fall to `f_schwinger` (and only then can they become
+        # named refusers).
+        arm_value = _uniform_arm_value(
+            w_node, source, gamma, beta=beta, kappa=kappa)
+        if arm_value is not None:
+            values[node] = arm_value
+            continue
         try:
             f_pure = _schwinger.f_schwinger(w_node, y_eig, gamma_prime)
             mass_sheet_phase = np.exp(
@@ -1195,6 +1207,18 @@ def _positive_parity_grid(
     mpmath_refusers: list[int] = []
     for node in mpmath_batch_index:
         w_node = float(w_array[node])
+        # Offer the uniform-asymptotic rung (fold then cusp arm) FIRST,
+        # before the exact engine: the cusp arm serves the on-axis /
+        # interior-degenerate cusp sources fast and accurately (self-
+        # calibrating uniform ratio), and the exact mpmath path may REFUSE
+        # at order-32 where the arm certifies.  Only nodes both arms
+        # decline fall to `f_schwinger` (and only then can they become
+        # named refusers).
+        arm_value = _uniform_arm_value(
+            w_node, source, gamma, beta=beta, kappa=kappa)
+        if arm_value is not None:
+            values[node] = arm_value
+            continue
         try:
             f_pure = _schwinger.f_schwinger(w_node, y_eig, gamma_prime)
             mass_sheet_phase = np.exp(

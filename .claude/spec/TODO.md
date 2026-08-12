@@ -1516,6 +1516,27 @@ Tag conventions:
   `delta_parallel ~ 0`.  Acceptance: on-axis interior cusp sources serve
   with the same tolerance as the off-axis generic case.
 
+  ## DRIVER MANDATE (user, 2026-08-11): the cusp arm must serve the on-axis
+  ## points IN PRODUCTION — the exact engine is a TEST BASELINE ONLY.
+
+  The user: "I don't want F_op to actually serve the points in question in
+  production, it is slow. It is fine to measure the baseline against?"
+
+  Measured (driver): for the on-axis source (_effx_source, gamma=0.5), the
+  ladder `operator.F_op` serves via the CUSP ARM (fast) at w=50/200/300 but
+  falls to the EXACT ENGINE at w=100/150 (the mpmath band 60-150, where the
+  serving ladder does NOT offer the cusp arm — `_positive_parity_grid`
+  routes mpmath-band nodes straight to `_schwinger.f_schwinger`).  Worse,
+  at w=150 the exact engine REFUSES (order-32 paired-rule disagreement
+  2.2e-7 > 3e-10), so the point is UN-SERVED by the ladder while the cusp
+  arm serves it accurately (1.5e-3 at w=100).
+
+  FIX REQUIRED (production, operator.py): offer the cusp arm in the mpmath
+  band (60 < w <= 150) BEFORE falling to f_schwinger — the same
+  `_uniform_arm_value` offer the above-ceiling nodes get.  This serves the
+  on-axis points fast (cusp arm) and closes the w=150 refusal.  The exact
+  engine stays the fallback (and the test baseline).
+
 
 - **THE TIER-GATED TRAINING SUITE IS BROKEN AT HEAD — 16 failed, 16 errors,
   every one vacuous** `[housekeeping]` — measured 2026-08-06, PRE-EXISTING

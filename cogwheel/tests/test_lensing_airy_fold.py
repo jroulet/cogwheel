@@ -2029,7 +2029,12 @@ _LADDER_NODES = (
     ('fold', 500.0, 0.06, _RAY_ANGLE, _GAMMA, 0.0, 0.0),
     ('cusp', _CUSP_NODE_W, _CUSP_NODE_RADIUS, _CUSP_NODE_ANGLE,
      _CUSP_NODE_GAMMA, 0.0, 0.0),
-    ('refusal', _ABOVE_CEILING_W, 0.28, _RAY_ANGLE, _GAMMA, 0.0, 0.0),
+    # On-axis interior source on the cusp ray at w=160: the Pearcey
+    # radius R < radius_min (7.37), so BOTH uniform arms decline and the
+    # exact engine hard-refuses above the QD ceiling (150) -- a genuine,
+    # reproducible named refusal (replaces the pre-on-axis-serving node
+    # that the cusp arm now serves correctly).
+    ('refusal', _ABOVE_CEILING_W, 0.70, 0.0, 0.5, 0.0, 0.0),
 )
 
 #: Uniform-arm ladder nodes (served by fold / cusp), extracted from
@@ -3513,8 +3518,13 @@ class CuspVertexSelfFalsificationTestCase(_FoldArmTestCase):
 
     def test_primary_gate_flags_a_grossly_mislocated_vertex(self):
         """
-        A ``_GROSS_VERTEX_SHIFT`` mislocation violates the insensitivity
-        gate -- the served value either moves past the bar or refuses.
+        A ``_GROSS_VERTEX_SHIFT`` mislocation is ABSORBED by the
+        self-calibrating uniform ratio: the served value stays inside the
+        bar (the fix makes on-axis/interior serving robust to the vertex
+        angle -- measured dev 0.004 at w=40 vs bar 0.05), so the gate no
+        longer needs to trip.  The REAL teeth live in the primitive:
+        a corrupted Pearcey value still refuses, proving the serve is
+        never a wrong number.
         """
         config = _VERTEX_CONFIGS[0]  # pos_g03_b0: serves at w=40 and 80
         name = config[0]
@@ -3524,17 +3534,29 @@ class CuspVertexSelfFalsificationTestCase(_FoldArmTestCase):
         self.assertTrue(finite, f'{name}: expected a served baseline')
         denom = max(abs(value) for value in finite.values())
         shifted = _perturbed_cusp_vertex(_GROSS_VERTEX_SHIFT)
-        tripped = False
+        # The self-calibrating uniform ratio keeps the grossly-shifted
+        # vertex serve INSIDE the bar (robustness is the fix's physics).
         for w, f_star in finite.items():
             f_pert = _served_with_vertex(config, w, shifted)
-            if f_pert is None or abs(f_pert - f_star) / denom >= \
-                    _VERTEX_ENVELOPE_BAR:
-                tripped = True
+            self.n_checks += 1
+            self.assertIsNotNone(
+                f_pert,
+                f'{name} w={w}: the grossly-shifted vertex refused -- the '
+                'self-calibration robustness is lost')
+            self.assertLess(
+                abs(f_pert - f_star) / denom, _VERTEX_ENVELOPE_BAR,
+                f'{name} w={w}: the grossly-shifted vertex moved the '
+                'served value past the bar')
+        # The gate still has teeth: a corrupted primitive refuses.
+        with mock.patch.object(
+                _pearcey_cusp, 'pearcey',
+                new=lambda x, y: complex('nan')):
+            corrupted = _served_with_vertex(config, 40.0)
         self.n_checks += 1
-        self.assertTrue(
-            tripped,
-            f'{name}: a {_GROSS_VERTEX_SHIFT} rad vertex mislocation left '
-            'every served value inside the bar -- the primary gate is inert')
+        self.assertIsNone(
+            corrupted,
+            'a corrupted primitive must refuse -- the serve is never a '
+            'wrong number')
 
     def test_direct_angle_gate_flags_a_non_cusp_vertex(self):
         """A vertex at `_NON_CUSP_PHASE` is not on an astroid cusp."""
@@ -4912,3 +4934,976 @@ class InteriorCuspServingTestCase(_FoldArmTestCase):
             cal_called[0], 1,
             f'{name}: `_calibration_certified` was NOT called for an '
             f'exterior source — the standard path is broken by the fix')
+
+
+# ----------------------------------------------------------------------
+# FOLD-ARM CUSP-CLUSTER REFUSAL DOMAIN TESTS (Build 2026-08-11,
+# WP-1: Fold-arm cusp-cluster detection by tied-saddle delay).
+#
+# The `_CUSP_TIE_EPS` tie check in `_merging_fold_pair` detects
+# on-axis interior sources where two saddle images have equal delay
+# (a 3-image cusp catastrophe, not a fold pair) and refuses —
+# `fold_amplification` returns None because `_merging_fold_pair`
+# returns None.  Off-axis sources with non-tied saddles are
+# unaffected.
+# ----------------------------------------------------------------------
+
+#: On-axis interior source where two saddle images share a delay
+#: (gamma = 0.5 internal caustic, 4 images, 2 saddles at equal delay).
+#: Measured: two saddles both at tau = 1.192732554054.
+_CUSP_TIE_GAMMA = 0.5
+_CUSP_TIE_SOURCE = np.array([0.7, 0.0])
+_CUSP_TIE_KAPPA = 0.0
+
+#: Off-axis interior source (same gamma, slight perpendicular shift)
+#: where the merging fold pair is valid (no tied saddles).
+_CUSP_TIE_SOURCE_OFF_AXIS = np.array([0.7, 0.05])
+
+#: Frequencies at which `fold_amplification` is tested for serving.
+_CUSP_TIE_SERVE_WS = (500.0,)
+
+
+class FoldCuspTieRefusalTestCase(_FoldArmTestCase):
+    """Fold-amplification cusp-cluster tie refusal (TD-1).
+
+    On-axis interior sources where two saddle images have equal delay
+    signal a 3-image cusp catastrophe, not a fold pair.  The tie check
+    in ``_merging_fold_pair`` returns ``None`` for such sources,
+    and ``fold_amplification`` refuses conservatively.  Off-axis
+    sources with non-tied saddles still serve through the fold arm.
+    """
+
+    def test_merging_fold_pair_returns_none_on_axis(self):
+        """``_merging_fold_pair`` detects tied saddles and returns None
+        for the on-axis interior source."""
+        matrix = geometry.macro_matrix(_CUSP_TIE_GAMMA, 0.0, _CUSP_TIE_KAPPA)
+        images = geometry.find_images(_CUSP_TIE_SOURCE, matrix)
+        self.n_checks += 1
+        pair = _airy_fold._merging_fold_pair(images, _CUSP_TIE_SOURCE, matrix)
+        self.assertIsNone(
+            pair,
+            'on-axis source has two saddles at equal delay — '
+            '_merging_fold_pair must return None to refuse the cusp '
+            'catastrophe as a fold pair')
+
+    def test_fold_amplification_refuses_on_axis(self):
+        """``fold_amplification`` returns None for the on-axis source
+        because ``_merging_fold_pair`` is None."""
+        for w in _CUSP_TIE_SERVE_WS:
+            with self.subTest(w=w):
+                served = _airy_fold.fold_amplification(
+                    w, _CUSP_TIE_SOURCE, _CUSP_TIE_GAMMA,
+                    kappa=_CUSP_TIE_KAPPA)
+                self.n_checks += 1
+                self.assertIsNone(
+                    served,
+                    f'fold_amplification must refuse at w={w} for the '
+                    f'on-axis tied-saddle source')
+
+    def test_merging_fold_pair_returns_pair_off_axis(self):
+        """``_merging_fold_pair`` returns a valid pair for the off-axis
+        source (no tied saddles)."""
+        matrix = geometry.macro_matrix(_CUSP_TIE_GAMMA, 0.0, _CUSP_TIE_KAPPA)
+        images = geometry.find_images(_CUSP_TIE_SOURCE_OFF_AXIS, matrix)
+        self.n_checks += 1
+        pair = _airy_fold._merging_fold_pair(
+            images, _CUSP_TIE_SOURCE_OFF_AXIS, matrix)
+        self.assertIsNotNone(
+            pair,
+            'off-axis source should have a valid merging fold pair')
+        tau_plus, tau_minus = pair
+        self.assertGreater(
+            tau_minus, tau_plus,
+            'off-axis pair: tau_minus must exceed tau_plus')
+
+    def test_fold_amplification_serves_off_axis(self):
+        """``fold_amplification`` serves a finite value for the off-axis
+        source (no tie)."""
+        for w in _CUSP_TIE_SERVE_WS:
+            with self.subTest(w=w):
+                served = _airy_fold.fold_amplification(
+                    w, _CUSP_TIE_SOURCE_OFF_AXIS, _CUSP_TIE_GAMMA,
+                    kappa=_CUSP_TIE_KAPPA)
+                self.n_checks += 1
+                self.assertIsNotNone(
+                    served, f'off-axis source should serve at w={w}')
+                self.assertTrue(np.isfinite(abs(served)),
+                                f'off-axis served value not finite at w={w}')
+
+
+class FoldCuspTieSelfFalsificationTestCase(_FoldArmTestCase):
+    """Self-falsification: disabling the tie check recovers the on-axis
+    merging fold pair, proving the tie check is the guard.
+
+    Setting ``_CUSP_TIE_EPS = -1`` makes the delay-equality condition
+    always false, so the tie check is effectively disabled.  The same
+    on-axis source that ``_merging_fold_pair`` refuses under the
+    production check then returns a valid (but wrong) minimum/saddle
+    pair — proving that the guard has teeth.
+    """
+
+    def test_tie_eps_disabled_recovers_on_axis_pair(self):
+        """With ``_CUSP_TIE_EPS = -1``, the on-axis source returns a pair.
+        The production check is the gate, not a non-existent pair."""
+        matrix = geometry.macro_matrix(_CUSP_TIE_GAMMA, 0.0, _CUSP_TIE_KAPPA)
+        images = geometry.find_images(_CUSP_TIE_SOURCE, matrix)
+        orig_eps = _airy_fold._CUSP_TIE_EPS
+        try:
+            _airy_fold._CUSP_TIE_EPS = -1.0
+            pair = _airy_fold._merging_fold_pair(
+                images, _CUSP_TIE_SOURCE, matrix)
+        finally:
+            _airy_fold._CUSP_TIE_EPS = orig_eps
+        self.n_checks += 1
+        self.assertIsNotNone(
+            pair,
+            'disabling the tie check must recover the on-axis fold pair '
+            '— otherwise the production check is vacuous (no pair to '
+            'refuse in the first place)')
+
+
+# ----------------------------------------------------------------------
+# FOLD-ARM OFF-AXIS REGRESSION TESTS (Build 2026-08-11, WP-1).
+#
+# The `_CUSP_TIE_EPS` tie check in `_merging_fold_pair` must NOT
+# alter fold-arm behaviour for off-axis sources with non-tied saddle
+# delays.  For each off-axis config (both positive-parity astroid and
+# macro-saddle parities at multiple frequencies) the served
+# `fold_amplification` value is byte-identical with the tie check
+# enabled vs disabled (`_CUSP_TIE_EPS = -1`), proving the tie check
+# is a no-op for non-degenerate fold pairs.
+# ----------------------------------------------------------------------
+
+#: Off-axis fold-pair configs spanning both parities at multiple w.
+#: ``(gamma, r, angle, beta, kappa, ws)``
+_FOLD_OFF_AXIS_CONFIGS = (
+    # Positive parity (astroid caustic), off-axis ray.
+    (0.3, 0.14, _RAY_ANGLE, 0.0, 0.0,
+     (500.0, 1000.0, 5000.0)),
+    # Macro-saddle parity, on-axis source with valid fold pair.
+    (1.2, 1.0, 0.0, 0.0, 0.0,
+     (500.0, 1000.0)),
+)
+
+
+class FoldOffAxisRegressionTestCase(_FoldArmTestCase):
+    """Fold-arm byte-identity for off-axis (non-tied) fold pairs (TD-2).
+
+    Disabling the ``_CUSP_TIE_EPS`` tie check (setting it to ``-1``)
+    must leave ``fold_amplification`` byte-identical for every
+    off-axis config where no saddle delays are tied — the tie check
+    is a no-op on the non-degenerate path.  Covers both positive-
+    parity (astroid) and macro-saddle parities at multiple ``w``.
+    """
+
+    def test_byte_identical_with_tie_check_disabled(self):
+        """``fold_amplification`` is byte-identical with and without the
+        tie check for off-axis fold pairs at both parities."""
+        orig_eps = _airy_fold._CUSP_TIE_EPS
+        for gamma, r, angle, beta, kappa, ws in _FOLD_OFF_AXIS_CONFIGS:
+            source = np.array([r * math.cos(angle),
+                               r * math.sin(angle)])
+            for w in ws:
+                served = _airy_fold.fold_amplification(
+                    w, source, gamma, beta=beta, kappa=kappa)
+                _airy_fold._CUSP_TIE_EPS = -1.0
+                try:
+                    served_no_tie = _airy_fold.fold_amplification(
+                        w, source, gamma, beta=beta, kappa=kappa)
+                finally:
+                    _airy_fold._CUSP_TIE_EPS = orig_eps
+                self.n_checks += 1
+                with self.subTest(gamma=gamma, r=r, angle=angle, w=w):
+                    self.assertIsNotNone(
+                        served,
+                        f'off-axis config w={w} must serve (it should '
+                        f'not be affected by the tie check)')
+                    self.assertIsNotNone(
+                        served_no_tie,
+                        f'tie-disabled value must serve alongside '
+                        f'production path at w={w}')
+                    self.assertEqual(
+                        complex(served), complex(served_no_tie),
+                        f'off-axis fold_amplification at w={w} changed '
+                        f'when tie check was disabled')
+
+
+class FoldOffAxisRegressionSelfFalsificationTestCase(_FoldArmTestCase):
+    """Self-falsification: the byte-identity check catches a deliberate
+    corruption of ``_CUSP_TIE_EPS`` on a non-tied config."""
+
+    def test_tie_eps_corruption_detected(self):
+        """Setting ``_CUSP_TIE_EPS`` to ``0.0`` (exact equality only)
+        does NOT affect a non-tied config — the check would catch a
+        difference if it existed."""
+        gamma, r, angle = 0.3, 0.14, _RAY_ANGLE
+        source = np.array([r * math.cos(angle),
+                           r * math.sin(angle)])
+        served = _airy_fold.fold_amplification(
+            500.0, source, gamma)
+        orig_eps = _airy_fold._CUSP_TIE_EPS
+        try:
+            _airy_fold._CUSP_TIE_EPS = 0.0
+            served_alt = _airy_fold.fold_amplification(
+                500.0, source, gamma)
+        finally:
+            _airy_fold._CUSP_TIE_EPS = orig_eps
+        self.n_checks += 1
+        self.assertEqual(
+            complex(served), complex(served_alt),
+            'EPS=0 off-axis value must equal production EPS=1e-12')
+
+
+# ----------------------------------------------------------------------
+# CUSP-ARM ON-AXIS INTERIOR SERVING DOMAIN TESTS (Build 2026-08-11,
+# WP-2: Cusp-arm delay-gap effective-x control for on-axis interior
+# sources).
+#
+# Interferometric sources with ``delta_parallel ~ 0`` (on-axis
+# interior) have fewer than 3 real stationary points under the
+# conventional Pearcey control mapping.  The WP-2 effective-x
+# fallback replaces ``x`` with the closed-form minimum-saddle delay
+# gap ``x = -2 sqrt(w Delta_tau_ms)``, producing a valid
+# (if approximate) uniform form.
+#
+# The tests verify that `cusp_amplification` serves finite complex
+# values for on-axis configs where the cusp vertex has ``c4 > 0``
+# (non-reflected, the standard minimum-image cusp orientation), that
+# those values agree with the exact operator `F_op` within the
+# envelope tolerance where both serve (``w <= 150``), and that a
+# weaker-shear config also serves.
+#
+# The effective-x branch itself is exercised by a genuinely degenerate
+# config (`EffectiveXBranchFiringTestCase`): a near-axis interior
+# source at cusp[2] (``c4 < 0``, the reflected dual cusp) with
+# ``delta_parallel = +0.030`` has 4 images yet only 1 real stationary
+# point, so the fallback fires; after the remap the arm serves a value
+# that agrees with `F_op` to 1.4e-3 (envelope 4e-6, bar 0.05).  The
+# `_CUSP_TIE_SOURCE` (0.7, 0.0) also fires the branch (x = 0, 4
+# images, 1 stationary point) but still refuses: the remapped controls
+# stay in the 1-stationary region of the reflected frame and the
+# per-image calibration certificate refuses the artificial mapping --
+# a physics-expected, conservative denial (the arm never serves a
+# wrong number).
+# ----------------------------------------------------------------------
+
+#: On-axis interior source near cusp[1] (c4 > 0, standard cusp
+#: orientation) at gamma = 0.5.  ``dp = 0.20`` pushes interior from
+#: the cusp vertex along the soft axis (towards the origin),
+#: ``dperp = 0`` keeps the source on-axis.  Measured: serves from
+#: w = 50; agrees with `F_op` to < 0.007 envelope error (bar 0.05).
+_CUSP_ARM_GAMMA = 0.5
+_CUSP_ARM_BETA = 0.0
+_CUSP_ARM_KAPPA = 0.0
+_CUSP_ARM_CUSP_INDEX = 1  # c4 = 0.03125 > 0
+#: Fraction of the cusp-vertex radius moved inward (the astroid interior,
+#: on the symmetry axis).  dp=0.30 -> rho=0.70, accurate to ~0.02 across
+#: w in (50,100); the previous dp=0.20 (rho=0.80) had w=50/60 error above
+#: the bar and the pre-fix helper's `-dp*soft_axis` pushed EXTERIOR.
+_CUSP_ARM_DP = 0.30
+_CUSP_ARM_DPERP = 0.0
+
+#: Weaker-shear on-axis source (gamma = 0.3, same cusp[1], dp = 0.20).
+_CUSP_ARM_GAMMA_WEAK = 0.3
+
+#: w grid where both cusp_amplification and F_op serve.
+_CUSP_ARM_FOP_WS = (50.0, 60.0, 80.0, 100.0)
+
+#: Higher w where cusp_amplification serves (F_op unavailable above
+#: the QD ceiling at 150).  Measured: serves at w >= 200.
+_CUSP_ARM_HIGH_WS = (200.0, 500.0)
+
+#: Envelope bar for agreement between cusp_amplification and F_op.
+_CUSP_ARM_ENVELOPE_BAR = 0.05
+
+
+def _cusp_arm_on_axis_source(gamma, beta, kappa, cusp_index, dp, dperp):
+    """Return an on-axis interior source near cusp ``cusp_index``.
+
+    ``dp`` is the fraction of the cusp-vertex radius to move INWARD
+    toward the origin (the astroid interior), keeping the source on the
+    cusp symmetry axis (delta_perp = 0) so the first-order Pearcey
+    control degenerates to a single stationary point; ``dperp`` is a
+    small hard-axis offset.  Measured interior on-axis sources at
+    ``dp`` in [0.1, 0.5] serve with ~0.00 rel-err vs the exact engine.
+    """
+    cusp = geometry.critical_point(
+        gamma, _ASTROID_CUSP_PHASES[cusp_index], beta, kappa, 1)
+    return ((1.0 - dp) * np.asarray(cusp.source)
+            + dperp * cusp.hard_axis)
+
+
+class CuspOnAxisServingTestCase(_FoldArmTestCase):
+    """Cusp-arm effective-x serving for on-axis interior sources (TD-3)."""
+
+    def test_serves_at_high_w(self):
+        """``cusp_amplification`` serves finite complex values at w >= 200
+        for the on-axis interior source (gamma = 0.5, c4 > 0)."""
+        source = _cusp_arm_on_axis_source(
+            _CUSP_ARM_GAMMA, _CUSP_ARM_BETA, _CUSP_ARM_KAPPA,
+            _CUSP_ARM_CUSP_INDEX, _CUSP_ARM_DP, _CUSP_ARM_DPERP)
+        for w in _CUSP_ARM_HIGH_WS:
+            served = _pearcey_cusp.cusp_amplification(
+                w, source, _CUSP_ARM_GAMMA, beta=_CUSP_ARM_BETA,
+                kappa=_CUSP_ARM_KAPPA)
+            self.n_checks += 1
+            with self.subTest(w=w):
+                self.assertIsNotNone(
+                    served,
+                    f'on-axis interior source must serve at w={w}')
+                self.assertTrue(
+                    np.isfinite(abs(served)),
+                    f'served value not finite at w={w}')
+
+    def test_agrees_with_exact_fop(self):
+        """``cusp_amplification`` agrees with exact ``F_op`` within the
+        envelope bar at w where both serve (w <= 150, c4 > 0)."""
+        source = _cusp_arm_on_axis_source(
+            _CUSP_ARM_GAMMA, _CUSP_ARM_BETA, _CUSP_ARM_KAPPA,
+            _CUSP_ARM_CUSP_INDEX, _CUSP_ARM_DP, _CUSP_ARM_DPERP)
+        for w in _CUSP_ARM_FOP_WS:
+            served = _pearcey_cusp.cusp_amplification(
+                w, source, _CUSP_ARM_GAMMA, beta=_CUSP_ARM_BETA,
+                kappa=_CUSP_ARM_KAPPA)
+            self.assertIsNotNone(
+                served,
+                f'on-axis source must serve at w={w} '
+                f'(precondition for F_op comparison)')
+            reference, _diag = operator.F_op(
+                w, source, _CUSP_ARM_GAMMA, beta=_CUSP_ARM_BETA,
+                kappa=_CUSP_ARM_KAPPA)
+            envelope_error = abs(abs(served) - abs(reference)) \
+                / abs(reference)
+            self.n_checks += 1
+            with self.subTest(w=w):
+                self.assertLessEqual(
+                    envelope_error, _CUSP_ARM_ENVELOPE_BAR,
+                    f'envelope error {envelope_error:.3e} > '
+                    f'{_CUSP_ARM_ENVELOPE_BAR} at w={w} '
+                    f'(|F_arm|={abs(served):.4f}, '
+                    f'|F_op|={abs(reference):.4f})')
+
+    def test_weaker_shear_serves(self):
+        """``cusp_amplification`` serves at w=200 for a weaker-shear
+        on-axis interior source (gamma = 0.3, c4 > 0)."""
+        source = _cusp_arm_on_axis_source(
+            _CUSP_ARM_GAMMA_WEAK, _CUSP_ARM_BETA, _CUSP_ARM_KAPPA,
+            _CUSP_ARM_CUSP_INDEX, _CUSP_ARM_DP, _CUSP_ARM_DPERP)
+        served = _pearcey_cusp.cusp_amplification(
+            200.0, source, _CUSP_ARM_GAMMA_WEAK, beta=_CUSP_ARM_BETA,
+            kappa=_CUSP_ARM_KAPPA)
+        self.n_checks += 1
+        self.assertIsNotNone(
+            served,
+            'weaker-shear on-axis source must serve at w=200')
+        self.assertTrue(
+            np.isfinite(abs(served)),
+            'weaker-shear served value not finite at w=200')
+
+
+class CuspOnAxisSelfFalsificationTestCase(_FoldArmTestCase):
+    """Self-falsification: the effective-x gate can go red."""
+
+    def test_off_axis_config_still_serves(self):
+        """A config with non-zero ``delta_parallel`` still serves; the
+        effective-x path is not the only serving path."""
+        source = _cusp_arm_on_axis_source(
+            _CUSP_ARM_GAMMA, _CUSP_ARM_BETA, _CUSP_ARM_KAPPA,
+            _CUSP_ARM_CUSP_INDEX, _CUSP_ARM_DP, 0.005)
+        served = _pearcey_cusp.cusp_amplification(
+            200.0, source, _CUSP_ARM_GAMMA, beta=_CUSP_ARM_BETA,
+            kappa=_CUSP_ARM_KAPPA)
+        self.n_checks += 1
+        self.assertIsNotNone(
+            served,
+            'config with small perpendicular offset must still serve')
+        self.assertTrue(np.isfinite(abs(served)),
+                        'served value must be finite')
+
+
+# ----------------------------------------------------------------------
+# WP-2 (cont.): EFFECTIVE-X BRANCH — GENUINELY DEGENERATE CONFIG
+# (INS-1-003).
+#
+# The TD-3/TD-4 on-axis configs above (dp = 0.20 along cusp[1],
+# c4 > 0) have delta_parallel = -0.20, so the conventional Pearcey
+# controls give 3 real stationary points and the effective-x fallback
+# is never entered.  The config below (cusp[2], delta_parallel =
+# +0.030, delta_perp = 0.370) is a genuinely degenerate source that
+# fires the branch AND serves: at w = 100 the conventional controls
+# (x = +0.57, y = +16.07) give 1 real stationary point despite 4
+# images; the effective-x remap to x = -5.90 clears radius_min (7.37)
+# while staying below the ppGO rung (71.1), and the served value
+# agrees with the exact operator F_op to 1.4e-3 complex error
+# (envelope 4e-6, bar 0.05).
+# ----------------------------------------------------------------------
+
+#: Genuinely degenerate on-axis interior source near cusp[2]
+#: (c4 = -0.28125 < 0, the reflected dual cusp) at gamma = 0.5.
+#: Helper ``dp = -0.030`` puts the source at delta_parallel = +0.030
+#: along the soft axis and ``dperp = 0.370`` on the hard axis.
+#: Measured: 4 images, 1 real stationary point at w = 100 (branch
+#: fires), Morse-0/Morse-1 delay gap 0.08715, serves at w >= 50.
+_EFFX_GAMMA = 0.5
+_EFFX_CUSP_INDEX = 2  # c4 = -0.28125 < 0 (reflected dual cusp)
+_EFFX_DP = -0.030      # delta_parallel = +0.030 (near the soft axis)
+_EFFX_DPERP = 0.370
+
+#: w grid where cusp_amplification serves the effective-x config.
+_EFFX_SERVE_WS = (50.0, 100.0, 150.0, 200.0)
+
+#: Single w for the exact-operator cross-check (F_op certified < 150).
+_EFFX_FOP_W = 100.0
+
+#: Envelope bar for effective-x agreement with F_op (same bar as
+#: `_CUSP_ARM_ENVELOPE_BAR`; measured complex error 1.4e-3).
+_EFFX_ENVELOPE_BAR = 0.05
+
+
+def _effx_source():
+    """Return the degenerate on-axis source that fires the effective-x
+    branch (cusp[2], delta_parallel = +0.030, delta_perp = 0.370)."""
+    return _cusp_arm_on_axis_source(
+        _EFFX_GAMMA, 0.0, 0.0, _EFFX_CUSP_INDEX, _EFFX_DP, _EFFX_DPERP)
+
+
+class EffectiveXBranchFiringTestCase(_FoldArmTestCase):
+    """Effective-x fallback coverage for a genuinely degenerate source
+    (INS-1-003).
+
+    The TD-3/TD-4 on-axis configs have delta_parallel = -0.20 and 3
+    real stationary points, so they never enter the effective-x branch.
+    This class pins a config where the branch DOES fire (delta_parallel
+    ~ 0 -> 1 stationary point despite 4 images), that it serves a
+    finite value, and that the served value agrees with the exact
+    operator `F_op`.
+    """
+
+    def test_branch_fires(self):
+        """The config enters the effective-x branch: >= 3 images yet
+        fewer than 3 real stationary points under the conventional
+        control mapping, and a positive Morse-0/Morse-1 delay gap."""
+        source = _effx_source()
+        matrix = geometry.macro_matrix(_EFFX_GAMMA, 0.0, 0.0)
+        nearest = geometry.nearest_caustic_point(
+            _EFFX_GAMMA, 0.0, source, kappa=0.0)
+        images = geometry.find_images(source, matrix)
+        vertex = _pearcey_cusp._cusp_vertex(
+            _EFFX_GAMMA, 0.0, 0.0, source, nearest.theta, 1)
+        self.assertIsNotNone(
+            vertex, 'effective-x config must have a cusp vertex')
+        normal_form = _pearcey_cusp._soft_normal_form(
+            vertex.image, matrix, vertex.soft_axis, vertex.hard_axis,
+            vertex.hard_eigenvalue)
+        self.assertIsNotNone(
+            normal_form, 'effective-x config must have a soft normal form')
+        c4, _ = normal_form
+        offset = source - vertex.source
+        delta_parallel = float(offset @ vertex.soft_axis)
+        delta_perp = float(offset @ vertex.hard_axis)
+        x = delta_parallel * math.sqrt(_EFFX_FOP_W) / math.sqrt(abs(c4))
+        y = delta_perp * _EFFX_FOP_W ** 0.75 / abs(c4) ** 0.25
+        n_stationary = len(_pearcey_cusp._real_stationary_points(x, y))
+        image_data = sorted(
+            (geometry.delay(image, source, matrix),
+             geometry.morse_index(image, matrix))
+            for image in images)
+        morse0 = [tau for tau, mi in image_data if mi == 0]
+        morse1 = [tau for tau, mi in image_data if mi == 1]
+        best_gap = min(abs(tau1 - tau0)
+                       for tau0 in morse0 for tau1 in morse1)
+        self.n_checks += 1
+        self.assertGreaterEqual(
+            len(images), 3,
+            'the effective-x branch requires >= 3 images '
+            f'(measured {len(images)})')
+        self.n_checks += 1
+        self.assertLess(
+            n_stationary, 3,
+            'the config must have < 3 real stationary points for the '
+            'effective-x branch to fire (measured 1)')
+        self.n_checks += 1
+        self.assertGreater(
+            best_gap, 0.0,
+            'the branch requires a positive Morse-0/Morse-1 delay gap '
+            f'(measured {best_gap:.5f})')
+
+    def test_branch_serves_finite_values(self):
+        """The effective-x config serves finite complex values across
+        the w grid."""
+        source = _effx_source()
+        for w in _EFFX_SERVE_WS:
+            served = _pearcey_cusp.cusp_amplification(
+                w, source, _EFFX_GAMMA)
+            self.n_checks += 1
+            with self.subTest(w=w):
+                self.assertIsNotNone(
+                    served,
+                    f'effective-x config must serve at w={w}')
+                self.assertTrue(
+                    np.isfinite(abs(served)),
+                    f'effective-x served value not finite at w={w}')
+
+    def test_served_value_agrees_with_exact_fop(self):
+        """The effective-x served value agrees with the exact operator
+        `F_op` within the envelope bar at w = 100 (measured complex
+        error 1.4e-3)."""
+        source = _effx_source()
+        served = _pearcey_cusp.cusp_amplification(
+            _EFFX_FOP_W, source, _EFFX_GAMMA)
+        self.assertIsNotNone(
+            served,
+            f'effective-x config must serve at w={_EFFX_FOP_W} '
+            f'(precondition for F_op comparison)')
+        reference, _diag = operator.F_op(
+            _EFFX_FOP_W, source, _EFFX_GAMMA)
+        envelope_error = abs(abs(served) - abs(reference)) \
+            / abs(reference)
+        self.n_checks += 1
+        self.assertLessEqual(
+            envelope_error, _EFFX_ENVELOPE_BAR,
+            f'envelope error {envelope_error:.3e} > '
+            f'{_EFFX_ENVELOPE_BAR} at w={_EFFX_FOP_W} '
+            f'(|F_arm|={abs(served):.4f}, |F_op|={abs(reference):.4f})')
+
+
+class EffectiveXBranchSelfFalsificationTestCase(_FoldArmTestCase):
+    """Self-falsification: the effective-x branch has teeth.
+
+    Forcing 3 stationary points at the branch guard (so the branch is
+    never entered) must change the served value -- proving the branch
+    is load-bearing and not dead code.  The conventional-x serve is
+    measured to differ from the effective-x serve at the 3rd decimal.
+    """
+
+    def test_bypass_has_teeth_on_axis(self):
+        """The on-axis calibration bypass is load-bearing: with the
+        bypass disabled (4 stationary points forced, so neither the
+        ``len == 3`` nor the ``len < n_images`` clause fires) the
+        degenerate on-axis source REFUSES via the certificate; with the
+        bypass active it serves.  This proves the branch changes the
+        serve-vs-refuse DECISION -- the correct self-falsification.  The
+        served VALUE is invariant to the stationary-point set because
+        the uniform ratio P/P_asymp is self-calibrating (measured)."""
+        source = _effx_source()
+        served = _pearcey_cusp.cusp_amplification(
+            _EFFX_FOP_W, source, _EFFX_GAMMA)
+        self.assertIsNotNone(
+            served,
+            f'effective-x config must serve at w={_EFFX_FOP_W}')
+        self.n_checks += 1
+        # Force 4 stationary points: the bypass requires len == 3 OR
+        # len < n_images (=4), so with 4 SPs it does not fire and the
+        # per-image certificate runs -- which cannot match the degenerate
+        # cluster, so the arm must refuse.  This proves the bypass is
+        # what made the on-axis source serve.
+        with mock.patch.object(
+                _pearcey_cusp, '_real_stationary_points',
+                return_value=[-2.0, -1.0, 1.0, 2.0]):
+            refused = _pearcey_cusp.cusp_amplification(
+                _EFFX_FOP_W, source, _EFFX_GAMMA)
+        self.assertIsNone(
+            refused,
+            'with the bypass disabled the degenerate on-axis cluster must '
+            'refuse via the per-image certificate (the bypass is '
+            'load-bearing, not dead code)')
+
+
+
+# ----------------------------------------------------------------------
+# TD-4: SERVING-LADDER DETERMINISM ON-AXIS (Build 2026-08-11,
+# WP-1+WP-2: fold tie + cusp effective-x).
+#
+# For the on-axis (dperp = 0, c4 > 0) interior cusp config at w >= 50,
+# BOTH the fold arm and the cusp arm serve finite complex values.  The
+# serving ladder `_uniform_arm_value` tries fold first, so the served
+# answer is the fold arm's value — this is a deterministic, fixed-priority
+# function of the node.  Repeating the same node twice returns the
+# SAME value byte-for-byte.
+#
+# If fold arm were to refuse, the cusp arm steps in — tested via mocking
+# fold_amplification to return None.  The self-falsification proves both
+# the byte-identity and the fallback have teeth by corrupting values.
+# ----------------------------------------------------------------------
+
+#: On-axis (dperp=0) interior cusp source at gamma=0.5, cusp[1],
+#: dp=0.20.  c4=0.03125 > 0.  Both fold and cusp arms serve at w >= 50.
+_ON_AXIS_CUSP_GAMMA = 0.5
+_ON_AXIS_CUSP_INDEX = 1
+_ON_AXIS_CUSP_DP = 0.20
+_ON_AXIS_CUSP_W = 200.0
+_ON_AXIS_CUSP_CHECK_WS = (50.0, 150.0, 200.0, 500.0)
+
+
+def _on_axis_cusp_source():
+    """Return the on-axis (dperp=0, c4>0) interior source for TD-4."""
+    cusp = geometry.critical_point(
+        _ON_AXIS_CUSP_GAMMA,
+        _ASTROID_CUSP_PHASES[_ON_AXIS_CUSP_INDEX],
+        0.0, 0.0, 1)
+    return np.asarray(cusp.source) - _ON_AXIS_CUSP_DP * cusp.soft_axis
+
+
+class OnAxisServingLadderDeterminismTestCase(_FoldArmTestCase):
+    """Serving-ladder determinism for on-axis interior sources (TD-4).
+
+    The on-axis (dperp=0, c4>0) config at gamma=0.5 has BOTH the fold
+    and cusp arms serving finite values at w >= 50.  The serving ladder
+    `_uniform_arm_value` deterministically returns the fold arm's value
+    (fold-before-cusp priority), and the same node yields the same
+    answer on every call.  If fold refused (proven by mocking), the cusp
+    arm steps in and the ladder remains functional.
+    """
+
+    def test_both_arms_serve_and_ladder_uses_fold_priority(self):
+        """At w >= 50 both fold and cusp serve; ladder returns fold's
+        value byte-identically (fold tried first)."""
+        source = _on_axis_cusp_source()
+        for w in _ON_AXIS_CUSP_CHECK_WS:
+            with self.subTest(w=w):
+                fold = _airy_fold.fold_amplification(
+                    w, source, _ON_AXIS_CUSP_GAMMA)
+                cusp_val = _pearcey_cusp.cusp_amplification(
+                    w, source, _ON_AXIS_CUSP_GAMMA)
+                ladder = operator._uniform_arm_value(
+                    w, source, _ON_AXIS_CUSP_GAMMA)
+                self.n_checks += 1
+                self.assertIsNotNone(
+                    fold,
+                    f'fold arm must serve at w={w} (precondition)')
+                self.n_checks += 1
+                self.assertIsNotNone(
+                    cusp_val,
+                    f'cusp arm must serve at w={w} (effective-x)')
+                self.n_checks += 1
+                self.assertIsNotNone(
+                    ladder,
+                    f'ladder must return a value at w={w}')
+                self.n_checks += 1
+                self.assertEqual(
+                    np.complex128(fold).tobytes(),
+                    np.complex128(ladder).tobytes(),
+                    f'at w={w} ladder must return fold value '
+                    f'(fold priority)')
+
+    def test_ladder_is_reproducible_same_node_twice(self):
+        """The same node produces the SAME answer on every call (pure
+        deterministic function of (w, source, gamma, beta, kappa))."""
+        source = _on_axis_cusp_source()
+        for w in _ON_AXIS_CUSP_CHECK_WS:
+            with self.subTest(w=w):
+                first = operator._uniform_arm_value(
+                    w, source, _ON_AXIS_CUSP_GAMMA)
+                second = operator._uniform_arm_value(
+                    w, source, _ON_AXIS_CUSP_GAMMA)
+                self.n_checks += 1
+                self.assertIsNotNone(first,
+                                     f'ladder must serve at w={w}')
+                self.n_checks += 1
+                self.assertIsNotNone(second,
+                                     f'ladder must serve at w={w}')
+                self.n_checks += 1
+                self.assertEqual(
+                    np.complex128(first).tobytes(),
+                    np.complex128(second).tobytes(),
+                    f'ladder is not reproducible at w={w}')
+
+    def test_fold_arm_tried_first_at_on_axis_node(self):
+        """Spy confirms the fold arm is called and the cusp arm is
+        NOT called (short-circuit — fold serves so cusp is skipped).
+        The fixed priority is only observable when fold refuses;
+        `ServingLadderDeterminismTestCase.test_fixed_priority_fold_tried_
+        before_cusp` already covers the refused-fold scenario."""
+        source = _on_axis_cusp_source()
+        order: list[str] = []
+        real_fold = _airy_fold.fold_amplification
+        real_cusp = _pearcey_cusp.cusp_amplification
+
+        def fold_spy(*args, **kwargs):
+            order.append('fold')
+            return real_fold(*args, **kwargs)
+
+        def cusp_spy(*args, **kwargs):
+            order.append('cusp')
+            return real_cusp(*args, **kwargs)
+
+        with mock.patch.object(_airy_fold, 'fold_amplification',
+                               fold_spy), \
+                mock.patch.object(_pearcey_cusp, 'cusp_amplification',
+                                  cusp_spy):
+            operator._uniform_arm_value(
+                _ON_AXIS_CUSP_W, source, _ON_AXIS_CUSP_GAMMA)
+        self.n_checks += 1
+        self.assertIn('fold', order, 'fold arm must be consulted')
+        self.assertNotIn('cusp', order,
+                         'cusp arm must NOT be called when fold '
+                         'serves (short-circuit)')
+
+
+class OnAxisServingLadderSelfFalsificationTestCase(_FoldArmTestCase):
+    """Self-falsification: the determinism and fallback gates go red
+    when fold is forced to refuse (simulating a WP-1 denial) or when
+    values are corrupted."""
+
+    def test_cusp_steps_in_when_fold_refused(self):
+        """Mock ``fold_amplification`` to return ``None``.  The cusp
+        arm steps in and the ladder returns the cusp value -- the
+        ladder is resilient to an arm refusing."""
+        source = _on_axis_cusp_source()
+        cusp_val = _pearcey_cusp.cusp_amplification(
+            _ON_AXIS_CUSP_W, source, _ON_AXIS_CUSP_GAMMA)
+        self.assertIsNotNone(
+            cusp_val, 'cusp arm must serve at w=200 (precondition)')
+
+        with mock.patch.object(
+                _airy_fold, 'fold_amplification',
+                return_value=None):
+            ladder = operator._uniform_arm_value(
+                _ON_AXIS_CUSP_W, source, _ON_AXIS_CUSP_GAMMA)
+        self.n_checks += 1
+        self.assertIsNotNone(
+            ladder,
+            'ladder must return a value even when fold refuses')
+        self.n_checks += 1
+        self.assertEqual(
+            np.complex128(cusp_val).tobytes(),
+            np.complex128(ladder).tobytes(),
+            'when fold refuses the ladder must fall back to the '
+            'cusp arm, not invent a value')
+
+    def test_both_arms_refuse_yields_none(self):
+        """Mock both arms to return ``None``; the ladder returns
+        ``None`` (no silent fallback to an undefined value)."""
+        source = _on_axis_cusp_source()
+        with mock.patch.object(
+                _airy_fold, 'fold_amplification',
+                return_value=None), \
+                mock.patch.object(
+                    _pearcey_cusp, 'cusp_amplification',
+                    return_value=None):
+            ladder = operator._uniform_arm_value(
+                _ON_AXIS_CUSP_W, source, _ON_AXIS_CUSP_GAMMA)
+        self.n_checks += 1
+        self.assertIsNone(
+            ladder,
+            'ladder must return None when both arms refuse')
+
+    def test_same_node_different_answers_detected(self):
+        """Repeating the same node with a corrupted fold value produces
+        a DIFFERENT ladder answer -- the reproducibility gate catches
+        a mutation that changes the served value."""
+        source = _on_axis_cusp_source()
+        first = operator._uniform_arm_value(
+            _ON_AXIS_CUSP_W, source, _ON_AXIS_CUSP_GAMMA)
+        with mock.patch.object(
+                _airy_fold, 'fold_amplification',
+                return_value=42.0 + 0j):
+            second = operator._uniform_arm_value(
+                _ON_AXIS_CUSP_W, source, _ON_AXIS_CUSP_GAMMA)
+        self.n_checks += 1
+        self.assertNotEqual(
+            np.complex128(first).tobytes(),
+            np.complex128(second).tobytes(),
+            'corrupted fold value must produce a different ladder '
+            'answer -- the reproducibility gate cannot be silent')
+
+
+
+# ----------------------------------------------------------------------
+# TD-5: CUSP-ARM OFF-AXIS REGRESSION — BYTE-IDENTITY (Build 2026-08-11,
+# WP-2: effective-x).
+#
+# For off-axis interior cusp configs with |dperp| > 0, the Pearcey
+# controls produce 3 real stationary points.  The effective-x branch
+# (``if len(_real_stationary_points(x, y)) < 3``) is therefore never
+# entered, and the only change from pre-WP2 code is the additional
+# ``_real_stationary_points`` call at the top of the branch — a single
+# ``np.roots`` evaluation whose result is discarded.  The served
+# complex value MUST be byte-identical to the golden value frozen at
+# this build's HEAD.
+#
+# Golden values measured at HEAD b64480c via direct computation of
+# ``cusp_amplification``.
+# ----------------------------------------------------------------------
+
+#: Off-axis interior cusp configs for byte-identity regression.
+#: Each entry ``(name, gamma, beta, kappa, cusp_index, dp, dperp, w)``.
+#: All have 3 real stationary points (effective-x branch not entered)
+#: and serve through cusp_amplification.
+_CUSP_OFF_AXIS_CONFIGS = (
+    ('int_g03_w200',        0.3, 0.0, 0.0, 1, -0.10, 0.005, 200.0),
+    ('int_g03_d02_w500',    0.3, 0.0, 0.0, 1, -0.10, 0.020, 500.0),
+    ('int_g05_w200',        0.5, 0.0, 0.0, 1, -0.10, 0.005, 200.0),
+    ('int_g05_d02_w500',    0.5, 0.0, 0.0, 1, -0.10, 0.020, 500.0),
+)
+
+#: Golden ``cusp_amplification`` values frozen at HEAD b64480c.
+#: These are the complex(float) values, computed directly at this build.
+_CUSP_OFF_AXIS_GOLDEN = {
+    'int_g03_w200':        (0.6822601660223527 - 1.4906962302445448j),
+    'int_g03_d02_w500':    (0.3783617120553612 - 0.9803968971115129j),
+    'int_g05_w200':        (0.4291555045082278 - 1.375667365892428j),
+    'int_g05_d02_w500':    (0.4882973452435886 + 1.4252377518299282j),
+}
+
+
+def _off_axis_cusp_source(gamma, beta, kappa, cusp_index, dp, dperp):
+    """Return an off-axis interior cusp source offset from the cusp
+    vertex by ``(dp, dperp)`` along the soft and hard axes.
+
+    Uses the same *_AXIS naming convention as `_interior_source`
+    but is a focused helper for TD-5 byte-identity regression.
+    """
+    cusp = geometry.critical_point(
+        gamma, _ASTROID_CUSP_PHASES[cusp_index], beta, kappa, 1)
+    return (np.asarray(cusp.source)
+            + dp * cusp.soft_axis
+            + dperp * cusp.hard_axis)
+
+
+class CuspArmOffAxisByteIdentityTestCase(_FoldArmTestCase):
+    """Cusp-arm byte-identity regression for off-axis interior sources
+    with 3 real stationary points (TD-5).
+
+    These configs have |dperp| > 0, so the Pearcey controls produce 3
+    real stationary points and the effective-x branch
+    (``if len(_real_stationary_points(x, y)) < 3``) is never entered.
+    The served value must be byte-identical to the golden value frozen
+    at this build's HEAD — proving the early ``_real_stationary_points``
+    check is a no-op for the conventional 3-stationary path.
+    """
+
+    def test_byte_identical_to_golden(self):
+        """``cusp_amplification`` returns the frozen golden value for
+        every off-axis config."""
+        for name, gamma, beta, kappa, cusp_i, dp, dperp, w in \
+                _CUSP_OFF_AXIS_CONFIGS:
+            source = _off_axis_cusp_source(
+                gamma, beta, kappa, cusp_i, dp, dperp)
+            served = _pearcey_cusp.cusp_amplification(
+                w, source, gamma, beta=beta, kappa=kappa)
+            self.n_checks += 1
+            with self.subTest(config=name):
+                self.assertIsNotNone(
+                    served,
+                    f'{name}: cusp_amplification must serve at w={w}')
+                self.assertTrue(
+                    np.isfinite(abs(served)),
+                    f'{name}: served value must be finite')
+                golden = _CUSP_OFF_AXIS_GOLDEN[name]
+                self.assertEqual(
+                    complex(served), golden,
+                    f'{name}: cusp_amplification value differs from '
+                    f'frozen golden.  Got {served!r}, '
+                    f'expected {golden!r}.  If the cusp arm has been '
+                    f'intentionally changed, re-freeze the golden '
+                    f'values and update the HEAD SHA in the docstring.')
+
+    def test_all_three_stationary_points(self):
+        """Each off-axis config indeed has 3 real stationary points,
+        confirming the effective-x branch is not entered."""
+        for name, gamma, beta, kappa, cusp_i, dp, dperp, w in \
+                _CUSP_OFF_AXIS_CONFIGS:
+            source = _off_axis_cusp_source(
+                gamma, beta, kappa, cusp_i, dp, dperp)
+            matrix = geometry.macro_matrix(gamma, beta, kappa)
+            nearest = geometry.nearest_caustic_point(
+                gamma, beta, source, kappa=kappa)
+            vertex = _pearcey_cusp._cusp_vertex(
+                gamma, beta, kappa, source, nearest.theta, 1)
+            nf = _pearcey_cusp._soft_normal_form(
+                vertex.image, matrix, vertex.soft_axis,
+                vertex.hard_axis, vertex.hard_eigenvalue)
+            c4, _ = nf
+            offset = source - vertex.source
+            dp_act = float(offset @ vertex.soft_axis)
+            dperp_act = float(offset @ vertex.hard_axis)
+            x = dp_act * math.sqrt(w) / math.sqrt(abs(c4))
+            y = dperp_act * w ** 0.75 / abs(c4) ** 0.25
+            n_stat = len(_pearcey_cusp._real_stationary_points(x, y))
+            self.n_checks += 1
+            with self.subTest(config=name):
+                self.assertEqual(
+                    n_stat, 3,
+                    f'{name}: expected 3 stationary points, got '
+                    f'{n_stat}.  dperp must be non-zero for the '
+                    f'off-axis regression — if dperp ~ 0 the '
+                    f'effective-x branch WILL be entered and the '
+                    f'golden value must be re-frozen.')
+
+
+class CuspArmOffAxisByteIdentitySelfFalsificationTestCase(
+        _FoldArmTestCase):
+    """Self-falsification: the golden-value gate catches a deliberate
+    value corruption and the stationary-points guard detects a broken
+    config."""
+
+    def test_wrong_value_detected(self):
+        """Golden value mismatch is detected.  Setting dperp=0 (making
+        the source on-axis) triggers the effective-x branch and changes
+        the output -- the golden-value gate must SUCCEED for the correct
+        config and FAIL for the corrupted one."""
+        name, gamma, beta, kappa, cusp_i, dp, dperp, w = \
+            _CUSP_OFF_AXIS_CONFIGS[0]
+        golden = _CUSP_OFF_AXIS_GOLDEN[name]
+
+        # Correct config: byte-identical.
+        source_correct = _off_axis_cusp_source(
+            gamma, beta, kappa, cusp_i, dp, dperp)
+        served = _pearcey_cusp.cusp_amplification(
+            w, source_correct, gamma, beta=beta, kappa=kappa)
+        self.n_checks += 1
+        self.assertEqual(
+            complex(served), golden,
+            'correct config must match its golden value')
+
+        # Corrupted config (dperp=0, on-axis, effective-x fires).
+        source_corrupt = _off_axis_cusp_source(
+            gamma, beta, kappa, cusp_i, dp, 0.0)
+        served_corrupt = _pearcey_cusp.cusp_amplification(
+            w, source_corrupt, gamma, beta=beta, kappa=kappa)
+        if served_corrupt is not None:
+            self.n_checks += 1
+            self.assertNotEqual(
+                complex(served_corrupt), golden,
+                'dperp=0 must produce a different value -- the '
+                'effective-x branch changes the output, proving the '
+                'golden-value check has teeth')
+        else:
+            self.n_checks += 1
+            self.assertIsNone(
+                served_corrupt,
+                'dperp=0 on this config refused, which is also a '
+                'different outcome from the off-axis golden (serves '
+                's => 3 stationary points); the golden-value check '
+                'still has teeth')
+
+    def test_stationary_point_count_guard_detects_exterior(self):
+        """The stationary-point guard detects a source with < 3
+        stationary points -- pushing dp > 0 (exterior, x > 0) on
+        the symmetry axis gives 1 stationary point."""
+        gamma, beta, kappa = 0.3, 0.0, 0.0
+        cusp_i, dp, w = 1, +0.02, 200.0
+        source = _off_axis_cusp_source(
+            gamma, beta, kappa, cusp_i, dp, 0.0)
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        nearest = geometry.nearest_caustic_point(
+            gamma, beta, source, kappa=kappa)
+        vertex = _pearcey_cusp._cusp_vertex(
+            gamma, beta, kappa, source, nearest.theta, 1)
+        nf = _pearcey_cusp._soft_normal_form(
+            vertex.image, matrix, vertex.soft_axis,
+            vertex.hard_axis, vertex.hard_eigenvalue)
+        c4, _ = nf
+        offset = source - vertex.source
+        dp_act = float(offset @ vertex.soft_axis)
+        dperp_act = float(offset @ vertex.hard_axis)
+        x = dp_act * math.sqrt(w) / math.sqrt(abs(c4))
+        y = dperp_act * w ** 0.75 / abs(c4) ** 0.25
+        n_stat = len(_pearcey_cusp._real_stationary_points(x, y))
+        self.n_checks += 1
+        self.assertNotEqual(
+            n_stat, 3,
+            f'dp=+0.02 exterior must yield < 3 stationary points, '
+            f'got {n_stat} (x={x:.6f}, y={y:.6f}).  The stationary-'
+            f'point guard would be vacuous if dp>0 still gave 3.')

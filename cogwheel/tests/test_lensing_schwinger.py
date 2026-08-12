@@ -305,32 +305,29 @@ POINTLENS_BITFREEZE_WS = (1.0, 2.0, 3.0, 5.0)
 
 #: Above-ceiling fixtures: positive-parity strong-shear points evaluated
 #: at ``w > W_CEILING_SCHWINGER``, spanning BOTH serving-ladder outcomes.
-#: RE-BASELINE (Build 8e serving ladder): at ``gamma in (0.47, 0.49)`` the
-#: ``y = (0.4, 0.3)`` column is SERVED by the certified uniform Airy fold
-#: arm (moderate image splitting -> fold argument xi large enough to
-#: certify), while the near-caustic ``y = (0.1, 0.1)`` column is genuinely
-#: HARD-CORE -- both the fold argument xi (~2.4) and the Pearcey radius R
-#: (~2.6) are too small for either arm, so the named
+#: RE-BASELINE (Build 8e serving ladder, updated post-8e cusp-arm extension):
+#: the near-degenerate ``gamma = 0.9`` / moderate ``0.47`` column is SERVED
+#: by the uniform arms (cusp Pearcey or fold Airy depending on y) across the
+#: full source grid; the weak-shear ``gamma = 0.1``, ``y = (0.26, 0)``
+#: (on-axis) column is GENUINELY HARD-CORE -- both arms decline at these
+#: configurations because the fold arm's caustic distance criterion
+#: (``eta < 0.3``) and the cusp arm's interior-bypass gating (rho < 1
+#: degenerate cluster) both fail -- so the named
 #: `SchwingerCertificationError` still stands.
+#: ``gamma = 0.47`` is the moderate-shear probe, ``0.9`` the NEAR-DEGENERATE
+#: strong-shear probe (``lambda_1 = 1 - gamma = 0.1``, an order of magnitude
+#: closer to the degenerate limit than the ``0.53`` of ``0.47``).
+#: ``y = (0.1, 0.1)`` exercises the fold/cusp arm (near-caustic,
+#: small-interior), ``y = (0.4, 0.3)`` the geometric-serve or arm-serve path
+#: (large splitting, resolved).
 #: `RefusalAboveCeilingTestCase` asserts the CONDITIONAL contract per
 #: fixture and proves both branches are exercised.
 #:
-#: DO NOT PRUNE ``0.9`` / ``0.95`` as duplicates of ``0.47`` / ``0.49``.
-#: They are the NEAR-DEGENERATE strong-shear probe: at ``kappa = 0`` the
-#: parity is still positive (``det A = 1 - gamma**2 = 0.19`` / ``0.0975``)
-#: but the weak eigenvalue is ``lambda_1 = 1 - gamma = 0.1`` / ``0.05`` --
-#: an order of magnitude closer to the degenerate limit than the
-#: ``0.53`` / ``0.51`` of the 0.47/0.49 pair, i.e. exactly where the
-#: Schwinger 1D representation breaks down.  Measured 2026-07-29: ALL
-#: eight of their nodes are hard-core (neither arm certifies, F_op and
-#: F_op_grid both raise the named refusal), so they extend the refusal
-#: branch only; the arm-served branch is kept non-vacuous by the
-#: ``gamma in (0.47, 0.49)`` x ``y = (0.4, 0.3)`` nodes.
 #: Post-WP1 (mpmath extension): the refuse-or-arm boundary is now at
 #: W_CEILING_SCHWINGER_QD = 150 (the mpmath band 60 < w <= 150 is
 #: served by the wave branch).  Shift the probe above 150.
-ABOVE_CEILING_GAMMAS = (0.47, 0.49, 0.9, 0.95)
-ABOVE_CEILING_YS = ((0.4, 0.3), (0.1, 0.1))
+ABOVE_CEILING_GAMMAS = (0.1, 0.47, 0.9)
+ABOVE_CEILING_YS = ((0.26, 0.0), (0.1, 0.1), (0.4, 0.3))
 ABOVE_CEILING_WS = (151.0, 180.0)
 
 #: Image-census (WP1) falsification fixtures.  A positive-parity macro
@@ -441,10 +438,13 @@ SADDLE_BOUNDARY_WS = (150.5, 151.5)
 #: Post-WP1: the arm/refuse routing lives at w > W_CEILING_SCHWINGER_QD
 #: (= 150); below that the wave branch (mpmath) serves directly.
 #: Use w=151 so that select_branch routing is exercised.
+#: RE-BASELINE (cusp-arm extension): the 0.47/0.5 configs that previously
+#: exercised these outcomes are now all cusp-served; replaced with weak-shear
+#: (gamma=0.1/0.2) configs where the arm decisions are still distinct.
 THREE_OUTCOME_W = 151.0
-THREE_OUTCOME_FOLD = (0.47, (0.4, 0.3))      # fold certifies, cusp does not
-THREE_OUTCOME_CUSP = (0.5, (0.5, 0.1))       # cusp certifies, fold does not
-THREE_OUTCOME_REFUSE = (0.5, (0.3, 0.2))     # neither arm certifies
+THREE_OUTCOME_FOLD = (0.1, (0.1, 0.1))       # fold certifies, cusp does not
+THREE_OUTCOME_CUSP = (0.2, (0.1, 0.1))       # cusp certifies, fold does not
+THREE_OUTCOME_REFUSE = (0.1, (0.3, 0.2))     # neither arm certifies
 
 
 # ---------------------------------------------------------------------
@@ -1351,14 +1351,14 @@ class RefusalAboveCeilingTestCase(SchwingerTestCase):
     EITHER served by a certified uniform arm (fold Airy / cusp Pearcey) OR
     falls through to the SAME existing named `SchwingerCertificationError`.
 
-    RE-BASELINE (Build 8e serving ladder): the old UNCONDITIONAL
-    above-ceiling refusal pin becomes CONDITIONAL, asserted per fixture.
-    A served node's ``F_op`` value must BE the serving arm's number (the
-    arm called DIRECTLY, agreeing at 1e-12 -- no third path); a refusing
-    node must be genuinely HARD-CORE (NO arm certifies it) and raise the
-    named `SchwingerCertificationError`.  Both branches are asserted
-    non-vacuous: the fixture set spans an arm-served column
-    (``y = (0.4, 0.3)``) and a hard-core column (``y = (0.1, 0.1)``).
+    RE-BASELINE (Build 8e serving ladder, updated post-8e cusp-arm
+    extension): the old UNCONDITIONAL above-ceiling refusal pin becomes
+    CONDITIONAL, asserted per fixture.  The fixture set spans a
+    geometric-served column (``y = (0.4, 0.3)`` at moderate to strong
+    shear), an arm-served column (``y = (0.1, 0.1)`` via fold or cusp
+    arm), and a genuinely HARD-CORE refusal column (``gamma = 0.1``,
+    ``y = (0.26, 0)`` -- on-axis exterior source where both fold and cusp
+    arms decline).  Both branches are asserted non-vacuous.
     """
 
     def _serving_path(self, w, y, gamma, beta=0.0, kappa=0.0):
@@ -1472,13 +1472,16 @@ class RefusalAboveCeilingTestCase(SchwingerTestCase):
         node refuses the WHOLE grid rather than returning a partial result
         (per-node refusal fails the batch).  Post-WP1: the refuse boundary
         is at W_CEILING_SCHWINGER_QD = 150; use w=151 for the hard-core node.
+        RE-BASELINE (cusp-arm extension): the ``gamma=0.47, y=(0.1, 0.1)``
+        config is now cusp-served; replaced with ``gamma=0.1, y=(0.26, 0.0)``
+        which is genuinely hard-core (both arms decline).
         """
-        path_label, _ = self._serving_path(151.0, (0.1, 0.1), 0.47)
+        path_label, _ = self._serving_path(151.0, (0.26, 0.0), 0.1)
         self.assertIsNone(path_label,
                           'the mixed-grid above-ceiling node is no longer '
                           'hard-core -- a path now certifies it')
         with self.assertRaises(SchwingerCertificationError):
-            F_op_grid(np.asarray([5.0, 151.0]), np.asarray([0.1, 0.1]), 0.47)
+            F_op_grid(np.asarray([5.0, 151.0]), np.asarray([0.26, 0.0]), 0.1)
         self.n_checks += 1
 
 
@@ -1837,12 +1840,17 @@ class AboveCeilingWaveThreeOutcomeTestCase(SchwingerTestCase):
     (ii) the fold arm refuses but the cusp Pearcey arm serves;
     (iii) BOTH arms refuse and the named `SchwingerCertificationError`
     fires with the lowest-index refuser's authentic `f_schwinger`
-    message.  The refusal message at ``w > 60`` is the y-independent
-    ceiling refusal, reproduced here by an INDEPENDENT direct call to
+    message.  The refusal message at ``w > 150`` is the y-independent
+    QD-ceiling refusal, reproduced here by an INDEPENDENT direct call to
     `f_schwinger` at the same ``w`` (its ceiling guard fires before any
     y-dependent work).  Refusal-identity across the fixture matrix is
     already covered by `RefusalAboveCeilingTestCase`; this only pins that
     the third outcome is reachable and named.
+
+    RE-BASELINE (cusp-arm extension): the original ``gamma in (0.47, 0.5)``
+    fixtures are now all cusp-served; replaced with weak-shear
+    ``gamma = 0.1 / 0.2`` configs where the three outcomes are still
+    distinct (fold, cusp, refuse) at ``w = 151``.
     """
 
     def _arms(self, w, y, gamma):

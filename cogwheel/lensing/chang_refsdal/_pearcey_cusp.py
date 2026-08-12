@@ -881,7 +881,48 @@ def cusp_amplification(w: float, source, gamma: float, *,
     # (x, y), so a control miscalibration cancels to leading order and
     # only enters at second order.  Exterior sources (1 stationary
     # point) still validate the delay-to-image alignment.
-    if len(stationary_values) != 3:
+    #
+    # On the cusp symmetry axis (delta_parallel ~ 0) an INTERIOR source
+    # (rho < 1, inside the caustic) has >= 3 images whose cluster is
+    # misrepresented as a single real stationary point (the first-order
+    # control projection degenerates: the source offset lands on the hard
+    # axis, so x ~ 0 and the Pearcey phase has 1 stationary point despite
+    # the 3-image cluster).  The same self-calibration argument applies:
+    # the uniform ratio P/P_asymp is accurate even though the per-image
+    # certificate cannot match the cluster delays (measured rel-err 1.5e-3
+    # at w=100, ~0 at w=200, vs the exact engine).  So the bypass extends
+    # to interior sources whose stationary-point count under-represents
+    # the image count.  EXTERIOR sources (rho > 1) are untouched -- their
+    # per-image certificate stays enforced.
+    # The interior degenerate cluster: an INTERIOR source (inside the
+    # caustic, rho < 1) on the cusp symmetry axis whose cluster is
+    # misrepresented as a single stationary point, where the cusp arm is
+    # the last uniform rung (the fold arm declines) and the per-image
+    # certificate cannot match the cluster.  Only then is the
+    # self-calibrating uniform ratio trusted over the certificate.
+    # EXTERIOR sources (rho > 1) keep the certificate enforced -- the
+    # self-calibration robustness does NOT hold there (measured 52% error
+    # for an exterior on-axis source at w=80).  Interior is decided by
+    # the directional caustic reach `geometry.r_caustic` in the source
+    # direction (no circular import; `ppgo_map` imports this module).
+    _theta_src = math.atan2(float(source[1]), float(source[0]))
+    try:
+        _is_interior = (
+            float(np.linalg.norm(source))
+            < float(geometry.r_caustic(gamma, _theta_src, kappa=kappa)))
+    except geometry.LensDomainError:
+        # No caustic intersection on this ray (e.g. a saddle ray between
+        # the two deltoid lobes): conservatively NOT interior, so the
+        # on-axis bypass does not fire.
+        _is_interior = False
+    cusp_is_last_rung = (
+        _airy_fold.fold_amplification(
+            w, source, gamma, beta=beta, kappa=kappa) is None)
+    interior_degenerate = (
+        len(images) > 2 and len(stationary_values) == 1
+        and cusp_is_last_rung and _is_interior)
+    bypass = (len(stationary_values) == 3 or interior_degenerate)
+    if not bypass:
         if not _calibration_certified(stationary_values, matched_delays):
             return None
 
