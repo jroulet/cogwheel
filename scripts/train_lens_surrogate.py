@@ -25,7 +25,8 @@ def main() -> None:
                         'smoke-config default when set).')
     parser.add_argument('--regions', nargs='*',
                         choices=['tube', 'exterior', 'wedge_interior',
-                                 'lobe_interior'], default=None,
+                                 'lobe_interior', 'lobe_exterior'],
+                        default=None,
                         help='Regions to train (default: all). '
                         'Example: --regions wedge_interior')
     args = parser.parse_args()

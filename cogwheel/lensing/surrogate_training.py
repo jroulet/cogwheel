@@ -62,9 +62,8 @@ from cogwheel.lensing.surrogate import (
     _REFUSAL_ERRORS, _log_w_grid, _log_reach_gamma_axis,
     _caustic_reach as _scalar_caustic_reach, _from_caustic_fixed,
     _from_lobe_fixed, _lobe_boundary_radius, LobeInteriorChart,
-    InteriorWedgeChart, _from_wedge_fixed,
+    LobeExteriorChart, InteriorWedgeChart, _from_wedge_fixed,
     _wedge_theta_waist, _wedge_cusp_axis_map, _lobe_cusp_axis_map,
-    _deltoid_cusp_axis_map,
     _uniform_axis, CarrierDiscontinuityError)
 
 #: Engine refusals treated conservatively as "do not serve here" during
@@ -2534,6 +2533,46 @@ class _SaddleLobeAdmission:
                 return False
         return True
 
+    def admits_exterior(self, center: tuple[float, float],
+                        half: tuple[float, float]) -> bool:
+        """Whether every probe of the lobe-local tile is a served lobe
+        EXTERIOR (WP2).
+
+        The lobe-exterior counterpart of `admits`.  The tile is admitted iff
+        each of its nine probes lies OUTSIDE the lobe caustic for every band
+        gamma (winding number ~ 0 for every band loop -- the inverse of the
+        interior membership test) AND is at least ``eta_max`` from the nearest
+        caustic point (the SAME tube-shell exclusion `admits` applies, centred
+        on the actual cusp vertices, which are members of ``caustic_cloud``).
+        The inter-lobe corridor test is DROPPED: the canonical ``+y1`` lobe's
+        exterior chart serves the whole inter-lobe corridor (the D2 reflection
+        fold maps any corridor source into the ``+y1`` half-plane), so no
+        corridor carve-out is applied here.  Any probe that is inside the lobe
+        for some band gamma, or inside the ``eta_max`` tube shell, rejects the
+        tile.
+        """
+        if self.reach <= 0.0 or self.caustic_cloud.shape[0] == 0 \
+                or not self.loops:
+            return False
+        for probe in self._probe_points(center, half):
+            for loop in self.loops:
+                if loop.shape[0] < 3:
+                    return False
+                # Exterior membership: reject the tile if the probe is INSIDE
+                # the lobe (|winding| ~ 1) for ANY band gamma -- the inverse of
+                # the interior admission's "inside for EVERY loop" test.  A
+                # near-boundary probe that the non-convex deltoid still encloses
+                # (rho_lobe just above 1 in a concave sector) is correctly
+                # excluded here.
+                if abs(_winding_number(loop - probe)) >= 0.5:
+                    return False
+            nearest = float(np.hypot(
+                self.caustic_cloud[:, 0] - probe[0],
+                self.caustic_cloud[:, 1] - probe[1]).min())
+            if nearest < self.eta_max:
+                return False
+        return True
+
 
 def _saddle_lobe_admissions(band: tuple[float, float],
                             config: 'TrainingConfig',
@@ -2628,6 +2667,42 @@ def _lobe_interior_tiles(admission: _SaddleLobeAdmission,
             center = (float(rho_c), float(theta_c))
             half = (float(half_rho), float(half_theta))
             if admission.admits(center, half):
+                tiles.append((center, half, i, j))
+    return tiles
+
+
+def _lobe_exterior_tiles(admission: _SaddleLobeAdmission,
+                         cusp_angles: list[float], n_per_side: int,
+                         rho_outer: float
+                         ) -> list[tuple[tuple[float, float],
+                                         tuple[float, float], int, int]]:
+    """Cusp-aligned lobe-local EXTERIOR tiles of one deltoid lobe (WP2).
+
+    The lobe-exterior counterpart of `_lobe_interior_tiles`: lays
+    ``n_per_side`` uniform ``rho_lobe`` rows over the EXTERIOR shell
+    ``rho_lobe in (1, rho_outer]`` (deltoid boundary out to the scalar-reach
+    far-zone bound) and, on the lobe-local polar angle, the SAME cusp-aligned
+    sub-tiles as the interior tiler (`_cusp_aligned_theta_tiles`) so no tile
+    straddles one of the lobe's three cusp rays or the lobe-local ``+-pi``
+    seam.  A tile is ADMITTED iff `_SaddleLobeAdmission.admits_exterior` --
+    outside the lobe by winding for every band gamma and clear of the
+    ``eta_max`` tube shell (NO inter-lobe corridor test).  Returns
+    ``((rho_lobe_center, theta_local_center), (half_rho, half_theta), i, j)``
+    for each admitted tile in row-major order (deterministic); ``i`` indexes
+    the ``rho_lobe`` row, ``j`` the cusp-aligned lobe-local angular sub-tile.
+    """
+    if admission.reach <= 0.0 or rho_outer <= 1.0:
+        return []
+    half_rho = 0.5 * (rho_outer - 1.0) / n_per_side
+    rho_centers = [1.0 + half_rho * (2 * k + 1) for k in range(n_per_side)]
+    theta_tiles = _cusp_aligned_theta_tiles(cusp_angles, n_per_side,
+                                            theta_range=(0.0, math.pi))
+    tiles: list[tuple[tuple[float, float], tuple[float, float], int, int]] = []
+    for i, rho_c in enumerate(rho_centers):
+        for j, (theta_c, half_theta) in enumerate(theta_tiles):
+            center = (float(rho_c), float(theta_c))
+            half = (float(half_rho), float(half_theta))
+            if admission.admits_exterior(center, half):
                 tiles.append((center, half, i, j))
     return tiles
 
@@ -3002,42 +3077,14 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
             _uniform_axis(theta_c_range, config.n_rho, 'theta_c'),
             theta_fine, u_fine)
     else:
-        # Macro-saddle exterior (parity == -1): probe for deltoid cusp
-        # rays inside the tile's theta_c range.  When a cusp ray falls
-        # inside and the tile is entirely on one side, build the
-        # cusp-adapted u = d**(2/3) map via _deltoid_cusp_axis_map.
-        # When multiple cusp rays are in range, pick the closest to the
-        # tile centre (largest divergence).  When none, or the tile
-        # straddles a cusp, fall back to raw-theta (None).
-        gamma_mid = float(np.median(np.exp(np.linspace(
-            np.log(gamma_band[0]), np.log(gamma_band[1]), n_gamma))))
-        cusp_angles = _deltoid_cusp_source_angles(
-            gamma_mid, config.n_caustic_samples)
-        theta_lo, theta_hi = theta_c_range
-        candidates: list[float] = [
-            a for a in cusp_angles if theta_lo <= a <= theta_hi]
-        if candidates:
-            nearest = min(candidates,
-                          key=lambda a: abs(a - theta_c_center))
-            if nearest == theta_lo or nearest == theta_hi:
-                result = _deltoid_cusp_axis_map(
-                    theta_lo, theta_hi, nearest)
-                if result is not None:
-                    theta_fine, u_fine = result
-                    theta_to_u = np.vstack([theta_fine, u_fine])
-                    u_grid = np.interp(
-                        _uniform_axis(theta_c_range, config.n_rho,
-                                      'theta_c'),
-                        theta_fine, u_fine)
-                else:
-                    theta_to_u = None
-                    u_grid = None
-            else:
-                theta_to_u = None
-                u_grid = None
-        else:
-            theta_to_u = None
-            u_grid = None
+        # Macro-saddle exterior (parity == -1) no longer flows through
+        # `_build_farfield_chart`: WP2 routes it through the lobe-local
+        # exterior tiler (`_lobe_exterior_tiles` / `_build_lobe_exterior_chart`)
+        # which owns its own cusp-adapted u = d**(2/3) map via
+        # `_lobe_cusp_axis_map`.  Any residual non-positive-parity caller here
+        # falls back to the raw-theta angular grid.
+        theta_to_u = None
+        u_grid = None
     try:
         single = LensAmplificationSurrogate.from_engine(
             gamma_range=gamma_band, rho_range=rho_range,
@@ -3125,6 +3172,76 @@ def _build_lobe_chart(*, gamma_band: tuple[float, float], parity: int,
     rho_lobe_range = (rho_lobe_c - half_rho, rho_lobe_c + half_rho)
     theta_local_range = (theta_local_c - half_theta, theta_local_c + half_theta)
     single = LensAmplificationSurrogate.from_lobe_engine(
+        admission=lobe, gamma_range=gamma_band,
+        rho_lobe_range=rho_lobe_range, theta_local_range=theta_local_range,
+        w_range=w_range, n_gamma=config.n_gamma, n_rho=config.n_rho,
+        n_theta=config.n_theta_c, w_nodes_per_decade=nodes_per_decade,
+        cusp_angle=cusp_angle, cusp_side=cusp_side)
+    chart = single.charts[0]
+    refused = int(chart.refused_points.shape[0])
+    return chart, n_points, refused
+
+
+def _build_lobe_exterior_chart(*, gamma_band: tuple[float, float],
+                               parity: int, lobe: '_SaddleLobeAdmission',
+                               box_center: tuple[float, float],
+                               half: tuple[float, float],
+                               w_range: tuple[float, float],
+                               config: TrainingConfig,
+                               w_nodes_per_decade: int | None = None,
+                               cusp_angle: float | None = None,
+                               cusp_side: str | None = None
+                               ) -> tuple['LobeExteriorChart', int, int]:
+    """Build one macro-saddle lobe-EXTERIOR chart in lobe-local coordinates.
+
+    The lobe-exterior counterpart of `_build_lobe_chart` (WP2): ``box_center``
+    is ``(rho_lobe_center, theta_local_center)`` and ``half`` is
+    ``(half_rho, half_theta)`` with ``rho_lobe`` in the EXTERIOR shell
+    ``(1, rho_outer]``.  The chart is trained via
+    `LensAmplificationSurrogate.from_lobe_exterior_engine`, which maps each
+    ``(gamma, rho_lobe, theta_local)`` node to a physical eigenframe source
+    through the lobe frame (`_from_lobe_fixed`) and stores the
+    ``FARFIELD_KERNEL_SUM`` far-field label on a `LobeExteriorChart`
+    (``image_count`` = 2, ``parity`` = -1).  The chart drops the inter-lobe
+    corridor frame -- the canonical ``+y1`` lobe's exterior serves the whole
+    corridor via the D2 fold.
+
+    Only macro-saddle (``parity != 1``) bands have lobe exteriors; a
+    positive-parity call is a programming error.  ``w_nodes_per_decade``
+    overrides the ``w``-axis node density for THIS chart only; ``None`` falls
+    back to ``config.w_nodes_per_decade``.  ``cusp_angle`` / ``cusp_side``
+    activate the cusp-adapted ``u = d**(2/3)`` angular spline-axis map when the
+    tile records lobe cusp angles (`_lobe_nearest_cusp`); both ``None`` uses
+    the raw-theta uniform-grid fallback.
+
+    Returns
+    -------
+    tuple[LobeExteriorChart, int, int]
+        The built `LobeExteriorChart` (unwrapped from the single-chart
+        surrogate), the engine node count, and the number of refused nodes.
+
+    Raises
+    ------
+    ValueError
+        If ``parity == 1`` (positive-parity bands have no lobe exterior).
+    CarrierDiscontinuityError
+        If the tile straddles a critical-basin flip (caller records the gap).
+    """
+    if parity == 1:
+        raise ValueError(
+            'lobe-exterior charts exist only for macro-saddle (parity != 1) '
+            f'bands; got parity={parity}.')
+    nodes_per_decade = (config.w_nodes_per_decade
+                        if w_nodes_per_decade is None
+                        else int(w_nodes_per_decade))
+    n_points = config.n_gamma * config.n_rho * config.n_theta_c
+    _budget_check(n_points, config.engine_budget, 'lobe_exterior')
+    rho_lobe_c, theta_local_c = box_center
+    half_rho, half_theta = half
+    rho_lobe_range = (rho_lobe_c - half_rho, rho_lobe_c + half_rho)
+    theta_local_range = (theta_local_c - half_theta,
+                         theta_local_c + half_theta)
+    single = LensAmplificationSurrogate.from_lobe_exterior_engine(
         admission=lobe, gamma_range=gamma_band,
         rho_lobe_range=rho_lobe_range, theta_local_range=theta_local_range,
         w_range=w_range, n_gamma=config.n_gamma, n_rho=config.n_rho,
@@ -3764,7 +3881,8 @@ def _self_estimate(
     the caller forgot to gate it.  A smoke/probe config stays under the
     budget; a production config (many w nodes, full region set) exceeds it.
     """
-    regions = regions or ("tube", "exterior", "wedge_interior", "lobe_interior")
+    regions = regions or (
+        "tube", "exterior", "wedge_interior", "lobe_interior", "lobe_exterior")
     w_nodes = int(config.w_nodes_per_decade * 2.0)
     # Per-region engine-eval count at the config's grid.  A single-region
     # probe pays only that region's grid, not the full 4-D union.
@@ -3773,6 +3891,7 @@ def _self_estimate(
         "exterior": config.n_rho * config.n_theta_c,
         "wedge_interior": 1,
         "lobe_interior": 1,
+        "lobe_exterior": 1,
     }
     n_evals = sum(per_region[r] for r in regions) * config.n_gamma * w_nodes
     # Tiling/subdivision expands the nominal grid; be conservative.
@@ -4637,7 +4756,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                        regions: tuple[str, ...] | None = None) -> None:
     """Build the tube + far-field charts of one topology-stable gamma band."""
     if regions is None:
-        regions = ('tube', 'exterior', 'wedge_interior', 'lobe_interior')
+        regions = ('tube', 'exterior', 'wedge_interior', 'lobe_interior',
+                   'lobe_exterior')
     gamma_grid = _log_reach_gamma_axis(band, config.n_gamma, f'gamma_{label}')
 
     # -- Tube charts (per fold arc, resumable) --
@@ -4777,7 +4897,14 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # certification stays conservative.  Macro saddles keep the scalar
     # ``_farfield_tiles(exclusion_rho, ...)`` path unchanged (parity != 1).
     exterior_admission = None
-    if 'exterior' in regions:
+    # WP2 (deltoid exterior fix): the origin-polar saddle-exterior tiler is
+    # RETIRED -- macro saddles (parity != 1) now chart their exterior shell in
+    # lobe-local ``(rho_lobe, theta_local)`` coordinates (see the
+    # ``'lobe_exterior'`` packing block below), so this origin-centred
+    # far-field-window machinery is POSITIVE-PARITY ONLY.  For parity != 1 the
+    # block is skipped and ``exterior_tiles`` / ``region_exclusion_rho`` fall to
+    # the ``else`` default; the saddle exterior is packed separately.
+    if 'exterior' in regions and parity == 1:
         exterior_tiles: list | None = None
         ghost_drop_count = [0]
         if parity == 1:
@@ -4799,13 +4926,6 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             region_exclusion_rho = (
                 min(center[0] - half[0] for center, half, _, _ in exterior_tiles)
                 if exterior_tiles else exclusion_rho)
-        else:
-            region_exclusion_rho = exclusion_rho
-            # Deltoid cusp exclusion for saddle exterior: cusp-aligned
-            # cusp_angles in D₂-folded [0, π/2] passed to _farfield_tiles
-            # so near-cusp tiles are dropped from the scalar-reach tiling.
-            cusp_angles = _deltoid_cusp_source_angles(
-                gamma_mid, config.n_caustic_samples)
         # caustic-relative inner edge (WP1 defect 1).  Derive it from the NARROWED
         # served region ``region_exclusion_rho`` -- NOT the pre-narrowing outer
         # rho-band -- so the certified-ppGO trim below reads ``w_trust`` /
@@ -4830,14 +4950,10 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         # in exactly ONE place (``_scalar_caustic_reach == caustic_geometry(gamma,
         # 0)[0]`` bit-exact, so the saddle result is byte-identical to the former
         # hand-rolled ``physical_exclusion_radius / reach_scalar``).
-        if parity == 1:
-            ppgo_exclusion_rho = caustic_rho(
-                gamma_mid,
-                region_exclusion_rho - 1.0 + coordinate_radius_min,
-                kappa=0.0)
-        else:
-            ppgo_exclusion_rho = caustic_rho(
-                gamma_mid, physical_exclusion_radius, kappa=0.0)
+        ppgo_exclusion_rho = caustic_rho(
+            gamma_mid,
+            region_exclusion_rho - 1.0 + coordinate_radius_min,
+            kappa=0.0)
         # -- Exterior far-field: ONE fixed [w_floor, w_trust] window (S1-3) --
         # Build S1-3 replaces the per-mass-stratum ``w`` partitioning of the
         # exterior with a SINGLE fixed window ``[w_floor(region),
@@ -4901,22 +5017,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 # containment bookkeeping.
                 contained, containment_report = _farfield_window_contains_draws(
                     box, window)
-                if parity == 1:
-                    # Per-column admitted set (`_farfield_exterior_tiles`); every
-                    # tile's inner edge already clears the caustic + tube shell and
-                    # lies inside the prior box for its direction.
-                    tiles = exterior_tiles
-                else:
-                    # Macro saddle: scalar-reach exterior tiler.
-                    # Near-cusp tiles are admitted (d_exclude=0.0) and
-                    # flagged force_minus_ghost=True below — the
-                    # MINUS_GHOST label resolves the near-cusp
-                    # oscillation that the KERNEL_SUM label cannot.
-                    tiles = _farfield_tiles(
-                        exclusion_rho, rho_outer_region,
-                        config.n_farfield_tiles_per_side,
-                        cusp_angles=cusp_angles, gamma=gamma_mid,
-                        gamma_band=band, d_exclude=0.0)
+                # Per-column admitted set (`_farfield_exterior_tiles`); every
+                # tile's inner edge already clears the caustic + tube shell and
+                # lies inside the prior box for its direction.  (Positive parity
+                # only -- the saddle exterior is charted lobe-locally below.)
+                tiles = exterior_tiles
                 # Per-window node reprovision (w-axis ONLY): probe the innermost
                 # tile (largest w_floor, hardest fit) for the minimal w-node
                 # density N_rec still clearing the eps bar; the rho/theta_c tiling
@@ -4937,12 +5042,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     fold_carrier = _needs_fold_carrier(
                         gamma=gamma_mid, center=center, half=half,
                         gamma_band=band)
-                    force_minus_ghost: bool = False
-                    if parity == -1 and cusp_angles:
-                        force_minus_ghost = _exclude_near_cusp(
-                            gamma_mid, center, half, cusp_angles,
-                            d_exclude=_CUSP_EXCLUSION_DISTANCE,
-                            gamma_band=band)
+                    # Positive-parity exterior tiles never use the MINUS_GHOST
+                    # label (that was the retired saddle origin-polar path); the
+                    # key is packed False so the far-field builder's
+                    # ``force_minus_ghost`` consumer stays byte-identical.
+                    force_minus_ghost = False
                     admitted.append({
                         'si': 0, 'i': i, 'j': j, 'center': center, 'half': half,
                         'm_lo': m_lo_region, 'm_hi': m_hi_region,
@@ -4966,6 +5070,83 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     else:
         exterior_tiles = None
         region_exclusion_rho = exclusion_rho
+
+    # -- Macro-saddle lobe-EXTERIOR tiles (WP2, deltoid exterior fix) --
+    # The origin-polar saddle exterior is topologically wrong for the two
+    # disjoint off-origin deltoid lobes (the inter-lobe corridor has NEGATIVE
+    # origin-relative rho).  For ``gamma > 1`` the exterior shell is instead
+    # charted in the SAME lobe-local ``(rho_lobe, theta_local)`` frame as the
+    # lobe interior, but over the EXTERIOR band ``rho_lobe in (1, rho_outer]``
+    # (`_lobe_exterior_tiles`), admitted by `_SaddleLobeAdmission.admits_exterior`
+    # (outside the lobe by winding, clear of the ``eta_max`` tube shell, NO
+    # inter-lobe corridor test).  Only the canonical ``+y1`` lobe is charted
+    # (`_SADDLE_LOBE_CENTERS[1:]``, ``si = 0``): the D2 reflection fold maps any
+    # source -- including the whole inter-lobe corridor -- into the ``+y1``
+    # half-plane, exactly as the lobe-interior branch does.  ``rho_outer`` is
+    # the scalar-reach far-zone bound ``rho_outer_region`` already computed for
+    # the retired origin-polar tiler (no new coverage constant).  Tiles carry
+    # the ``FARFIELD_KERNEL_SUM`` label (2-image exterior) via
+    # ``_build_lobe_exterior_chart`` in the build loop below.
+    # Shared saddle lobe admissions (INS-1-002): the lobe_exterior packing
+    # and lobe_interior sites both consume ``_saddle_lobe_admissions`` with the
+    # SAME eta_max (the band's widest tube shell, ``max_eta_max``).  That call
+    # runs 2 lobes x 3 band gammas of caustic-point + winding-loop sweeps, so
+    # compute it ONCE per band and reuse it at both sites rather than twice.
+    saddle_lobe_admissions = (
+        _saddle_lobe_admissions(band, config, eta_max=max_eta_max)
+        if parity != 1 and ({'lobe_interior', 'lobe_exterior'} & set(regions))
+        else None)
+    lobe_exterior_records: list[dict] = []
+    lobe_exterior_admitted = 0
+    if 'lobe_exterior' in regions and parity != 1:
+        ext_lobe_admissions = saddle_lobe_admissions
+        si = 0
+        for lens_center, lobe in zip(_SADDLE_LOBE_CENTERS[1:],
+                                     ext_lobe_admissions[1:]):
+            lobe_cusps = _lobe_cusp_source_angles(
+                gamma_mid, lens_center, lobe.centroid,
+                config.n_caustic_samples)
+            lobe_ext_tiles = _lobe_exterior_tiles(
+                lobe, lobe_cusps, config.n_farfield_tiles_per_side,
+                rho_outer_region)
+            lobe_exterior_admitted += len(lobe_ext_tiles)
+            centroid_mag = float(np.hypot(lobe.centroid[0], lobe.centroid[1]))
+            r_deltoid_max = float(np.max(lobe.boundary_r))
+            for center, half, i, j in lobe_ext_tiles:
+                rho_lobe_max = float(center[0]) + float(half[0])
+                # Union spatial extent for the frequency cap: the farthest
+                # physical source magnitude reachable inside this lobe-local
+                # exterior tile (centroid offset + outer boundary radius scaled
+                # by the tile's outer ``rho_lobe``).
+                y_max_tile = centroid_mag + rho_lobe_max * r_deltoid_max
+                admitted.append({
+                    'si': si, 'i': i, 'j': j,
+                    'center': center, 'half': half,
+                    # Mass-stratum bounds are REQUIRED of every tile: the build
+                    # loop reads tile['m_lo']/tile['m_hi'] by hard index (not
+                    # .get), so omitting them raises KeyError at chart
+                    # construction rather than degrading. Every sibling tiler
+                    # sets them from the same region bounds.
+                    'm_lo': m_lo_region, 'm_hi': m_hi_region,
+                    'w_range': _capped_w_range(box, parity, y_max_tile),
+                    'region': 'lobe_exterior', 'lobe': lobe,
+                    'lobe_cusps': lobe_cusps})
+            lobe_exterior_records.append({
+                'lens_center': round(float(lens_center), 6),
+                'centroid': [round(float(lobe.centroid[0]), 6),
+                             round(float(lobe.centroid[1]), 6)],
+                'reach': round(float(lobe.reach), 6),
+                'rho_outer': round(float(rho_outer_region), 6),
+                'n_cusp_rays': len(lobe_cusps),
+                'cusp_angles': [round(float(a), 6) for a in lobe_cusps],
+                'admitted_tiles': len(lobe_ext_tiles)})
+        chart_reports.append({
+            'name': f'chart_{label}_lobe_exterior_region',
+            'parity': parity, 'lobe_exterior_summary': True,
+            'rho_outer': round(float(rho_outer_region), 6),
+            'lobe_exterior_admitted_tiles': int(lobe_exterior_admitted),
+            'served': lobe_exterior_admitted > 0,
+            'lobes': lobe_exterior_records})
     # -- Interior (4-image) far-field tiles (frozen WP6, S2-1) --
     # The astroid interior is a single 4-image region enclosing the origin, so
     # an interior tile carries the SAME E_ff / far-field label (the subtraction
@@ -5011,11 +5192,9 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             # ``(rho_lobe, theta_local)`` coordinates and the persisted lobe frame
             # (centroid, boundary) maps a served node back to its true physical
             # source, so the lobe interiors are now served (not just recorded).
-            # Saddle eta_max for lobe corridor: use the band's max eta_max
-            # (widest tube shell among all fold arcs in this band).
-            saddle_eta_max = max_eta_max
-            lobe_admissions = _saddle_lobe_admissions(band, config,
-                                                      eta_max=saddle_eta_max)
+            # Saddle lobe admissions (widest tube shell, band's max eta_max):
+            # reuse the once-computed shared result (INS-1-002).
+            lobe_admissions = saddle_lobe_admissions
             # WP2: chart only the canonical +y1 lobe (lens_center=π).  The
             # D2 reflection fold (|y1|, |y2|) in `_lobe_serves` /
             # `_evaluate_chart` maps any source to the positive-y1
@@ -5410,6 +5589,85 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     charts=charts, chart_reports=chart_reports)
                 chart_report['subdivision'] = subdivision
                 chart_report['ladder_served_gap'] = subdivision['packed'] == 0
+                continue
+            charts.append(chart)
+            chart_reports.append(chart_report)
+            continue
+
+        if region == 'lobe_exterior':
+            # Macro-saddle lobe-EXTERIOR tile (WP2): trained in lobe-local
+            # ``(rho_lobe, theta_local)`` coordinates over the exterior shell
+            # ``rho_lobe in (1, rho_outer]`` via ``from_lobe_exterior_engine``
+            # on the tile's owning ``_SaddleLobeAdmission`` (carried on the
+            # tile), storing the ``FARFIELD_KERNEL_SUM`` 2-image far-field
+            # envelope on a ``LobeExteriorChart``.  Gated on the FAR-FIELD eps
+            # bar (the exterior label is the far-field kernel sum, not the
+            # interior SACR-C envelope); the held-out probe maps through the
+            # LOBE frame (`_lobe_heldout_samples`), and ``rho_lobe > 1`` is
+            # in-domain for `_from_lobe_fixed` (no upper clamp).  A gated or
+            # carrier-flipped lobe-exterior tile is a ladder-served gap: the
+            # lobe subdivider (`_subdivide_lobe_tile`) rebuilds INTERIOR charts
+            # only, so there is no exterior re-subdivision path -- the tile is
+            # recorded loudly for the serving ladder, never numerically
+            # quadratured.
+            lobe = tile['lobe']
+            lobe_ext_tag = f'chart_{label}_s{si}_fflobeext_{i}_{j}'
+            lobe_ext_path = outdir / f'{lobe_ext_tag}.npz'
+
+            def build_lobe_ext(band=band, center=center, half=half,
+                               w_range=w_range, si=si, m_lo=m_lo, m_hi=m_hi,
+                               region=region, lobe=lobe,
+                               eff_w_nodes=eff_w_nodes,
+                               cusp_angle=cusp_angle, cusp_side=cusp_side,
+                               w_nodes=eff_w_nodes):
+                chart, calls, refused = _build_lobe_exterior_chart(
+                    gamma_band=band, parity=parity, lobe=lobe,
+                    box_center=center, half=half, w_range=w_range,
+                    config=config, w_nodes_per_decade=w_nodes,
+                    cusp_angle=cusp_angle, cusp_side=cusp_side)
+                samples = _lobe_heldout_samples(
+                    band, center, half, config, rng, lobe=lobe)
+                eps = _heldout_eps(chart, samples,
+                                   {'schema': 'heldout-probe'})
+                return chart, calls, refused, {
+                    'kind': 'farfield', 'region': region,
+                    'image_count': chart.image_count,
+                    'stratum_index': si,
+                    'stratum_mass_range': [round(m_lo, 3), round(m_hi, 3)],
+                    'rho_theta_box': [list(center), list(half)],
+                    'w_range': [round(w_range[0], 6), round(w_range[1], 6)],
+                    'node_counts': {'n_gamma': config.n_gamma,
+                                    'n_rho': config.n_rho,
+                                    'n_theta_c': config.n_theta_c,
+                                    'n_w_per_decade': int(eff_w_nodes)},
+                    'heldout_eps': eps}
+
+            try:
+                chart, report, reused = _load_or_build(
+                    lobe_ext_path, build_lobe_ext,
+                    {'schema': 'build8c-chart', 'parity': parity})
+            except CarrierDiscontinuityError as exc:
+                # The tile straddles a critical-basin flip; the lobe subdivider
+                # rebuilds interior charts only, so record a ladder-served gap.
+                chart_reports.append({
+                    'name': lobe_ext_tag, 'parity': parity,
+                    'file': str(lobe_ext_path), 'region': region,
+                    'carrier_flip': True, 'carrier_flip_detail': str(exc),
+                    'subdivided': False, 'ladder_served_gap': True})
+                continue
+            gated, gate_reason = _gate_chart('farfield', report, config)
+            chart_report = {'name': lobe_ext_tag, 'parity': parity,
+                            'file': str(lobe_ext_path), 'reused': reused,
+                            **report}
+            if gated:
+                # No exterior lobe subdivider exists (the lobe subdivider is
+                # interior-only); a gated lobe-exterior tile is a ladder-served
+                # gap, recorded loudly.
+                chart_report['gated'] = True
+                chart_report['gate_reason'] = gate_reason
+                chart_report['subdivided'] = False
+                chart_report['ladder_served_gap'] = True
+                chart_reports.append(chart_report)
                 continue
             charts.append(chart)
             chart_reports.append(chart_report)

@@ -20,6 +20,8 @@ from cogwheel.lensing.chang_refsdal.geometry import (
     LensDomainError, r_caustic, caustic_curvature_radius,
     nearest_caustic_point)
 from cogwheel.lensing.ppgo_map import caustic_rho, caustic_geometry
+from cogwheel.lensing.surrogate import _to_lobe_fixed
+from cogwheel.lensing import surrogate_training as _st
 
 # ---- Architecture constants (mirrored from surrogate.py) ----
 _DD_PRODUCT_MARGIN = 58.0
@@ -33,6 +35,104 @@ _ASTROID_CUSP_ANGLES = (0.0, math.pi / 2, -math.pi / 2, math.pi)
 # cusp window is ~0.25 rad; after subtracting _CUSP_ARM_COVERAGE the
 # residual is ~0.18, but the full window defines what the arm can cover.
 _TYPICAL_CUSP_HALF_WINDOW = 0.25  # rad, approximate tube cusp window
+
+# ---- Macro-saddle lobe coverage (mirrored from surrogate_training.py) ----
+# Largest source magnitude the census prior can draw (source box corner,
+# 3*sqrt(2)); the census is mass-free, so this stands in for the production
+# per-stratum ``y_outer_region = _source_scale(m_lo)`` when forming the served
+# exterior band ``rho_outer = 1 + y_outer - coordinate_radius_min``.
+_SOURCE_BOX_CORNER = 3.0 * math.sqrt(2.0)
+_SADDLE_PARITY = -1
+# Gamma-band grid over the saddle regime (gamma > 1).  One canonical +y1 lobe
+# admission is built per band and cached; band edges are nudged above the
+# gamma = 1 parity boundary, where the deltoid geometry is singular.  The band
+# width mirrors production's near-boundary refinement
+# (``gamma_refine_near_one_width = 0.05``): a wider band moves the lobe too far
+# between its three gammas, so no interior point stays inside all three winding
+# loops and the lobe-interior admission collapses to empty (a width-0.2 band
+# admits zero interior probes; 0.05 recovers the interior family).
+_SADDLE_BAND_WIDTH = 0.05
+_SADDLE_BAND_FLOOR = 1.0 + 1e-3
+_SADDLE_CONFIG = _st.TrainingConfig()
+# Cache: band index -> (canonical +y1 lobe admission or None, rho_outer).
+_SADDLE_ADMISSION_CACHE: dict[int, tuple] = {}
+
+
+def _saddle_lobe_admission(gamma: float) -> tuple:
+    """Canonical +y1 lobe admission and served exterior rho for a saddle gamma.
+
+    Mirrors the production saddle packing path
+    (``surrogate_training._train_band_charts``): builds the band caustic
+    structure, the tube-shell half-width
+    ``max_eta_max = f_max * max(arc_r_min)``, the two per-lobe admissions, and
+    the additive outer edge ``rho_outer = 1 + y_outer - coordinate_radius_min``.
+    The canonical ``+y1`` lobe is admission index 1 (lens centre ``pi``),
+    matching the production chart that serves the whole D2-folded first
+    quadrant.  Results are cached per coarse gamma band (only a few bands span
+    the saddle regime), so the caustic clouds are built at most once per band.
+
+    Returns ``(admission, rho_outer)`` for the band containing ``gamma`` or
+    ``(None, None)`` if the band geometry is degenerate.
+    """
+    band_index = int((gamma - 1.0) // _SADDLE_BAND_WIDTH)
+    if band_index in _SADDLE_ADMISSION_CACHE:
+        return _SADDLE_ADMISSION_CACHE[band_index]
+    band_lo = max(1.0 + band_index * _SADDLE_BAND_WIDTH, _SADDLE_BAND_FLOOR)
+    band_hi = 1.0 + (band_index + 1) * _SADDLE_BAND_WIDTH
+    band = (band_lo, band_hi)
+    cfg = _SADDLE_CONFIG
+    try:
+        structure = _st.band_caustic_structure(
+            band, _SADDLE_PARITY, n_samples=cfg.n_caustic_samples)
+        arc_r_min = [
+            _st._min_curvature_radius(band, arc, cfg.n_caustic_samples)
+            for arc in structure.arcs[:cfg.max_tube_arcs]]
+        max_eta_max = (cfg.f_max * max(arc_r_min)
+                       if arc_r_min else cfg.f_max * 0.05)
+        admissions = _st._saddle_lobe_admissions(
+            band, cfg, eta_max=max_eta_max)
+        coordinate_radius_min, _ = _st._coordinate_radius_bounds(
+            band, _SADDLE_PARITY)
+        rho_outer = 1.0 + _SOURCE_BOX_CORNER - coordinate_radius_min
+        result: tuple = (admissions[1], rho_outer)
+    except (ValueError, LensDomainError, ZeroDivisionError, IndexError):
+        result = (None, None)
+    _SADDLE_ADMISSION_CACHE[band_index] = result
+    return result
+
+
+def _classify_saddle(gamma: float, y_abs: float, theta: float) -> str:
+    """Serve category for a macro-saddle scalar-interior draw (rho <= 1).
+
+    Mirrors the production lobe serve gates: fold the source into the first
+    quadrant (D2 reflection), map it to the canonical +y1 lobe's lobe-local
+    ``(rho_lobe, theta_local)``, and admit it as ``lobe_interior`` when it is
+    inside the lobe caustic (``rho_lobe < 1`` and ``admits``) or as
+    ``lobe_exterior`` when it is in the served exterior band
+    (``rho_lobe in (1, rho_outer]`` and ``admits_exterior``).  Genuinely
+    uncovered draws fall through to ``exact_engine``.
+    """
+    lobe, rho_outer = _saddle_lobe_admission(gamma)
+    if lobe is None:
+        return 'exact_engine'
+    y1 = y_abs * math.cos(theta)
+    y2 = y_abs * math.sin(theta)
+    # D2 reflection fold: production charts only the canonical +y1 lobe and
+    # maps any quadrant into the first via abs() on both eigenframe axes.
+    y1_fold, y2_fold = abs(y1), abs(y2)
+    try:
+        rho_lobe, theta_local = _to_lobe_fixed(
+            lobe.centroid, lobe.boundary_theta, lobe.boundary_r,
+            y1_fold, y2_fold)
+    except ValueError:
+        return 'exact_engine'  # degenerate query exactly at the centroid
+    center = (rho_lobe, theta_local)
+    half = (0.0, 0.0)  # single-point structural probe (no tile extent)
+    if rho_lobe < 1.0:
+        return 'lobe_interior' if lobe.admits(center, half) else 'exact_engine'
+    if rho_lobe <= rho_outer and lobe.admits_exterior(center, half):
+        return 'lobe_exterior'
+    return 'exact_engine'
 
 
 def _draw_prior(n: int, rng: np.random.Generator):
@@ -142,6 +242,14 @@ def classify_draw(gamma: float, y_abs: float, theta: float, w: float
     if rho > 1.0:
         return 'born'
 
+    # (a') Macro-saddle interior (gamma >= 1): the two deltoid lobes are
+    # served by the lobe-interior and lobe-exterior charts, NOT the
+    # origin-centred astroid paths below.  Route via the same lobe-local map
+    # (`_to_lobe_fixed`) and structural admissions (`admits` /
+    # `admits_exterior`) the production serve path uses.
+    if gamma >= 1.0:
+        return _classify_saddle(gamma, y_abs, theta)
+
     # Interior path (rho <= 1):
     # The interior is covered by the InteriorWedgeChart up to the DD cap,
     # and by fold-ppGO above it.
@@ -149,15 +257,10 @@ def classify_draw(gamma: float, y_abs: float, theta: float, w: float
     # (b) Interior, below DD cap → InteriorWedgeChart serves.
     dd_cap = _dd_w_cap(gamma, y_abs)
     if w < dd_cap:
-        # Additional check: the wedge chart requires gamma < 1 (positive
-        # parity) and the source must be inside the astroid (rho < 1).
-        if gamma < 1.0:
-            return 'chart_interior'
-        else:
-            # Macro-saddle interior: the deltoid lobe interior.
-            # Currently the wedge chart covers positive parity only.
-            # Saddle interior is a structural gap.
-            return 'exact_engine'
+        # Positive parity (gamma < 1): the source is inside the astroid and
+        # the InteriorWedgeChart serves it.  (Macro-saddle interior draws are
+        # already routed to the lobe charts above.)
+        return 'chart_interior'
 
     # (c) Interior, above DD cap: fold-ppGO handoff if xi_min >= 4.
     # The xi_min gate requires w * delta_tau to be large enough.
@@ -295,8 +398,9 @@ def main() -> None:
 
     # Define display order.
     display_order = [
-        'born', 'chart_interior', 'ppgo_fold', 'cusp_arm',
-        'chart_tube', 'chart_farfield', 'exact_engine'
+        'born', 'chart_interior', 'lobe_interior', 'lobe_exterior',
+        'ppgo_fold', 'cusp_arm', 'chart_tube', 'chart_farfield',
+        'exact_engine'
     ]
     served_count = 0
     for cat in display_order:
@@ -336,7 +440,7 @@ def main() -> None:
             dd_cap = _dd_w_cap(g, y)
             note = ""
             if g >= 1.0:
-                note = "saddle interior (gamma>=1)"
+                note = "saddle lobe gap (gamma>=1)"
             elif rho > 0.95:
                 note = f"near-caustic, w>{dd_cap:.1f}(DD), rho={rho:.3f}"
             elif ww >= dd_cap:
@@ -353,7 +457,7 @@ def main() -> None:
         other = len(exact_engine_draws) - saddle_interior - near_caustic
         print()
         print("  Gap breakdown:")
-        print(f"    Saddle interior (gamma >= 1):      {saddle_interior}")
+        print(f"    Saddle lobe gap (gamma >= 1):      {saddle_interior}")
         print(f"    Near-caustic (rho >= 0.95, high w): {near_caustic}")
         print(f"    Other:                              {other}")
 

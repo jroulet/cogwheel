@@ -2729,5 +2729,963 @@ class OpenCuspEdgeProbeTestCase(LobeTestCase):
             f'open-cusp edge error {error:.3e} > {_OPEN_CUSP_TOL}')
 
 
+# ===========================================================================
+# EXTERIOR LOBE COORDINATE COVERAGE (SHARD A -- WP1 LobeExteriorChart).
+#
+# The macro-saddle (gamma > 1) deltoid lobes sit OFF the origin, so the
+# retired origin-centred exterior-polar coordinate produced NEGATIVE rho in
+# the inter-lobe corridor (the headline bug: ValueError('rho must be
+# non-negative') at HEAD 6a45e52).  `LobeExteriorChart` re-indexes the
+# exterior in the SAME lobe-local polar frame as the interior chart, on the
+# EXTERIOR domain rho_lobe in (1, rho_outer].  These classes pin:
+#   * the corridor regression (Spec 1): the corridor source now maps to a
+#     finite, NON-NEGATIVE rho_lobe > 1 with NO ValueError, and round-trips;
+#   * the lobe-local bijection over the exterior band (Spec 2): the SAME
+#     `_from_lobe_fixed` / `_to_lobe_fixed` maps are exact inverses on the
+#     exterior domain, including near-cusp arms;
+#   * the cusp-adapted u map stored on a `LobeExteriorChart` (Spec 3): row0
+#     spans the tile exactly, row1 starts at ~0, strictly increases, and is
+#     genuinely nonlinear (the d**(2/3) cusp adaptation).
+#
+# The maps are shared with the interior path, so the round-trip tolerances
+# are the SAME floating-point floor (`_ROUND_TRIP_TOL = 1e-12`, measured
+# ~1e-16 for a correct map); all fixtures are analytic geometry (caustic
+# clouds), NO engine evaluation -- fast-tier.
+# ===========================================================================
+
+#: Saddle band bracketing the corridor-regression shear (gamma = 1.3); both
+#: edges exceed 1 so the caustic is two disjoint deltoid lobes.
+_EXT_CORRIDOR_BAND: tuple[float, float] = (1.2, 1.4)
+
+#: The inter-lobe corridor source (shear-frame) that raised
+#: ``ValueError('rho must be non-negative')`` under the retired origin-polar
+#: exterior coordinate at HEAD 6a45e52.  It sits on the axis BETWEEN the two
+#: lobes, exterior to the ``+y1`` lobe.
+_EXT_CORRIDOR_SOURCE: tuple[float, float] = (0.5, 0.0)
+
+#: Saddle bands whose midpoints are the representative saddle shears
+#: (1.1, 1.3, 1.6) of the exterior round-trip sweep.  Every edge is > 1.
+_EXT_ROUND_TRIP_BANDS: tuple[tuple[float, float], ...] = (
+    (1.05, 1.15), (1.25, 1.35), (1.55, 1.65))
+
+#: Exterior ``rho_lobe`` nodes for the round-trip grid.  All strictly
+#: greater than 1 (outside the deltoid boundary) up to a generous
+#: ``rho_outer`` -- the round-trip is pure geometry so any exterior radius
+#: is a valid probe.
+_EXT_RHO_GRID: np.ndarray = np.linspace(1.15, 4.0, 5)
+
+#: Minimum residual of the stored ``theta_to_u`` map from a straight-line
+#: fit that certifies the ``u = d**(2/3)`` cusp adaptation is genuinely
+#: nonlinear (a linear/identity map would leave a residual ~ machine
+#: epsilon; the 2/3 power leaves an O(0.01) curvature over the tile).
+_EXT_U_LINEARITY_MIN: float = 1e-4
+
+
+def _plus_y1_exterior_admission(band: tuple[float, float]
+                                ) -> training_module._SaddleLobeAdmission:
+    """The ``+y1`` (positive-x centroid) lobe admission for ``band``.
+
+    Mirrors the engine fixture's D2 choice (`_SADDLE_LOBE_CENTERS[1]`): the
+    exterior chart is built ONLY for the canonical ``+y1`` lobe and serves
+    all four quadrants via the reflection fold.  Returns the ``lobe_b``
+    admission (index 1) after asserting its centroid is on the ``+x`` axis
+    side so the choice is self-documenting rather than positional lore.
+    """
+    _lobe_a, lobe_b = _admissions(band)
+    assert float(lobe_b.centroid[0]) > 0.0, (
+        'expected the +y1 lobe (positive-x centroid) at index 1; '
+        'admission ordering drifted')
+    return lobe_b
+
+
+class LobeExteriorCorridorPinTestCase(LobeTestCase):
+    """Acceptance Spec 1: the corridor regression is fixed (headline bug).
+
+    At ``gamma = 1.3`` the source ``(0.5, 0)`` sits in the inter-lobe
+    corridor -- the point the retired origin-centred exterior-polar
+    coordinate mapped to a NEGATIVE ``rho`` (raising
+    ``ValueError('rho must be non-negative')``).  Mapped through the
+    lobe-local forward transform `_to_lobe_fixed` that `LobeExteriorChart`
+    uses (after the same D2 reflection fold the serve gate applies), it must
+    now return a finite, NON-NEGATIVE ``rho_lobe`` STRICTLY GREATER than 1
+    (an exterior point of the ``+y1`` lobe) with NO exception, and the
+    inverse `_from_lobe_fixed` must reconstruct the (folded) source to
+    ``<= _ROUND_TRIP_TOL``.
+    """
+
+    def test_corridor_source_maps_to_finite_exterior_rho(self) -> None:
+        """``_to_lobe_fixed`` returns finite ``rho_lobe > 1``, NO ValueError."""
+        lobe_b = _plus_y1_exterior_admission(_EXT_CORRIDOR_BAND)
+        # The serve gate folds the source into the canonical quadrant BEFORE
+        # calling `_to_lobe_fixed`; reproduce that fold here (the eigenframe
+        # source at beta=0 is the shear-frame source, then abs-folded).
+        y1_eig, y2_eig = surrogate_module._rotate_to_eigenframe(
+            *_EXT_CORRIDOR_SOURCE, 0.0)
+        y1_fold, y2_fold = abs(y1_eig), abs(y2_eig)
+        # This call raised ValueError('rho must be non-negative') under the
+        # retired origin-polar coordinate; the lobe-local map must not.
+        rho_lobe, theta_local = surrogate_module._to_lobe_fixed(
+            lobe_b.centroid, lobe_b.boundary_theta, lobe_b.boundary_r,
+            y1_fold, y2_fold)
+        self.n_checks += 1
+        self.assertTrue(math.isfinite(rho_lobe),
+                        f'rho_lobe not finite: {rho_lobe}')
+        self.assertTrue(math.isfinite(theta_local),
+                        f'theta_local not finite: {theta_local}')
+        self.assertGreaterEqual(
+            rho_lobe, 0.0,
+            f'rho_lobe went NEGATIVE ({rho_lobe:.4e}) -- the headline '
+            'corridor bug has regressed')
+        self.assertGreater(
+            rho_lobe, 1.0,
+            f'corridor source must be EXTERIOR to the +y1 lobe '
+            f'(rho_lobe > 1); got {rho_lobe:.4e}')
+
+    def test_corridor_source_round_trips_through_inverse(self) -> None:
+        """``_from_lobe_fixed(_to_lobe_fixed(p)) == p`` for the corridor point.
+
+        Feeding the returned ``(rho_lobe, theta_local)`` back through the
+        inverse reconstructs the folded eigenframe source to
+        ``<= _ROUND_TRIP_TOL`` -- the forward/inverse pair is a genuine
+        bijection at the very point that used to raise.
+        """
+        lobe_b = _plus_y1_exterior_admission(_EXT_CORRIDOR_BAND)
+        y1_eig, y2_eig = surrogate_module._rotate_to_eigenframe(
+            *_EXT_CORRIDOR_SOURCE, 0.0)
+        y1_fold, y2_fold = abs(y1_eig), abs(y2_eig)
+        rho_lobe, theta_local = surrogate_module._to_lobe_fixed(
+            lobe_b.centroid, lobe_b.boundary_theta, lobe_b.boundary_r,
+            y1_fold, y2_fold)
+        y1_rt, y2_rt = surrogate_module._from_lobe_fixed(
+            lobe_b.centroid, lobe_b.boundary_theta, lobe_b.boundary_r,
+            rho_lobe, theta_local)
+        err = max(abs(y1_fold - y1_rt), abs(y2_fold - y2_rt))
+        self.n_checks += 1
+        self.assertLessEqual(
+            err, _ROUND_TRIP_TOL,
+            f'corridor round-trip error {err:.3e} > {_ROUND_TRIP_TOL:.1e}')
+
+
+def _exterior_named_directions(adm: training_module._SaddleLobeAdmission
+                               ) -> list[tuple[str, float]]:
+    """``(label, theta_local)`` angular probes spanning the ``+y1`` lobe.
+
+    Includes the near-cusp PINCH (``theta_local`` where ``r_deltoid`` is
+    SMALLEST -- a deltoid cusp arm, the coordinate-degeneracy signature the
+    round-trip must survive), the far-cusp BULGE (largest ``r_deltoid``),
+    the ``+-pi`` seam and a generic mid-angle.  The exterior round-trip is
+    swept at each of these across ``_EXT_RHO_GRID``.
+    """
+    theta_dense = np.linspace(-np.pi, np.pi, 721)
+    r_dir = surrogate_module._lobe_boundary_radius(
+        theta_dense, adm.boundary_theta, adm.boundary_r)
+    theta_pinch = float(theta_dense[int(np.argmin(r_dir))])
+    theta_bulge = float(theta_dense[int(np.argmax(r_dir))])
+    return [
+        ('near_cusp_pinch', theta_pinch),
+        ('far_cusp_bulge', theta_bulge),
+        ('seam_plus', math.pi),
+        ('seam_minus', -math.pi + 1e-12),
+        ('generic_mid', 1.1),
+    ]
+
+
+class LobeExteriorBandRoundTripTestCase(LobeTestCase):
+    """Acceptance Spec 2: lobe-local bijection over the EXTERIOR band.
+
+    For a grid of exterior lobe-local coordinates (``rho_lobe`` in
+    ``(1, rho_outer]`` x ``theta_local`` spanning the ``+y1`` lobe including
+    near-cusp arms), across saddle bands whose midpoints are ``1.1, 1.3,
+    1.6``, mapping ``(rho_lobe, theta_local) -> _from_lobe_fixed -> source
+    plane -> _to_lobe_fixed`` reproduces the input coordinate to
+    ``<= _ROUND_TRIP_TOL`` at every node -- including points close to (but
+    not on) a cusp ray, where a scalar reach would overshoot.
+    """
+
+    def test_exterior_lobe_local_round_trip_exact_over_band(self) -> None:
+        """``(rho, theta) -> _from -> _to`` recovers the exterior coordinate."""
+        for band in _EXT_ROUND_TRIP_BANDS:
+            adm = _plus_y1_exterior_admission(band)
+            for label, theta_local in _exterior_named_directions(adm):
+                for rho_lobe in _EXT_RHO_GRID:
+                    with self.subTest(band=band, direction=label,
+                                      rho_lobe=float(rho_lobe)):
+                        rho_in = float(rho_lobe)
+                        y1, y2 = surrogate_module._from_lobe_fixed(
+                            adm.centroid, adm.boundary_theta, adm.boundary_r,
+                            rho_in, theta_local)
+                        rho_back, theta_back = surrogate_module._to_lobe_fixed(
+                            adm.centroid, adm.boundary_theta, adm.boundary_r,
+                            y1, y2)
+                        rho_err = abs(rho_in - rho_back)
+                        # Angular residual on the circle (absorb the +-pi
+                        # seam representation).
+                        dtheta = (theta_local - theta_back + math.pi) % (
+                            2.0 * math.pi) - math.pi
+                        self.n_checks += 1
+                        self.assertGreater(
+                            rho_in, 1.0,
+                            'probe must be exterior (rho_lobe > 1)')
+                        self.assertLessEqual(
+                            rho_err, _ROUND_TRIP_TOL,
+                            f'{band} {label}: exterior rho_lobe round-trip '
+                            f'error {rho_err:.3e} > {_ROUND_TRIP_TOL:.1e}')
+                        self.assertLessEqual(
+                            abs(dtheta), _ROUND_TRIP_TOL,
+                            f'{band} {label}: exterior theta_local round-trip '
+                            f'error {abs(dtheta):.3e} > {_ROUND_TRIP_TOL:.1e}')
+
+    def test_exterior_round_trip_residual_heatmap_flat(self) -> None:
+        """Round-trip residual is flat over ``(rho_lobe, theta_local)``.
+
+        Sweeps a full exterior ``(rho_lobe, theta_local)`` grid at the
+        ``gamma = 1.3`` band and asserts the max round-trip residual stays
+        at the numerical floor -- a cusp-ray coordinate degeneracy would
+        localise a blow-up in the diagnostic heatmap.  Saves the heatmap.
+        """
+        adm = _plus_y1_exterior_admission(_EXT_CORRIDOR_BAND)
+        thetas = np.linspace(-np.pi, np.pi, 121)
+        rhos = np.linspace(1.05, 4.0, 40)
+        residual = np.empty((rhos.size, thetas.size))
+        for i_r, rho_in in enumerate(rhos):
+            for i_t, theta_local in enumerate(thetas):
+                y1, y2 = surrogate_module._from_lobe_fixed(
+                    adm.centroid, adm.boundary_theta, adm.boundary_r,
+                    float(rho_in), float(theta_local))
+                rho_back, theta_back = surrogate_module._to_lobe_fixed(
+                    adm.centroid, adm.boundary_theta, adm.boundary_r, y1, y2)
+                dtheta = (float(theta_local) - theta_back + math.pi) % (
+                    2.0 * math.pi) - math.pi
+                residual[i_r, i_t] = max(abs(float(rho_in) - rho_back),
+                                         abs(dtheta))
+
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig, axis = plt.subplots(figsize=(7, 4))
+        mesh = axis.pcolormesh(
+            thetas, rhos, np.log10(np.maximum(residual, 1e-20)),
+            shading='auto')
+        axis.set_xlabel('theta_local [rad]')
+        axis.set_ylabel('rho_lobe (exterior)')
+        axis.set_title('Exterior lobe round-trip residual (log10)')
+        fig.colorbar(mesh, ax=axis, label='log10 |resid|')
+        fig.tight_layout()
+        fig.savefig(_OUTPUT_DIR
+                    / 'lobe_exterior_roundtrip_residual_heatmap.png', dpi=90)
+        plt.close(fig)
+
+        self.n_checks += 1
+        self.assertLessEqual(
+            float(residual.max()), _ROUND_TRIP_TOL,
+            f'exterior round-trip residual spike {residual.max():.3e} '
+            f'> {_ROUND_TRIP_TOL:.1e} (cusp-ray degeneracy?)')
+
+
+def _exterior_cusp_chart(band: tuple[float, float]
+                         ) -> tuple[surrogate_module.LobeExteriorChart,
+                                    float, float, np.ndarray, np.ndarray]:
+    """A ``LobeExteriorChart`` whose ``theta_local`` arm abuts a cusp ray.
+
+    Builds a synthetic exterior chart (unit envelope; the DECISION under
+    test is the STORED ``theta_to_u`` map, not envelope values) on an
+    EXTERIOR ``rho_lobe`` domain ``(1, rho_outer]`` with the cusp-adapted
+    ``u = d**(2/3)`` map from `_lobe_cusp_axis_map`.  Returns the chart plus
+    ``(theta_lo, theta_hi, theta_fine, u_fine)`` for endpoint / monotonicity
+    checks.
+    """
+    adm = _plus_y1_exterior_admission(band)
+    n_w, n_g, n_r, n_th = 4, 4, 4, 5
+    log_w_grid = np.linspace(-1.5, 1.0, n_w)
+    gamma_grid = np.linspace(band[0], band[1], n_g)
+    # EXTERIOR rho_lobe domain: strictly above the deltoid boundary.
+    rho_lobe_grid = np.linspace(1.2, 3.5, n_r)
+    # A tile whose LOW edge abuts a right-side cusp ray at _RIGHT_CUSP_ANGLE
+    # (cusp strictly ABOVE theta_hi -> side='right', d = cusp - theta).
+    theta_lo, theta_hi = 0.5, 1.5
+    theta_local_grid = np.linspace(theta_lo, theta_hi, n_th)
+    theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+        theta_lo, theta_hi, _RIGHT_CUSP_ANGLE, 'right')
+    u_grid = np.interp(theta_local_grid, theta_fine, u_fine)
+    shape = (n_w, n_g, n_r, n_th)
+    chart = surrogate_module.LobeExteriorChart.from_lobe_values(
+        gamma_grid=gamma_grid, rho_lobe_grid=rho_lobe_grid,
+        theta_local_grid=theta_local_grid, log_w_grid=log_w_grid,
+        envelope_real=np.ones(shape), envelope_imag=np.zeros(shape),
+        image_count=surrogate_module._MACRO_SADDLE_EXTERIOR_IMAGE_COUNT,
+        parity=-1, centroid=adm.centroid,
+        boundary_theta=adm.boundary_theta, boundary_r=adm.boundary_r,
+        theta_to_u=np.vstack([theta_fine, u_fine]), u_grid=u_grid)
+    return chart, theta_lo, theta_hi, theta_fine, u_fine
+
+
+class LobeExteriorCuspAxisMapTestCase(LobeTestCase):
+    """Acceptance Spec 3: cusp-adapted ``theta_to_u`` on the exterior chart.
+
+    A `LobeExteriorChart` tile whose ``theta_local`` arm abuts a lobe cusp
+    ray is built with the cusp-adapted ``u = d**(2/3)`` map.  The STORED
+    ``chart.theta_to_u`` must (a) span the tile's ``[theta_lo, theta_hi]``
+    exactly to ~12 digits on row 0, (b) start at ~0 and be strictly
+    increasing on row 1, and (c) be genuinely NONLINEAR (max residual from a
+    straight-line fit ``>> _EXT_U_LINEARITY_MIN``), confirming the 2/3-power
+    cusp adaptation rather than an identity/linear axis.
+    """
+
+    def test_stored_map_row0_spans_tile_exactly(self) -> None:
+        """Row 0 (theta_local) endpoints equal ``[theta_lo, theta_hi]``."""
+        chart, theta_lo, theta_hi, _tf, _uf = _exterior_cusp_chart(
+            _EXT_CORRIDOR_BAND)
+        self.assertIsNotNone(
+            chart.theta_to_u,
+            'the exterior cusp chart must store a theta_to_u map (REQUIRED)')
+        theta_row = chart.theta_to_u[0]
+        self.n_checks += 1
+        self.assertAlmostEqual(float(theta_row[0]), theta_lo, places=12,
+                               msg='row0 start != theta_lo')
+        self.assertAlmostEqual(float(theta_row[-1]), theta_hi, places=12,
+                               msg='row0 end != theta_hi')
+
+    def test_stored_map_row1_starts_at_zero_and_increases(self) -> None:
+        """Row 1 (u) starts at ~0 and is strictly increasing."""
+        chart, _lo, _hi, _tf, _uf = _exterior_cusp_chart(_EXT_CORRIDOR_BAND)
+        u_row = chart.theta_to_u[1]
+        self.n_checks += 1
+        self.assertAlmostEqual(float(u_row[0]), 0.0, places=12,
+                               msg=f'u row does not start at 0: {u_row[0]}')
+        self.assertTrue(
+            np.all(np.diff(u_row) > 0.0),
+            'u row is not strictly increasing (cusp map non-monotone)')
+
+    def test_stored_map_is_genuinely_nonlinear(self) -> None:
+        """Max residual of ``u(theta)`` from a straight line ``>> 1e-4``.
+
+        A linear/identity axis would sit on its own least-squares line to
+        machine precision; the ``d**(2/3)`` cusp adaptation leaves an
+        O(0.01) curvature, so the residual certifies the 2/3-power map is
+        actually in force.  Overplots ``u`` vs the straight line.
+        """
+        chart, theta_lo, theta_hi, _tf, _uf = _exterior_cusp_chart(
+            _EXT_CORRIDOR_BAND)
+        theta_row = chart.theta_to_u[0]
+        u_row = chart.theta_to_u[1]
+        # Straight line through the two endpoints (u is offset so u[0]=0).
+        line = (u_row[0] + (u_row[-1] - u_row[0])
+                * (theta_row - theta_row[0])
+                / (theta_row[-1] - theta_row[0]))
+        residual = float(np.max(np.abs(u_row - line)))
+
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig, axis = plt.subplots(figsize=(7, 4))
+        axis.plot(theta_row, u_row, '-', label='cusp-adapted u(theta)')
+        axis.plot(theta_row, line, 'r--', label='straight line')
+        axis.set_xlabel('theta_local [rad]')
+        axis.set_ylabel('u = d**(2/3) (offset)')
+        axis.set_title(f'Exterior cusp u-map nonlinearity '
+                       f'(max resid {residual:.2e})')
+        axis.legend()
+        fig.tight_layout()
+        fig.savefig(_OUTPUT_DIR
+                    / 'lobe_exterior_cusp_u_map_nonlinearity.png', dpi=90)
+        plt.close(fig)
+
+        self.n_checks += 1
+        self.assertGreater(
+            residual, _EXT_U_LINEARITY_MIN,
+            f'stored u-map looks linear (resid {residual:.3e} '
+            f'<= {_EXT_U_LINEARITY_MIN:.1e}); the d**(2/3) cusp adaptation '
+            'is not in force')
+
+
+class LobeExteriorSelfFalsificationTestCase(TestCase):
+    """Prove the exterior suite can go RED (self-falsification).
+
+    Closes the loop for the three exterior acceptance classes: a corrupted
+    inverse breaks the corridor/band round-trip, and a chart built WITHOUT
+    the cusp-adapted map has a linear (identity) axis that fails the
+    nonlinearity check -- so a green exterior suite is evidence, not
+    decoration.
+    """
+
+    def test_corrupted_inverse_breaks_exterior_round_trip(self) -> None:
+        """A perturbed ``_from_lobe_fixed`` moves the round-trip past tol."""
+        lobe_b = _plus_y1_exterior_admission(_EXT_CORRIDOR_BAND)
+        rho_in, theta_local = 2.5, 0.8
+        y1, y2 = surrogate_module._from_lobe_fixed(
+            lobe_b.centroid, lobe_b.boundary_theta, lobe_b.boundary_r,
+            rho_in, theta_local)
+        # Perturb the reconstructed source by an O(r_deltoid) amount: the
+        # round-trip must then FAIL the tolerance.
+        rho_back, _theta_back = surrogate_module._to_lobe_fixed(
+            lobe_b.centroid, lobe_b.boundary_theta, lobe_b.boundary_r,
+            y1 + 0.05, y2)
+        self.assertGreater(
+            abs(rho_in - rho_back), _ROUND_TRIP_TOL,
+            'a corrupted inverse must break the exterior round-trip; the '
+            'tolerance has no teeth')
+
+    def test_identity_axis_chart_fails_nonlinearity(self) -> None:
+        """A chart with ``theta_to_u=None`` has no nonlinear u-axis to pass.
+
+        The negative control for Spec 3: an exterior chart built on the raw
+        ``theta_local`` axis (no cusp adaptation) stores ``theta_to_u=None``,
+        so the nonlinearity certificate cannot be satisfied.
+        """
+        adm = _plus_y1_exterior_admission(_EXT_CORRIDOR_BAND)
+        n_w, n_g, n_r, n_th = 4, 4, 4, 5
+        shape = (n_w, n_g, n_r, n_th)
+        chart = surrogate_module.LobeExteriorChart.from_lobe_values(
+            gamma_grid=np.linspace(_EXT_CORRIDOR_BAND[0],
+                                   _EXT_CORRIDOR_BAND[1], n_g),
+            rho_lobe_grid=np.linspace(1.2, 3.5, n_r),
+            theta_local_grid=np.linspace(0.5, 1.5, n_th),
+            log_w_grid=np.linspace(-1.5, 1.0, n_w),
+            envelope_real=np.ones(shape), envelope_imag=np.zeros(shape),
+            image_count=surrogate_module._MACRO_SADDLE_EXTERIOR_IMAGE_COUNT,
+            parity=-1, centroid=adm.centroid,
+            boundary_theta=adm.boundary_theta, boundary_r=adm.boundary_r)
+        self.assertIsNone(
+            chart.theta_to_u,
+            'a chart built without theta_to_u/u_grid must store None (the '
+            'Spec 3 negative control)')
+
+
+# ===========================================================================
+# SHARD A -- LobeExteriorChart persistence, node-exact serve, and the
+# cusp/tube-shell exclusion.  These extend (never replace) the exterior
+# corridor / round-trip / cusp-u classes above.
+# ===========================================================================
+
+#: Field-by-field NPZ bit-identity floor.  ``_chart_to_npz`` stores float64
+#: arrays verbatim and ``_chart_from_npz`` rebuilds via ``_assemble`` (which
+#: only re-wraps with ``ascontiguousarray`` + recomputes ``param_spacing``
+#: from the SAME grids), so a correct round-trip is EXACTLY bit-for-bit
+#: (max|diff| == 0.0), not merely close.
+_EXT_NPZ_BITWISE: float = 0.0
+
+#: Node-exact serve tolerance.  A cubic tensor B-spline is interpolatory at
+#: its own knots, so contracting `_evaluate_chart` at a stored
+#: ``(log_w, gamma, rho_lobe, u)`` node returns the tabulated envelope value
+#: to the spline's floating-point floor.  The lobe-local round-trip
+#: (`_from_lobe_fixed` -> `_to_lobe_fixed`) that reconstructs the node is
+#: exact to ~1e-15 and the theta->u remap at an exact node is a bit-identical
+#: `np.interp` call, so the composed residual sits ~50x below this gate;
+#: 5e-13 catches an axis-ordering / theta_local->u remap bug (which would
+#: move the value by O(envelope range) ~ 1) without tripping on FP noise.
+_EXT_NODE_EXACT_TOL: float = 5e-13
+
+#: Node-exact grid dimensions (>= 4 per axis for a cubic spline; theta
+#: uses 5 so the u-remap is exercised at an interior node).
+_EXT_NODE_DIMS: tuple[int, int, int, int] = (4, 4, 4, 5)
+
+#: Exterior serve query band (macro-saddle; both edges > 1).
+_EXT_SERVE_BAND: tuple[float, float] = _EXT_CORRIDOR_BAND
+
+#: A caustic distance used in the ``_lobe_exterior_serves`` eta-floor sweep,
+#: comfortably above `surrogate._DEFAULT_CAUSTIC_FLOOR` so the box / image /
+#: exclusion gates all pass and the ``eta`` floor is the sole decider.
+_EXT_SERVE_ETA: float = 0.3
+
+#: Lobe-local exterior tile probed by the ``admits_exterior`` self-
+#: falsification: ``rho_lobe`` ~ 2 is well outside the deltoid (winding ~ 0
+#: for every band loop), so the loop membership gate passes and the flip is
+#: attributable to ``eta_max`` alone.
+_EXT_ADMIT_CENTER: tuple[float, float] = (2.0, 1.0)
+_EXT_ADMIT_HALF: tuple[float, float] = (0.3, 0.2)
+
+
+def _exterior_node_chart(band: tuple[float, float]) -> tuple[
+        surrogate_module.LobeExteriorChart, np.ndarray, np.ndarray,
+        np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+        training_module._SaddleLobeAdmission]:
+    """A `LobeExteriorChart` with a SMOOTH non-constant envelope.
+
+    Unlike `_exterior_cusp_chart` (unit envelope), this fills the value
+    tensor with ``F = log_w * gamma * rho_lobe * u`` (+ ``1`` in the imag
+    part) so that a theta_local->u REMAP bug or an axis transposition
+    produces a large, detectable residual at the stored nodes -- a constant
+    envelope would hide such a bug.  Returns the chart plus the four training
+    axes, the ``u_grid``, the real envelope tensor, and the admission frame.
+    """
+    adm = _plus_y1_exterior_admission(band)
+    n_w, n_g, n_r, n_th = _EXT_NODE_DIMS
+    log_w_grid = np.linspace(-1.5, 1.0, n_w)
+    gamma_grid = np.linspace(band[0], band[1], n_g)
+    rho_lobe_grid = np.linspace(1.2, 3.5, n_r)
+    theta_lo, theta_hi = 0.5, 1.5
+    theta_local_grid = np.linspace(theta_lo, theta_hi, n_th)
+    theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+        theta_lo, theta_hi, _RIGHT_CUSP_ANGLE, 'right')
+    u_grid = np.interp(theta_local_grid, theta_fine, u_fine)
+    envelope_real = np.empty((n_w, n_g, n_r, n_th))
+    envelope_imag = np.empty((n_w, n_g, n_r, n_th))
+    for i_w, lw in enumerate(log_w_grid):
+        for i_g, ga in enumerate(gamma_grid):
+            for i_r, rl in enumerate(rho_lobe_grid):
+                for i_u, uu in enumerate(u_grid):
+                    envelope_real[i_w, i_g, i_r, i_u] = lw * ga * rl * uu
+                    envelope_imag[i_w, i_g, i_r, i_u] = lw * ga * rl * uu + 1.0
+    chart = surrogate_module.LobeExteriorChart.from_lobe_values(
+        gamma_grid=gamma_grid, rho_lobe_grid=rho_lobe_grid,
+        theta_local_grid=theta_local_grid, log_w_grid=log_w_grid,
+        envelope_real=envelope_real, envelope_imag=envelope_imag,
+        image_count=surrogate_module._MACRO_SADDLE_EXTERIOR_IMAGE_COUNT,
+        parity=-1, centroid=adm.centroid,
+        boundary_theta=adm.boundary_theta, boundary_r=adm.boundary_r,
+        theta_to_u=np.vstack([theta_fine, u_fine]), u_grid=u_grid)
+    return (chart, log_w_grid, gamma_grid, rho_lobe_grid, theta_local_grid,
+            u_grid, envelope_real, adm)
+
+
+class LobeExteriorNpzRoundTripTestCase(LobeTestCase):
+    """SHARD A Spec 1: ``kind='lobe_exterior'`` NPZ round-trip bit-identity.
+
+    A small `LobeExteriorChart` (image_count=2, `FARFIELD_KERNEL_SUM`,
+    ``theta_to_u`` present) is flattened by `_chart_to_npz`, persisted with
+    ``np.savez`` and reloaded via ``np.load`` + `_chart_from_npz`.  Every
+    stored array field must round-trip BITWISE (``max|diff| == 0.0``), the
+    ``kind`` and schema tag (``lobe_caustic_relative_v1``) must survive, and
+    ``theta_to_u`` is an OPTIONAL key -- ``from_lobe_exterior_engine``
+    supports a ``cusp_angle=None`` raw-theta fallback that stores
+    ``theta_to_u=None`` and ``_chart_to_npz`` writes the map only when
+    present, so a ``lobe_exterior`` NPZ without the map reloads with
+    ``theta_to_u=None`` (soft ``.get()``), matching the LobeInteriorChart
+    convention -- NOT the wedge one, whose producer always builds the map.
+    """
+
+    def _round_tripped(self) -> tuple[
+            surrogate_module.LobeExteriorChart,
+            surrogate_module.LobeExteriorChart, dict]:
+        """Build a chart, persist through disk, reload it; return both + meta.
+        """
+        chart, *_rest = _exterior_node_chart(_EXT_SERVE_BAND)
+        arrays = surrogate_module._chart_to_npz(chart, 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'lobe_exterior.npz'
+            np.savez(path, **arrays)
+            with np.load(path, allow_pickle=False) as data:
+                reloaded = surrogate_module._chart_from_npz(data, 0)
+                meta = json.loads(str(data['chart0_meta']))
+        return chart, reloaded, meta
+
+    def test_kind_and_schema_survive(self) -> None:
+        """Persisted meta carries ``kind='lobe_exterior'`` and the lobe tag."""
+        _chart, reloaded, meta = self._round_tripped()
+        self.n_checks += 1
+        self.assertEqual(meta['kind'], 'lobe_exterior')
+        self.assertEqual(meta['axis_schema'],
+                         surrogate_module._LOBE_AXIS_SCHEMA_NEW)
+        self.assertEqual(meta['axis_schema'], 'lobe_caustic_relative_v1')
+        self.assertIsInstance(reloaded,
+                              surrogate_module.LobeExteriorChart)
+        self.assertEqual(reloaded.image_count,
+                         surrogate_module._MACRO_SADDLE_EXTERIOR_IMAGE_COUNT)
+
+    def test_every_array_field_round_trips_bitwise(self) -> None:
+        """Field-by-field ``max|diff| == 0.0`` for every stored array.
+
+        Writes a diagnostic table (field -> max|diff|) to the output dir so a
+        nonzero row pinpoints exactly which array a persistence bug corrupted.
+        """
+        chart, reloaded, _meta = self._round_tripped()
+        fields = {
+            'gamma_grid': (chart.gamma_grid, reloaded.gamma_grid),
+            'rho_lobe_grid': (chart.rho_lobe_grid, reloaded.rho_lobe_grid),
+            'theta_local_grid': (chart.theta_local_grid,
+                                 reloaded.theta_local_grid),
+            'log_w_grid': (chart.log_w_grid, reloaded.log_w_grid),
+            'real_coeffs': (chart.real_coeffs, reloaded.real_coeffs),
+            'imag_coeffs': (chart.imag_coeffs, reloaded.imag_coeffs),
+            'centroid': (chart.centroid, reloaded.centroid),
+            'boundary_theta': (chart.boundary_theta, reloaded.boundary_theta),
+            'boundary_r': (chart.boundary_r, reloaded.boundary_r),
+            'theta_to_u': (chart.theta_to_u, reloaded.theta_to_u),
+            'param_spacing': (chart.param_spacing, reloaded.param_spacing),
+            'refused_points': (chart.refused_points, reloaded.refused_points),
+        }
+        for j, (kt, kr) in enumerate(zip(chart.knots, reloaded.knots)):
+            fields[f'knots_{j}'] = (kt, kr)
+
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        report_lines = ['field, max_abs_diff']
+        for name, (orig, back) in fields.items():
+            orig_a = np.asarray(orig, dtype=float)
+            back_a = np.asarray(back, dtype=float)
+            with self.subTest(field=name):
+                self.n_checks += 1
+                self.assertEqual(orig_a.shape, back_a.shape,
+                                 f'{name} shape changed on round-trip')
+                max_diff = (float(np.max(np.abs(orig_a - back_a)))
+                            if orig_a.size else 0.0)
+                report_lines.append(f'{name}, {max_diff:.3e}')
+                self.assertLessEqual(
+                    max_diff, _EXT_NPZ_BITWISE,
+                    f'{name} not bit-identical after NPZ round-trip '
+                    f'(max|diff|={max_diff:.3e})')
+        (_OUTPUT_DIR / 'lobe_exterior_npz_field_maxdiff.txt').write_text(
+            '\n'.join(report_lines) + '\n')
+
+    def test_theta_to_u_none_chart_survives_round_trip(self) -> None:
+        """A ``theta_to_u=None`` ``lobe_exterior`` chart reloads with None.
+
+        ``from_lobe_exterior_engine`` supports a ``cusp_angle=None`` raw-theta
+        fallback that stores ``theta_to_u=None``; ``_chart_to_npz`` writes the
+        map only when present, so no ``chart0_theta_to_u`` array is persisted.
+        ``_chart_from_npz`` reads it with a soft ``.get()`` (matching the
+        LobeInteriorChart branch), so the chart round-trips with
+        ``theta_to_u`` still None -- never a ``KeyError``.
+        """
+        adm = _plus_y1_exterior_admission(_EXT_CORRIDOR_BAND)
+        n_w, n_g, n_r, n_th = 4, 4, 4, 5
+        shape = (n_w, n_g, n_r, n_th)
+        chart = surrogate_module.LobeExteriorChart.from_lobe_values(
+            gamma_grid=np.linspace(_EXT_CORRIDOR_BAND[0],
+                                   _EXT_CORRIDOR_BAND[1], n_g),
+            rho_lobe_grid=np.linspace(1.2, 3.5, n_r),
+            theta_local_grid=np.linspace(0.5, 1.5, n_th),
+            log_w_grid=np.linspace(-1.5, 1.0, n_w),
+            envelope_real=np.ones(shape), envelope_imag=np.zeros(shape),
+            image_count=surrogate_module._MACRO_SADDLE_EXTERIOR_IMAGE_COUNT,
+            parity=-1, centroid=adm.centroid,
+            boundary_theta=adm.boundary_theta, boundary_r=adm.boundary_r)
+        self.assertIsNone(chart.theta_to_u,
+                          'the raw-theta fallback must store theta_to_u=None')
+        arrays = surrogate_module._chart_to_npz(chart, 0)
+        self.assertNotIn(
+            'chart0_theta_to_u', arrays,
+            'a theta_to_u=None chart must not persist a theta_to_u array')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'no_theta_to_u.npz'
+            np.savez(path, **arrays)
+            with np.load(path, allow_pickle=False) as data:
+                self.n_checks += 1
+                reloaded = surrogate_module._chart_from_npz(data, 0)
+        self.assertIsInstance(reloaded,
+                              surrogate_module.LobeExteriorChart)
+        self.assertIsNone(
+            reloaded.theta_to_u,
+            'a theta_to_u=None exterior chart must survive the NPZ round-trip '
+            'with theta_to_u still None (soft .get(), not a KeyError)')
+
+
+class LobeExteriorNodeExactServeTestCase(LobeTestCase):
+    """SHARD A Spec 2: node-exact serve on the stored exterior grid.
+
+    A cubic tensor B-spline is interpolatory at its own knots, so querying
+    the surrogate through `_evaluate_chart` at coordinates that land EXACTLY
+    on a stored ``(log_w, gamma, rho_lobe, u)`` node must reproduce the
+    tabulated envelope value to the spline's floating-point floor
+    (``<= _EXT_NODE_EXACT_TOL = 5e-13``).  The chart carries a SMOOTH,
+    non-constant envelope ``F = log_w * gamma * rho_lobe * u`` so that a
+    theta_local->u REMAP bug or an axis transposition (which a constant
+    envelope would hide) moves the served value by ``O(envelope range) ~ 1``
+    and trips the gate.
+
+    Each node is reconstructed by inverting the lobe-local frame:
+    ``(y1, y2) = _from_lobe_fixed(centroid, rho_lobe_node, theta_node)``,
+    then served with ``gamma = gamma_node`` and ``log_w = log_w_node``.  The
+    source stays in the ``+`` quadrant (centroid on ``+x``, theta_local in
+    ``[0.5, 1.5]``), so the serve-side D2 abs-fold is the identity and the
+    round-trip recovers the node coordinates to ~1e-15.  A companion
+    off-by-one probe proves the theta->u remap resolves the CORRECT node
+    (the served value must NOT equal a NEIGHBOURING node's tabulation).
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Build the smooth-envelope exterior chart once for the whole sweep."""
+        (cls.chart, cls.log_w_grid, cls.gamma_grid, cls.rho_lobe_grid,
+         cls.theta_local_grid, cls.u_grid, cls.envelope_real,
+         cls.adm) = _exterior_node_chart(_EXT_SERVE_BAND)
+
+    def _serve_node(self, i_w: int, i_g: int, i_r: int, i_th: int) -> complex:
+        """Serve the chart at the exact ``(log_w, gamma, rho_lobe, u)`` node."""
+        y1_eig, y2_eig = surrogate_module._from_lobe_fixed(
+            self.adm.centroid, self.adm.boundary_theta, self.adm.boundary_r,
+            float(self.rho_lobe_grid[i_r]),
+            float(self.theta_local_grid[i_th]))
+        # Both eigenframe coordinates are positive here, so the abs-fold in
+        # `_evaluate_chart` is the identity and the query lands on the node.
+        self.assertGreater(y1_eig, 0.0,
+                           'fixture broken: source left the + quadrant (y1)')
+        self.assertGreater(y2_eig, 0.0,
+                           'fixture broken: source left the + quadrant (y2)')
+        log_w_query = np.array([float(self.log_w_grid[i_w])])
+        served = surrogate_module._evaluate_chart(
+            self.chart, float(self.gamma_grid[i_g]), _EXT_SERVE_ETA, 0.0,
+            log_w_query, y1_eig, y2_eig)
+        return complex(served[0])
+
+    def test_served_value_equals_tabulated_node(self) -> None:
+        """Served envelope == tabulated node value to ``<= 5e-13`` everywhere.
+
+        Sweeps every stored node; collects the residual per flat node index
+        and writes a semilog residual-vs-node-index scatter so an
+        axis-ordering / remap spike is localised to a specific node.
+        """
+        n_w, n_g, n_r, n_th = _EXT_NODE_DIMS
+        indices: list[int] = []
+        resids: list[float] = []
+        flat = 0
+        for i_w, i_g, i_r, i_th in np.ndindex(n_w, n_g, n_r, n_th):
+            expected_real = float(self.envelope_real[i_w, i_g, i_r, i_th])
+            with self.subTest(node=(i_w, i_g, i_r, i_th)):
+                self.n_checks += 1
+                served = self._serve_node(i_w, i_g, i_r, i_th)
+                resid_real = abs(served.real - expected_real)
+                resid_imag = abs(served.imag - (expected_real + 1.0))
+                indices.append(flat)
+                resids.append(max(resid_real, resid_imag))
+                self.assertLessEqual(
+                    resid_real, _EXT_NODE_EXACT_TOL,
+                    f'node {(i_w, i_g, i_r, i_th)} real residual '
+                    f'{resid_real:.3e} > {_EXT_NODE_EXACT_TOL:.1e} '
+                    '(theta_local->u remap or axis-ordering bug?)')
+                self.assertLessEqual(
+                    resid_imag, _EXT_NODE_EXACT_TOL,
+                    f'node {(i_w, i_g, i_r, i_th)} imag residual '
+                    f'{resid_imag:.3e} > {_EXT_NODE_EXACT_TOL:.1e}')
+            flat += 1
+
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig, axis = plt.subplots(figsize=(7, 4))
+        axis.semilogy(indices, np.maximum(resids, 1e-18), '.', ms=4)
+        axis.axhline(_EXT_NODE_EXACT_TOL, color='r', ls='--',
+                     label=f'tol {_EXT_NODE_EXACT_TOL:.0e}')
+        axis.set_xlabel('flat node index (log_w, gamma, rho_lobe, theta)')
+        axis.set_ylabel('|served - tabulated|')
+        axis.set_title('Exterior chart node-exact serve residual')
+        axis.legend()
+        fig.tight_layout()
+        fig.savefig(_OUTPUT_DIR
+                    / 'lobe_exterior_node_exact_residual.png', dpi=90)
+        plt.close(fig)
+
+    def test_neighbouring_node_value_is_not_served(self) -> None:
+        """The remap resolves the RIGHT theta node (off-by-one has teeth).
+
+        Serving at theta node ``i_th`` must reproduce the tabulation at
+        ``i_th`` and DIFFER from the tabulation at the neighbour ``i_th + 1``
+        by ``>> _EXT_NODE_EXACT_TOL``.  A transposed / off-by-one
+        theta_local->u remap would instead land on the wrong node, so this
+        gap is the self-falsification that the exact match above is not
+        vacuous.
+        """
+        i_w, i_g, i_r, i_th = _EXT_NODE_DIMS[0] - 1, _EXT_NODE_DIMS[1] - 1, \
+            _EXT_NODE_DIMS[2] - 1, 0
+        served = self._serve_node(i_w, i_g, i_r, i_th)
+        this_node = float(self.envelope_real[i_w, i_g, i_r, i_th])
+        neighbour = float(self.envelope_real[i_w, i_g, i_r, i_th + 1])
+        self.n_checks += 1
+        self.assertLessEqual(
+            abs(served.real - this_node), _EXT_NODE_EXACT_TOL,
+            'served value does not match its OWN node')
+        self.assertGreater(
+            abs(served.real - neighbour), 1e6 * _EXT_NODE_EXACT_TOL,
+            f'served value {served.real:.6e} is indistinguishable from the '
+            f'NEIGHBOUR node {neighbour:.6e} -- theta->u remap off-by-one')
+
+
+class LobeExteriorExclusionSelfFalsificationTestCase(LobeTestCase):
+    """SHARD A Spec 3: the cusp / tube-shell exclusion has TEETH.
+
+    Two independent exclusion gates guard the lobe-exterior region, and each
+    must measurably flip a verdict when its threshold is perturbed:
+
+    * `_lobe_exterior_serves` gate (f): a source whose caustic distance
+      ``eta`` is above ``chart.eta_overlap_min`` is SERVED, one just below is
+      REFUSED, and raising ``eta_overlap_min`` past a fixed ``eta`` flips a
+      served candidate to refused -- with the SAME source (all other gates
+      already passed at baseline), so the flip is attributable to the eta
+      floor alone.
+    * `admits_exterior` tube-shell gate: a lobe-EXTERIOR tile (every probe
+      outside the deltoid, winding ~ 0) whose nearest caustic-cloud distance
+      ``D`` exceeds ``eta_max`` is ADMITTED; setting ``eta_max`` just above
+      ``D`` refuses it.  A companion interior tile (winding ~ 1) is refused
+      even with ``eta_max = 0``, proving the eta flip is the tube-shell gate,
+      not the membership gate.
+
+    A source-plane map of the admit/refuse verdict over tile distance-to-lobe
+    with the ``D`` (nearest-caustic) contour overlaid is written to the output
+    dir; the admit boundary must track the contour.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Build the exterior chart and its ``+y1`` admission once."""
+        cls.chart = _exterior_node_chart(_EXT_SERVE_BAND)[0]
+        cls.adm = _plus_y1_exterior_admission(_EXT_SERVE_BAND)
+
+    def _mid_source(self) -> tuple[float, float, float, float]:
+        """A ``(gamma, log_w, y1, y2)`` landing mid-box in every serve gate.
+
+        Reconstructs the eigenframe source from the lobe frame at the middle
+        ``rho_lobe`` / ``theta_local`` node (inside the chart box) so gates
+        (a)-(e) of `_lobe_exterior_serves` all pass and only the eta floor
+        (f) is left to decide.
+        """
+        chart = self.chart
+        i_r = chart.rho_lobe_grid.size // 2
+        i_th = chart.theta_local_grid.size // 2
+        y1_eig, y2_eig = surrogate_module._from_lobe_fixed(
+            self.adm.centroid, self.adm.boundary_theta, self.adm.boundary_r,
+            float(chart.rho_lobe_grid[i_r]),
+            float(chart.theta_local_grid[i_th]))
+        gamma = float(chart.gamma_grid[chart.gamma_grid.size // 2])
+        log_w = float(chart.log_w_grid[chart.log_w_grid.size // 2])
+        return gamma, log_w, y1_eig, y2_eig
+
+    def _serves(self, chart: surrogate_module.LobeExteriorChart,
+                eta: float) -> bool:
+        """`_lobe_exterior_serves` for the mid-box source at caustic ``eta``."""
+        gamma, log_w, y1_eig, y2_eig = self._mid_source()
+        return surrogate_module._lobe_exterior_serves(
+            chart, gamma, log_w, log_w, eta, chart.image_count,
+            y1_eig, y2_eig)
+
+    def test_serve_gate_eta_floor_admits_above_refuses_below(self) -> None:
+        """Source served for ``eta`` above the floor, refused just below it."""
+        floor = float(self.chart.eta_overlap_min)
+        self.n_checks += 1
+        self.assertTrue(
+            self._serves(self.chart, floor * 2.0),
+            f'mid-box source not served at eta={floor * 2.0:.3f} '
+            f'(> floor {floor:.3f}) -- an upstream gate is refusing')
+        self.assertFalse(
+            self._serves(self.chart, floor * 0.5),
+            f'source served at eta={floor * 0.5:.3f} <= floor {floor:.3f} '
+            '-- the eta floor is not enforced')
+
+    def test_serve_gate_floor_perturbation_flips_verdict(self) -> None:
+        """Raising ``eta_overlap_min`` past a fixed ``eta`` flips serve->refuse.
+
+        Same source, same ``eta``; only ``chart.eta_overlap_min`` changes, so
+        the flip isolates gate (f) from every other serve gate.
+        """
+        floor = float(self.chart.eta_overlap_min)
+        eta = floor * 2.0
+        raised = dataclasses.replace(self.chart, eta_overlap_min=eta * 2.0)
+        self.n_checks += 1
+        self.assertTrue(self._serves(self.chart, eta),
+                        'baseline chart must serve above its floor')
+        self.assertFalse(
+            self._serves(raised, eta),
+            'raising eta_overlap_min above eta did not refuse the source '
+            '-- the eta floor has no teeth')
+
+    def _probe_min_distance(self,
+                            center: tuple[float, float],
+                            half: tuple[float, float]) -> float:
+        """Nearest caustic-cloud distance ``D`` over a tile's nine probes.
+
+        Reproduces INDEPENDENTLY the per-probe nearest-distance that
+        `admits_exterior` computes internally, so the perturbation targets
+        are measured, not guessed.
+        """
+        probes = self.adm._probe_points(center, half)
+        cloud = self.adm.caustic_cloud
+        return float(min(
+            np.hypot(cloud[:, 0] - px, cloud[:, 1] - py).min()
+            for px, py in probes))
+
+    def _all_probes_outside(self, center: tuple[float, float],
+                            half: tuple[float, float]) -> bool:
+        """Whether every probe is OUTSIDE the lobe for every band loop."""
+        probes = self.adm._probe_points(center, half)
+        for probe in probes:
+            for loop in self.adm.loops:
+                if abs(training_module._winding_number(loop - probe)) >= 0.5:
+                    return False
+        return True
+
+    def test_admits_exterior_eta_max_flips_verdict(self) -> None:
+        """An exterior tile is admitted below ``D`` and refused above it.
+
+        The tile at ``_EXT_ADMIT_CENTER`` (rho_lobe ~ 2, well outside the
+        deltoid) has all nine probes outside the lobe, so the winding gate
+        passes and the flip is attributable to ``eta_max`` alone.
+        """
+        center, half = _EXT_ADMIT_CENTER, _EXT_ADMIT_HALF
+        self.n_checks += 1
+        self.assertTrue(
+            self._all_probes_outside(center, half),
+            'fixture broken: the admit tile is not fully exterior '
+            '(winding gate would decide instead of eta_max)')
+        dist = self._probe_min_distance(center, half)
+        self.assertGreater(dist, 0.0, 'degenerate probe/caustic distance')
+        admitted = dataclasses.replace(self.adm, eta_max=dist * 0.5)
+        refused = dataclasses.replace(self.adm, eta_max=dist * 1.5)
+        self.assertTrue(
+            admitted.admits_exterior(center, half),
+            f'tile not admitted at eta_max={dist * 0.5:.4f} < D={dist:.4f}')
+        self.assertFalse(
+            refused.admits_exterior(center, half),
+            f'tile still admitted at eta_max={dist * 1.5:.4f} > D={dist:.4f} '
+            '-- the tube-shell exclusion has no teeth')
+
+    def test_admits_exterior_interior_tile_refused_regardless_of_eta(
+            self) -> None:
+        """An INTERIOR tile (winding ~ 1) is refused even with ``eta_max=0``.
+
+        Proves the eta flip above is the tube-shell gate, not the membership
+        (winding) gate: with the eta exclusion fully disabled, a tile whose
+        probes fall inside the deltoid is still refused.
+        """
+        interior_center = (0.5, 1.0)   # rho_lobe = 0.5 -> inside the deltoid
+        half = _EXT_ADMIT_HALF
+        no_eta = dataclasses.replace(self.adm, eta_max=0.0)
+        self.n_checks += 1
+        self.assertFalse(
+            self._all_probes_outside(interior_center, half),
+            'fixture broken: the interior tile is not actually inside')
+        self.assertFalse(
+            no_eta.admits_exterior(interior_center, half),
+            'interior tile admitted with eta_max=0 -- the winding '
+            'membership gate is not enforced')
+
+    def test_verdict_map_boundary_tracks_nearest_caustic_contour(self) -> None:
+        """Diagnostic: admit/refuse map over distance-to-lobe vs ``eta_max``.
+
+        For a grid of tile centres (increasing ``rho_lobe`` = increasing
+        distance from the lobe) and ``eta_max`` thresholds, the real
+        `admits_exterior` verdict is mapped and the nearest-caustic contour
+        ``D(rho_lobe)`` overlaid.  The admit boundary must track ``D`` -- at
+        least one admitted and one refused cell must appear (the map is not
+        degenerate).  Saves the map.
+        """
+        half = _EXT_ADMIT_HALF
+        rho_centers = np.linspace(1.2, 3.0, 12)
+        eta_maxes = np.linspace(0.02, 0.6, 12)
+        verdict = np.zeros((eta_maxes.size, rho_centers.size))
+        dist_curve = np.empty(rho_centers.size)
+        for i_r, rho_c in enumerate(rho_centers):
+            center = (float(rho_c), 1.0)
+            dist_curve[i_r] = self._probe_min_distance(center, half)
+            for i_e, eta_max in enumerate(eta_maxes):
+                probe_adm = dataclasses.replace(self.adm,
+                                                eta_max=float(eta_max))
+                verdict[i_e, i_r] = (
+                    1.0 if probe_adm.admits_exterior(center, half) else 0.0)
+
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        fig, axis = plt.subplots(figsize=(7, 4))
+        mesh = axis.pcolormesh(rho_centers, eta_maxes, verdict,
+                               shading='auto', cmap='RdYlGn')
+        axis.plot(rho_centers, dist_curve, 'k-', lw=2,
+                  label='D = nearest caustic distance')
+        axis.set_xlabel('tile centre rho_lobe (distance from lobe)')
+        axis.set_ylabel('eta_max (tube-shell half-width)')
+        axis.set_title('Lobe-exterior admit (green) / refuse (red) vs eta_max')
+        axis.legend(loc='upper left')
+        fig.colorbar(mesh, ax=axis, label='admitted')
+        fig.tight_layout()
+        fig.savefig(_OUTPUT_DIR
+                    / 'lobe_exterior_admit_eta_max_map.png', dpi=90)
+        plt.close(fig)
+
+        self.n_checks += 1
+        self.assertTrue(np.any(verdict > 0.5),
+                        'no tile admitted anywhere -- map is degenerate')
+        self.assertTrue(np.any(verdict < 0.5),
+                        'no tile refused anywhere -- eta_max never bites')
+
+
 if __name__ == '__main__':
     main()

@@ -13,11 +13,14 @@ a slow tier is enabled.  This suite pins:
   boundary; the refusal message names the operation and the budget.
 
 * THE ESTIMATOR (`_self_estimate`) -- ``regions=None`` costs the full
-  4-region default; a single-region probe pays only that region's grid (the
-  WP's core promise: ``wedge_interior`` costs ~1 engine eval, ``exterior``
-  costs ``n_rho * n_theta_c``); an empty tuple falls back to the full
-  default (``()`` is falsy -- pinned, not "fixed"); the estimate is
-  monotone under region removal (a leaner filter can never cost MORE).
+  5-region default (``tube``, ``exterior``, ``wedge_interior``,
+  ``lobe_interior``, ``lobe_exterior`` -- ``lobe_exterior`` is now a
+  first-class training region, this build's WP1); a single-region probe
+  pays only that region's grid (the WP's core promise: ``wedge_interior``
+  costs ~1 engine eval, ``exterior`` costs ``n_rho * n_theta_c``); an empty
+  tuple falls back to the full default (``()`` is falsy -- pinned, not
+  "fixed"); the estimate is monotone under region removal (a leaner filter
+  can never cost MORE).
 
 * THE WIRING (`train()`) -- the guard fires BEFORE any chart is requested
   (a sentinel `_train_band_charts` that raises if called proves zero engine
@@ -72,7 +75,7 @@ _EXPECTED_SLOW_TIER_VARS: tuple[str, ...] = (
 )
 
 #: A smoke/probe config (matches the fast-tier fixture grids): cheap enough
-#: that even the FULL 4-region set stays under the budget.
+#: that even the FULL 5-region set stays under the budget.
 _SMOKE_CONFIG: TrainingConfig = TrainingConfig(
     n_gamma=4, n_u=4, n_theta=4, n_rho=4, n_theta_c=4, w_nodes_per_decade=3)
 
@@ -196,16 +199,34 @@ class SelfEstimateTestCase(_CountingTestCase):
     """`_self_estimate` costs a region-selected run at only that region's
     grid -- the WP's core promise, pinned arithmetically."""
 
-    def test_none_default_costs_full_four_region_set(self) -> None:
+    def test_none_default_costs_full_five_region_set(self) -> None:
         full = _self_estimate(_SMOKE_CONFIG, None)
         explicit = _self_estimate(_SMOKE_CONFIG,
                                   ('tube', 'exterior', 'wedge_interior',
-                                   'lobe_interior'))
+                                   'lobe_interior', 'lobe_exterior'))
         self.assertEqual(full, explicit)
-        # Hand-derived bookkeeping: n_evals = (16+16+1+1) * 4 * 6 = 816,
-        # estimate = 816 * 8 * 0.09.
-        self.assertAlmostEqual(full, 816 * 8 * 0.09, places=6)
+        # Hand-derived bookkeeping (smoke grid, WP1's 5-region default):
+        # per-region evals = tube(4*4=16) + exterior(4*4=16) +
+        # wedge_interior(1) + lobe_interior(1) + lobe_exterior(1) = 35;
+        # n_evals = 35 * n_gamma(4) * w_nodes(3*2=6) = 840;
+        # estimate = 840 * 8 * 0.09.
+        self.assertAlmostEqual(full, 840 * 8 * 0.09, places=6)
         self.comparisons += 2
+
+    def test_lobe_exterior_only_pays_one_eval_per_gamma_w(self) -> None:
+        """WP1: ``lobe_exterior`` is a first-class region priced at 1 engine
+        eval per (gamma, w) node -- identical to ``lobe_interior`` and
+        ``wedge_interior``, so the guard estimate stays honest and no
+        KeyError is raised for a ``lobe_exterior`` run."""
+        est = _self_estimate(_PRODUCTION_CONFIG, ('lobe_exterior',))
+        # (1 eval) * n_gamma(6) * w_nodes(2*8=16) * 8 * 0.09.
+        self.assertAlmostEqual(est, 1 * 6 * 16 * 8 * 0.09, places=6)
+        # Same cost as the other unit-cost interior regions.
+        self.assertEqual(
+            est, _self_estimate(_PRODUCTION_CONFIG, ('lobe_interior',)))
+        self.assertEqual(
+            est, _self_estimate(_PRODUCTION_CONFIG, ('wedge_interior',)))
+        self.comparisons += 3
 
     def test_wedge_interior_only_pays_one_eval_per_gamma_w(self) -> None:
         est = _self_estimate(_PRODUCTION_CONFIG, ('wedge_interior',))
@@ -229,7 +250,8 @@ class SelfEstimateTestCase(_CountingTestCase):
         self.comparisons += 2
 
     def test_single_region_never_costs_more_than_full(self) -> None:
-        for region in ('tube', 'exterior', 'wedge_interior', 'lobe_interior'):
+        for region in ('tube', 'exterior', 'wedge_interior', 'lobe_interior',
+                       'lobe_exterior'):
             with self.subTest(region=region):
                 est = _self_estimate(_PRODUCTION_CONFIG, (region,))
                 full = _self_estimate(_PRODUCTION_CONFIG, None)
@@ -239,7 +261,8 @@ class SelfEstimateTestCase(_CountingTestCase):
     def test_removing_a_region_never_increases_the_estimate(self) -> None:
         """Monotone under region removal: a leaner filter is a cheaper or
         equal filter, never a pricier one."""
-        full = ('tube', 'exterior', 'wedge_interior', 'lobe_interior')
+        full = ('tube', 'exterior', 'wedge_interior', 'lobe_interior',
+                'lobe_exterior')
         for drop in range(len(full)):
             subset = full[:drop] + full[drop + 1:]
             with self.subTest(dropped=full[drop]):

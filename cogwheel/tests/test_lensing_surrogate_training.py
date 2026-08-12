@@ -202,6 +202,11 @@ from cogwheel.lensing.surrogate_training import (
     _DD_PRODUCT_MARGIN,
     _deltoid_cusp_source_angles)
 from cogwheel.lensing.surrogate import CarrierDiscontinuityError
+from cogwheel.lensing.surrogate import LobeExteriorChart
+from cogwheel.lensing.surrogate_training import (
+    _saddle_lobe_admissions, _lobe_exterior_tiles, _lobe_cusp_source_angles,
+    _lobe_nearest_cusp, _lobe_heldout_samples, _build_lobe_exterior_chart,
+    _SADDLE_LOBE_CENTERS)
 from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal._hyp1f1 import (
     point_mass_g_derivatives, HypergeometricDomainError, DD_PRODUCT_CEILING)
@@ -6773,6 +6778,318 @@ class CuspArmCoverageParityGateSelfFalsificationSelfFalsification(
             self.comparisons += 1
         finally:
             surrogate_module._SADDLE_CUSP_ARM_COVERAGE = original
+
+# ---------------------------------------------------------------------------
+# SHARD D: held-out accuracy of a macro-saddle lobe-EXTERIOR chart against the
+# exact Schwinger oracle (WP1 LobeExteriorChart + WP2 admits_exterior /
+# _lobe_exterior_tiles).
+#
+# A saddle band (gamma > 1) has a deltoid whose two lobes each carry an
+# EXTERIOR shell ``rho_lobe in (1, rho_outer]`` served by a 2-image far-field
+# ``LobeExteriorChart`` (label FARFIELD_KERNEL_SUM, image_count = 2,
+# parity = -1).  ``operator.F_op`` DIVERGES for gamma > 1, so it must NOT be
+# the oracle; the independent oracle is the double-double Schwinger engine
+# (`ChangRefsdalChannels`), valid for the whole w-window here (w <= 55 < 60).
+#
+# The contract we pin is the one production actually records: `_heldout_eps`
+# serves each off-grid held-out ``(gamma, y1, y2)`` through the full guard
+# stack and compares to a FRESH engine reference, taking the max relative
+# ``max_w|served - E|/max|E|`` over the served points.  For a
+# ``LobeExteriorChart`` (which is NOT an `ExteriorPolarChart`) `_heldout_eps`
+# takes the ELSE branch: ``E = partition.envelope`` normalized by ``max|E|``.
+# We reproduce that comparison on the chart LOADED FROM DISK, reading the
+# recorded eps from the NPZ provenance (never the in-memory object), so:
+#   * each served held-out point obeys ``max_w|served - E|/max|E| <=
+#     recorded_eps`` -- true by construction on a clean round-trip, giving the
+#     bound teeth against an NPZ round-trip / serve-path regression; and
+#   * a poisoned (coeffs-scaled) loaded chart BREAKS the bound
+#     (self-falsification), proving the suite can go red.
+#
+# MEASURED REALITY (do not "fix" to a tight bar): at this smoke scale
+# (4x4x4 nodes over the far-field kernel sum) the recorded eps is O(1) and the
+# served envelope carries a large systematic magnitude bias -- the far-field
+# interpolant is genuinely coarse here.  A near-zero-bias / eps << 1 claim is a
+# HIGHER-NODE, post-build property (driver-verified), NOT something this
+# fast-fixture can assert.  We therefore gate the recorded eps against a LOOSE
+# absolute smoke ceiling and pin image_count == 2 (the "wrong image count"
+# failure mode the diagnostic calls out); the served-vs-oracle scatter with the
+# +-recorded_eps band is saved as the diagnostic, annotated with the bias.
+#
+# COST (opt-in engine tier only; skipped on the fast tier):
+#   fixture build ~ n_gamma*n_rho*n_theta_c = 64 Schwinger evals (+ a couple of
+#   image-count-refused outer tiles) ~ 20-35 s, built ONCE (lru_cache) and
+#   shared by both classes; each test adds ~6 held-out evals + ~6 serves
+#   (~2 s).  Whole file, engine tier: < ~40 s.
+# ---------------------------------------------------------------------------
+
+#: SHARD D saddle band ``(gamma_lo, gamma_hi)`` (macro-saddle: gamma > 1).
+_SHARD_D_BAND = (1.25, 1.35)
+#: Band-representative gamma for the lobe cusp-ray probe (band midpoint), the
+#: SAME representative the production build loop passes to
+#: `_lobe_cusp_source_angles`.
+_SHARD_D_GAMMA_MID = 0.5 * (_SHARD_D_BAND[0] + _SHARD_D_BAND[1])
+#: Tube-shell half-width for `_saddle_lobe_admissions` exterior admission.
+_SHARD_D_ETA_MAX = 0.15
+#: Chart ``w`` window, kept wholly below the double-double Schwinger ceiling
+#: (60) so the engine oracle stays in its accurate regime for every held-out
+#: point.
+_SHARD_D_W_RANGE = (25.0, 55.0)
+#: Outer ``rho_lobe`` bound of the exterior shell ``(1, rho_outer]``.
+_SHARD_D_RHO_OUTER = 2.0
+#: Deterministic RNG seed for `_lobe_heldout_samples` (fixes the fixture tile,
+#: its recorded eps, and the poison outcome across runs).
+_SHARD_D_SEED = 20260812
+#: Max exterior tiles to attempt before giving up (SkipTest).  The outer-rho
+#: tiles are cleanly 2-image; sorting outer-first, the first attempt serves.
+_SHARD_D_MAX_TILE_ATTEMPTS = 6
+#: Loose absolute ceiling for the recorded held-out eps at THIS smoke scale.
+#: The measured value is ~1.2 (coarse 4x4x4 far-field kernel-sum interpolant);
+#: this bar only catches a NaN / blown-up / grossly-wrong eps, not a tight
+#: accuracy claim (that is a post-build, higher-node driver measurement).
+_SHARD_D_EPS_SMOKE_BAR = 5.0
+#: Coefficient scale factor for the self-falsification poison (must push the
+#: served envelope far enough off that the recorded-eps bound breaks).
+_SHARD_D_POISON_FACTOR = 3.0
+
+#: SHARD D fixture training config: coarse spatial grid (minimum cubic-spline
+#: node count of 4 per axis), a couple of ``w`` nodes across the short window,
+#: 6 held-out probes, wide eps bars so the chart always registers.  The numbers
+#: this shard reads -- recorded eps, per-point residuals, image_count -- are
+#: independent of the (deliberately loose) registration bars.
+_SHARD_D_CONFIG = TrainingConfig(
+    n_gamma=4, n_rho=4, n_theta_c=4, w_nodes_per_decade=4,
+    n_heldout=6, n_caustic_samples=80,
+    farfield_eps_max=1e9, tube_eps_max=1e9)
+
+
+@functools.lru_cache(maxsize=1)
+def _shard_d_fixture() -> dict:
+    """Build ONE macro-saddle lobe-exterior chart and its held-out probe set.
+
+    Mirrors the production lobe-exterior build loop (`_train_band_charts`,
+    ``region == 'lobe_exterior'``): the canonical ``+y1`` lobe
+    (`_SADDLE_LOBE_CENTERS[1]`, lens centre ``pi``) is charted over the
+    exterior shell via `_build_lobe_exterior_chart` / `from_lobe_exterior_engine`,
+    the held-out probes are drawn through the LOBE frame
+    (`_lobe_heldout_samples`), and the recorded eps is `_heldout_eps` on the
+    fresh chart.  The single-chart surrogate is saved to a temporary NPZ with
+    the eps stamped into the provenance (exactly as `_load_or_build` does) and
+    RELOADED, so tests read the eps from disk.
+
+    Exterior tiles are attempted OUTER-``rho``-first (the far-zone tiles are
+    cleanly 2-image; near-boundary tiles still see 4 images and are refused by
+    `from_lobe_exterior_engine`'s image-count assertion), so the first attempt
+    serves.  Returns a dict with the loaded surrogate, the loaded chart, the
+    held-out samples, the NPZ-recorded eps, and the chart's ``w`` grid.  Raises
+    `unittest.SkipTest` (loudly) if no attempted tile yields a serving 2-image
+    chart -- never a silent green.
+    """
+    config = _SHARD_D_CONFIG
+    lens_center = _SADDLE_LOBE_CENTERS[1]
+    admissions = _saddle_lobe_admissions(
+        _SHARD_D_BAND, config, eta_max=_SHARD_D_ETA_MAX)
+    lobe = admissions[1]
+    cusp_angles = _lobe_cusp_source_angles(
+        _SHARD_D_GAMMA_MID, lens_center, lobe.centroid, config.n_caustic_samples)
+    tiles = _lobe_exterior_tiles(
+        lobe, cusp_angles, config.n_farfield_tiles_per_side, _SHARD_D_RHO_OUTER)
+    # Outer rho first (cleanly 2-image), so the first build serves.
+    tiles = sorted(tiles, key=lambda tile: -tile[0][0])
+    rng = np.random.default_rng(_SHARD_D_SEED)
+    refusals: list[str] = []
+    for center, half, _i, _j in tiles[:_SHARD_D_MAX_TILE_ATTEMPTS]:
+        cusp_angle, cusp_side = _lobe_nearest_cusp(
+            {'center': center, 'lobe_cusps': cusp_angles})
+        try:
+            chart, _calls, _refused = _build_lobe_exterior_chart(
+                gamma_band=_SHARD_D_BAND, parity=-1, lobe=lobe,
+                box_center=center, half=half, w_range=_SHARD_D_W_RANGE,
+                config=config, w_nodes_per_decade=config.w_nodes_per_decade,
+                cusp_angle=cusp_angle, cusp_side=cusp_side)
+        except (ValueError, CarrierDiscontinuityError) as exc:
+            refusals.append(f'{tuple(round(c, 3) for c in center)}: '
+                            f'{type(exc).__name__}')
+            continue
+        samples = _lobe_heldout_samples(
+            _SHARD_D_BAND, center, half, config, rng, lobe=lobe)
+        eps = _heldout_eps(chart, samples, {'schema': 'heldout-probe'})
+        if not math.isfinite(eps):
+            refusals.append(f'{tuple(round(c, 3) for c in center)}: eps=nan')
+            continue
+        outdir = tempfile.mkdtemp(prefix='shard_d_lobe_ext_')
+        path = Path(outdir) / 'lobe_exterior.npz'
+        LensAmplificationSurrogate(
+            [chart],
+            {'schema': 'build8c-chart', 'parity': -1,
+             'heldout_eps': eps}).save(path)
+        loaded = LensAmplificationSurrogate.load(path)
+        return {'loaded': loaded, 'chart': loaded.charts[0],
+                'samples': samples,
+                'recorded_eps': float(loaded.provenance['heldout_eps']),
+                'w_grid': np.exp(loaded.charts[0].log_w_grid),
+                'center': center}
+    raise unittest.SkipTest(
+        'SHARD D: no lobe-exterior tile yielded a serving 2-image chart in '
+        f'{_SHARD_D_MAX_TILE_ATTEMPTS} attempts; refusals={refusals}')
+
+
+def _serve_residuals(surrogate: 'LensAmplificationSurrogate',
+                     samples, w_grid):
+    """Per-point held-out residuals of ``surrogate`` vs the Schwinger oracle.
+
+    Reproduces the `_heldout_eps` ELSE branch (the LobeExteriorChart path):
+    for each held-out ``(gamma, y1, y2)`` a FRESH `ChangRefsdalChannels`
+    supplies ``E = partition.envelope`` (normalized by ``max|E|``); the
+    surrogate is served through its full guard stack at the SAME geometry.
+    Returns ``(residuals, biases, served)`` -- ``residuals[k] =
+    max_w|served - E|/max|E|``, ``biases[k] = mean_w(|served| - |E|)/max|E|``
+    (the signed magnitude offset, for the bias diagnostic), and ``served`` the
+    count of held-out points the guard stack actually served.
+    """
+    residuals: list[float] = []
+    biases: list[float] = []
+    served = 0
+    for gamma, y1, y2 in samples:
+        channels = ChangRefsdalChannels(w_grid)
+        try:
+            partition = channels.evaluate(
+                gamma=gamma, y=(y1, y2), beta=0.0, kappa=0.0)
+        except training._ENGINE_REFUSALS:
+            continue
+        env_true = np.asarray(partition.envelope)
+        denom = float(np.max(np.abs(env_true))) or 1.0
+        if not np.all(np.isfinite(env_true)):
+            continue
+        emulated, ok, _definition = surrogate.serve(
+            w_grid, gamma=gamma, y1=y1, y2=y2, beta=0.0,
+            eta=partition.caustic_distance, theta=partition.critical_theta,
+            image_count=int(partition.real_mask.sum()))
+        if not ok:
+            continue
+        served += 1
+        residuals.append(
+            float(np.max(np.abs(emulated - env_true)) / denom))
+        biases.append(
+            float(np.mean(np.abs(emulated) - np.abs(env_true)) / denom))
+    return residuals, biases, served
+
+
+@_TRAIN_TIER_SKIP
+class SaddleExteriorHeldoutOracleTestCase(_CountingTestCase):
+    """Held-out lobe-exterior accuracy vs the exact Schwinger oracle (SHARD D).
+
+    The chart is a macro-saddle 2-image `LobeExteriorChart`; the oracle is the
+    double-double Schwinger engine (``operator.F_op`` diverges for gamma > 1
+    and is deliberately unused).  Reads the recorded held-out eps from the NPZ
+    PROVENANCE and asserts every served held-out point obeys the
+    ``max_w|served - E|/max|E| <= recorded_eps`` contract that production's
+    registration gate records.
+    """
+
+    def test_recorded_eps_is_finite_and_below_smoke_bar(self) -> None:
+        """The NPZ-recorded held-out eps is finite, positive, and O(1)."""
+        fixture = _shard_d_fixture()
+        eps = fixture['recorded_eps']
+        self.assertTrue(math.isfinite(eps),
+                        'recorded held-out eps must be finite (>=1 served pt)')
+        self.comparisons += 1
+        self.assertGreater(eps, 0.0, 'a real interpolant has nonzero eps')
+        self.comparisons += 1
+        self.assertLess(
+            eps, _SHARD_D_EPS_SMOKE_BAR,
+            f'recorded eps {eps:.4f} exceeds the loose smoke ceiling '
+            f'{_SHARD_D_EPS_SMOKE_BAR} -- blown-up interpolant or wrong label')
+        self.comparisons += 1
+
+    def test_loaded_chart_is_two_image_macro_saddle_exterior(self) -> None:
+        """The loaded chart is a parity=-1, 2-image LobeExteriorChart."""
+        chart = _shard_d_fixture()['chart']
+        self.assertIsInstance(chart, LobeExteriorChart)
+        self.comparisons += 1
+        self.assertEqual(
+            int(chart.image_count), 2,
+            'macro-saddle lobe exterior is a 2-image far-field region; a '
+            'wrong image_count would mis-route the serve')
+        self.comparisons += 1
+        self.assertEqual(int(chart.parity), -1, 'macro-saddle parity is -1')
+        self.comparisons += 1
+
+    def test_served_points_obey_recorded_eps_bound(self) -> None:
+        """Every served held-out point matches Schwinger within recorded_eps.
+
+        Serves the LOADED chart and compares to a fresh engine reference at
+        off-grid held-out geometry; the per-point relative envelope error must
+        not exceed the eps recorded on disk (true by construction on a clean
+        round-trip -- so this is a round-trip / serve-path regression guard).
+        """
+        fixture = _shard_d_fixture()
+        residuals, biases, served = _serve_residuals(
+            fixture['loaded'], fixture['samples'], fixture['w_grid'])
+        recorded = fixture['recorded_eps']
+        self.assertGreater(served, 0, 'no held-out point served -- vacuous')
+        self.comparisons += 1
+        for k, residual in enumerate(residuals):
+            with self.subTest(point=k):
+                self.assertLessEqual(
+                    residual, recorded * (1.0 + 1e-6),
+                    f'held-out point {k} residual {residual:.6f} exceeds the '
+                    f'NPZ-recorded eps {recorded:.6f}')
+                self.comparisons += 1
+        # Diagnostic: served-vs-oracle scatter with the +-recorded_eps band.
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except Exception:  # pragma: no cover - plotting is best-effort
+            return
+        figure, axis = plt.subplots(figsize=(6, 4))
+        idx = np.arange(len(residuals))
+        axis.axhspan(0.0, recorded, color='tab:green', alpha=0.15,
+                     label=f'recorded eps = {recorded:.3f}')
+        axis.scatter(idx, residuals, color='tab:blue', label='per-point eps')
+        axis.axhline(recorded, color='tab:green', ls='--')
+        mean_bias = float(np.mean(biases)) if biases else float('nan')
+        axis.set_xlabel('held-out point index')
+        axis.set_ylabel(r'$\max_w|served-E| / \max|E|$')
+        axis.set_title(
+            f'SHARD D lobe-exterior held-out vs Schwinger '
+            f'(mean magnitude bias {mean_bias:.3f})')
+        axis.legend(loc='best', fontsize=8)
+        _save_plot(figure, 'shard_d_lobe_exterior_heldout_vs_oracle.png')
+        plt.close(figure)
+
+
+@_TRAIN_TIER_SKIP
+class SaddleExteriorHeldoutSelfFalsificationTestCase(_CountingTestCase):
+    """The recorded-eps bound has teeth: a poisoned chart breaks it (SHARD D).
+
+    Scaling the loaded chart's spline coefficients drives the served envelope
+    off the engine reference, so the max held-out residual must EXCEED the
+    recorded eps.  If it did not, the `test_served_points_obey_recorded_eps_bound`
+    contract would be vacuous (any chart would pass).
+    """
+
+    def test_poisoned_coefficients_break_the_bound(self) -> None:
+        fixture = _shard_d_fixture()
+        chart = fixture['chart']
+        poisoned = dataclasses.replace(
+            chart,
+            real_coeffs=chart.real_coeffs * _SHARD_D_POISON_FACTOR,
+            imag_coeffs=chart.imag_coeffs * _SHARD_D_POISON_FACTOR)
+        poisoned_surrogate = LensAmplificationSurrogate(
+            [poisoned], {'schema': 'shard-d-poison', 'parity': -1})
+        residuals, _biases, served = _serve_residuals(
+            poisoned_surrogate, fixture['samples'], fixture['w_grid'])
+        recorded = fixture['recorded_eps']
+        self.assertGreater(served, 0, 'no held-out point served -- vacuous')
+        self.comparisons += 1
+        self.assertGreater(
+            max(residuals), recorded,
+            f'poisoned (x{_SHARD_D_POISON_FACTOR}) chart max residual '
+            f'{max(residuals):.6f} did not exceed recorded eps '
+            f'{recorded:.6f}; the bound has no teeth')
+        self.comparisons += 1
+
 
 if __name__ == '__main__':
     main()

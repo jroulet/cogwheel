@@ -89,9 +89,12 @@ from cogwheel.lensing.surrogate_training import (
 
 #: The canonical region-name set, single-sourced here so both the
 #: default-equality claim and the per-region exclusivity claims key on one
-#: tuple (mirroring the production inline default).
+#: tuple (mirroring the production inline default).  WP1 promoted
+#: ``lobe_exterior`` (the macro-saddle deltoid-exterior shell, charted in
+#: lobe-local ``(rho_lobe, theta_local)`` coordinates) to a first-class
+#: region, so the tuple grew from four names to five.
 _ALL_REGIONS: tuple[str, ...] = ('tube', 'exterior', 'wedge_interior',
-                                 'lobe_interior')
+                                 'lobe_interior', 'lobe_exterior')
 
 #: Positive-parity (astroid) band: interior origin-enclosing, wedge tiles
 #: admitted, tube + exterior regions live.  Topology-stable at 60 samples.
@@ -162,11 +165,19 @@ _TRAIN_TIER_SKIP = unittest.skipUnless(
 def _tag_kind(tag: str) -> str:
     """Chart region a build tag belongs to, from the tag's own infix.
 
-    The four production tag infixes are unambiguous: exterior far-field tags
+    The five production tag infixes are unambiguous: exterior far-field tags
     are ``_ff_{i}_{j}`` (no wedge/lobe infix), wedge tags ``_ffwedge_``,
-    lobe tags ``_fflobe_``, tube tags ``_tube_``.  ``_ff_`` is a substring
-    of ``_ffwedge_``/``_fflobe_``, so the interior infixes are checked first.
+    lobe-interior tags ``_fflobe_``, lobe-exterior tags ``_fflobeext_``
+    (WP1's macro-saddle exterior shell), tube tags ``_tube_``.  ``_ff_`` is a
+    substring of ``_ffwedge_``/``_fflobe_``, so the interior infixes are
+    checked first.  ``_fflobeext_`` is NOT a superstring of ``_fflobe_`` (the
+    char after ``_fflobe`` is ``e``, not ``_``) NOR of ``_ff_`` (``_ffl...``),
+    so without its own branch a lobe-exterior tag would fall through to
+    ``'other'`` -- its check is placed BEFORE the ``_ff_`` exterior check so
+    it can never be misread as exterior.
     """
+    if '_fflobeext_' in tag:
+        return 'lobe_exterior'
     if '_fflobe_' in tag:
         return 'lobe_interior'
     if '_ffwedge_' in tag:
@@ -362,11 +373,52 @@ class RegionExclusivityTestCase(_CountingTestCase):
         self.comparisons += 3
 
     def test_exterior_only_saddle(self) -> None:
-        tags, _reports = _run_band_charts(-1, _SADDLE_BAND, ('exterior',),
-                                          _CONFIG, _SADDLE_N_SAMPLES)
-        self.assertGreater(len(tags), 0)
-        self.assertEqual({_tag_kind(t) for t in tags}, {'exterior'})
-        self.comparisons += 2
+        """After WP1's deltoid-exterior rewiring, the origin-polar
+        saddle-exterior tiler is RETIRED: the exterior far-field block runs
+        ONLY at positive parity (``'exterior' in regions and parity == 1``),
+        so a saddle-parity run with ``regions=('exterior',)`` builds ZERO
+        charts.  The macro-saddle exterior shell is now owned by the separate
+        ``lobe_exterior`` region (see ``test_lobe_exterior_only_saddle``)."""
+        tags, reports = _run_band_charts(-1, _SADDLE_BAND, ('exterior',),
+                                         _CONFIG, _SADDLE_N_SAMPLES)
+        self.assertEqual(tags, (),
+                         'saddle exterior-only run must build no charts: the '
+                         'exterior far-field block is positive-parity only')
+        self.assertFalse(any('file' in r for r in reports),
+                         'saddle exterior-only run must emit no chart records')
+        self.assertFalse(any(r.get('exterior_region_summary')
+                             for r in reports),
+                         'the exterior region block never runs at saddle '
+                         'parity, so no exterior summary is emitted')
+        self.comparisons += 3
+
+    def test_lobe_exterior_only_saddle(self) -> None:
+        """The new ``lobe_exterior`` filter builds only lobe-exterior charts
+        at the narrow-tube saddle band where the deltoid lobes' exterior
+        shell genuinely admits tiles.
+
+        Every produced tag must decode to ``'lobe_exterior'`` (only
+        ``_fflobeext_`` tags), the set must be NON-EMPTY, and no tube /
+        lobe-interior / wedge / origin-exterior tags may leak.  ``_fflobeext_``
+        contains neither ``_fflobe_`` nor ``_ff_`` as a substring, so the
+        no-leak assertions below are exact, not accidentally self-satisfied.
+        """
+        tags, _reports = _run_band_charts(-1, _SADDLE_LOBE_BAND,
+                                          ('lobe_exterior',), _LOBE_CONFIG,
+                                          _LOBE_N_SAMPLES)
+        self.assertGreater(
+            len(tags), 0,
+            'lobe_exterior filter must build >=1 exterior-shell tile at the '
+            'narrow-tube saddle band')
+        self.assertEqual({_tag_kind(t) for t in tags}, {'lobe_exterior'},
+                         'lobe-exterior-only run must build only '
+                         'lobe_exterior charts')
+        self.assertFalse(
+            any('_tube_' in t or '_fflobe_' in t or '_ffwedge_' in t
+                or '_ff_' in t for t in tags),
+            'lobe-exterior-only run must not build tube/interior/exterior '
+            'charts')
+        self.comparisons += 3
 
     def test_lobe_interior_only_saddle(self) -> None:
         """Lobe filter builds only lobe charts at a band where the deltoid
@@ -476,8 +528,16 @@ class RegionsFilterMatchesFullRunTestCase(_CountingTestCase):
         self.comparisons += 2
 
     def test_lobe_only_matches_full_restricted_saddle(self) -> None:
-        """The lobe-family interior comparison (narrow-tube band where the
-        lobes admit tiles)."""
+        """The lobe-INTERIOR-family comparison (narrow-tube band where the
+        lobes admit tiles).
+
+        WP1's full (``regions=None``) saddle run now ALSO builds the
+        ``lobe_exterior`` family (``_fflobeext_`` chart records plus a
+        ``lobe_exterior_summary`` report).  The ``lobe_interior``-only
+        restriction excludes that family, so the baseline must strip it too --
+        otherwise the leaked exterior-shell records make the equality go RED
+        for the wrong reason.
+        """
         full = _run_band_charts(-1, _SADDLE_LOBE_BAND, None, _LOBE_CONFIG,
                                 _LOBE_N_SAMPLES)
         lobe = _run_band_charts(-1, _SADDLE_LOBE_BAND, ('lobe_interior',),
@@ -485,7 +545,9 @@ class RegionsFilterMatchesFullRunTestCase(_CountingTestCase):
         full_minus_others = [
             r for r in full[1]
             if not (r.get('exterior_region_summary')
+                    or r.get('lobe_exterior_summary')
                     or ('_tube_' in str(r.get('name')))
+                    or ('_fflobeext_' in str(r.get('name')))
                     or ('_ff_' in str(r.get('name'))
                         and '_fflobe_' not in str(r.get('name'))))]
         self.assertEqual(_norm_reports(tuple(full_minus_others)),

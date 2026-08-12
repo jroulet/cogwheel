@@ -5192,6 +5192,482 @@ class TubeCuspWindowParityGatingSelfFalsificationTestCase(SurrogateTestCase):
         self.assertFalse(served,
                          'positive with coverage=0.0 should REFUSE at shrink '
                          'margin (original was ADMIT)')
+# ==========================================================================
+# SHARD B -- macro-saddle LobeExteriorChart coverage + astroid byte-identity
+# (Build lobe_exterior; WP1 add LobeExteriorChart + serve/select/NPZ wiring,
+#  WP2 exterior lobe tiler, WP3 census exterior category).
+#
+# Tolerance justification.  Both shards assert EXACT outcomes (a chart
+# identity or ``max|diff| = 0.0``), so there is no numerical tolerance to
+# choose: `select_chart` is a deterministic structural dispatch (box +
+# image-count + exclusion-ball gates, no floating comparison against a
+# fitted surface), and the byte-identity legs compare the SAME spline
+# evaluated on the SAME nodes, so equality is bit-for-bit.  The synthetic
+# unit envelope (``envelope_real = 1``, ``envelope_imag = 0``) carries no
+# physical meaning -- these gates pin the SELECTION and PERSISTENCE plumbing,
+# not reconstruction accuracy (that lives in
+# ``test_lensing_farfield_envelope.py``).  All geometry fed to `select_chart`
+# (``image_count = 2``, ``eta = 0.5954``, ``caustic_theta = pi`` for the
+# corridor point) is the REAL `ChangRefsdalChannels.geometry_partition`
+# output, never a hand-picked scalar, so the coverage claim is physical.
+# ==========================================================================
+
+#: Macro-saddle gamma band charted by the production exterior lobe tiler
+#: (``surrogate_training._train_band_charts`` charts only the canonical +y1
+#: lobe).  A representative narrow band inside the shear-saddle regime.
+LX_SADDLE_BAND = (1.2, 1.4)
+
+#: Representative saddle shear used for the coverage queries (interior to
+#: `LX_SADDLE_BAND`, off the ``gamma = 1`` guard band).
+LX_GAMMA = 1.3
+
+#: The inter-lobe CORRIDOR source (shear-frame ``(y1, y2)``): on the y1 axis
+#: BETWEEN the two deltoid lobes.  Its real `geometry_partition` reports two
+#: real images (`_MACRO_SADDLE_EXTERIOR_IMAGE_COUNT`) with a large caustic
+#: distance -- the point the Architect flags must NOT be left to the engine.
+LX_CORRIDOR_SOURCE = (0.5, 0.0)
+
+#: Exterior lobe-local radial nodes ``(1, rho_outer]`` -- span past the
+#: corridor point's folded ``rho_lobe = 3.804`` so the +y1 exterior chart
+#: contains it (the D2 fold on ``|y1|, |y2|`` maps the whole inter-lobe
+#: corridor into the canonical +y1 lobe).
+LX_RHO_EXTERIOR = np.linspace(1.5, 9.0, 4)
+
+#: Lobe interior radial nodes ``[0, 1)`` -- the interior chart cannot reach a
+#: ``rho_lobe > 1`` corridor source, so it must DECLINE.
+LX_RHO_INTERIOR = np.linspace(0.05, 0.95, 4)
+
+#: Lobe-local angular nodes.  MUST span ``[-pi, pi]`` (endpoints included) so
+#: the corridor point's seam angle ``theta_local = -pi`` lies on the grid and
+#: passes box containment (a razor's-edge seam otherwise refused).
+LX_THETA_LOCAL = np.linspace(-np.pi, np.pi, 6)
+
+#: Positive-parity (astroid) wedge gamma band for the DECLINE control -- a
+#: sub-critical shear box whose caustic map ``r_caustic`` is well posed.
+LX_ASTROID_WEDGE_BAND = (0.2, 0.5)
+
+
+@functools.lru_cache(maxsize=1)
+def _lobe_exterior_multichart_fixture():
+    """A 3-chart saddle surrogate whose ONLY exterior claimant is the +y1
+    `LobeExteriorChart`, built WITHOUT engine calls.
+
+    Charts (list order = `select_chart` scan order): a positive-parity
+    `InteriorWedgeChart` (astroid, gamma ``[0.2, 0.5]``), the canonical +y1
+    `LobeInteriorChart` and the canonical +y1 `LobeExteriorChart` (both saddle,
+    gamma ``[1.2, 1.4]``).  Mirrors the production wiring where
+    ``_train_band_charts`` charts only the +y1 lobe, so the corridor point --
+    folded by D2 into the +y1 lobe -- is claimed by exactly ONE chart.
+    """
+    log_w = MC_LOG_W_GRID
+    gamma_grid = np.linspace(*LX_SADDLE_BAND, 4)
+    _lobe_a, lobe_b = surrogate_training._saddle_lobe_admissions(
+        LX_SADDLE_BAND, surrogate_training.TrainingConfig(),
+        eta_max=MC_ETA_MAX)
+
+    # Canonical +y1 lobe EXTERIOR chart (the sole exterior claimant).
+    ext_shape = (log_w.size, gamma_grid.size, LX_RHO_EXTERIOR.size,
+                 LX_THETA_LOCAL.size)
+    ext = surrogate_module.LobeExteriorChart.from_lobe_values(
+        gamma_grid=gamma_grid, rho_lobe_grid=LX_RHO_EXTERIOR,
+        theta_local_grid=LX_THETA_LOCAL, log_w_grid=log_w,
+        envelope_real=np.ones(ext_shape), envelope_imag=np.zeros(ext_shape),
+        image_count=surrogate_module._MACRO_SADDLE_EXTERIOR_IMAGE_COUNT,
+        parity=-1, centroid=lobe_b.centroid,
+        boundary_theta=lobe_b.boundary_theta, boundary_r=lobe_b.boundary_r)
+
+    # Canonical +y1 lobe INTERIOR chart (declines a rho_lobe > 1 corridor).
+    int_shape = (log_w.size, gamma_grid.size, LX_RHO_INTERIOR.size,
+                 LX_THETA_LOCAL.size)
+    interior = surrogate_module.LobeInteriorChart.from_lobe_values(
+        gamma_grid=gamma_grid, rho_lobe_grid=LX_RHO_INTERIOR,
+        theta_local_grid=LX_THETA_LOCAL, log_w_grid=log_w,
+        envelope_real=np.ones(int_shape), envelope_imag=np.zeros(int_shape),
+        image_count=surrogate_module._MACRO_SADDLE_IMAGE_COUNT, parity=-1,
+        centroid=lobe_b.centroid, other_centroid=lobe_b.other_centroid,
+        corridor_half=lobe_b.corridor_half,
+        boundary_theta=lobe_b.boundary_theta, boundary_r=lobe_b.boundary_r)
+
+    # Positive-parity astroid wedge chart (a parity/gamma-band decline).
+    wedge = _astroid_wedge_chart()
+
+    provenance = {'engine_version': 'shardb-fixture', 'chart_count': 3,
+                  'chart_types': ['wedge', 'lobe', 'lobe_exterior']}
+    return LensAmplificationSurrogate([wedge, interior, ext], provenance)
+
+
+@functools.lru_cache(maxsize=1)
+def _astroid_wedge_chart():
+    """A positive-parity `InteriorWedgeChart` (astroid, gamma ``[0.2, 0.5]``).
+
+    Built from an analytic `_WedgeCausticMap` (``geometry.r_caustic`` is well
+    posed for ``gamma < 1``).  Used as the parity/gamma-band DECLINE control
+    in the saddle coverage fixture and as the parity==1 subject of the
+    byte-identity shard.
+    """
+    log_w = MC_LOG_W_GRID
+    gw = np.linspace(*LX_ASTROID_WEDGE_BAND, 4)
+    th = np.linspace(0.0, np.pi / 2, 5)
+    r_table = np.array([[geometry.r_caustic(g, t) for t in th] for g in gw])
+    wedge_map = surrogate_module._WedgeCausticMap(
+        gamma_nodes=gw.copy(), theta_nodes=th.copy(), r_table=r_table)
+    r_grid = np.linspace(0.1, 0.9, 4)
+    tw_grid = np.linspace(0.0, np.pi / 2, 5)
+    shape = (log_w.size, gw.size, r_grid.size, tw_grid.size)
+    return surrogate_module.InteriorWedgeChart.from_wedge_values(
+        gamma_grid=gw, r_grid=r_grid, theta_wedge_grid=tw_grid,
+        log_w_grid=log_w, envelope_real=np.ones(shape),
+        envelope_imag=np.zeros(shape), image_count=2, parity=1,
+        wedge_map=wedge_map)
+
+
+def _corridor_partition():
+    """Real `geometry_partition` for the corridor source at `LX_GAMMA`.
+
+    Returns ``(image_count, eta, theta)`` -- the certified physical triple
+    `select_chart` consumes (never a hand-picked scalar)."""
+    part = ChangRefsdalChannels(MC_W_ARRAY).geometry_partition(
+        gamma=LX_GAMMA, y=LX_CORRIDOR_SOURCE, beta=0.0, kappa=0.0)
+    return (int(part.real_mask.sum()), float(part.caustic_distance),
+            float(part.caustic_theta))
+
+
+def _select_saddle(charts, image_count, eta, theta, y1, y2):
+    """`select_chart` for a saddle source at `LX_GAMMA` (eigenframe rotation
+    applied, ``beta = 0`` so the shear frame IS the eigenframe)."""
+    y1_eig, y2_eig = _rotate_to_eigenframe(y1, y2, 0.0)
+    log_w_min = float(MC_LOG_W_GRID.min())
+    log_w_max = float(MC_LOG_W_GRID.max())
+    return surrogate_module.select_chart(
+        charts, gamma=LX_GAMMA, log_w_min=log_w_min, log_w_max=log_w_max,
+        eta=eta, theta=theta, image_count=image_count,
+        y1_eig=y1_eig, y2_eig=y2_eig)
+
+
+class LobeExteriorSelectionTestCase(SurrogateTestCase):
+    """SHARD B, Spec 1: a macro-saddle EXTERIOR source is claimed by exactly
+    ONE chart -- the canonical +y1 `LobeExteriorChart` -- and the corridor
+    point ``(0.5, 0)`` at ``gamma = 1.3`` is served by that chart rather than
+    left to the exact engine.
+
+    `select_chart` runs over the whole 3-chart stack (positive-parity wedge,
+    +y1 lobe interior, +y1 lobe exterior).  The lobe interior declines
+    (``rho_lobe > 1``), the astroid wedge declines (wrong parity/gamma band),
+    and only the lobe exterior claims -- verified BOTH through the full
+    dispatch AND per-kind by isolating each chart.  The self-falsification
+    companion shrinks the exterior radial band below the corridor's folded
+    ``rho_lobe`` so the sole claimant drops out and dispatch flips to None.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.sur = _lobe_exterior_multichart_fixture()
+        self.wedge, self.interior, self.exterior = self.sur.charts
+        self.image_count, self.eta, self.theta = _corridor_partition()
+
+    def test_corridor_partition_is_a_genuine_exterior_two_image_source(self):
+        """Precondition: the corridor point's REAL geometry is the served
+        macro-saddle exterior (two real images, caustic distance well above
+        the floor) -- so the coverage claim is physical, not a hand-picked
+        scalar."""
+        self.n_checks += 1
+        self.assertEqual(
+            self.image_count,
+            surrogate_module._MACRO_SADDLE_EXTERIOR_IMAGE_COUNT,
+            'corridor source must report the macro-saddle exterior image '
+            'count (2) -- re-derive the fixture geometry')
+        self.n_checks += 1
+        self.assertGreater(
+            self.eta, surrogate_module._DEFAULT_CAUSTIC_FLOOR,
+            'corridor source must sit above the caustic floor to be served')
+
+    def test_exactly_one_chart_claims_the_corridor_source(self):
+        """Across all chart kinds, exactly ONE chart (the +y1 lobe exterior)
+        claims the corridor source; the wedge and lobe interior decline.  A
+        per-kind serve-verdict table is emitted as the diagnostic."""
+        table = {}
+        for name, chart in (('wedge', self.wedge),
+                            ('lobe_interior', self.interior),
+                            ('lobe_exterior', self.exterior)):
+            isolated = LensAmplificationSurrogate([chart], self.sur.provenance)
+            claimed = _select_saddle(
+                isolated.charts, self.image_count, self.eta, self.theta,
+                *LX_CORRIDOR_SOURCE) is not None
+            table[name] = claimed
+            self.n_checks += 1
+        self.assertEqual(
+            table, {'wedge': False, 'lobe_interior': False,
+                    'lobe_exterior': True},
+            f'expected the +y1 lobe exterior to be the sole claimant; got '
+            f'{table}')
+        print('\n[LobeExterior] corridor (0.5,0)@1.3 per-kind verdict:', table)
+
+    def test_full_dispatch_selects_the_lobe_exterior_chart(self):
+        """The full-stack `select_chart` returns the +y1 `LobeExteriorChart`
+        object itself -- the corridor point is NOT left to the exact engine."""
+        selected = _select_saddle(
+            self.sur.charts, self.image_count, self.eta, self.theta,
+            *LX_CORRIDOR_SOURCE)
+        self.n_checks += 1
+        self.assertIs(selected, self.exterior,
+                      'full dispatch did not select the +y1 lobe exterior '
+                      'chart for the corridor source')
+        self.n_checks += 1
+        self.assertIsInstance(selected, surrogate_module.LobeExteriorChart,
+                              'the corridor claimant is not a LobeExteriorChart')
+
+    def test_lobe_interior_declines_on_rho_lobe_above_one(self):
+        """The lobe INTERIOR chart declines because the corridor source folds
+        to ``rho_lobe > 1`` in the +y1 lobe frame (the exterior domain)."""
+        y1_eig, y2_eig = _rotate_to_eigenframe(*LX_CORRIDOR_SOURCE, 0.0)
+        rho_lobe, _theta_local = surrogate_module._to_lobe_fixed(
+            self.interior.centroid, self.interior.boundary_theta,
+            self.interior.boundary_r, abs(y1_eig), abs(y2_eig))
+        self.n_checks += 1
+        self.assertGreater(rho_lobe, 1.0,
+                           'corridor source must be exterior (rho_lobe > 1) '
+                           'to the +y1 lobe -- else the interior would claim')
+        isolated = LensAmplificationSurrogate(
+            [self.interior], self.sur.provenance)
+        self.n_checks += 1
+        self.assertIsNone(
+            _select_saddle(isolated.charts, self.image_count, self.eta,
+                           self.theta, *LX_CORRIDOR_SOURCE),
+            'the lobe interior must decline a rho_lobe > 1 source')
+
+    def test_sweep_of_exterior_sources_is_claimed_by_the_lobe_exterior(self):
+        """A sweep of inter-lobe corridor sources (varying y1 between the
+        lobes) is each claimed by the +y1 lobe exterior; a per-source
+        serve-verdict table is emitted."""
+        table = {}
+        for y1 in (0.3, 0.5, 0.7, 0.9):
+            source = (y1, 0.0)
+            part = ChangRefsdalChannels(MC_W_ARRAY).geometry_partition(
+                gamma=LX_GAMMA, y=source, beta=0.0, kappa=0.0)
+            image_count = int(part.real_mask.sum())
+            if image_count != \
+                    surrogate_module._MACRO_SADDLE_EXTERIOR_IMAGE_COUNT:
+                continue  # only exterior (2-image) sources are in scope
+            selected = _select_saddle(
+                self.sur.charts, image_count,
+                float(part.caustic_distance), float(part.caustic_theta),
+                *source)
+            table[y1] = (selected is self.exterior)
+            with self.subTest(y1=y1):
+                self.n_checks += 1
+                self.assertIs(selected, self.exterior,
+                              f'exterior source y1={y1} not claimed by the '
+                              f'+y1 lobe exterior chart')
+        print('\n[LobeExterior] exterior y1-sweep claimed-by-+y1:', table)
+
+
+class LobeExteriorSelfFalsificationTestCase(SurrogateTestCase):
+    """SHARD B, Spec 1 self-falsification: the coverage claim has teeth.
+
+    Shrinking the exterior radial band below the corridor point's folded
+    ``rho_lobe = 3.804`` drops the sole claimant out of coverage, so full
+    dispatch flips from the lobe exterior to ``None`` (the exact engine).  A
+    coverage claim that could never fail would be untestable.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.image_count, self.eta, self.theta = _corridor_partition()
+
+    def test_shrinking_exterior_rho_drops_the_corridor_claim(self):
+        """A +y1 lobe exterior chart whose ``rho_lobe`` band stops at 3.0
+        (below the corridor's folded 3.804) no longer contains the source, so
+        `select_chart` returns None -- proving the box-containment gate, not a
+        vacuous always-serve, drives the coverage."""
+        log_w = MC_LOG_W_GRID
+        gamma_grid = np.linspace(*LX_SADDLE_BAND, 4)
+        _a, lobe_b = surrogate_training._saddle_lobe_admissions(
+            LX_SADDLE_BAND, surrogate_training.TrainingConfig(),
+            eta_max=MC_ETA_MAX)
+        rho_small = np.linspace(1.5, 3.0, 4)  # max 3.0 < corridor rho 3.804
+        shape = (log_w.size, gamma_grid.size, rho_small.size,
+                 LX_THETA_LOCAL.size)
+        shrunk = surrogate_module.LobeExteriorChart.from_lobe_values(
+            gamma_grid=gamma_grid, rho_lobe_grid=rho_small,
+            theta_local_grid=LX_THETA_LOCAL, log_w_grid=log_w,
+            envelope_real=np.ones(shape), envelope_imag=np.zeros(shape),
+            image_count=surrogate_module._MACRO_SADDLE_EXTERIOR_IMAGE_COUNT,
+            parity=-1, centroid=lobe_b.centroid,
+            boundary_theta=lobe_b.boundary_theta,
+            boundary_r=lobe_b.boundary_r)
+        sur = LensAmplificationSurrogate(
+            [_astroid_wedge_chart(), shrunk], {'chart_count': 2})
+        selected = _select_saddle(sur.charts, self.image_count, self.eta,
+                                  self.theta, *LX_CORRIDOR_SOURCE)
+        self.n_checks += 1
+        self.assertIsNone(
+            selected,
+            'shrinking the exterior rho band below the corridor rho_lobe '
+            'did not drop the claim -- the coverage gate has no teeth')
+
+    def test_baseline_exterior_chart_does_claim(self):
+        """Control: the FULL-range exterior chart (rho up to 9.0) DOES claim
+        the same source, so the flip above is caused by the shrink, not by an
+        unrelated gate."""
+        sur = _lobe_exterior_multichart_fixture()
+        selected = _select_saddle(sur.charts, self.image_count, self.eta,
+                                  self.theta, *LX_CORRIDOR_SOURCE)
+        self.n_checks += 1
+        self.assertIs(selected, sur.charts[2],
+                      'baseline full-range exterior chart must claim the '
+                      'corridor source')
+
+
+#: Positive-parity (astroid) probe sources for the byte-identity shard.  Each
+#: ``(kwargs)`` serves via the astroid tube or exterior-polar chart at
+#: ``gamma < 1`` -- the parity==1 region the deltoid-exterior change must not
+#: touch.  ``eta`` spans tube-only, exterior-only and the overlap band.
+LX_ASTROID_PROBES = (
+    dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.008, theta=0.70,
+         image_count=2),   # tube-only
+    dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.10, theta=0.70,
+         image_count=2),   # exterior-polar only
+    dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.7, eta=0.03, theta=0.70,
+         image_count=2),   # overlap band, off-axis beta (rotation exercised)
+)
+
+
+def _astroid_positive_charts():
+    """The two positive-parity astroid charts from `_multichart_fixture`
+    (tube + exterior-polar), shareable across the byte-identity legs."""
+    sur = _multichart_fixture()
+    return sur.charts[0], sur.charts[1]  # pos_tube, pos_ff
+
+
+def _saddle_lobe_exterior_chart():
+    """A saddle (parity==-1) `LobeExteriorChart` -- the new machinery whose
+    presence must NOT perturb positive-parity serving."""
+    return _lobe_exterior_multichart_fixture().charts[2]
+
+
+class AstroidByteIdentityTestCase(SurrogateTestCase):
+    """SHARD B, Spec 2: the deltoid-exterior change touches ONLY parity==-1.
+
+    For a set of astroid (``gamma < 1``) sources, serving is byte-identical
+    whether or not the new saddle `LobeExteriorChart` is present in the chart
+    list, and an astroid `ExteriorPolarChart` survives an NPZ round-trip with
+    ``max|diff| = 0.0`` served values.  Any nonzero diff would localise an
+    ungated code path leaking into positive parity.
+    """
+
+    def setUp(self):
+        super().setUp()
+        pos_tube, pos_ff = _astroid_positive_charts()
+        prov = {'engine_version': 'shardb-astroid', 'chart_count': 2}
+        #: parity==1-only reference surrogate.
+        self.reference = LensAmplificationSurrogate([pos_tube, pos_ff], prov)
+        #: same charts + the new saddle exterior chart appended.
+        self.augmented = LensAmplificationSurrogate(
+            [pos_tube, pos_ff, _saddle_lobe_exterior_chart()], prov)
+
+    def test_probes_are_actually_served(self):
+        """Precondition: every astroid probe IS served by the reference (so
+        the byte-identity below is non-vacuous, not both-empty)."""
+        for i, kwargs in enumerate(LX_ASTROID_PROBES):
+            with self.subTest(probe=i):
+                _e, served, _d = self.reference.serve(MC_W_ARRAY, **kwargs)
+                self.n_checks += 1
+                self.assertTrue(served,
+                                f'astroid probe {i} was not served -- the '
+                                f'byte-identity check would be vacuous')
+
+    def test_saddle_chart_presence_does_not_perturb_astroid_serving(self):
+        """Serving an astroid source is byte-identical with vs without the
+        saddle `LobeExteriorChart` present -- envelope, served flag AND
+        definition tag all match to the bit."""
+        for i, kwargs in enumerate(LX_ASTROID_PROBES):
+            with self.subTest(probe=i):
+                e_ref, s_ref, d_ref = self.reference.serve(
+                    MC_W_ARRAY, **kwargs)
+                e_aug, s_aug, d_aug = self.augmented.serve(
+                    MC_W_ARRAY, **kwargs)
+                self.n_checks += 1
+                self.assertEqual((s_ref, d_ref), (s_aug, d_aug),
+                                 f'probe {i}: served flag/definition changed '
+                                 f'when the saddle chart was added')
+                np.testing.assert_array_equal(
+                    e_ref, e_aug,
+                    err_msg=f'probe {i}: astroid envelope changed when the '
+                            f'saddle exterior chart was added')
+
+    def test_astroid_selection_is_unchanged_by_the_saddle_chart(self):
+        """`select_chart` returns the SAME positive-parity chart object with
+        vs without the saddle chart -- the new chart never wins a parity==1
+        query."""
+        for i, kwargs in enumerate(LX_ASTROID_PROBES):
+            with self.subTest(probe=i):
+                ref_sel = _select_for_query(self.reference, kwargs)
+                aug_sel = _select_for_query(self.augmented, kwargs)
+                self.n_checks += 1
+                self.assertIs(ref_sel, aug_sel,
+                              f'probe {i}: the saddle chart changed the '
+                              f'astroid chart selection')
+
+    def test_astroid_exterior_polar_npz_round_trip_is_bit_identical(self):
+        """An astroid `ExteriorPolarChart` (parity==1) survives a production
+        NPZ save/load with byte-identical served values -- the WP1 schema
+        additions (the ``lobe_exterior`` NPZ kind) do not perturb
+        positive-parity persistence."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / 'astroid.npz'
+            self.reference.save(path)
+            reloaded = LensAmplificationSurrogate.load(path)
+        max_delta = 0.0
+        for i, kwargs in enumerate(LX_ASTROID_PROBES):
+            with self.subTest(probe=i):
+                e_orig, s_orig, d_orig = self.reference.serve(
+                    MC_W_ARRAY, **kwargs)
+                e_load, s_load, d_load = reloaded.serve(MC_W_ARRAY, **kwargs)
+                self.n_checks += 1
+                self.assertEqual((s_orig, d_orig), (s_load, d_load),
+                                 f'probe {i}: served flag/definition changed '
+                                 f'across NPZ round-trip')
+                np.testing.assert_array_equal(
+                    e_orig, e_load,
+                    err_msg=f'probe {i}: astroid envelope changed across NPZ '
+                            f'round-trip')
+                max_delta = max(max_delta,
+                                float(np.max(np.abs(e_orig - e_load)))
+                                if e_orig.size else 0.0)
+        self.n_checks += 1
+        self.assertEqual(max_delta, 0.0,
+                         f'astroid NPZ round-trip max|diff| = {max_delta} '
+                         f'(expected exactly 0.0)')
+
+
+class AstroidByteIdentitySelfFalsificationTestCase(SurrogateTestCase):
+    """SHARD B, Spec 2 self-falsification: the byte-identity comparison can go
+    red.  A DELIBERATELY perturbed astroid chart (envelope coefficients
+    scaled) produces a nonzero served-value diff against the pristine chart --
+    so the ``max|diff| = 0.0`` gate above is a real discriminator, not a
+    tautology comparing an array with itself.
+    """
+
+    def test_perturbed_astroid_chart_breaks_byte_identity(self):
+        """Scaling the exterior-polar chart's imag coefficients makes the
+        served envelope differ -- proving equality is load-bearing."""
+        pos_tube, pos_ff = _astroid_positive_charts()
+        prov = {'chart_count': 2}
+        pristine = LensAmplificationSurrogate([pos_tube, pos_ff], prov)
+        perturbed_ff = dataclasses.replace(
+            pos_ff, imag_coeffs=pos_ff.imag_coeffs + 0.1)
+        perturbed = LensAmplificationSurrogate(
+            [pos_tube, perturbed_ff], prov)
+        # An exterior-polar probe (eta = 0.10) routes through pos_ff.
+        kwargs = LX_ASTROID_PROBES[1]
+        e_ref, _s, _d = pristine.serve(MC_W_ARRAY, **kwargs)
+        e_bad, _s2, _d2 = perturbed.serve(MC_W_ARRAY, **kwargs)
+        self.n_checks += 1
+        self.assertGreater(
+            float(np.max(np.abs(e_ref - e_bad))), 0.0,
+            'perturbing the exterior-polar coefficients left the served '
+            'envelope unchanged -- the byte-identity gate is a tautology')
+
 
 if __name__ == '__main__':
     unittest.main()

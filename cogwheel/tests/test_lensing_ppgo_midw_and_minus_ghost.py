@@ -818,7 +818,30 @@ class GhostGateNearCuspVertexTestCase(_PpgoMidwTestCase):
 
 class MinusGhostServeRoundtripSelfFalsificationTestCase(_PpgoMidwTestCase):
     """Prove TD-4 assertions have teeth: make the ghost gate refuse, and
-    the serve path returns a different result."""
+    the serve path returns a different result.
+
+    Builds its OWN chart rather than borrowing
+    ``MinusGhostServeRoundtripTestCase.chart``. Reading another TestCase's
+    class attribute is only safe when both classes run in the same process,
+    and the tree gate runs ``pytest --dist loadscope``, which distributes by
+    CLASS — so whenever the scheduler puts the two classes on different
+    xdist workers the attribute is unset and this test errors with
+    ``AttributeError: ... has no attribute 'chart'``. That made it an
+    intermittent gate-only failure: green standalone, green under
+    ``--dist loadfile``, green under ``loadscope`` on this file alone, red
+    only when the full suite's scope competition splits the pair
+    (measured 2026-08-12, red on two consecutive tree gates and reproduced
+    at HEAD with no build changes applied).
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        _cx = _TD4_CONFIG
+        cls.chart, _, _ = _build_farfield_chart(
+            gamma_band=_TD4_GAMMA_BAND, parity=-1,
+            box_center=(3.0, _TD4_CENTER_THETA), half=(0.15, 0.1),
+            w_range=_TD4_W_RANGE, config=_cx,
+            force_minus_ghost=True)
 
     def test_missing_ghost_recovery_differs(self) -> None:
         """Omitting the ghost re-addition step gives a different
@@ -838,7 +861,7 @@ class MinusGhostServeRoundtripSelfFalsificationTestCase(_PpgoMidwTestCase):
 
         _log_w = np.log(_TD4_TEST_W)
         _env_chart = _evaluate_chart(
-            MinusGhostServeRoundtripTestCase.chart,
+            type(self).chart,
             _TD4_GAMMA, 1.0, _TD4_CENTER_THETA, _log_w,
             y1_eig=_source[0], y2_eig=_source[1])
 
