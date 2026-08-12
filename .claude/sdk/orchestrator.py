@@ -2341,6 +2341,41 @@ class BuildOrchestrator:
             impl_findings = classified[EscalationLevel.IMPLEMENTATION]
             design_findings = classified[EscalationLevel.DESIGN]
 
+            # Tier 0.4: defer doc/spec findings at ANY severity, before the
+            # split matters. F050 added this for TRIVIAL only, which left the
+            # identical finding blocking whenever the Inspector happened to
+            # call it DESIGN — and it does, because its own contract (check 2)
+            # makes SPEC/DATA_CONTRACTS a bidirectional invariant it OWNS and
+            # tells it to "report the finding with both interpretations so it
+            # can be triaged upstream". A DESIGN doc finding then costs an
+            # Architect triage per round AND blocks the budget-spent exit at
+            # `not design_findings`, so the loop can only end by exhausting the
+            # budget and escalating to a human.
+            #
+            # MEASURED: 2026-07-28 (saddle lobe-serve, INS-S2-001) and
+            # 2026-08-12 (deltoid exterior, INS-5-001) both burned 3/2 revision
+            # rounds and a driver escalation on ONE non-blocking finding whose
+            # own suggested_fix began "Librarian scope:". Severity is the wrong
+            # axis here: a spec file is the Librarian's to edit no matter how
+            # serious the divergence is.
+            _doc_deferred = [
+                f for f in (trivial_findings + design_findings)
+                if (f.file and f.file.startswith('.claude/spec/'))
+                or (f.suggested_fix and 'librarian' in f.suggested_fix.lower())
+            ]
+            if _doc_deferred:
+                trivial_findings = [f for f in trivial_findings
+                                    if f not in _doc_deferred]
+                design_findings = [f for f in design_findings
+                                   if f not in _doc_deferred]
+                for _f in _doc_deferred:
+                    open_findings.pop(_f.finding_id, None)
+                self._librarian_deferred.extend(_doc_deferred)
+                self._log(
+                    f"  Deferring {len(_doc_deferred)} doc/spec finding(s) to "
+                    f"the Librarian stage at any severity (F050 extended): "
+                    + ", ".join(f.finding_id for f in _doc_deferred))
+
             self._log(
                 f"  Inspector issues — revision {revision_loops}/{MAX_REVISION_LOOPS}"
                 f" ({len(trivial_findings)} trivial, {len(impl_findings)} impl"
@@ -2477,6 +2512,9 @@ class BuildOrchestrator:
             # duplicate invocation per build to solve a problem the stage
             # reorder already solves. All the loop needs is to stop treating
             # as blocking what it cannot fix.
+            # Tier 0.4 above now catches these at any severity before the
+            # triage runs; this stays as a backstop for findings whose
+            # severity was rewritten mid-loop (e.g. a CODER_FIX downgrade).
             deferred = [
                 f for f in trivial_findings
                 if (f.file and f.file.startswith('.claude/spec/'))

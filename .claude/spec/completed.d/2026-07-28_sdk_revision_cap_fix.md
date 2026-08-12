@@ -53,6 +53,7 @@ section: Backlog
   finding set re-raised yields an equal signature while a reworded one does
   not.
 
-  RELATED, still open: [[sdk_inspector_librarian_routing_gap]] — a finding
-  having no correct DISPOSITION, distinct from the loop not terminating.
-  Both surfaced as builds burning budget on findings everyone agreed about.
+  RELATED, now closed 2026-08-12 by
+  [[2026-08-12_doc-findings-deferred-at-any-severity]] — a finding having no
+  correct DISPOSITION, distinct from the loop not terminating. Both surfaced
+  as builds burning budget on findings everyone agreed about.
