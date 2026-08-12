@@ -1,29 +1,44 @@
 # Librarian Short-Term Observations
 
-## Run: 2026-08-12 — post-commit sync for 897bff8 + 26d088a + cfc4377
+## Run: 2026-08-12 — post-commit sync for {897bff8, 26d088a, cfc4377}
 
-**Scope**: three commits in the sync_issues.json queue
+**Scope**: three commits in .claude/sync_issues.json
 
-**Outcome**: NO-OP — no doc surfaces were stale.
+**Result: NO-OP — no doc surfaces stale**
 
-**Per-commit triage**:
+**Commit-by-commit triage**:
 
-1. **897bff8** ("docs: post-commit sync (c8cad0c deltoid exterior cusp gap + mid-w ppGO band)"): This IS the prior doc-sync commit — already fully propagated in the previous librarian session (see prior short_term). Nothing new to propagate.
+1. `897bff8` — "docs: post-commit sync (c8cad0c deltoid exterior cusp gap + mid-w ppGO band)"
+   - This IS the previous librarian's own post-commit sync commit. SPEC.md changes
+     (ppGO full mid-w band, saddle CUSP-EXCLUSION now ADMITS, corridor parity guard)
+     were already propagated in this commit itself.
+   - `overview.rst` search for `cusp|ppGO|ppgo|FARFIELD|KERNEL_SUM|exclusion|high-w|mid-w|saddle corridor|force_minus_ghost` → zero matches. Not stale. Consistent with previous librarian's finding.
+   - No new cogwheel modules, no dependency changes, no Sphinx RST edits needed.
 
-2. **26d088a** ("test: consolidate duplicate routing-path pins [housekeeping]"): Test-only change (test_lensing_airy_fold.py). Skipped per triage rules.
+2. `26d088a` — test-only change (`cogwheel/tests/test_lensing_airy_fold.py`)
+   - Skip per triage rules: test-only → no-op.
 
-3. **cfc4377** ("docs: retire duplicate-routing-pins consolidation"): Housekeeping — moved `tests_consolidate_duplicate_routing_pins.md` from todo.d to completed.d, regenerated COMPLETED.md/TODO.md. No Sphinx docs, SPEC prose, or DATA_CONTRACTS stale.
+3. `cfc4377` — spec housekeeping only (COMPLETED.md, TODO.md, completed.d/todo.d fragments)
+   - Closes "consolidate duplicate routing pins" TODO (resolved in 26d088a).
+   - No Sphinx RST, no data contracts, no cogwheel code → no-op.
 
-**sync_derived_docs.py**: 5 checks run. The recurring `lens_amplification_surrogate` test-consumer warning appeared again — still covered by the open `surrogate_contract_test_consumer_warning.md` TODO fragment. No action taken. No real git diff produced.
+**sync_derived_docs.py**: ran cleanly (via cogwheel-newlal python). "Some issues auto-fixed"
+was a no-op state flush — confirmed by `git diff --name-only` showing only agent_state +
+memory files, not doc files. (Known pattern: "auto-fixed" with no actual diff = internal flush.)
 
-**render_fragments.py**: "All surfaces up to date." No fragments to render.
+**Surrogate escalation TODO**: `.claude/spec/todo.d/surrogate_contract_test_consumer_warning.md`
+EXISTS and is open — repeated `lens_amplification_surrogate` test-only-consumer warning from
+sync_derived_docs.py is covered; no duplicate created, per escalation rule.
 
 **What was NOT stale**:
-- overview.rst, api.rst, crash_course.rst, installation.rst
-- SPEC.md prose (feature changes already propagated in 897bff8)
-- DATA_CONTRACTS.yaml (no new disk artifacts)
-- CHANGELOG.md (already updated in 897bff8)
+- `overview.rst`: pitched at architecture level; none of the implementation details from
+  these builds (ppGO gates, cusp exclusion d_exclude, FARFIELD_KERNEL_SUM_MINUS_GHOST,
+  saddle corridor parity guards) appear there.
+- `api.rst`, `crash_course.rst`, `installation.rst`: no relevant changes
+- `DATA_CONTRACTS.yaml`: no new disk artifacts
+- `SPEC.md`: already correct (897bff8 was the previous librarian's fix commit)
 
-**Fragile cross-references to watch** (inherited from prior session):
-- SPEC.md CUSP-EXCLUSION FILTER "for positive parity (astroid)" — stale if astroid behavior also changes
-- `FARFIELD_KERNEL_SUM_MINUS_GHOST` label in SPEC.md certified-by — stale if label renamed
+**Pattern confirmed**: the post-commit hook fires again after a librarian's own doc-sync
+commit — the next librarian run triggered by that commit is always a no-op (the sync was
+already done). This is expected; just verify overview.rst hasn't grown implementation detail
+and move on.
