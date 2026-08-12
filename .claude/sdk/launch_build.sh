@@ -321,7 +321,8 @@ IN-DAG (the build runs these itself -- do NOT re-run on a clean build):
     /dream                          # short-term memories are tail-capped (F021):
                                     # a busy day evicts findings before consolidation
 POSTBUILD
-echo "arm the Monitor from the log header: tail -20 $LOG once it exists"
+echo "ARM THIS MONITOR (persistent=true) -- do NOT hand-roll one:
+  .claude/sdk/build_monitor.sh $LOG 120 $BUILD_PID"
 if [[ "$AUTO" != "--auto" ]]; then
   echo "PLAN APPROVAL: on the plan-ready log line,"
   echo "  read:    $APPROVAL_DIR/plan.json"
