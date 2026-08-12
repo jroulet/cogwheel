@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.37.10` (2026-08-12):
+- `0.37.13` (2026-08-12):
 
 Update INTERIOR CUSP SERVING: interior discriminator changed from origin-based
 `r_caustic` directional check to image-count gate `_is_interior = len(images) >= 4`.
@@ -17,7 +17,38 @@ corridor between the two lobes.  The generic interior case condition is now
 `len(images) >= 4, len(stationary_values) == 1`.  Exterior sources now described
 as `len(images) < 4` (was `rho > 1`).
 
-- `0.37.9` (2026-08-12):
+- `0.37.12` (2026-08-12):
+### Saddle corridor refusal in ppGO map; caustic_rho is origin-based, not an interior discriminator
+
+SPEC.md FOLD-PPGO INTERIOR HANDOFF paragraph: added the PARITY-GATED saddle
+corridor refusal — origin-based `caustic_rho` is NOT an interior
+discriminator on the macro saddle (the deltoid lobes do not enclose the
+origin), so saddle corridor sources (`gamma > 1`, 2 images, `rho < 1`) are
+never routed through the ppGO map / fold-ppGO interior handoff / Born
+classification; `CertifiedPpgoMap.w_cert` returns the `UNKNOWN` sentinel
+for saddle `rho < 1` cells (saddle `rho >= 1` stays certified); interior is
+decided by image count (`len(images) >= 4`) on both parities.
+
+Module list: `caustic_rho` annotated as an origin-based scalar-reach gauge
+that is NOT a saddle interior discriminator.
+
+- `0.37.11` (2026-08-12):
+### Pearcey ppGO rung full mid-w band + MINUS_GHOST saddle exterior window
+
+SPEC.md Microlensing engine row (ppGO rung description): the rung is no
+longer described as "high-w" — `_R_PPGO_ERROR_CONST = 0.10` (measured,
+`r_ppgo_min ~ radius_min ~ 7.37`) makes it fire across the FULL mid-w band
+(previously only deep-asymptotic `R` served, leaving the mid-w window to an
+exact-engine flashback on the astroid and a refusal on the deltoid);
+measured rel-err 5e-6..6e-5 across the opened band, both parities.
+
+Born / `_surrogate_coefficients` paragraph: added the saddle EXTERIOR CUSP
+WINDOW serving — `ExteriorPolarChart` under the `FARFIELD_KERNEL_SUM_
+MINUS_GHOST` envelope label (ghost gates become the admission authority;
+`_CUSP_EXCLUSION_DISTANCE` reduced for saddle near-cusp tiles), closing the
+exterior cusp neighbourhood quadrature-free on both parities.
+
+- `0.37.10` (2026-08-12):
 ### Pearcey arm: interior degenerate cluster bypass + on-axis fold detection
 
 Extended the INTERIOR CUSP SERVING description in the Microlensing engine row:
@@ -29,6 +60,26 @@ Added description of `_merging_fold_pair` detecting the degenerate cluster via
 `_CUSP_TIE_EPS = 1e-12` (two saddles at tied delay returns None, routing to
 cusp arm as last rung). Exterior sources (`rho > 1`) still validate
 delay-to-image alignment.
+
+- `0.37.9` (2026-08-12):
+### CUSP-EXCLUSION FILTER paragraph: saddle parity now admits near-cusp tiles
+
+SPEC.md TRAINING section, CUSP-EXCLUSION FILTER paragraph: the sentence
+"excluded from exterior training on BOTH parities" was stale after commit
+c8cad0c extended `ExteriorPolarChart` to the saddle exterior cusp window.
+
+For positive parity (astroid), the `_CUSP_EXCLUSION_DISTANCE = 0.35` carve-out
+still applies; astroid tiles within the exclusion window are served by the Pearcey
+arm / exact engine as designed.
+
+For the macro saddle (parity -1), near-cusp tiles are now ADMITTED (`d_exclude =
+0.0`) and trained on the ghost-subtracted label (`FARFIELD_KERNEL_SUM_MINUS_GHOST`,
+`force_minus_ghost=True`); the ghost gate resolves the near-cusp oscillation that
+the raw kernel-sum label cannot.  Cusp proximity for saddle tiles is still
+determined by `_deltoid_cusp_source_angles` at band edges, but used for labeling
+rather than exclusion.  The certified-by sentence is qualified to "astroid cusp
+exclusion boundary" to reflect that saddle tiles near the cusp are no longer
+excluded.
 
 - `0.37.8` (2026-08-11):
 ### Pearcey arm: ppGO fast rung fold-pair-existence-or-resolution gate

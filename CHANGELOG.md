@@ -7,6 +7,109 @@
 
 ---
 
+## 2026-08-12
+
+### Deltoid exterior cusp gap closed: mid-w ppGO band + MINUS_GHOST saddle exterior window
+
+The exterior cusp neighbourhood (just outside the deltoid cusp tips,
+`rho` 1.0–~1.2) is now served quadrature-free on both parities — no
+exact-engine serving in the cusp neighbourhood.
+
+- **`_R_PPGO_ERROR_CONST` calibrated 3.0 → 0.10** in
+  `cogwheel/lensing/chang_refsdal/_pearcey_cusp.py` so the ppGO fast rung
+  fires across the FULL mid-w band (`r_ppgo_min ≈ radius_min ≈ 7.37`),
+  closing the astroid mid-w exact-engine flashback and serving saddle
+  exterior sources outside the fold band. Measured ppGO accuracy 5e-6 to
+  6e-5 vs the exact engine across the opened band, both parities.
+- **`ExteriorPolarChart` extended to the saddle exterior cusp window** via
+  the `FARFIELD_KERNEL_SUM_MINUS_GHOST` envelope label (ghost gates become
+  the admission authority; `_CUSP_EXCLUSION_DISTANCE` reduced for saddle
+  near-cusp tiles). No serve-side changes — the MINUS_GHOST mirror already
+  existed.
+
+Stale fixtures re-anchored: ppGO-threshold tests, calibration-invoked tests
+(ppGO disabled via mock where the uniform path is the probe), and
+mpmath-routing tests (arms-first contract). All 367 affected tests pass.
+
+---
+
+### On-axis interior cusp cluster now serves via the Pearcey arm (fold detection + degenerate bypass)
+
+The on-axis interior cusp source — the degenerate 3-image cluster on the cusp
+symmetry axis — no longer falls to the exact engine. Two changes in
+`cogwheel/lensing/chang_refsdal/`:
+
+- **`_airy_fold._merging_fold_pair` detects the 3-image cluster**: added
+  `_CUSP_TIE_EPS = 1e-12`; when the best saddle delay has `tie_count >= 2`
+  (two saddles at the same delay — the degenerate symmetric pair on the cusp
+  symmetry axis), it returns None instead of certifying a 2-image fold form
+  against a 3-image reality, routing the node to the cusp arm as the next
+  rung.
+- **`cusp_amplification` interior degenerate bypass**: the calibration
+  bypass extends to interior degenerate clusters — an on-axis interior
+  source (`rho < 1`) whose first-order control projection degenerates to 1
+  stationary point while `len(images) > 2` and the fold arm has declined.
+  The self-calibrating ratio `P/P_asymp` is accurate there (measured rel-err
+  1.5e-3 at w=100 vs exact). Exterior sources (`rho > 1`) keep the
+  certificate enforced (measured 52% error for exterior on-axis sources —
+  the bypass does NOT apply there).
+- **`operator.py` mpmath band**: the uniform-asymptotic rung is now offered
+  BEFORE the exact engine in the mpmath band (60 < w <= 150), matching the
+  declared serving-ladder order, closing the w=150 exact-refusal gap for
+  on-axis sources.
+
+All 221 affected tests pass.
+
+---
+
+### Saddle deltoid interior cusp sources now serve via the Pearcey arm (image-count discriminator)
+
+The saddle (macro-saddle, `gamma > 1`) deltoid interior cusp region now
+serves via the Pearcey arm at all w, where it previously refused at w >= 80
+and fell to the exact engine. Changes in
+`cogwheel/lensing/chang_refsdal/_pearcey_cusp.py`:
+
+- **`_is_interior` is the image-count discriminator** (`len(images) >= 4`),
+  parity-correct: the deltoid caustic does not enclose the origin, so the
+  origin-based `r_caustic` interior check misclassified saddle corridor
+  sources as interior. The image-count gate fixes both parities (astroid
+  path byte-identical).
+- **Interior bypass for the deltoid 1-stationary cluster**: for a deltoid
+  cusp source the source offset projects onto the HARD (radial) axis (the
+  deltoid cusp soft axis is TANGENTIAL to the lobe), so the Pearcey
+  controls land in the 1-stationary EXTERIOR regime — the same
+  self-calibrating `P/P_asymp` ratio justifies the bypass there as for the
+  astroid interior degenerate cluster.
+- **Cusp arm serves interior above-ceiling nodes in the mpmath band**: the
+  serving ladder offers the uniform rung in the mpmath band, so interior
+  nodes it previously refused are served.
+- **6 stale refusal-contract fixtures re-pointed** to genuinely hard-core
+  configs (2-image exterior sources where both arms decline and `F_op`
+  raises `SchwingerCertificationError`); `_CUSP_TIE_EPS` allowlisted in the
+  mechanical absorber guard.
+
+---
+
+### Saddle corridor origin-rho misclassification fixed in ppGO/Born serving
+
+The deltoid (saddle, `gamma > 1`) caustic does not enclose the origin, so
+origin-based `caustic_rho` misclassified the corridor between the two
+deltoid lobes as interior (2 images but `rho < 1`). Fixed with the
+image-count discriminator (`len(images) == 4` interior / `== 2` exterior),
+parity-gated so the astroid (origin-enclosing) path is byte-identical:
+
+- **`_ppgo_cell_coords` refuses saddle `rho < 1` ppGO map queries.**
+- **fold-ppGO interior handoff** skips saddle non-4-image draws.
+- **census `classify_fallthrough`** marks saddle `image_count == 2` as
+  'born' in addition to `rho > 1`.
+- **`ppgo_map.w_cert` returns UNKNOWN for saddle `rho < 1`** (defense-in-
+  depth); saddle `rho >= 1` (genuinely exterior) stays certified.
+
+Exploits the D2 4-fold symmetry (image count is fold-invariant). Stale
+born-test fixtures re-pointed to genuine saddle lobe-interior configs.
+
+---
+
 ## 2026-08-11
 
 ### Interior cusp sources now serve via the Pearcey arm; cross-arm ppGO fold-band gate
