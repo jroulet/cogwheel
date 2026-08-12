@@ -672,6 +672,11 @@ njit nearest-caustic search; certified by the new
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
 
+- `0.11.9` ():
+SPEC.md engine row: certified-by list gains `test_lensing_saddle_rho_guards.py`
+(parity-and-image-count guards preventing saddle corridor sources from
+entering the ppGO map / fold-ppGO interior handoff / Born classification).
+
 - `0.11.8` ():
 Update the REGISTRATION GATE description in Key abstractions (surrogate
 training) to reflect lobe-interior subdivision: a gated chart's window is

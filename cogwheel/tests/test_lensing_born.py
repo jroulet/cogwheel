@@ -1100,9 +1100,11 @@ SADDLE_CENSUS_Y2_EIG = 0.0
 #: exterior test) is fixed by y1_eig, and the empty chart list means theta never
 #: reaches a chart-serve predicate.
 SADDLE_CENSUS_THETA = 0.4
-#: Interior saddle draw (|y| = 1.0 < caustic_reach ≈ 1.618): rho ≈ 0.62 < 1,
-#: so the born branch must NOT claim it (it falls through to 'out-of-box').
-SADDLE_CENSUS_INTERIOR_Y1_EIG = 1.0  # Historical: annulus retired in C8
+#: Genuine deltoid-lobe interior saddle draw (|y|=1.2, 4 images, rho≈0.74<1,
+#: gamma=1.2): the born branch must NOT claim it (falls through to 'out-of-box').
+#: The old "interior" y=1.0 was in the saddle corridor (2 images, exterior),
+#: reclassified 'born' by the corridor guard (gamma>1 and image_count==2).
+SADDLE_CENSUS_INTERIOR_Y1_EIG = 1.2  # Measured: 4 images, rho=0.742, gamma=1.2
 #: Small saddle-exterior tally grid.  All gammas are macro-saddle (>1, det A < 0);
 #: all radii are exterior to their respective caustic (rho > 1).  The caustic
 #: reaches for (1.1, 1.2, 1.4, 1.6, 1.8) at kappa=0 are approximately
@@ -1501,6 +1503,7 @@ class SaddleBandSplitSelfFalsificationTestCase(BornTestCase):
             f'carrier is what keeps the residual small)')
 
 def _classify_saddle(gamma: float, y1_eig: float, *,
+                     image_count: int = 2,
                      disable_saddle_arm: bool = False) -> str:
     """Classify a fall-through draw via the production census predicate.
 
@@ -1509,20 +1512,25 @@ def _classify_saddle(gamma: float, y1_eig: float, *,
     `BornCensusReachableRedTestCase` does for the positive-parity arm.
 
     When ``disable_saddle_arm`` is set, ``caustic_rho`` in
-    `surrogate_census` is patched to always return 0.0 (interior), so the
-    born branch never fires — reproducing the PRE-BUILD positive-only
-    predicate, in which the saddle arm simply did not exist.
+    `surrogate_census` is patched to always return 0.0 (interior) AND
+    ``image_count`` is overridden to 4 to neutralize the saddle corridor
+    guard (``gamma > 1 and image_count == 2``), so the born branch never
+    fires — reproducing the PRE-BUILD positive-only predicate, in which
+    the saddle arm simply did not exist.
     """
     surrogate = types.SimpleNamespace(charts=[])
     kwargs = dict(
         gamma=gamma, log_w_min=-5.0, log_w_max=-1.0, eta=1.0,
-        theta=SADDLE_CENSUS_THETA, image_count=2, y1_eig=y1_eig,
+        theta=SADDLE_CENSUS_THETA, image_count=image_count, y1_eig=y1_eig,
         y2_eig=SADDLE_CENSUS_Y2_EIG, dropped_slivers=(), kappa=0.0)
     if not disable_saddle_arm:
         return surrogate_census.classify_fallthrough(surrogate, **kwargs)
+    # Disable born: patch caustic_rho AND neutralize corridor guard.
+    disabled_kwargs = {**kwargs, 'image_count': 4}
     with mock.patch('cogwheel.lensing.surrogate_census.caustic_rho',
                     lambda gamma, abs_y, kappa=0.0: 0.0):
-        return surrogate_census.classify_fallthrough(surrogate, **kwargs)
+        return surrogate_census.classify_fallthrough(
+            surrogate, **disabled_kwargs)
 
 
 def _plot_saddle_census_tally(axis, tally: dict[str, int]) -> None:
@@ -1537,9 +1545,10 @@ class SaddleCensusReachableRedTestCase(BornTestCase):
     """Acceptance #7: a macro-saddle exterior draw (rho > 1) classifies 'born'.
 
     After C8 the census classify_fallthrough uses caustic_rho > 1 on both
-    parities (no gamma fence). The reachable-red foil disables the born arm
-    via a caustic_rho patch and shows the SAME draw falls through to
-    'out-of-box'.
+    parities, plus a saddle corridor guard (gamma > 1 and image_count == 2
+    -> 'born'). The reachable-red foil disables the born arm via a
+    caustic_rho patch AND image_count override, and shows the SAME draw
+    falls through to 'out-of-box'.
     """
 
     def test_saddle_exterior_draw_classifies_born(self) -> None:
@@ -1562,10 +1571,11 @@ class SaddleCensusReachableRedTestCase(BornTestCase):
         self.assertEqual(category, CENSUS_FALLBACK_CATEGORY)
 
     def test_non_exterior_saddle_draw_not_born(self) -> None:
-        # A |y| < caustic_reach draw is interior (rho < 1): the born branch
+        # A source inside a deltoid lobe (4 images, rho < 1): the born branch
         # must NOT claim it (it falls through to 'out-of-box').
         category = _classify_saddle(
-            SADDLE_CENSUS_GAMMA, SADDLE_CENSUS_INTERIOR_Y1_EIG)
+            SADDLE_CENSUS_GAMMA, SADDLE_CENSUS_INTERIOR_Y1_EIG,
+            image_count=4)
         self.comparisons += 1
         self.assertNotEqual(category, CENSUS_BORN_CATEGORY)
         self.assertEqual(category, CENSUS_FALLBACK_CATEGORY)
@@ -1600,11 +1610,12 @@ class SaddleCensusSelfFalsificationTestCase(BornTestCase):
     """
 
     def test_interior_saddle_draw_is_not_born(self) -> None:
-        # A source INTERIOR to the caustic (rho < 1) must NOT classify as
-        # 'born' — proving the exterior threshold is load-bearing.
-        # gamma=1.2 (macro saddle), |y|=1.0 -> rho ~ 0.62 < 1.
+        # A source inside a deltoid lobe (4 images, rho < 1) must NOT classify
+        # as 'born' — proving the exterior threshold is load-bearing.
+        # gamma=1.2, |y|=1.2 -> rho≈0.74<1, 4 images (genuine lobe interior).
         category = _classify_saddle(SADDLE_CENSUS_GAMMA,
-                                    SADDLE_CENSUS_INTERIOR_Y1_EIG)
+                                    SADDLE_CENSUS_INTERIOR_Y1_EIG,
+                                    image_count=4)
         self.comparisons += 1
         self.assertNotEqual(category, CENSUS_BORN_CATEGORY)
 
@@ -1625,9 +1636,9 @@ class CausticRelativeClassificationTestCase(BornTestCase):
     """Acceptance C8: classify_fallthrough uses caustic-relative rho > 1.
 
     After the C8 build, classify_fallthrough's 'born' classification is
-    determined SOLELY by caustic_rho > 1 (exterior to caustic), regardless
-    of the parity (positive vs saddle).  This replaces the old fixed-radius
-    exterior region (rho > 1).  (Historical: annulus retired in C8.)
+    determined by caustic_rho > 1 (exterior to caustic) for both parities,
+    plus a saddle corridor guard (gamma > 1 and image_count == 2 -> 'born').
+    (Historical: annulus retired in C8.)
 
     For positive parity (gamma=0.5, kappa=0): caustic_reach ≈ 1.414.
         - |y|=2.0 -> rho ≈ 1.41 > 1 -> 'born'
@@ -1635,16 +1646,17 @@ class CausticRelativeClassificationTestCase(BornTestCase):
 
     For saddle parity (gamma=1.3, kappa=0): caustic_reach ≈ 1.70.
         - |y|=2.5 -> rho ≈ 1.47 > 1 -> 'born'
-        - |y|=1.0 -> rho ≈ 0.59 < 1 -> NOT 'born'
+        - |y|=1.3 -> rho ≈ 0.76 < 1, 4 images (genuine lobe interior)
+          -> NOT 'born'
     """
 
     @staticmethod
-    def _classify(gamma: float, y1_eig: float) -> str:
+    def _classify(gamma: float, y1_eig: float, *, image_count: int = 2) -> str:
         surrogate = types.SimpleNamespace(charts=[])
         return surrogate_census.classify_fallthrough(
             surrogate,
             gamma=gamma, log_w_min=-5.0, log_w_max=-1.0, eta=1.0,
-            theta=0.4, image_count=2, y1_eig=y1_eig,
+            theta=0.4, image_count=image_count, y1_eig=y1_eig,
             y2_eig=0.0, dropped_slivers=(), kappa=0.0)
 
     def test_positive_exterior_classifies_born(self) -> None:
@@ -1668,8 +1680,9 @@ class CausticRelativeClassificationTestCase(BornTestCase):
         self.assertEqual(category, 'born')
 
     def test_saddle_interior_not_born(self) -> None:
-        # gamma=1.3, |y|=1.0, rho ≈ 0.59 < 1.
-        category = self._classify(1.3, 1.0)
+        # gamma=1.3, |y|=1.3: inside a deltoid lobe (4 images, rho≈0.76<1).
+        # Genuine lobe interior — the born branch must NOT claim it.
+        category = self._classify(1.3, 1.3, image_count=4)
         self.comparisons += 1
         self.assertNotEqual(category, 'born')
 

@@ -507,6 +507,8 @@ class CertifiedPpgoMap:
         rho : float
             Caustic-frame rho coordinate ``|y| / caustic_reach``.
         """
+        if parity == 'saddle' and rho < 1.0:
+            return UNKNOWN
         cell = self._cell(parity, gamma, rho)
         if cell is None:
             return UNKNOWN

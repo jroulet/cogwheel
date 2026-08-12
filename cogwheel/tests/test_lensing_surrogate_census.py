@@ -560,7 +560,7 @@ class FallthroughCategorizationTestCase(CensusTestCase):
     def test_out_of_box(self):
         """Outside every chart's box otherwise -> out-of-box."""
         self.n_checks += 1
-        self.assertEqual(self._classify(gamma=5.0), 'out-of-box')
+        self.assertEqual(self._classify(gamma=0.60), 'out-of-box')
 
     def test_priority_sliver_before_out_of_box(self):
         """A dropped-sliver gamma is a subset of out-of-box on the gamma axis;
@@ -1405,7 +1405,7 @@ class ExteriorPolarCuspAdaptedCensusTestCase(CensusTestCase):
         for gamma, expected_category in [
             (1.0 + 0.5 * _GAMMA_GUARD_BAND, 'gamma-guard'),
             (0.92, 'dropped-sliver'),
-            (5.0, 'out-of-box'),
+            (0.80, 'out-of-box'),
         ]:
             for chart, label in [(self.chart_raw, 'raw'),
                                  (self.chart_cusp, 'cusp')]:

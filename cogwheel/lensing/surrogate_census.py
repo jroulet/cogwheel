@@ -287,6 +287,8 @@ def classify_fallthrough(
         rho = 0.0  # degenerate reach -> not exterior
     if rho > 1.0:
         return 'born'
+    if gamma > 1.0 and image_count == 2:
+        return 'born'
 
     # cusp-window: a tube chart blocked ONLY by its cusp exclusion.
     for chart in surrogate.charts:
@@ -393,6 +395,8 @@ def characterize_sample(
         try:
             rho = caustic_rho(gamma, float(np.hypot(y1, y2)), kappa=0.0)
         except (ValueError, LensDomainError):
+            rho = None
+        if parity == 'saddle' and rho is not None and rho < 1.0:
             rho = None
         if rho is not None:
             w_trust = ppgo_map.w_trust(parity, gamma, rho)

@@ -1397,6 +1397,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 gamma, float(np.hypot(lens['y1'], lens['y2'])), kappa=0.0)
         except LensDomainError:
             return None
+        if parity == 'saddle' and rho < 1.0:
+            return None
         return parity, gamma, rho
 
     def _ppgo_band_split(self, lens):
@@ -1689,6 +1691,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 # estimate is below CERTIFICATION_BAR.  Reconstruction mirrors the
                 # Born rung (reconstruct_farfield with FARFIELD_KERNEL_SUM).
                 if rho is not None and rho <= 1.0:
+                    if lens['gamma'] > 1.0 and int(geom.real_mask.sum()) != 4:
+                        return None
                     try:
                         from cogwheel.lensing.chang_refsdal._airy_fold import (
                             fold_ppgo_correction, _merging_fold_pair,

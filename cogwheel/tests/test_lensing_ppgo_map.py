@@ -885,14 +885,14 @@ class SelfFalsificationTestCase(_GaugeTestCase):
         self.n_compared += 1
 
     def test_narrowing_a_saddle_would_move_the_cell(self) -> None:
-        """A saddle that wrongly narrowed would read a DIFFERENT cell (teeth).
+        """A saddle that wrongly narrowed would hit the ``rho < 1`` guard (teeth).
 
         Confirms the saddle byte-identity / cell-field diff test is not
         vacuous: had the saddle branch (wrongly) applied the positive-parity
-        narrowing, its read-point would fall in a different ``rho`` cell with
-        a different ``w_cert``, so the exact cell-field equality would fail.
-        The saddle branch instead reads the full outer radius, keeping the
-        HEAD cell.
+        narrowing, its read-point would fall below ``rho = 1`` -- the domain
+        the saddle ``w_cert`` guard blocks -- so the read returns `UNKNOWN`
+        instead of the head cell's certified floor.  The saddle branch instead
+        reads the full outer radius (``head_rho >= 1``), keeping the HEAD cell.
         """
         self._expect_comparisons = True
         ppgo = _synthetic_ppgo_map('decreasing', gamma_max=2.0)
@@ -906,7 +906,7 @@ class SelfFalsificationTestCase(_GaugeTestCase):
         w_narrowed = ppgo.w_cert('saddle', gamma_mid, narrowed_rho)
         self.assertLess(narrowed_rho, head_rho)
         self.assertIsNot(w_head, UNKNOWN)
-        self.assertIsNot(w_narrowed, UNKNOWN)
+        self.assertIs(w_narrowed, UNKNOWN)
         self.assertNotEqual(w_head, w_narrowed)
         self.n_compared += 1
 
