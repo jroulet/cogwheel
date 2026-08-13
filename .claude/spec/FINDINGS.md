@@ -3905,3 +3905,76 @@ of its contract: check it still holds for every label routed through it.
 Same shape as F028 — an admission certificate that cannot see the axis along
 which the approximation dies. Here the invisible axis is the envelope
 definition rather than distance from the caustic.
+
+## F071 — `f_schwinger` CERTIFIES AND IS WRONG above w ~ 110: the paired N/2N check cannot see a floor both rules share, and it is amplified by e^{+pi w/4} (2026-08-13)
+
+`f_schwinger` is THE exact evaluator — the reference the uniform arms, the
+charts, the ppGO rungs and every accuracy number in this repo are measured
+against. Above `w ~ 110` it returns a certified value that is wrong, and the
+error grows exponentially to `1.7e-4` at `w = 130`.
+
+**Measured** (driver, against `_oracle_1d` — an INDEPENDENT mpmath oracle,
+"shared MATHEMATICS with production, zero shared CODE", at
+`dps = ORACLE_DPS_BASE + ceil(w)`). Every row below CERTIFIED, i.e.
+`f_schwinger` returned rather than raising `SchwingerCertificationError`:
+
+    w      gamma'=1.3     gamma'=0.7
+    50     4.27e-15  ok   (dd path)
+    70     1.07e-15  ok
+    100    6.67e-15  ok
+    105    5.06e-13  ok   1.48e-13  ok
+    110    4.13e-11  ok   2.70e-12  ok
+    115    5.05e-10  WRONG   1.34e-10  WRONG
+    120    2.20e-08  WRONG   6.86e-09  WRONG
+    125    1.40e-06  WRONG   5.11e-07  WRONG
+    130    1.71e-04  WRONG   3.08e-05  WRONG
+
+against the suite's own `MPMATH_EXT_RTOL = 1e-10`. Both fixtures cross
+between `w = 110` and `w = 115`, so this is a property of `w`, not of a
+config.
+
+**Mechanism — it is not a cliff, it is a law.** Fitting the growth:
+
+    d(ln err)/dw = 0.785 (gamma'=1.3), 0.764 (gamma'=0.7)
+    pi/4         = 0.7854
+
+The error grows EXACTLY as the cancellation exponential. `_schwinger`'s own
+docstring states the structure: the prefactor `1/Gamma(iw/2)` grows as
+`e^{+pi w/4}` while the raw `t`-integral supplies the compensating
+`e^{-pi w/4}` (`_CANCEL_SCALE = pi/4`, F001-S). Therefore ANY fixed absolute
+error floor in the quadrature is amplified by `e^{+pi w/4}` into the
+reconstructed `F`. The error was always present; it simply crossed the 1e-10
+bar near `w ~ 111`.
+
+**Why the self-certification cannot see it.** The evaluator certifies by
+paired-rule agreement, `|I_N - I_2N| / |I_2N| <= _CERTIFICATION_TOL = 3e-10`.
+N and 2N SHARE the floor and share the amplification, so they agree with each
+other while both are carried away from the truth together. Paired-rule
+agreement measures self-consistency, not error.
+
+`_MP_PANEL_ORDER = 32`'s docstring says "Order-32 certifies across the band
+(measured)". That is true and misleading in the same breath: it certifies —
+it is not correct.
+
+**Consequence.** `W_CEILING_SCHWINGER_QD = 150` advertises a band the
+evaluator does not earn. The honest ceiling at the 1e-10 bar is `w ~ 110`
+(extrapolating the fitted law, the crossing is `w ~ 111` for the worse
+fixture). Everything certified against `f_schwinger` in `(110, 150]` inherits
+an error up to 1.7e-4 — including the `_ppgo_above_ceiling` boundary tests
+that pin agreement "at w=150", and any arm-vs-engine comparison there. Note
+this compounds with F069: in `60 < w <= 150` the positive-parity grid often
+returns the ARM rather than the engine, so above 110 a test may be comparing
+an arm against an arm, and below that a wrong engine.
+
+**Rule.** A self-consistency check is not an error bound. Two rules that share
+a systematic floor agree with each other exactly where they are both wrong,
+and refining one of them (N -> 2N) does not break the tie. Before trusting a
+paired-rule certificate, ask what the two rules SHARE — and if the answer
+includes the dominant error term, the certificate is measuring the wrong
+thing. Third instance of this class today: F069 (a certificate decaying as
+`1/w` while the error did not), F070 (an extrapolation licence inherited by a
+label whose envelope diverges), and this.
+
+**Not affected**: every accuracy number the driver quoted on 2026-08-13 for
+the cusp guard, the fold-ppGO swap and the `w_floor` guard was measured at
+`w <= 60` on the double-double path, clean at 4.3e-15 here.
