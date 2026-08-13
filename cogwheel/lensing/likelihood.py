@@ -94,7 +94,8 @@ from cogwheel.likelihood.relative_binning import BaseLinearFree
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal.channels import (
     _channel_switch, _physical_kernels, reconstruct_from_envelope,
-    reconstruct_farfield, farfield_ghost_term, FARFIELD_DIFFRACTIVE,
+    reconstruct_farfield, farfield_ghost_term, farfield_w_floor,
+    _FARFIELD_KERNEL_FAMILY, FARFIELD_DIFFRACTIVE,
     FARFIELD_KERNEL_SUM, FARFIELD_KERNEL_SUM_MINUS_GHOST,
     KNOWN_FARFIELD_DEFINITIONS, KNOWN_INTERIOR_DEFINITIONS)
 from cogwheel.lensing.chang_refsdal.geometry import (
@@ -1741,6 +1742,24 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             beta=lens['beta'], eta=geom.caustic_distance,
             theta=geom.caustic_theta,
             image_count=int(geom.real_mask.sum()))
+
+        # LOW-END WINDOW GUARD (F070).  `_log_w_band_serveable` leaves the
+        # low end open and clamps `w < chart.w_min` to the first grid point,
+        # justified by the envelope being flat below the first Airy fringe.
+        # That holds for the SACR-C envelope and is FALSE for the kernel-sum
+        # family, which DIVERGES into the diffractive bottom below the
+        # region's `farfield_w_floor`.  The trainer clips every exterior tile
+        # to [w_floor, w_trust]; nothing re-checked it at serve time, so a
+        # correctly tiled kernel-sum chart queried below its floor passed
+        # every admission gate and served 468x max|F| wrong.  Refuse instead
+        # and fall through -- the geometry needed is already in hand, so this
+        # costs one min-delay scan.
+        if served and definition in _FARFIELD_KERNEL_FAMILY:
+            w_floor = farfield_w_floor(geom.delays, geom.real_mask)
+            if float(chart_w.min()) < w_floor:
+                served = False
+                envelope_chart = None
+
         if not served:
             # Fact-4 slot (Born weak-deflection rung): serve the analytic
             # carrier + trained residual chart for configurations in the

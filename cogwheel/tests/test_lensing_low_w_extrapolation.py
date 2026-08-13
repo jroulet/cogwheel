@@ -28,6 +28,10 @@ import unittest
 
 import numpy as np
 
+from cogwheel.lensing.chang_refsdal.channels import (
+    ChangRefsdalChannels, farfield_w_floor, _FARFIELD_KERNEL_FAMILY,
+    FARFIELD_DIFFRACTIVE, FARFIELD_KERNEL_SUM,
+    FARFIELD_KERNEL_SUM_MINUS_GHOST)
 from cogwheel.lensing.surrogate import (
     TubeChart,
     LensAmplificationSurrogate,
@@ -214,6 +218,87 @@ class FlatExtrapolationTestCase(_LowWExtrapolationTestCase):
             '_log_w_band_serveable must admit when log_w_min < grid[0] '
             'and log_w_max <= grid[-1]')
         self._record()
+
+
+class KernelSumLowEndGuardTestCase(unittest.TestCase):
+    """The low-end clamp is NOT licensed for the kernel-sum family (F070).
+
+    `_log_w_band_serveable` deliberately leaves the low end open, justified
+    by the envelope being "smooth and nearly constant below the first Airy
+    fringe".  That is true of the tube / SACR-C envelope every other test in
+    this file exercises, and FALSE of `FARFIELD_KERNEL_SUM`, which diverges
+    into the diffractive bottom below the region's `farfield_w_floor`.
+
+    Measured 2026-08-13 on a chart tiled exactly the way
+    `surrogate_training` tiles one: every admission gate passed and the
+    sub-floor band served at ``eps = 4.7e+02`` (468x ``max|F|``) while the
+    interpolated part sat at 1.5e-3.  `_surrogate_coefficients` now re-checks
+    the floor at serve time and refuses instead.
+
+    These are cheap geometry/contract checks, not a trained-chart accuracy
+    run: the point is that the floor is COMPUTED at the serve site and that
+    the family membership test selects the right labels.
+    """
+
+    def setUp(self) -> None:
+        self._n = 0
+
+    def tearDown(self) -> None:
+        if self._n == 0:
+            self.fail(f'{type(self).__name__}: zero comparisons ran.')
+
+    def test_kernel_family_is_exactly_the_subtracting_labels(self) -> None:
+        """The guard must fire for kernel-sum labels and NOT for others.
+
+        `FARFIELD_DIFFRACTIVE` is the bounded object that is legitimately
+        valid below the floor -- guarding it would refuse serves that are
+        fine, which is the opposite failure.
+        """
+        self._n += 1
+        self.assertIn(FARFIELD_KERNEL_SUM, _FARFIELD_KERNEL_FAMILY)
+        self._n += 1
+        self.assertIn(FARFIELD_KERNEL_SUM_MINUS_GHOST,
+                      _FARFIELD_KERNEL_FAMILY)
+        self._n += 1
+        self.assertNotIn(
+            FARFIELD_DIFFRACTIVE, _FARFIELD_KERNEL_FAMILY,
+            'the diffractive label is the BOUNDED object valid below the '
+            'floor; guarding it would refuse correct serves')
+
+    def test_floor_is_finite_and_positive_for_a_resolvable_pair(self) -> None:
+        """`farfield_w_floor` returns a usable number from geometry alone.
+
+        The guard is only as good as this being computable at the serve
+        site with no engine call.
+        """
+        w_grid = np.geomspace(5.0, 60.0, 12)
+        geom = ChangRefsdalChannels(w_grid).geometry_partition(
+            gamma=0.5, y=(1.5, 0.3), beta=0.0, kappa=0.0)
+        floor = farfield_w_floor(geom.delays, geom.real_mask)
+        self._n += 1
+        self.assertTrue(np.isfinite(floor) and floor > 0.0,
+                        f'w_floor is not usable: {floor!r}')
+
+    def test_floor_rises_as_the_pair_closes_up(self) -> None:
+        """`w_floor` is `(RHO_END/2) / min|dtau|`, so it grows as the
+        closest real pair merges -- which is why an interior source has a
+        floor far above a well-separated exterior one, and why a band that
+        clears the floor for one config can sit entirely below it for
+        another.  This is the quantity the clamp was ignoring.
+        """
+        w_grid = np.geomspace(5.0, 60.0, 12)
+        far = ChangRefsdalChannels(w_grid).geometry_partition(
+            gamma=0.5, y=(1.5, 0.3), beta=0.0, kappa=0.0)
+        near = ChangRefsdalChannels(w_grid).geometry_partition(
+            gamma=0.5, y=(0.05, 0.02), beta=0.0, kappa=0.0)
+        floor_far = farfield_w_floor(far.delays, far.real_mask)
+        floor_near = farfield_w_floor(near.delays, near.real_mask)
+        self._n += 1
+        self.assertGreater(
+            floor_near, floor_far,
+            f'w_floor did not rise as the pair closed up '
+            f'(far {floor_far:.4g} vs near {floor_near:.4g}); the guard '
+            f'keys on this ordering.')
 
 
 if __name__ == '__main__':
