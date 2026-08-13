@@ -8,7 +8,12 @@ section: Backlog
   per rejection branch. Structural only: no engine calls, no trained NPZ, so
   it re-runs in ~1 min and needs no training.
 
-  Whole-prior structural coverage **87.61%**. Of the 1239-draw gap, 1236 are
+  SCOPE OF THIS NUMBER: `w in [5, 148]` ONLY. The census samples
+  `w ~ LogU(5, 148)`, mirroring the TRAINING cap `_SADDLE_W_CEILING`, not the
+  prior — which reaches `w ~ 444` at the top of the mass and frequency range.
+  ~24% of saddle draws lie above `w = 150` and are invisible here. See
+  [[lensing_saddle_above_the_training_cap_is_unmeasured]]. Within that window,
+  structural coverage is **87.61%**. Of the 1239-draw gap, 1236 are
   saddle and 3 near-caustic. Route: origin `rho > 1` serves via the Born rung
   FIRST; only `rho <= 1` reaches `_classify_saddle`. Of 3700 saddle draws,
   1958 are Born-served and **1742** reach the lobe path.
