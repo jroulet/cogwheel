@@ -76,29 +76,62 @@ def _saddle_lobe_admission(gamma: float) -> tuple:
     """
     band_index = int((gamma - 1.0) // _SADDLE_BAND_WIDTH)
     if band_index in _SADDLE_ADMISSION_CACHE:
-        return _SADDLE_ADMISSION_CACHE[band_index]
-    band_lo = max(1.0 + band_index * _SADDLE_BAND_WIDTH, _SADDLE_BAND_FLOOR)
-    band_hi = 1.0 + (band_index + 1) * _SADDLE_BAND_WIDTH
-    band = (band_lo, band_hi)
+        bands = _SADDLE_ADMISSION_CACHE[band_index]
+    else:
+        band_lo = max(1.0 + band_index * _SADDLE_BAND_WIDTH,
+                      _SADDLE_BAND_FLOOR)
+        band_hi = 1.0 + (band_index + 1) * _SADDLE_BAND_WIDTH
+        bands = _saddle_stable_subbands((band_lo, band_hi))
+        _SADDLE_ADMISSION_CACHE[band_index] = bands
+    for (lo, hi), result in bands:
+        if lo <= gamma <= hi:
+            return result
+    return (None, None)
+
+
+def _saddle_stable_subbands(band: tuple) -> list:
+    """Admission + rho_outer per TOPOLOGY-STABLE sub-band of *band*.
+
+    A fixed-width band can straddle a change in the caustic's fold-arc count,
+    which makes `band_caustic_structure` raise `CausticTopologyError` ("Split
+    the band"). Production never charts such a band directly — it bisects into
+    topology-stable sub-bands via `stable_gamma_bands` and charts each. The
+    census used the fixed band, swallowed the error, and returned no admission,
+    so it reported an UNCOVERED region that production covers fine.
+
+    MEASURED 2026-08-12: gamma in [1.00, 1.05] reported "no lobe admission"
+    for 292 of 1742 saddle draws — 23% of the whole saddle gap — because
+    band (1.001, 1.05) has fold-arc counts [10, 6, 6] across it. Bisecting
+    yields 16 stable sub-bands (one measure-zero sliver dropped), each of
+    which produces 2 lobe admissions. The gap was an artifact of the
+    instrument, not of the charts. An instrument that invents gaps misdirects
+    every build that reads it, so it mirrors production here.
+    """
     cfg = _SADDLE_CONFIG
     try:
-        structure = _st.band_caustic_structure(
-            band, _SADDLE_PARITY, n_samples=cfg.n_caustic_samples)
-        arc_r_min = [
-            _st._min_curvature_radius(band, arc, cfg.n_caustic_samples)
-            for arc in structure.arcs[:cfg.max_tube_arcs]]
-        max_eta_max = (cfg.f_max * max(arc_r_min)
-                       if arc_r_min else cfg.f_max * 0.05)
-        admissions = _st._saddle_lobe_admissions(
-            band, cfg, eta_max=max_eta_max)
-        coordinate_radius_min, _ = _st._coordinate_radius_bounds(
-            band, _SADDLE_PARITY)
-        rho_outer = 1.0 + _SOURCE_BOX_CORNER - coordinate_radius_min
-        result: tuple = (admissions[1], rho_outer)
+        stable, _dropped = _st.stable_gamma_bands(
+            band, _SADDLE_PARITY, n_samples=cfg.n_caustic_samples,
+            min_width=cfg.min_gamma_band)
     except (ValueError, LensDomainError, ZeroDivisionError, IndexError):
-        result = (None, None)
-    _SADDLE_ADMISSION_CACHE[band_index] = result
-    return result
+        return [(band, (None, None))]
+
+    out: list = []
+    for sub_band, structure in stable:
+        try:
+            arc_r_min = [
+                _st._min_curvature_radius(sub_band, arc, cfg.n_caustic_samples)
+                for arc in structure.arcs[:cfg.max_tube_arcs]]
+            max_eta_max = (cfg.f_max * max(arc_r_min)
+                           if arc_r_min else cfg.f_max * 0.05)
+            admissions = _st._saddle_lobe_admissions(
+                sub_band, cfg, eta_max=max_eta_max)
+            coordinate_radius_min, _ = _st._coordinate_radius_bounds(
+                sub_band, _SADDLE_PARITY)
+            rho_outer = 1.0 + _SOURCE_BOX_CORNER - coordinate_radius_min
+            out.append((sub_band, (admissions[1], rho_outer)))
+        except (ValueError, LensDomainError, ZeroDivisionError, IndexError):
+            out.append((sub_band, (None, None)))
+    return out
 
 
 def _classify_saddle(gamma: float, y_abs: float, theta: float) -> str:
