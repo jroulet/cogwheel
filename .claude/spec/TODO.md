@@ -1723,6 +1723,58 @@ Tag conventions:
   when Inspector + Professor pass) is safe but leaves the gate untested.
 
 
+- **REMOVE `FARFIELD_KERNEL_SUM_MINUS_GHOST` — it has no producer and its
+  survivors actively mislead** `[→ spec]` — owner-directed 2026-08-13. Ride
+  this with the deferred tier-2 build
+  ([[lensing_saddle_envelope_is_negligible_at_high_w]]), which is already
+  opening the same files; do NOT spend a build on it alone.
+
+  Full diagnosis in FINDINGS F065. In short: the label's ONLY producer was the
+  macro-saddle origin-polar exterior tiler (`force_minus_ghost =
+  _exclude_near_cusp(...)` under `if parity == -1`), retired by `4c7dc92`
+  when that tiler was replaced with the lobe-local exterior. Positive parity
+  never stamped it — `surrogate_training.py` ~L5073 hardcodes
+  `force_minus_ghost = False` with a comment saying so.
+
+  ## What to remove
+
+  - `FARFIELD_KERNEL_SUM_MINUS_GHOST` from `channels.py`: the constant, the
+    `__all__` export, and its membership in `KNOWN_FARFIELD_DEFINITIONS` and
+    the other definition sets.
+  - The serve-side branch at `likelihood.py:1871`
+    (`if definition == FARFIELD_KERNEL_SUM_MINUS_GHOST:`) — currently
+    unreachable.
+  - The `force_minus_ghost` parameter from `_build_farfield_chart` and every
+    tile-dict key that threads it (`surrogate_training.py` ~L3024, 3037, 3096,
+    4391, 4517, 5073-5079, 5710-5745).
+  - `test_lensing_ppgo_midw_and_minus_ghost.py`'s MINUS_GHOST classes. NOTE
+    the file ALSO covers the astroid mid-`w` ppGO band, which STAYS — split
+    the file or delete only the ghost classes, and do not lose the ppGO
+    coverage. That file also contains the cross-class fixture borrow fixed on
+    2026-08-12; keep that fix.
+
+  ## What must NOT be removed
+
+  `ghost_kernel`, `farfield_ghost_term` and the ghost machinery in
+  `geometry.py` are LIVE — they serve the two-real-image ppGO + ghost branch
+  above the Born band split (`w * Delta_tau >= RHO_END`). Only the far-field
+  chart LABEL and its dead plumbing go.
+
+  ## Load-bearing check before deleting
+
+  A stored artifact carrying the label would fail to load once it leaves
+  `KNOWN_FARFIELD_DEFINITIONS`. Confirm no shipped `.npz` stamps it —
+  `cogwheel/data/*.npz` plus any local training output — and say so in the
+  build report. Expected to be none, since the producer is gone, but a
+  hard-refusing loader turns a wrong expectation into a broken load.
+
+  ## Acceptance
+
+  `git grep FARFIELD_KERNEL_SUM_MINUS_GHOST` returns nothing outside
+  CHANGELOG/FINDINGS history; the astroid mid-`w` ppGO tests still pass; the
+  ghost branch above the band split is untouched and its tests still pass.
+
+
 - **Born rung for the MACRO-SADDLE (`det A < 0`) — carrier, gate, and census
   landed 2026-07-28 (commit `31ee133`, F024/F026); only the wiring step
   remains.**
@@ -2116,6 +2168,31 @@ Tag conventions:
   the serve-side reconstruction all have working precedents to copy. Budget it
   as a port, not an invention — and start from `train_born_residual.py` and
   `born_residual_chart.py` rather than a blank file.
+
+  ## RIDE-ALONG for the tier-2 build
+
+  Remove the orphaned `FARFIELD_KERNEL_SUM_MINUS_GHOST` label in the same
+  build — see [[lensing_remove_orphaned_minus_ghost_label]] and FINDINGS F065.
+  It touches the same files (`channels.py`, `surrogate_training.py`,
+  `likelihood.py`) that tier 2 opens anyway, and leaving it costs real
+  confusion: the dead serve-side consumer reads as a live capability and its
+  passing tests corroborate the illusion.
+
+  ALSO relevant to tier 2's design, found while chasing that label: the
+  positive-parity exterior does NOT subtract the ghost either. It removes the
+  ghost-driven OSCILLATION by fold-carrier demodulation and charts the
+  remainder — `ghost_drop_count` exists only to tally exclusions and its
+  docstring records it as "Always zero (ghost-dominated tiles are rescued by
+  fold-carrier demodulation rather than dropped)". So there are TWO precedents
+  for tier 2's "lowest-order physics out, chart the residual", not one:
+
+      exterior rho > 1                Born lead carrier   -> born_residual_chart.npz
+      positive-parity near-caustic    FOLD CARRIER        -> ExteriorPolarChart.carrier_rate
+
+  The fold-carrier one is the closer analogue, because it is specifically
+  about dividing out an oscillation before splining — the exact problem the
+  re-gauged saddle envelope presents. Start tier 2 from `carrier_rate` rather
+  than re-deriving a carrier convention.
 
   ## Process note
 

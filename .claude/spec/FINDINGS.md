@@ -3629,3 +3629,48 @@ feedback cannot discover that it needs more tiles. Both instances were
 invisible until someone read the eps DISTRIBUTION rather than its max — a
 max-metric summary hid the wedge defect for a full day. Report p50/p90/max and
 the worst-sample LOCUS in any chart diagnostic, never a bare max.
+
+## F065 — retiring a producer left its label, its consumer and its tests alive, and the orphan misled an agent twice (2026-08-13)
+
+**Where:** `FARFIELD_KERNEL_SUM_MINUS_GHOST` across `channels.py`,
+`surrogate_training.py`, `likelihood.py` and
+`test_lensing_ppgo_midw_and_minus_ghost.py`.
+
+The label had exactly ONE producer: the macro-saddle origin-polar exterior
+tiler, which set `force_minus_ghost = _exclude_near_cusp(...)` under an
+`if parity == -1` guard. Commit `4c7dc92` retired that tiler — correctly, the
+origin-polar saddle exterior is topologically ill-posed — and replaced the
+flag with a hardcoded `force_minus_ghost = False`.
+
+What was NOT retired with it:
+
+- the label itself, still exported from `channels.py` and still a member of
+  `KNOWN_FARFIELD_DEFINITIONS`;
+- the serve-side consumer, `likelihood.py:1871`
+  `if definition == FARFIELD_KERNEL_SUM_MINUS_GHOST:` — now an unreachable
+  branch;
+- the `force_minus_ghost` parameter threaded through `_build_farfield_chart`
+  and the tile dicts;
+- a whole test file exercising it via `force_minus_ghost=True`, which keeps
+  the dead path green and therefore invisible to any "is this used?" check
+  that greps for callers or runs coverage.
+
+**Measured cost, same session.** An agent (the driver) asserted twice from
+this wreckage: first that the machinery was inert and had always been —
+wrong, it was live until that very commit; then, when challenged, it had to
+walk the claim back and re-derive the truth from `git show`. The dead
+consumer in `likelihood.py` reads exactly like a live capability, and the
+passing test file corroborates the illusion. Two wrong statements to the
+owner, from code that does nothing.
+
+**Rule.** Retiring a producer is not done until its LABEL, its CONSUMER and
+its TESTS go with it. A label with no producer is worse than dead code: it is
+dead code that documents a capability the system does not have, and the tests
+that keep it green are what make it invisible. When a retirement leaves an
+orphan on purpose (a planned successor is coming), say so at the declaration
+site with the successor named and dated — silence reads as "in use".
+
+Related: `todo.d/lensing_built_but_unused_machinery_guards.md` proposes the
+one-line greps that would catch this class — assert every declared envelope
+label is stamped by some producer. This finding is the case that justifies
+the cost of adding them.

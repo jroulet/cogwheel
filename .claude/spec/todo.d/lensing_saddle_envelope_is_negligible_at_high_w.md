@@ -190,6 +190,31 @@ section: Backlog
   as a port, not an invention — and start from `train_born_residual.py` and
   `born_residual_chart.py` rather than a blank file.
 
+  ## RIDE-ALONG for the tier-2 build
+
+  Remove the orphaned `FARFIELD_KERNEL_SUM_MINUS_GHOST` label in the same
+  build — see [[lensing_remove_orphaned_minus_ghost_label]] and FINDINGS F065.
+  It touches the same files (`channels.py`, `surrogate_training.py`,
+  `likelihood.py`) that tier 2 opens anyway, and leaving it costs real
+  confusion: the dead serve-side consumer reads as a live capability and its
+  passing tests corroborate the illusion.
+
+  ALSO relevant to tier 2's design, found while chasing that label: the
+  positive-parity exterior does NOT subtract the ghost either. It removes the
+  ghost-driven OSCILLATION by fold-carrier demodulation and charts the
+  remainder — `ghost_drop_count` exists only to tally exclusions and its
+  docstring records it as "Always zero (ghost-dominated tiles are rescued by
+  fold-carrier demodulation rather than dropped)". So there are TWO precedents
+  for tier 2's "lowest-order physics out, chart the residual", not one:
+
+      exterior rho > 1                Born lead carrier   -> born_residual_chart.npz
+      positive-parity near-caustic    FOLD CARRIER        -> ExteriorPolarChart.carrier_rate
+
+  The fold-carrier one is the closer analogue, because it is specifically
+  about dividing out an oscillation before splining — the exact problem the
+  re-gauged saddle envelope presents. Start tier 2 from `carrier_rate` rather
+  than re-deriving a carrier convention.
+
   ## Process note
 
   A build was launched to adjudicate the `w`-flatness question and killed
