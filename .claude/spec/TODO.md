@@ -2607,11 +2607,19 @@ Tag conventions:
   `test_lensing_ppgo_bandsplit` (4 failed + 4 errors -> **66 passed**) and
   `test_lensing_fold_ppgo_handoff` (2 failed + 2 errors -> **17 passed**).
   See the commit; the fold-ppGO one turned up a structural fact worth
-  keeping: the rung first serves near `w ~ 5e4` while the exact Schwinger
-  oracle ceilings at `W_CEILING_SCHWINGER_QD = 150`, so **its served domain
-  and its verifiable domain are disjoint by ~330x** and "fold-ppGO agrees
+  keeping: the rung first serves near `w ~ 5e4` while the INDEPENDENT
+  oracle ceiling is `W_CEILING_SCHWINGER = 60`, so its served domain and
+  its verifiable domain are disjoint by **~830x** and "fold-ppGO agrees
   with exact to 1%" can never be tested directly. Same shape as
   [[lensing_saddle_tier1_cannot_reach_the_census_gap]].
+
+  CORRECTED 2026-08-13: an earlier version of this line said the ceiling
+  was `W_CEILING_SCHWINGER_QD = 150` (disjoint by ~330x). It is 60.
+  `F_op` RETURNS THE UNIFORM ARM for `60 < w <= 150` rather than the exact
+  engine, so it is not an independent oracle there — [[FINDINGS F069]].
+  And the rung does not merely lack verification: it is measurably WRONG
+  by ~21% where it serves, see
+  [[lensing_fold_ppgo_rung_serves_wrong]].
 
   ## OPEN 1 — `test_lensing_airy_fold`, the cusp arm's fixtures
 
@@ -2660,13 +2668,74 @@ Tag conventions:
   the symmetry test and keep the agreement test (which is the stronger
   claim and is what actually held here).
 
-  ## OPEN 3 — `test_lensing_surrogate_census` crown dlnL
+  ## OPEN 3 — `test_lensing_surrogate_census` crown dlnL — ATTRIBUTED
 
   `LnlTierTestCase::test_real_likelihood_tiers_within_bars`: crown
-  dlnL **0.2394** against `CROWN_LNL_TOL = 0.05`. Spy-verified NOT the
-  tier-1 rung (calls=0). Unattributed — this is the one open failure that
-  is a genuine accuracy claim rather than a domain-drift, and it should be
-  triaged before the others.
+  dlnL **0.2394** against `CROWN_LNL_TOL = 0.05`.
+
+  ANSWERED 2026-08-13. **No production path returns a wrong likelihood
+  here** — the chart is one only the fixture builds. It broke at `4d59a6d`
+  (2026-08-07, whose own message says "(build stranded)"), which
+  re-coordinatized the fixture box from `s_range`/`d_range` — `d` the
+  SIGNED perpendicular distance from the caustic, positive OUTSIDE — to
+  `rho_range`/`theta_c_range`, where `rho <= 1` is the INTERIOR. Both the
+  semantics AND the axis roles swapped while the numbers were carried
+  across verbatim, moving the witness from ~0.125 outside a fold arc to
+  `|y| = 0.0271`, essentially the origin.
+
+  Consequence: the locus's `farfield_w_floor` is 352.46 and **100% of the
+  served band sits below it**, where `|E_ff| = 272.7` against `|F| = 1.21`.
+  The spline is healthy (node-exactness 1.3e-14); ~1e-3 relative error on a
+  label 200x larger than `F` is 6.6e-2 of `F` and 0.24 nats. Production
+  never builds such a tile — `_farfield_region_w_floor` clips exterior
+  tiles — and the fixture reaches it via `from_engine`, which documents
+  that it does not guard the exterior contract. Two production defences
+  would have caught it: that clip, and the registration bar
+  (`farfield_eps_max = 3e-3` vs this chart's 6.6e-2).
+
+  The error is honest gamma-axis interpolation error, not conditioning:
+  `carrier_rate` forced to 0 moves dlnL by 2e-5, w-density refinement
+  SATURATES (24/dec and 48/dec both ~0.247), and only the gamma axis moves
+  it (11 gammas -> dlnL 0.00185, 27x under the bar).
+
+  DO NOT take that gamma refinement as the fix. It is the tempting wrong
+  one: it reaches the bar while leaving the chart in a regime production
+  would never build, which IS the defect. Nor does simply re-pointing to an
+  exterior box work — measured, the constraint is structural: `w_floor >=
+  2/max(dtau)` with Fermat delays O(1), so no source position puts a
+  60-Msun band above `w_floor` short of `rho ~ 5` where the test goes
+  vacuous. The witness LENS MASS has to move too, and the detector band
+  spans `f_hi/f_lo = 68.3`, so the whole band must fit between the region
+  `w_floor` and the engine ceiling: that works at `rho ~ 1.4-2.0` with
+  `m_lens ~ 250-400 Msun`, and fails for `rho <= 1.25` (band top 67-91,
+  into the mpmath band).
+
+  So this is a REBUILD of the Section-D fixture, not an edit, and it moves
+  all four consumers of `_pos_farfield_dense` (`_likelihoods`, the census
+  `run` test, `test_node_exactness`, and
+  `test_trough_normalization_stays_bounded`, which needs a genuine `|E|`
+  trough the exterior may not provide). Derive the witness FROM the window
+  rather than hand-picking it. **Leave the test red until then — it is
+  currently the only thing pointing at the serve gap below.**
+
+  ## OPEN 5 — SUB-`w_floor` SERVE GAP: blocks the full-box training campaign
+
+  Found while attributing OPEN 3, and bigger than it. A chart tiled exactly
+  as `surrogate_training` tiles it, queried below its `w_floor`, passes
+  every gate and serves a value wrong by **468x max|F|** — because
+  `_log_w_band_serveable` leaves the low end open and clamps, on a
+  justification ("the envelope is smooth and nearly constant below the
+  first Airy fringe") that holds for the SACR-C envelope and fails for
+  `FARFIELD_KERNEL_SUM`. `farfield_w_floor` appears 0 times in
+  `surrogate.py` and `likelihood.py`. Full measurement in [[FINDINGS F070]].
+
+  NOT a today-regression — no `lens_amplification_surrogate.npz` ships, so
+  nothing reaches it. It IS a blocker on the deferred full-box training
+  campaign: once a chart ships, reachability is generic (any draw whose
+  lens mass puts the band bottom below the region `w_floor`, i.e. `m_lens`
+  under ~250-800 Msun for these configs). The guard is free at the serve
+  site — `_surrogate_coefficients` already holds `geom.delays` and
+  `geom.real_mask` — and should mirror the existing `w_trust` split.
 
   ## OPEN 4 — known, unchanged
 

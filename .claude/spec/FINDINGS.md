@@ -3840,3 +3840,60 @@ constant, not whether it was small.
 Corollary: `fold_ppgo_correction`'s docstring claims it "cannot make things
 worse than raw ppGO". Measured at w=100 against the exact engine: raw ppGO
 errs 8.7e-6, the corrected value 2.1e-1 -- 24,000x WORSE than doing nothing.
+
+## F070 — the low-end w clamp is LABEL-DEPENDENT, and the serve path never learned it (2026-08-13)
+
+**Context.** `_log_w_band_serveable` deliberately leaves the LOW end of a
+chart's `w` window open: a query below `chart.w_min` is clamped to the lowest
+grid point. Its docstring gives the reason — "the envelope is smooth and
+nearly constant below the first Airy fringe (O(w_min^2) correction to the
+geometric limit)" — and keeps the HIGH end strict because the envelope is
+oscillatory above `w_max`.
+
+That justification is TRUE of the tube / SACR-C envelope it was written for.
+It is FALSE of `FARFIELD_KERNEL_SUM`, which does not flatten below the first
+fringe: it diverges into the diffractive bottom. The trainer knows this and
+clips every exterior tile to `[w_floor, w_trust]` via
+`_farfield_region_w_floor`. The SERVE path does not: driver-verified
+2026-08-13, `farfield_w_floor` appears **0 times** in `surrogate.py` and **0
+times** in `likelihood.py`, against 3 in `surrogate_training.py`.
+
+**Measured.** A chart tiled exactly the way `surrogate_training` tiles it
+(exterior `rho in [1.05, 1.20]`, `FARFIELD_KERNEL_SUM`,
+`w_range = [w_floor, 40*w_floor]`), queried by a draw whose band bottom falls
+below its `w_min`, passes EVERY gate (`gamma_ok`, `band_ok`, `nimg_ok`,
+`eta_ok`, `rho_ok`, `theta_ok`) and serves:
+
+    eps for w >= w_floor  (interpolated)   1.54e-03   inside the 3e-3 bar
+    eps for w <  w_floor  (EXTRAPOLATED)   4.68e+02   468x max|F|
+      at w=0.1188: |E_sur| = 1.04e+01 vs |E_eng| = 1.02e+03
+
+**The trainer asserts a handoff the serve path never implements.**
+`_farfield_window_contains_draws` computes `seg_lo = max(w_lo_draw, w_floor)`
+and documents that "band-split serving hands the sub-`w_floor` diffractive
+bottom ... to other labels / bare ppGO". `_surrogate_coefficients` implements
+only the HIGH-end split at `w_trust`. There is no low-end split, and no
+`FARFIELD_DIFFRACTIVE` tile is ever trained — the exterior is tiled once under
+a single `[w_floor, w_trust]` window. The sub-floor band is absorbed silently
+by the clamp.
+
+**Severity: blocking for the deferred full-box training campaign, NOT a
+today-regression.** Driver-verified that no surrogate artifact ships —
+`cogwheel/data/` holds `born_residual_chart.npz`, `certified_ppgo_map.npz` and
+`pearcey_table.npz`, but not `lens_amplification_surrogate.npz`
+(`_DEFAULT_ARTIFACT_NAME`, `surrogate.py:319`), and `amplification_surrogate`
+defaults to `None`. Reachability once one ships is GENERIC, not exotic: any
+draw whose lens mass puts the band bottom below the region `w_floor`, which
+for these configs means `m_lens` below ~250-800 Msun — ordinary under a
+log-uniform mass prior.
+
+**Rule.** An extrapolation licence is a property of the LABEL, not of the
+chart container. `_log_w_band_serveable` grants it per-chart while the
+justification holds per-envelope-definition, so a label whose envelope
+diverges where another's flattens inherits a licence nobody granted it. When
+a guard's docstring names the physical reason it is safe, that reason is part
+of its contract: check it still holds for every label routed through it.
+
+Same shape as F028 — an admission certificate that cannot see the axis along
+which the approximation dies. Here the invisible axis is the envelope
+definition rather than distance from the caustic.
