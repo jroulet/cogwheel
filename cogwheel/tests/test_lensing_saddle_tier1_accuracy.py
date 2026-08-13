@@ -82,6 +82,7 @@ from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels, FARFIELD_KERNEL_SUM, reconstruct_farfield)
 from cogwheel.lensing.chang_refsdal.operator import RHO_END
+from cogwheel.lensing.chang_refsdal._schwinger import W_CEILING_SCHWINGER
 from cogwheel.lensing.likelihood import (
     _SADDLE_FARFIELD_RHO_FLOOR, _saddle_farfield_analytic_serves)
 from cogwheel.lensing.ppgo_map import caustic_geometry, caustic_rho
@@ -102,9 +103,11 @@ _OUTPUT_DIR = pathlib.Path(__file__).parent / 'output'
 #: domain (w <= 60), so every exact oracle eval is ~0.2 s.
 W_FLOOR = 8.0
 
-#: Cheap-band ceiling.  Engine evals at w > 60 use the mpmath QD path
-#: (~85-120 s/call) and are FORBIDDEN in this fast-tier suite.
-W_CEIL = 60.0
+#: Cheap-band ceiling.  Engine evals ABOVE the double-double Schwinger
+#: ceiling use the mpmath QD path (~85-120 s/call) and are FORBIDDEN in
+#: this fast-tier suite.  DERIVED from production so the band cannot
+#: silently spill into the expensive path if the ceiling moves down.
+W_CEIL = W_CEILING_SCHWINGER
 
 #: Number of log-spaced w nodes across [W_FLOOR, W_CEIL].
 _N_W = 24

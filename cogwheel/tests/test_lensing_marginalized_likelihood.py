@@ -248,7 +248,9 @@ N_PRIOR_DRAWS = 30
 #: mass; the reduced mass is orthogonal to the certified/refused split,
 #: which is a shear (``gamma'``) / source-position phenomenon (Professor
 #: Ruling 4), so both finite and exact ``-inf`` outcomes survive.
-W_SWEEP_CEILING = 55.0
+#: DERIVED from `W_CEILING_SCHWINGER` (a fixed 5-unit margin below it) so
+#: the sweep target follows the dispatch threshold instead of stranding.
+W_SWEEP_CEILING = W_CEILING_SCHWINGER - 5.0
 
 #: Names of the module under test that must NOT appear inside the spec-2
 #: independent oracle helper (F002 oracle-tautology guard).
@@ -661,18 +663,33 @@ class RefusalContractTestCase(_MarginalizedLensTestCase):
     mutation guard proves this is non-vacuous.
     """
 
-    # RE-BASELINE (Build 8e serving ladder): the Build-8d cancellation-band
-    # config (gamma' = 0.94, moderate-splitting) is now ARM-SERVED at the
-    # engine, so it no longer refuses through the likelihood -- the spy
-    # premise died.  CANCELLATION_LENS is repointed at a HARD-CORE
-    # near-caustic config whose above-ceiling nodes NO arm certifies, so the
-    # engine still raises the named SchwingerCertificationError BEFORE the
-    # coherent score.  The refusal-precedence contract is unchanged; the
-    # assertRaises below verifies the config genuinely refuses through the
-    # full likelihood before the spy call-count is checked.
+    # ONLY structurally-anchored refusals belong here.  `over_critical` is
+    # `kappa >= 1` -- an exact parity-boundary fact that no threshold can
+    # move -- so it pins the refusal-precedence contract permanently.
+    #
+    # The `cancellation` entry was RETIRED 2026-08-13 after its THIRD drift,
+    # not repointed a third time.  Its history is the argument: Build 8d
+    # picked a cancellation-band config; Build 8e found it "now ARM-SERVED at
+    # the engine, so it no longer refuses -- the spy premise died" and
+    # repointed it at a "HARD-CORE near-caustic config whose above-ceiling
+    # nodes NO arm certifies"; that one then stopped refusing too, and sat in
+    # `.claude/sdk/known_failures.txt` from 2026-08-06.  Raising
+    # `_MP_PANEL_ORDER` 32 -> 40 (certification now holds through w ~ 204)
+    # moves the boundary again.
+    #
+    # A witness anchored to a CERTIFICATION THRESHOLD drifts every time the
+    # serving ladder widens, which is continuously. A witness anchored to a
+    # STRUCTURAL boundary does not. The contract under test -- refusal
+    # precedes the extrinsic marginalization -- is fully exercised by
+    # `over_critical`, which raises a NAMED refusal through the same
+    # likelihood path and asserts the same zero spy call-count; nothing about
+    # the contract was specific to WHICH named exception arrived.
+    #
+    # If a cancellation-band witness is ever wanted back, DERIVE it at test
+    # time from the live certification boundary and assert the premise (that
+    # it genuinely refuses) before using it -- do not pin a fourth literal.
     REFUSING_CONFIGS = (
-        ('over_critical', OVER_CRITICAL_LENS, LensDomainError),
-        ('cancellation', CANCELLATION_LENS, SchwingerCertificationError))
+        ('over_critical', OVER_CRITICAL_LENS, LensDomainError),)
 
     @classmethod
     def setUpClass(cls):

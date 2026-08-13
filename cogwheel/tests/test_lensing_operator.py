@@ -88,8 +88,9 @@ FOP_MAX_ORDER = 70
 ORACLE_MAX_ORDER = 100
 
 #: The certified cancellation-exponent ceiling drawn on the diagnostic
-#: (mirrors ``operator.L_MAX``; NOT re-used as a gate here).
-L_CEILING = 48.0
+#: (DERIVED from ``operator.L_MAX``; NOT re-used as a gate here).  Reading
+#: the live constant keeps the annotation honest if the cap ever moves.
+L_CEILING = float(operator.L_MAX)
 
 #: The paper's shared macro parameters for its four representative
 #: source positions.

@@ -143,7 +143,7 @@ SADDLE_GAMMA = 1.3
 #: This fixture was rho = 1.5 until 2026-08-13, which the two-term gate
 #: REFUSES -- the continuity bounds were being certified on a domain the rung
 #: never serves, at a residual 57x worse (2.9e-3) than the worst case it does.
-SADDLE_RHO = 2.02
+SADDLE_RHO = _SADDLE_FARFIELD_RHO_FLOOR + 0.02
 SADDLE_ANGLE = 0.0
 
 #: Output directory for diagnostic plots.

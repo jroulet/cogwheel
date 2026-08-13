@@ -194,7 +194,7 @@ from cogwheel.likelihood.relative_binning import RelativeBinningLikelihood
 from cogwheel.lensing.chang_refsdal import _gauge, channels, geometry, operator
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, LensedBinningError,
-    _data_term, _norm_term, dimensionless_frequency)
+    _data_term, _norm_term, dimensionless_frequency, _LOO_MAX_NODES)
 
 #: Higher-mode approximant so the mode-pair (``M^2``) contraction is
 #: genuinely exercised (|m| in {1, 2, 3, 4}), not the trivial 22-only
@@ -567,8 +567,10 @@ LOO_EPS_GATE = 1e-3
 #: construction, so the LOO loop certifies a reconstruction with 26 -- 32
 #: nodes across the anchors (report cites production 30 -- 44); ``48``
 #: matches the engine's own hard cap `likelihood._LOO_MAX_NODES` and is
-#: never expected to bind on the gated configurations.
-LOO_NODE_CEILING = 48
+#: never expected to bind on the gated configurations.  DERIVED from the
+#: engine constant: a pinned ``48`` would silently stop being the engine's
+#: cap (too loose, or newly binding) the moment production retunes it.
+LOO_NODE_CEILING = _LOO_MAX_NODES
 
 #: GATE 1 (production layer) telescoping-identity ceiling.  Reconstructing
 #: ``F`` AT the LOO nodes (where the envelope is engine-exact, so only the

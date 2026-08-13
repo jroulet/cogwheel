@@ -281,7 +281,12 @@ KERNEL_SQRT_S = (0.1, 0.5, 1.0)
 
 #: Near-ceiling ``(w, L=w*sqrt(s))`` probes exercising the ~1e-6 accuracy
 #: tier just under the ceiling; both have physical ``sqrt(s) < 1``.
-KERNEL_NEAR_CEILING = ((200.0, 55.0), (400.0, 58.0))
+#: DERIVED from `DD_PRODUCT_CEILING`: pinned at ``55``/``58`` these stop
+#: being "near-ceiling" the moment the ceiling moves, and a lowered
+#: ceiling would turn them into out-of-domain refusals that read as a
+#: kernel accuracy regression.
+KERNEL_NEAR_CEILING = ((200.0, DD_PRODUCT_CEILING - 5.0),
+                       (400.0, DD_PRODUCT_CEILING - 2.0))
 
 #: Kernel domain refusals: ``(w, s)`` outside the certified box.  Each
 #: MUST still raise `HypergeometricDomainError` through the JIT path.

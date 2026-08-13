@@ -55,7 +55,7 @@ import pathlib
 import numpy as np
 from unittest import TestCase, main
 
-from cogwheel.lensing.chang_refsdal import channels, geometry
+from cogwheel.lensing.chang_refsdal import _schwinger, channels, geometry
 
 #: External shear of the representative off-axis frame probe.  Positive
 #: parity requires ``1 - kappa > |gamma|``; with ``kappa = 0`` any
@@ -79,7 +79,10 @@ W_GRID: np.ndarray = np.linspace(10.0, 59.0, 30)
 
 #: Ceiling above which the Schwinger wave branch is declined; the grid
 #: stays strictly below it so every node is a served wave-branch node.
-W_CEILING_SCHWINGER: float = 60.0
+#: DERIVED from production: a second copy of ``60.0`` would keep the
+#: "every node is served" assertion green while the engine's own ceiling
+#: moved out from under ``W_GRID``.
+W_CEILING_SCHWINGER: float = _schwinger.W_CEILING_SCHWINGER
 
 #: Relative tolerance on the complex frame ratio.  ~100x the ~1e-14
 #: common-mode residual observed at this probe; a wrong/dropped ``t_min``

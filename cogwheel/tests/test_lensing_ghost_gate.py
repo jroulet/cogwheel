@@ -113,7 +113,9 @@ FARFIELD_WINDOW_RADIANS = channels._FARFIELD_WINDOW_RADIANS
 #: wrong-currency threshold rather than silently passing.
 SEP_REFUSE_MAX = 0.5
 SEP_ADMIT_MIN = 1.0
-SEP_DIAGNOSTIC_THRESHOLD = 0.7
+#: DERIVED: the diagnostic line drawn on the separation plot IS the
+#: production threshold, so it must never be a second copy of it.
+SEP_DIAGNOSTIC_THRESHOLD = GHOST_SEPARATION_MIN
 
 #: Additive slack on the F-normalized DO-NOTHING residual comparison.  Both
 #: residuals can be ~1e-4, so an additive floor (not a ratio) is used.

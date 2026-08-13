@@ -514,7 +514,7 @@ _SCALING_WS = (30.0, 40.0, 50.0, 60.0)
 #: here the geometric and Schwinger rungs have already declined, so the
 #: uniform arm is the only server and its refusal falls through to the
 #: NAMED Schwinger refusal.
-_ABOVE_CEILING_W = 160.0
+_ABOVE_CEILING_W = _schwinger.W_CEILING_SCHWINGER_QD + 10.0
 
 #: Envelope-match bar of the cusp arm against the exact engine along the
 #: fold arcs (spec: <= 1e-2; measured 1e-3..7e-3 for the gamma=0.7
@@ -4064,11 +4064,18 @@ _PPGO_SADDLE_SOURCE = np.array([-0.5, 0.5])
 _PPGO_SERVE_W: float = 20000.0
 
 #: Intermediate w where ppGO refuses but the Pearcey uniform path serves
-#: (radius < r_ppgo_min≈34.2 at _R_PPGO_ERROR_CONST=1.0, but
-#: radius > radius_min≈7.4 so the Pearcey uniform form serves).
+#: (radius below the ppGO radius floor implied by
+#: ``_pearcey_cusp._R_PPGO_ERROR_CONST``, but above ``radius_min`` so the
+#: Pearcey uniform form serves).  The parenthetical used to quote
+#: ``r_ppgo_min ~ 34.2 at _R_PPGO_ERROR_CONST = 1.0``; production now
+#: carries ``_R_PPGO_ERROR_CONST = 0.10``, so the quoted numbers were
+#: stale -- the routing this fixture selects is unchanged.
 _PPGO_INTERMEDIATE_W: float = 70.0
 
-#: w below the ppGO floor (_W_PPGO_FLOOR=50.0) for the w-gate isolation test.
+#: w below `_pearcey_cusp._W_PPGO_FLOOR` for the w-gate isolation test.
+#: (The comment here read ``_W_PPGO_FLOOR=50.0`` until 2026-08-13;
+#: production carries ``8.0``.  ``5.0`` is below both, so the fixture's
+#: routing never changed -- only the annotation was stranded.)
 _PPGO_SUB_FLOOR_W: float = 5.0
 
 #: Reference bar for ppGO vs Pearcey asymptotic agreement (bar_ppgo=0.005).

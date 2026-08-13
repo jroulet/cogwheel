@@ -125,8 +125,13 @@ EPS = np.finfo(np.float64).eps
 RECONSTRUCTION_SLACK = 100.0
 
 #: Documented default switch window, shared with the channel tracker.
-RHO_START = 0.5
-RHO_END = 4.0
+#: DERIVED from the production window so these fixtures follow the engine:
+#: a pinned ``0.5``/``4.0`` would keep passing while measuring a window the
+#: engine no longer uses.  (The crossing-fixture helper further down this
+#: file already reads ``operator.RHO_START``/``operator.RHO_END`` directly;
+#: these module constants were the only remaining second copy.)
+RHO_START = operator.RHO_START
+RHO_END = operator.RHO_END
 
 #: Seed for every random sweep, so that a failure is reproducible and a
 #: frozen backstop is a fixed number rather than a lottery.

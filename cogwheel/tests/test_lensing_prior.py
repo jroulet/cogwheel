@@ -115,6 +115,8 @@ from cogwheel.lensing.likelihood import (LensedBinningError,
 from cogwheel.lensing.chang_refsdal import _schwinger as schwinger_module
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
+from cogwheel.lensing.chang_refsdal._hyp1f1 import (
+    DD_PRODUCT_CEILING, W_MAX_CERTIFIED)
 from cogwheel.lensing.posterior import LensedPosterior
 from cogwheel.lensing.prior import (
     LensedIASPrior, UniformLensMassPrior, UniformReducedShearPrior,
@@ -161,9 +163,13 @@ H_REL = 1e-7
 #: Tolerance on ``|ln_J_analytic - ln_J_numeric|`` (C2).
 JAC_TOL = 1e-5
 
-#: Domain-safety ceilings (C3), inside the engine's certified 500 / 60.
-W_MAX_CEILING = 450.0
-WSQRTS_CEILING = 58.0
+#: Domain-safety ceilings (C3), held a fixed margin INSIDE the engine's own
+#: certified domain.  DERIVED from `W_MAX_CERTIFIED` / `DD_PRODUCT_CEILING`
+#: so the guard follows the engine: pinned at ``450``/``58`` they would stay
+#: green while sitting OUTSIDE a lowered certified box, which is the exact
+#: silence this guard exists to break.
+W_MAX_CEILING = W_MAX_CERTIFIED - 50.0
+WSQRTS_CEILING = DD_PRODUCT_CEILING - 2.0
 
 #: Upper edge [Hz] of the analysis band used to form ``w_max = xi * f_max``
 #: (C3).  The crown event is 4 s at 2048 Hz Nyquist -> 1024 Hz band edge.

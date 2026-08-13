@@ -31,4 +31,14 @@
 # gate was blind to them. Removed; only the one still-red entry remains. The
 # discrepancy was noticed because run_full_suite.sh (which does NOT deselect)
 # reported a single failure where this file predicted eleven.
-cogwheel/tests/test_lensing_marginalized_likelihood.py::RefusalContractTestCase::test_refusal_precedes_coherent_score
+#
+# EMPTIED 2026-08-13. The last entry
+# (RefusalContractTestCase::test_refusal_precedes_coherent_score) was
+# FIXED, not re-listed: its `cancellation` witness was anchored to a
+# CERTIFICATION THRESHOLD and had drifted three times (Build 8d ->
+# Build 8e repoint -> red from 2026-08-06). It was retired rather than
+# repointed a fourth time; the contract is fully pinned by the
+# `over_critical` witness, which sits on the STRUCTURAL kappa >= 1
+# boundary and cannot move with a threshold. 11 passed, 0 failed.
+#
+# The gate is now re-armed on that test, per the RE-CHECK rule above.

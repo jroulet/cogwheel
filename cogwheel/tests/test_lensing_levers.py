@@ -1189,7 +1189,10 @@ LEVER5_INACCURATE_W = 28.0
 #: mpmath QD path certifies ``w in (60, 150]`` (measured), so ``62`` would
 #: not raise; ``160`` sits above the QD ceiling where the named refusal is
 #: immediate.
-LEVER5_ABOVE_CEILING_W = 160.0
+#: DERIVED from the QD ceiling so the fixture stays above it by
+#: construction; a pinned ``160`` silently drops BELOW a raised ceiling and
+#: the "named refusal" assertion then measures a served node.
+LEVER5_ABOVE_CEILING_W = _schwinger.W_CEILING_SCHWINGER_QD + 10.0
 
 #: Nonzero-gauge drift point for the lever-5 wave-vs-geometric comparison.
 #: The default sweep runs at ``beta == kappa == 0``, which makes the

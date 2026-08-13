@@ -447,7 +447,7 @@ class GateBordersTestCase(_PpgoCeilingTestCase):
         """w_max>150 but w_lo*min_delta_tau < RHO_END -> None."""
         source = self._SOURCE
         for w_lo in [0.5, 1.0, 2.0]:
-            w_grid = np.array([w_lo, 151.0])
+            w_grid = np.array([w_lo, W_CEILING_SCHWINGER_QD + 1.0])
             min_dt = self._min_delta_tau(source, 0.5, w_grid)
             if min_dt > 0 and w_lo * min_dt < RHO_END:
                 break
@@ -459,11 +459,11 @@ class GateBordersTestCase(_PpgoCeilingTestCase):
     def test_b2_resolved_gate_passes(self):
         """w_max nextafter(150,inf) + resolved pair: gate passes."""
         source = self._SOURCE
-        min_dt = self._min_delta_tau(source, 0.5,
-                                     np.array([10.0, 151.0]))
+        min_dt = self._min_delta_tau(
+            source, 0.5, np.array([10.0, W_CEILING_SCHWINGER_QD + 1.0]))
         self.assertGreater(min_dt, 0.0)
         w_lo = RHO_END / min_dt
-        w_max = np.nextafter(150.0, np.inf)
+        w_max = np.nextafter(W_CEILING_SCHWINGER_QD, np.inf)
         w_grid = np.array([w_lo, w_max])
         self.n_checks += 1
         self.assertGreater(float(w_grid.max()),
@@ -488,11 +488,11 @@ class GateBordersTestCase(_PpgoCeilingTestCase):
     def test_d_below_rho_end(self):
         """w_lo*min_delta_tau < RHO_END (nextafter below): gate None."""
         source = self._SOURCE
-        min_dt = self._min_delta_tau(source, 0.5,
-                                     np.array([1.0, 151.0]))
+        min_dt = self._min_delta_tau(
+            source, 0.5, np.array([1.0, W_CEILING_SCHWINGER_QD + 1.0]))
         self.assertGreater(min_dt, 0.0)
         w_lo = np.nextafter(RHO_END, -np.inf) / min_dt
-        w_grid = np.array([w_lo, 151.0])
+        w_grid = np.array([w_lo, W_CEILING_SCHWINGER_QD + 1.0])
         lens = {'gamma': 0.5, 'y1': float(source[0]),
                 'y2': float(source[1]),
                 'beta': 0.0, 'kappa': 0.0}
