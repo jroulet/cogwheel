@@ -6,13 +6,11 @@ TD-1: ppGO rung serves mid-w exterior sources (both parities) under the
       sources would be refused — these tests verify the new service
       AND the self-falsification via the old constant.
 
-TD-2: An interior 4-image on-axis source (gamma=0.5, src=(0.2,0.0))
-      has R=36.28 > r_ppgo_min (new) but _merging_fold_pair=None AND
-      w*delta_min=0 < 4.0, so the resolution gate fails the ppGO rung.
-      The function falls through to the Pearcey uniform form.  The
-      lowered r_ppgo_min lets the rung *enter* but NOT serve — the
-      fallthrough value is byte-identical to HEAD (both paths reach
-      Pearcey).
+TD-2: An interior 4-image on-axis source never reaches the ppGO rung
+      (the handoff is gated on ``len(images) < 4``) and is served by the
+      Pearcey uniform form instead.  The served value does not depend on
+      ``_R_PPGO_ERROR_CONST`` at all — asserted byte-for-byte with the
+      old constant restored.
 
 TD-3: ``_build_farfield_chart`` with ``force_minus_ghost=True`` for a
       saddle (gamma=1.3, parity=-1) near-cusp exterior tile produces
@@ -110,12 +108,16 @@ _ASTROID_SOURCE = np.array([-0.348, 1.656])
 _SADDLE_GAMMA: float = 1.3
 _SADDLE_SOURCE = np.array([2.611, 0.836])
 
-#: Interior 4-image on-axis source for TD-2:
-#: _merging_fold_pair returns None, w*delta_min=0 < 4.0,
-#: R=36.28 > _NEW_R_PPGO_MIN — ppGO rung enters but resolution gate
-#: fails, falling through to the Pearcey uniform form.
+#: Interior 4-image on-axis source for TD-2, on the cusp[1] symmetry
+#: axis at 98% of the cusp-vertex distance.  Interior (4 images) keeps
+#: the ppGO handoff out of play; near-cusp keeps the source inside the
+#: neighbourhood where the F074 uniform form certifies, so the Pearcey
+#: path serves.  (The pre-F074 fixture, ``(0.2, 0.0)``, sits at 14% of
+#: the cusp-vertex distance — deep interior, where the corrected control
+#: map's calibration certificate refuses.)
 _TD2_GAMMA: float = 0.5
-_TD2_SOURCE = np.array([0.2, 0.0])
+_TD2_SOURCE = 0.98 * np.asarray(
+    geometry.critical_point(_TD2_GAMMA, 0.5 * math.pi, 0.0, 0.0, 1).source)
 
 #: Gamma band for TD-3 saddle far-field chart.
 _TD3_GAMMA_BAND: tuple[float, float] = (1.2, 1.5)
@@ -272,18 +274,15 @@ class PpgoMidwSaddleServingTestCase(_PpgoMidwTestCase):
 # ---------------------------------------------------------------------------
 
 class PpgoResolutionGatePreservesPearceyTestCase(_PpgoMidwTestCase):
-    """TD-2: The lowered r_ppgo_min lets an interior 4-image source enter
-    the ppGO rung, but the resolution gate (no merging fold pair AND
-    w*delta_min < 4.0) causes the rung to return None — the function
-    falls through to the Pearcey uniform form.
-
-    The returned value is byte-identical to the old code path (which
-    never entered the ppGO rung at all, since R=36.28 < old r_ppgo_min).
+    """TD-2: an interior 4-image source is untouched by the ppGO radius
+    gate — the handoff requires ``len(images) < 4``, so the source is
+    served by the Pearcey uniform form and the served value is the same
+    bits at the new and the old ``_R_PPGO_ERROR_CONST``.
     """
 
-    def test_ppgo_rung_enters_but_resolution_fails(self) -> None:
-        """The source enters the ppGO rung (R >= new r_ppgo_min) but the
-        resolution gate fails, so fold_ppgo_correction is NOT called."""
+    def test_interior_source_never_reaches_the_ppgo_rung(self) -> None:
+        """The interior (4-image) source is served by the Pearcey uniform
+        form and ``fold_ppgo_correction`` is never called."""
         ppgo_called = [False]
         real_fpc = _airy_fold.fold_ppgo_correction
         def spy(*args, **kwargs):
@@ -299,7 +298,7 @@ class PpgoResolutionGatePreservesPearceyTestCase(_PpgoMidwTestCase):
                         'Pearcey result should be finite')
         self.assertFalse(ppgo_called[0],
                          'fold_ppgo_correction should NOT have been called '
-                         '(resolution gate failed)')
+                         '(the handoff is gated on len(images) < 4)')
 
 
     def test_pearcey_serves_via_fallthrough(self) -> None:
@@ -314,10 +313,9 @@ class PpgoResolutionGatePreservesPearceyTestCase(_PpgoMidwTestCase):
                          f'Expected pearcey route, got {route}')
 
     def test_byte_identical_to_old_behavior(self) -> None:
-        """With the old _R_PPGO_ERROR_CONST=50, the ppGO rung is never
-        entered.  The Pearcey fallthrough value should be byte-identical
-        to the new-code value (both paths reach the same Pearcey
-        computation)."""
+        """The served value is independent of ``_R_PPGO_ERROR_CONST``:
+        with the old value (50) restored, the interior source still takes
+        the same Pearcey path and returns the same bits."""
         result_new, _ = _capture_route_and_value(
             _W, _TD2_SOURCE, _TD2_GAMMA)
         with mock.patch.object(

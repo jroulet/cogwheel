@@ -392,9 +392,18 @@ def pearcey(x: float, y: float) -> complex | None:
 _STATIONARY_IMAG_TOL = 1e-9
 
 #: Leading uniform-error coefficient ``c_P`` in ``error ~ c_P R^{-3/2}``
-#: (``R^2 = x^2 + y^2``).  Order unity; used only to convert the F016
-#: envelope bar into a minimum admissible ``R``.  Conservative.
+#: (``R^2 = x^2 + y^2``).  This is the error law of `pearcey_asymptotic` --
+#: the thing the uniform form REPLACES -- so since F074 it no longer gates
+#: the uniform serve; it survives only in the ppGO-handoff radius floor.
 _UNIFORM_ERROR_CONST = 1.0
+
+#: Envelope of the SERVED uniform form's subleading correction,
+#: ``K / sqrt(w)`` -- regular through the caustic (the divergent per-image
+#: C1 parts are resummed by the Pearcey primitive; what survives decays as
+#: w^{-1/2}).  Calibrated 2026-08-13 (F074): max over 54 oracle-scored
+#: configs of err * sqrt(w) = 0.303, +15% margin.  Gate calibration on the
+#: same grid: 0 unsound admits, max served err 0.037 vs bar 0.05.
+_K_UNIFORM = 0.35
 
 #: Default max-normalized (F016) envelope bar for the leading uniform
 #: error.  The crown-tier lnL bar is 0.05 nats; strong/saddle 0.1.  The
@@ -781,7 +790,7 @@ def cusp_amplification(w: float, source, gamma: float, *,
                                     vertex.hard_axis, vertex.hard_eigenvalue)
     if normal_form is None:
         return None
-    c4, _phi_ssr = normal_form
+    c4, phi_ssr = normal_form
 
     tau_c = geometry.delay(vertex.image, source, matrix)
 
@@ -793,15 +802,30 @@ def cusp_amplification(w: float, source, gamma: float, *,
     delta_parallel = float(offset @ vertex.soft_axis)
     delta_perp = float(offset @ vertex.hard_axis)
 
-    # Normal-form controls a2 (coeff of s^2) = delta_parallel,
-    # a1 (coeff of s) = delta_perp, mapped to Pearcey controls by the
-    # s -> (w |C4|)^{-1/4} t rescaling: x = a2 w^{1/2} / sqrt(|C4|),
-    # y = a1 w^{3/4} / |C4|^{1/4}.  The |C4|^{-1/4} prefactor is common to
+    # F074: delta_phi = -delta_y . x(s) along the reduced manifold
+    # x(s) = x_c + s e_s - (phi_ssr / (2 lambda_h)) s^2 e_h, so the ODD
+    # control a1 (coeff of s) = -delta_parallel (the SOFT projection,
+    # linear because e_s multiplies s) and the EVEN control a2 (coeff of
+    # s^2) = +delta_perp * phi_ssr / (2 lambda_h) (the HARD projection
+    # times the manifold's curvature, entering through the bend h*(s)).
+    # The pre-F074 map had the two transposed and dropped the curvature
+    # factor; measured consequence, sign convention, and the 54/54
+    # stationary-cluster match are in FINDINGS F074.  Rescaling
+    # s -> (w |C4|)^{-1/4} t: x = a2 w^{1/2} / sqrt(|C4|),
+    # y = a1 w^{3/4} / |C4|^{1/4}; the |C4|^{-1/4} prefactor is common to
     # P and P_asymp, so it cancels in the uniform ratio below.
     abs_c4 = abs(c4)
-    x = delta_parallel * math.sqrt(w) / math.sqrt(abs_c4)
-    y = delta_perp * w ** 0.75 / abs_c4 ** 0.25
+    curvature = phi_ssr / (2.0 * vertex.hard_eigenvalue)
+    x = delta_perp * curvature * math.sqrt(w) / math.sqrt(abs_c4)
+    y = -delta_parallel * w ** 0.75 / abs_c4 ** 0.25
 
+    # The fold-ppGO handoff below was calibrated against the pre-F074
+    # control gauge; keep its ROUTING radius in that gauge so this fix
+    # does not silently re-tune a different gate (re-gauging the handoff
+    # is separate work with its own measurement).
+    handoff_radius = math.hypot(
+        delta_parallel * math.sqrt(w) / math.sqrt(abs_c4),
+        delta_perp * w ** 0.75 / abs_c4 ** 0.25)
     radius = math.hypot(x, y)
 
     # The ppGO fast rung serves the fold-region fold_ppgo_correction,
@@ -828,7 +852,8 @@ def cusp_amplification(w: float, source, gamma: float, *,
     # ON-AXIS, where `_merging_fold_pair` is None and the resolution gate
     # holds by accident -- so the contract was real and merely unenforced
     # off-axis.
-    if (len(images) < 4 and radius >= r_ppgo_min and w >= _W_PPGO_FLOOR
+    if (len(images) < 4 and handoff_radius >= r_ppgo_min
+            and w >= _W_PPGO_FLOOR
             and nearest.distance >= _airy_fold._ETA_MAX_FOLD):
         delays = sorted(geometry.delay(image, source, matrix)
                         for image in images)
@@ -847,8 +872,27 @@ def cusp_amplification(w: float, source, gamma: float, *,
             result = None
         if result is not None and np.isfinite(abs(result)):
             return result
-    radius_min = (_UNIFORM_ERROR_CONST / envelope_bar) ** (2.0 / 3.0)
-    if radius < radius_min:
+    # F074 gate: bound the error of what is SERVED.  Term 1 is the
+    # subleading uniform correction (~ K/sqrt(w), regular through the
+    # caustic); term 2 is the ghost the arm omits -- exactly zero on the
+    # interior (GhostAbsentError), refuse when a ghost exists but is
+    # unavailable.  The old `radius >= (c_P/bar)^(2/3)` gate bounded
+    # pearcey_asymptotic's error -- the object the uniform form replaces
+    # -- and so refused the near-cusp region where the uniform form is at
+    # its best (same defect class as F069/F070).  Calibration over 54
+    # oracle points: 0 unsound admits, max served error 0.037 vs
+    # envelope_bar = 0.05, interior coverage 12/18 (was 0).
+    error_estimate = _K_UNIFORM / math.sqrt(w)
+    try:
+        ghost = geometry.ghost_kernel([w], source, matrix)
+        error_estimate += (
+            abs(complex(np.atleast_1d(ghost.kernel)[0]))
+            * math.exp(-w * float(ghost.delay.imag)))
+    except geometry.GhostAbsentError:
+        pass
+    except geometry.GhostDomainError:
+        return None
+    if error_estimate > envelope_bar:
         return None
 
     # A negative reduced quartic (C4 < 0 -- the standard minimum-image
@@ -893,30 +937,17 @@ def cusp_amplification(w: float, source, gamma: float, *,
         else:
             far_sum += kernel_carrier
 
-    # Interior sources bypass the per-image calibration certificate: the
-    # uniform-error gate (R >= radius_min) already bounds the answer to
-    # the envelope_bar tolerance, and the uniform ratio P/P_asymp is
-    # self-calibrating -- both evaluated at the same (x, y), so a
-    # control miscalibration cancels to leading order.  Interior
-    # degenerate clusters (>= 4 images but only 1 stationary point on
-    # the symmetry axis) share the same argument (measured rel-err
-    # 1.5e-3 at w=100, ~0 at w=200 vs the exact engine).  EXTERIOR
-    # sources keep the per-image certificate enforced -- the self-
-    # calibration robustness does NOT hold there (measured 52% error
-    # for an exterior on-axis source at w=80).  Interior is decided by
-    # image count: >= 4 images is the exact discriminator for both
-    # parities (per the census cap of 4 images per geometry).
-    _is_interior = len(images) >= 4
-    cusp_is_last_rung = (
-        _airy_fold.fold_amplification(
-            w, source, gamma, beta=beta, kappa=kappa) is None)
-    interior_degenerate = (
-        _is_interior and len(stationary_values) == 1
-        and cusp_is_last_rung)
-    bypass = (len(stationary_values) == 3 or interior_degenerate)
-    if not bypass:
-        if not _calibration_certified(stationary_values, matched_delays):
-            return None
+    # F074: with the corrected controls the reduced stationary phases
+    # reproduce the geometric cluster (54/54 measured: 3 on-axis
+    # interior, 1 off-axis exterior, n_match == n_stat everywhere), so
+    # the calibration certificate is enforceable EVERYWHERE.  The old
+    # bypass existed to paper over the transposed controls, whose phases
+    # matched nothing (n_match = 0 at 26/54 configs) -- including the
+    # "interior degenerate cluster" special case, which was not a
+    # physical degeneracy but the transposition collapsing three
+    # stationary points into one.
+    if not _calibration_certified(stationary_values, matched_delays):
+        return None
 
     uniform = cluster_sum * (primitive / asymptotic)
     total = uniform + far_sum

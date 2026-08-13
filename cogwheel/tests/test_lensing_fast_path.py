@@ -321,23 +321,36 @@ FOP_GRID_GAMMA = (0.0, 0.2)
 #: member must still refuse by name (never a silent finite value from the
 #: legacy series).
 #:
-#: F028 re-point: the above-ceiling member is ``(160.0, 0.3, 0.2)`` -- a
-#: genuinely hard-core WAVE node (``w*delta_min < RHO_END`` unresolved,
-#: ``L = w*|y'| = 160*0.3 = 48`` so `select_branch` stays on 'wave', and
-#: BOTH uniform arms decline), which raises `SchwingerCertificationError`
-#: at the Schwinger ceiling.  ``w = 160`` sits above the QD ceiling (150)
-#: so the refusal is immediate (the mpmath band ``60 < w <= 150`` would
-#: take ~160 s per node).  The former ``(63.0, 0.9, 0.2)`` is now
-#: resolved AND strongly cancelling, so since Build 8f WP1 the
-#: authoritative `select_branch` gate serves it with the F028 geometric
-#: asymptote instead of refusing -- it no longer exercises the
-#: above-ceiling refusal edge.
+#: F074 re-point: the above-ceiling member is ``(160.0, 0.5, 0.2)`` -- a
+#: genuinely hard-core WAVE node (unresolved, `select_branch` stays on
+#: 'wave', and BOTH uniform arms decline), which raises
+#: `SchwingerCertificationError` at the Schwinger ceiling.  ``w = 160``
+#: sits above the QD ceiling (150) so the refusal is immediate (the
+#: mpmath band ``60 < w <= 150`` would take ~160 s per node).
+#:
+#: The former ``(160.0, 0.3, 0.2)`` stopped being hard-core when the
+#: F074 control-map fix widened the cusp arm's certified region: at
+#: gamma = 0.2 the astroid cusp vertex sits at radius 0.3651, so
+#: ``sqrt_s = 0.3`` is 82% of the way out to the cusp tip -- inside the
+#: neighbourhood the uniform Pearcey form now describes, and the arm
+#: serves it (measured |F| = 6.19 at w = 160).  ``sqrt_s = 0.5`` is well
+#: past the tip and both arms decline (measured).  The earlier
+#: ``(63.0, 0.9, 0.2)`` had left this fixture for the same kind of
+#: reason: it became resolved AND strongly cancelling, so the F028
+#: geometric rung serves it.
 FOP_REFUSALS = (
     (40.0, 0.9, 0.2),
     (50.0, 0.9, 0.2),
     (50.0, 0.95, 0.2),
-    (160.0, 0.3, 0.2),
+    (160.0, 0.5, 0.2),
 )
+
+#: ``sqrt_s`` appended to the flipped-arm GRID sweep so its above-ceiling
+#: three-way split (refuse / arm-served / geometric-served) keeps a
+#: hard-core member.  Measured at this build: at ``w = 160``, gamma=0.2,
+#: beta = 0 (both kappas) both arms decline and the grid refuses, while
+#: the beta = 0.7 rows serve -- so one fixture exercises both sides.
+FOP_SUPRA_HARDCORE_SQRT_S = 0.5
 
 # ---------------------------------------------------------------------------
 # LEVER 2 -- interpolation constants (RETIRED with the SACR-C swap).
@@ -1502,7 +1515,7 @@ class OperatorFusionByteIdentityTestCase(FastPathTestCase):
         sub_grid = np.asarray(FOP_GRID_W, dtype=float)  # all w <= 50 <= 60
         supra_grid = np.asarray(FOP_GRID_W + (160.0,), dtype=float)
         witnessed = refused = served = served_geometric = 0
-        for sqrt_s in FOP_GRID_SQRT_S:
+        for sqrt_s in FOP_GRID_SQRT_S + (FOP_SUPRA_HARDCORE_SQRT_S,):
             for beta in FOP_IDENTITY_BETAS:
                 for kappa in FOP_IDENTITY_KAPPAS:
                     y = (sqrt_s, 0.0)

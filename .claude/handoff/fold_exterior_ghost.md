@@ -1,4 +1,4 @@
-# Build: stop the fold arm serving non-merging pairs; consume the ghost
+# Build: distance-gate the near-caustic serves; stop non-merging-pair folds; consume the ghost
 
 ## Mission
 
