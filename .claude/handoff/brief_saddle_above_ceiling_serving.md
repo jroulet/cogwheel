@@ -123,12 +123,24 @@ the per-branch instrumentation in
    discontinuity between them — the handover is only about whether the
    envelope is large enough to need charting.
 
+8. **THE RULE COSTS NOTHING vs the (invalid) per-`w` optimum.** Over 220
+   (source, w) pairs from the real gap population:
+
+       per-w minimisation (NOT a valid gauge)   p50 8.48e-06  p90 1.11e-04  96.8% < 1e-3
+       tau_c = min(tau) - RHO_END/w_min         p50 8.48e-06  p90 1.20e-04  96.4% < 1e-3
+
+   Identical median, p90 within 8%, coverage within 0.4 points. The
+   implementable `w`-independent rule is essentially optimal, so tier 1 is
+   sized at **96.4%** and tier 2 at **3.6%** — and those are the numbers under
+   the rule the build will actually implement, not under an estimator it
+   cannot use.
+
 ## Scope
 
 IN — a THREE-TIER ladder for the far-from-caustic macro saddle, with NO tier
 falling through to direct evaluation:
 
-  1. re-gauged switched analytic channels (serves ~97.3%, no chart);
+  1. re-gauged switched analytic channels (serves 96.4%, no chart);
   2. for sources the gate rejects, a CHART of the RE-GAUGED ENVELOPE — the
      lowest-order physics is already removed by construction, since `E` is
      what remains after the switched analytic trials are subtracted, so the
