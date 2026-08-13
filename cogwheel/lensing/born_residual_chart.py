@@ -39,8 +39,8 @@ from scipy.interpolate import RegularGridInterpolator
 class BornResidualChart:
     """Frozen 3-D interpolation chart for the Born residual.
 
-    Fields
-    ------
+    Attributes
+    ----------
     gamma_grid : ndarray
         1-D ascending grid of shear parameter gamma values.
     rho_grid : ndarray
