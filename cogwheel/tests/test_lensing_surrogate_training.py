@@ -7093,3 +7093,97 @@ class SaddleExteriorHeldoutSelfFalsificationTestCase(_CountingTestCase):
 
 if __name__ == '__main__':
     main()
+
+
+class DegenerateExteriorBandIsRecordedTestCase(_CountingTestCase):
+    """A band whose caustic reach exceeds the prior box must SAY SO.
+
+    ``rho_outer_region = 1 + y_outer_region - coordinate_radius_min`` goes
+    ``<= 1`` when ``coordinate_radius_min`` diverges, which it does for the
+    macro saddle as ``det A -> 0``.  The exterior interval ``(1, rho_outer]``
+    is then EMPTY, ``_farfield_tiles`` returns ``[]`` on its
+    ``rho_outer <= rho_inner`` guard, and the region used to vanish with no
+    error, no log and no record.
+
+    A negative-width interval is ill-posed, not merely small, so the trainer
+    records it.  MEASURED 2026-08-12: 121 of 1742 macro-saddle census draws
+    land in such a band; the shipping trainer reports
+    ``rho_outer = -5.47`` for the sub-band at ``gamma ~ 1.005``.
+    """
+
+    #: Small but legal: `_log_reach_gamma_axis` needs >= 4 gamma nodes.
+    CONFIG = TrainingConfig(
+        n_gamma=5, n_u=5, n_theta=5, n_rho=5, n_theta_c=5,
+        w_nodes_per_decade=4, interior_w_nodes_per_decade=4,
+        f_floor=0.16, f_max=0.40, farfield_overlap=0.05,
+        n_farfield_tiles_per_side=2, max_farfield_regions=None,
+        gamma_band_halfwidth=0.02, min_gamma_band=1e-6,
+        tube_eps_max=5e-2, farfield_eps_max=1e-3, interior_eps_max=5e-2,
+        gamma_refine_near_one_window=0.15, gamma_refine_near_one_width=0.05,
+        engine_budget=2000, max_tube_arcs=4, n_heldout=4,
+        n_caustic_samples=120, seed=1)
+
+    @staticmethod
+    def _degenerate_records(band):
+        """Drive the SHIPPING trainer on *band*; return its degenerate records.
+
+        Only the two engine chokepoints are stubbed — the geometry pipeline
+        (caustic sweep, admissions, tiling, windows) runs for real.
+        """
+        stable, _dropped = training.stable_gamma_bands(
+            band, -1, n_samples=120, min_width=1e-6)
+        sub, structure = stable[0]
+
+        def fake_load_or_build(path, build_fn, provenance):
+            stem = Path(path).stem
+            return (types.SimpleNamespace(name=stem),
+                    {'heldout_eps': 1e-12, 'image_count': 4, 'kind': 'tube'},
+                    False)
+
+        reports: list[dict] = []
+        with tempfile.TemporaryDirectory(prefix='degen_band_') as tmp:
+            with mock.patch.object(training, '_load_or_build',
+                                   new=fake_load_or_build), \
+                 mock.patch.object(training, '_reprovision_w_nodes',
+                                   return_value=(3, {'status': 'ok',
+                                                     'n_rec': 3})):
+                training._train_band_charts(
+                    box=PriorBox.from_prior_classes(),
+                    config=DegenerateExteriorBandIsRecordedTestCase.CONFIG,
+                    rng=np.random.default_rng(0), outdir=Path(tmp), parity=-1,
+                    label='L', band=sub, structure=structure, charts=[],
+                    chart_reports=reports, regions=None)
+        return sub, [r for r in reports
+                     if str(r.get('name', '')).endswith(
+                         'exterior_band_degenerate')]
+
+    def test_degenerate_band_records_the_empty_interval(self) -> None:
+        """Near the parity boundary the record exists and carries the value."""
+        sub, degenerate = self._degenerate_records((1.001, 1.01))
+        self.comparisons += 1
+        self.assertEqual(
+            len(degenerate), 1,
+            f'sub-band {sub} should record exactly one degenerate-exterior '
+            f'entry; got {len(degenerate)}')
+        record = degenerate[0]
+        self.comparisons += 1
+        self.assertLessEqual(
+            record['rho_outer'], 1.0,
+            'the record must carry the offending value, not just a flag')
+        self.comparisons += 1
+        self.assertFalse(record['served'],
+                         'a degenerate exterior band serves nothing')
+        self.comparisons += 1
+        self.assertGreater(
+            record['coordinate_radius_min'], record['y_outer_region'],
+            'the cause is a caustic reach larger than the prior box; the '
+            'record must show both so the diagnosis needs no rerun')
+
+    def test_healthy_band_records_nothing(self) -> None:
+        """The control: a mid-range saddle band is silent (no false alarm)."""
+        sub, degenerate = self._degenerate_records((1.30, 1.34))
+        self.comparisons += 1
+        self.assertEqual(
+            len(degenerate), 0,
+            f'healthy sub-band {sub} must not be flagged degenerate; '
+            f'got {degenerate}')

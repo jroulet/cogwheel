@@ -4886,6 +4886,30 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # Additive outer edge, same convention as ``exclusion_rho`` above and the
     # serve map: mutual inverse of `_from_caustic_fixed` for both parities.
     rho_outer_region = 1.0 + y_outer_region - coordinate_radius_min
+    # A band whose caustic reach exceeds the prior box gives
+    # ``rho_outer_region <= 1``, i.e. an EMPTY exterior interval
+    # ``(1, rho_outer]``. `_farfield_tiles` / `_farfield_exterior_tiles` then
+    # return [] and the region vanishes with no error, no log and no record --
+    # silent degradation, which this repo's convention replaces with a loud
+    # one (cf. ``beyond_w_cap``, recorded rather than dropped).
+    #
+    # MEASURED 2026-08-12: the macro saddle reaches
+    # ``rho_outer = -4.147`` at gamma = 1.005 (0.940 at 1.02, healthy 3.5 by
+    # 1.10) because ``coordinate_radius_min`` diverges as det A -> 0. 121 of
+    # 1742 saddle census draws sit in such a band. A negative-width interval
+    # is ill-posed, not merely small, so record it and let the region be
+    # empty explicitly.
+    if rho_outer_region <= 1.0:
+        chart_reports.append({
+            'name': f'chart_{label}_exterior_band_degenerate',
+            'parity': parity, 'band': [float(band[0]), float(band[1])],
+            'rho_outer': round(float(rho_outer_region), 6),
+            'coordinate_radius_min': round(float(coordinate_radius_min), 6),
+            'y_outer_region': round(float(y_outer_region), 6),
+            'served': False,
+            'reason': ('exterior interval (1, rho_outer] is empty: the '
+                       'band caustic reach exceeds the prior box, so no '
+                       'exterior tile can exist here')})
     # Exterior admission (WP1).  Positive parity: per-``theta_c``-column
     # directional admission (`_farfield_exterior_tiles` via `admits_exterior`)
     # replaces the single scalar ``exclusion_rho``.  Each column's inner rho
