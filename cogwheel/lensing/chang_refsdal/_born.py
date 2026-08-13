@@ -79,8 +79,13 @@ from cogwheel.lensing.chang_refsdal import geometry, channels, operator
 
 #: Upper edge of the smooth-switch window and geometric-optics resolution
 #: onset, imported from `operator` as the ONE authoritative home of the
-#: SACR-C resolution scale ``RHO_END = 4`` (do not introduce a second
-#: literal).  Guard A refuses once the two real images are resolved,
+#: SACR-C resolution scale ``RHO_END = 4``.  Do not introduce a second
+#: literal in any module that MAY import `operator`.  `_gauge.py` is the
+#: one exception: it is a pinned dependency-free leaf
+#: (`test_lensing_gauge.GaugeIndependenceTestCase` forbids it importing
+#: `operator`), so it carries a guarded duplicate pinned equal by a test
+#: instead -- see FINDINGS F068.
+#: Guard A refuses once the two real images are resolved,
 #: ``w * Delta_tau >= RHO_END``, the same band split SACR-C switches on.
 RHO_END = operator.RHO_END
 

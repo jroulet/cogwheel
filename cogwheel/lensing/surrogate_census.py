@@ -11,6 +11,9 @@ through to the exact engine.  It then reports:
   fall-through causes (``gamma-guard``, ``dropped-sliver``, ``born``,
   ``cusp-window``, ``refusal-ball``, ``out-of-box``), plus a separate
   ``engine-refused`` bucket for domain refusals the geometry itself raises;
+  the served count is itself broken down by served-cause label (``chart``,
+  ``ppgo_fold``, ``saddle-farfield-analytic``) so a served drop in the
+  exact-engine bucket is attributable to the rung that claimed it;
 - per-chart held-out envelope error ``eps`` against a FRESH engine oracle;
 - ``(gamma, image_count, eta)``-partitioned lnL error tiers versus the exact
   engine (dependency-injected; never partitioned by the gauge angle ``theta``,
@@ -53,6 +56,7 @@ from cogwheel.lensing import surrogate as _surrogate
 from cogwheel.lensing.chang_refsdal import (ChangRefsdalChannels,
                                             farfield_envelope_from_partition)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
+from cogwheel.lensing.likelihood import _saddle_farfield_analytic_serves
 from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
                                        CERTIFICATION_BAR, caustic_rho,
                                        get_certified_ppgo_map)
@@ -108,6 +112,15 @@ _EMPTY_REFUSED = np.empty((0, 3), dtype=float)
 # exterior-to-caustic draw the analytic Born carrier rung serves (rho > 1).
 _FALLTHROUGH_CATEGORIES = ('gamma-guard', 'dropped-sliver', 'born',
                            'cusp-window', 'refusal-ball', 'out-of-box')
+
+# Served-cause labels for SERVED records, mirroring the production dispatch
+# order in ``_amplification_coefficients``.  Chart-served records carry
+# ``category=None`` and are reported under ``'chart'``; ``'ppgo_fold'`` is the
+# interior fold-ppGO handoff and ``'saddle-farfield-analytic'`` is the tier-1
+# far-from-caustic macro-saddle analytic rung (gamma > 1, resolvable at the
+# band floor).  These let ``fallthrough_breakdown`` attribute a served drop in
+# the exact-engine bucket to the rung that claimed it, not just a total delta.
+_SERVED_CATEGORIES = ('chart', 'ppgo_fold', 'saddle-farfield-analytic')
 
 #: Minimum Airy parameter xi for the fold-ppGO interior handoff gate.
 #: Mirrors the canonical definition in cogwheel.lensing.likelihood.
@@ -485,6 +498,36 @@ def characterize_sample(
         except (ValueError, ZeroDivisionError, LensDomainError):
             pass
 
+    # --- Tier-1 far-from-caustic macro-saddle analytic serve (WP-2) ---
+    # Mirrors LensedRelativeBinningLikelihood._saddle_farfield_analytic: a
+    # resolvable far-from-caustic macro saddle (gamma > 1) whose real image
+    # pair is resolved at the band floor is served analytically with a zero
+    # envelope -- no engine call.  Reuse the SHARED resolvability predicate
+    # (single source of truth with the live serve rung -- no re-derived gate
+    # math) on the SAME geometry partition already built above; a second
+    # partition is never constructed.  These sources were previously
+    # over-attributed to 'born' by classify_fallthrough; the gate-admitted
+    # subset is served and leaves the exact-engine bucket, while the
+    # unresolvable saddle sources keep their existing classification.
+    if gamma > 1.0:
+        real_mask = np.asarray(geom.real_mask, dtype=bool)
+        real_delays = np.asarray(geom.delays)[real_mask]
+        w_lo = float(w_grid.min())  # band floor == exp(log_w_min)
+        # Caustic-relative distance rho = |y| / caustic_reach.  Computed the
+        # SAME way as the live serve rung (raw (y1, y2), kappa=0.0) so the
+        # shared gate's rho input is identical on both sides and the served
+        # set can never skew from the counted set.  A near-caustic (small
+        # rho) resolvable saddle is the DEFERRED tier-2 population: the gate
+        # refuses it and it stays classified by classify_fallthrough below.
+        try:
+            rho = caustic_rho(gamma, float(np.hypot(y1, y2)), kappa=0.0)
+        except (ValueError, LensDomainError):
+            rho = None
+        if _saddle_farfield_analytic_serves(real_delays, w_lo, rho):
+            record.served = True
+            record.category = 'saddle-farfield-analytic'
+            return record
+
     record.category = classify_fallthrough(
         surrogate, gamma=gamma, log_w_min=log_w_min,
         log_w_max=chart_log_w_max, eta=eta, theta=theta,
@@ -517,6 +560,12 @@ def fallthrough_breakdown(records: Sequence[SampleRecord]) -> dict:
     ``engine_refused`` bucket (named geometry refusals) is reported separately
     because it is not a surrogate guard decision.
 
+    The served count is itself broken down by served-cause label
+    (`_SERVED_CATEGORIES`): chart-served records (``category=None``) under
+    ``'chart'``, plus the analytic served rungs ``'ppgo_fold'`` and
+    ``'saddle-farfield-analytic'``.  This makes a drop in the exact-engine
+    bucket attributable to the rung that claimed it, not just a total delta.
+
     Raises
     ------
     CensusError
@@ -527,8 +576,15 @@ def fallthrough_breakdown(records: Sequence[SampleRecord]) -> dict:
     served = sum(r.served for r in records)
     engine_refused = sum(r.engine_refused for r in records)
     counts = {name: 0 for name in _FALLTHROUGH_CATEGORIES}
+    served_counts = {name: 0 for name in _SERVED_CATEGORIES}
     for r in records:
-        if r.served or r.engine_refused:
+        if r.served:
+            cause = r.category if r.category is not None else 'chart'
+            if cause not in served_counts:
+                raise CensusError(f'Unknown served cause: {cause!r}.')
+            served_counts[cause] += 1
+            continue
+        if r.engine_refused:
             continue
         if r.category not in counts:
             raise CensusError(
@@ -544,6 +600,7 @@ def fallthrough_breakdown(records: Sequence[SampleRecord]) -> dict:
         'n_samples': n,
         'served': int(served),
         'served_fraction': (served / n) if n else float('nan'),
+        'served_breakdown': {k: int(v) for k, v in served_counts.items()},
         'engine_refused': int(engine_refused),
         'fallthrough': {k: int(v) for k, v in counts.items()},
         'fallthrough_total': int(n - served),

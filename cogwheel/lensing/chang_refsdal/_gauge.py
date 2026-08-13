@@ -753,3 +753,80 @@ def _broadcast_switch(switch: np.ndarray | float,
             f'shape {shape}. Pass a scalar, a per-frequency array of '
             f'shape {shape[:-1]}, or a per-channel array of shape '
             f'{shape}.') from exc
+
+
+#: Upper edge of the smooth channel-handover switch window: at
+#: ``w * delta_min >= this gate`` every channel is fully handed over to
+#: its stationary-phase target.
+#:
+#: This module is a SHARED LEAF -- it is imported by both the production
+#: channel tracker and the crossing-scenario builders, and
+#: `test_lensing_gauge.GaugeIndependenceTestCase` pins that it imports
+#: nothing but numpy, naming `operator` explicitly as forbidden.  So it
+#: CANNOT follow `_born.py`'s "bind it from `operator`" convention: doing
+#: that couples the two consumers through this module and breaks the leaf.
+#: The literal is therefore a DELIBERATE duplicate of `operator.RHO_END`,
+#: and `test_lensing_saddle_gauge` pins the two equal so the copy cannot
+#: drift silently.  Do not "fix" this by importing operator -- that was
+#: tried on 2026-08-13 and the independence test caught it.
+_RHO_END = 4.0
+
+
+def _saddle_switch_delay(tau_min: float, w_min: float) -> float:
+    """
+    Authoritative switch-gauge delay for the far-from-caustic macro saddle.
+
+    This is the gauge the DEFERRED tier-2 chart will use to demodulate its
+    stored envelope; it has no production caller yet.  Tier-1's live rung
+    (`likelihood._saddle_farfield_analytic`) does NOT call this function --
+    it implements its own resolvability check inline
+    (`likelihood._saddle_farfield_analytic_serves`).  The two are
+    boundary-equivalent (both key off ``w_min * delta_min >= RHO_END``),
+    which is why this function exists ahead of tier-2 landing, but the
+    "single authoritative gauge for both tiers" claim is aspirational
+    until tier-1 is refactored to route through it.
+
+    Returns the delay at which the switch window closes, ``tau_min -
+    RHO_END / w_min``.
+
+    CRITICAL: ``w_min`` is the PASSED band-floor frequency, NEVER a live
+    serve-time ``w``.  Feeding a per-query ``w`` here is the ghost-gate
+    train/serve skew bug class -- the gauge must be a fixed property of
+    the band, not of the query.
+
+    Parameters
+    ----------
+    tau_min : float
+        Minimum-image Fermat delay [dimensionless].
+    w_min : float
+        Band-floor dimensionless frequency ``min(dense_w)``, strictly
+        positive.
+
+    Returns
+    -------
+    float
+        The switch-gauge delay ``tau_min - RHO_END / w_min``.
+    """
+    return tau_min - _RHO_END / w_min
+
+
+def _saddle_phase_delay(tau_min: float) -> float:
+    """
+    Authoritative phase-gauge delay for the far-from-caustic macro saddle.
+
+    The minimum-image Fermat delay ``tau_min`` itself: the phase origin
+    against which the stored envelope's carrier is demodulated.  Paired
+    with `_saddle_switch_delay` as the gauge for the DEFERRED tier-2 chart
+    (see that function's docstring for the tier-1/tier-2 relationship).
+
+    Parameters
+    ----------
+    tau_min : float
+        Minimum-image Fermat delay [dimensionless].
+
+    Returns
+    -------
+    float
+        ``tau_min`` unchanged.
+    """
+    return tau_min

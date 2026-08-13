@@ -190,6 +190,20 @@ _LOO_STOP_STRONG = 1e-3
 #: ``gamma' == gamma``, so the crown fixture stays on the fast stop unchanged.
 _STRONG_SHEAR_STOP_THRESHOLD = 0.5
 
+#: Far-from-caustic floor on ``rho = |y| / caustic_reach`` for the tier-1
+#: macro-saddle analytic serve rung (`_saddle_farfield_analytic`).  That rung
+#: serves with a ZERO residual envelope, so its accuracy is governed by
+#: CAUSTIC PROXIMITY, not by the resolvability gate: a near-caustic (small
+#: ``rho``) source that is nonetheless resolvable at the band floor is the
+#: DEFERRED tier-2 population (~23% beyond-shell, which must be CHARTED, not
+#: served) and is REFUSED here so it falls through to the exact Schwinger
+#: engine rather than being answered with an O(1)-wrong likelihood.
+#: Calibrated by measurement (test_lensing_saddle_tier1_accuracy) so the
+#: admitted ``rho >= _SADDLE_FARFIELD_RHO_FLOOR`` population meets the spec
+#: p90 <= 1e-3 with ~20x headroom (measured p90 ~ 5e-5, worst ~ 7e-4 at the
+#: floor).
+_SADDLE_FARFIELD_RHO_FLOOR = 2.0
+
 #: Hard ceiling on the number of coarse envelope nodes.  The SACR-C
 #: envelope is beat-free by construction, so a certified reconstruction
 #: needs far fewer nodes than the old kernel grid (report: greedy-oracle
@@ -507,6 +521,63 @@ def _loo_stop_for_lens(lens):
     if gamma_prime >= _STRONG_SHEAR_STOP_THRESHOLD:
         return _LOO_STOP_STRONG
     return _LOO_STOP_FAST
+
+
+def _saddle_farfield_analytic_serves(real_delays, w_lo, rho):
+    """
+    Whether the far-from-caustic macro saddle may be served analytically
+    with a zero residual envelope.
+
+    SINGLE SOURCE OF TRUTH for the tier-1 saddle-analytic serve gate.  Both
+    the live serve rung (`_saddle_farfield_analytic`) and the census
+    band-splitting (WP-2) call this exact predicate, so the served set and
+    the counted set can never skew.
+
+    The gate has TWO independent terms, BOTH required:
+
+    1. Caustic proximity (accuracy).  The rung serves with a ZERO residual
+       envelope, so its error is governed by caustic proximity
+       ``rho = |y| / caustic_reach`` -- NOT by resolvability.  A near-caustic
+       (small ``rho``) source that is nonetheless resolvable is the DEFERRED
+       tier-2 population (which must be CHARTED, not served); serving it
+       returns an O(1)-wrong likelihood.  We therefore REQUIRE
+       ``rho >= _SADDLE_FARFIELD_RHO_FLOOR`` so tier-2 sources are refused and
+       fall through to the exact Schwinger engine.
+
+    2. Resolvability.  At least two REAL image delays AND the narrowest
+       positive pairwise delay gap resolved at the band floor, i.e.
+       ``w_lo * min_delta_tau >= RHO_END``.  Below that the neighbouring
+       images are not individually resolved, so the switched analytic channel
+       sum is not accurate.
+
+    Parameters
+    ----------
+    real_delays : array_like
+        Fermat delays [dimensionless] of the REAL images (already masked
+        by ``geom.real_mask``).
+    w_lo : float
+        Band-floor dimensionless frequency ``min(dense_w)``.
+    rho : float or None
+        Caustic-relative source distance ``|y| / caustic_reach`` from the
+        authoritative ``caustic_rho`` converter.  ``None`` or a non-finite
+        value (e.g. the converter could not place the source) declines.
+
+    Returns
+    -------
+    bool
+        Whether the analytic far-field rung may serve the whole band.
+    """
+    if rho is None or not np.isfinite(rho) or rho < _SADDLE_FARFIELD_RHO_FLOOR:
+        return False
+    real = np.sort(np.asarray(real_delays, dtype=float))
+    if len(real) < 2:
+        return False
+    delta_taus = np.diff(real)
+    positive_deltas = delta_taus[delta_taus > 0]
+    if len(positive_deltas) == 0:
+        return False
+    min_delta_tau = float(np.min(positive_deltas))
+    return w_lo * min_delta_tau >= RHO_END
 
 
 def _data_term(a_moments, rho0, rho1, kbar0, kbar1, tau, f_center):
@@ -1978,6 +2049,84 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         delays = self._image_delays(lens, geom)
         return delays, k0, k1, geom
 
+    def _saddle_farfield_analytic(self, lens, dense_w):
+        """Tier-1 far-from-caustic macro-saddle analytic serve (gamma > 1).
+
+        Serves the resolvable far-from-caustic macro saddle from the
+        switched analytic channels with a ZERO envelope -- no engine call,
+        no fold_ppgo correction.  The rung serves only when BOTH gate terms
+        of `_saddle_farfield_analytic_serves` hold: the source is
+        far-from-caustic (``rho = |y| / caustic_reach >=
+        _SADDLE_FARFIELD_RHO_FLOOR``, so the zero-envelope error is within
+        spec) AND the real image pair is resolved at the band floor
+        (``w_lo * min_delta_tau >= RHO_END``).  On those, the switched
+        analytic channel sum reconstructed under the ``FARFIELD_KERNEL_SUM``
+        tag -- which parks ``tau_c = 0`` and hardcodes ``S_a = 1`` on the
+        saturated set -- carries the whole band to within the rung's
+        certified bar, so the residual envelope is SET to zero and the
+        analytic carriers alone reconstruct the amplification.  It is
+        NEGLIGIBLE, not identically zero: measured over the gate-admitted
+        far-from-caustic population, pointwise relative error is p90 ~5e-5
+        with max ~7e-4 at the ``rho = 2.0`` floor (certified by
+        ``test_lensing_saddle_tier1_accuracy.py`` against p90 <= 1e-3).
+        Accuracy degrades as ``rho`` falls toward the caustic, which is
+        what the rho-floor gate term exists to bound.  A near-caustic (small ``rho``)
+        resolvable source is the DEFERRED tier-2 population and is REFUSED
+        here.  On any gate miss, returns ``None`` and the caller falls
+        through to the exact seed engine, byte-identical to HEAD.
+
+        The rung never uses ``geom.switch`` / ``geom.critical_delay``: the
+        ``FARFIELD_KERNEL_SUM`` tag is the switched-analytic sum on the
+        saturated set and needs no channel handover.  A geometry
+        ``LensDomainError`` propagates unswallowed, mirroring
+        `_ppgo_above_ceiling`.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters from `_lens_params`.
+        dense_w : np.ndarray
+            Dimensionless frequency grid for the kernel subsamples.
+
+        Returns
+        -------
+        tuple or None
+            ``(delays, k0, k1, partition)`` on success, ``None`` to fall
+            through.
+        """
+        geom = ChangRefsdalChannels(dense_w).geometry_partition(
+            gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
+            beta=lens['beta'], kappa=lens['kappa'])
+
+        real = np.asarray(geom.real_mask, dtype=bool)
+        real_delays = np.asarray(geom.delays)[real]
+        w_lo = float(dense_w.min())
+        # Caustic-relative distance rho = |y| / caustic_reach (engine-free).
+        # Gauged at the candidate's OWN kappa, matching the partition built
+        # above and the sibling `_ppgo_above_ceiling` rung -- the dispatch
+        # gates only on gamma > 1.0 (see the caller), so a general kappa != 0
+        # candidate can reach this rung and must be gauged against its own
+        # caustic, not the kappa=0 one. The WP-2 census separately gauges at
+        # kappa=0.0, which is correct for its kappa=0 sampled census space.
+        try:
+            rho = caustic_rho(
+                lens['gamma'], float(np.hypot(lens['y1'], lens['y2'])),
+                kappa=lens['kappa'])
+        except (ValueError, LensDomainError):
+            return None
+        if not _saddle_farfield_analytic_serves(real_delays, w_lo, rho):
+            return None
+
+        envelope = np.zeros(dense_w.shape, dtype=complex)
+
+        kernels, _total = reconstruct_farfield(
+            dense_w, envelope, geom.delays, geom.saddle_kernels,
+            geom.real_mask, FARFIELD_KERNEL_SUM, geom.t_min)
+
+        k0, k1 = self._reduce_dense_kernels(kernels)
+        delays = self._image_delays(lens, geom)
+        return delays, k0, k1, geom
+
     def _amplification_coefficients(self, par_dic):
         """
         Candidate amplification coefficients (ratio-layer dispatch).
@@ -2067,6 +2216,20 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             ppgo = self._ppgo_above_ceiling(lens, dense_w)
             if ppgo is not None:
                 return ppgo
+
+        # Tier-1 far-from-caustic macro-saddle analytic intercept.  For
+        # the resolvable FAR-FROM-CAUSTIC macro saddle (gamma > 1) the
+        # switched analytic channel sum carries the whole band to within
+        # the certified bar (p90 ~5e-5, max ~7e-4 at the rho floor), so it
+        # serves with a zero envelope and no per-candidate engine cost.  The gamma > 1
+        # guard keeps the astroid (gamma <= 1) path byte-identical; the
+        # two saddle rungs are mutually exclusive in effect (ppGO already
+        # served the w_max > 150 resolvable case above).  On gate miss,
+        # fall through to the exact seed engine.
+        if lens['gamma'] > 1.0:
+            served = self._saddle_farfield_analytic(lens, dense_w)
+            if served is not None:
+                return served
 
         # Candidate seed engine evaluation (single call).  A candidate-side
         # `geometry.LensDomainError` / `SchwingerCertificationError` from

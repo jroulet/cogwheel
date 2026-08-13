@@ -555,6 +555,12 @@ class CensusBandSplitMirrorIntegrityTestCase(_SaddleRhoTestCase):
         mock_geom.caustic_distance = 1.0
         mock_geom.caustic_theta = 0.1
         mock_geom.real_mask = np.array([True, True])
+        # `delays` must be supplied and must match `real_mask` in length:
+        # a real `geometry_partition` returns them together, and the tier-1
+        # saddle rung indexes one by the other.  A bare MagicMock attribute
+        # asarray()s to a 0-d array and raises IndexError before the code
+        # under test is reached.
+        mock_geom.delays = np.array([0.0, 0.5])
 
         def _engine_factory(_w: np.ndarray) -> MagicMock:
             ch = MagicMock()
@@ -609,6 +615,12 @@ class CensusBandSplitMirrorIntegrityTestCase(_SaddleRhoTestCase):
         mock_geom.caustic_distance = 1.0
         mock_geom.caustic_theta = 0.1
         mock_geom.real_mask = np.array([True, True])
+        # `delays` must be supplied and must match `real_mask` in length:
+        # a real `geometry_partition` returns them together, and the tier-1
+        # saddle rung indexes one by the other.  A bare MagicMock attribute
+        # asarray()s to a 0-d array and raises IndexError before the code
+        # under test is reached.
+        mock_geom.delays = np.array([0.0, 0.5])
 
         def _engine_factory(_w: np.ndarray) -> MagicMock:
             ch = MagicMock()
