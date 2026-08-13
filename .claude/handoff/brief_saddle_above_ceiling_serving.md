@@ -196,6 +196,31 @@ the per-branch instrumentation in
    LIMIT: one source. If tier 2's chart misses its eps bar, re-run this
    comparison across the tier-2 population before adding nodes.
 
+10. **TIER 2's NODE BUDGET IS ORDINARY — the 8-node seed suffices.** Selecting
+    by the ACTUAL tier-2 criterion (`|E|/|F| > 1e-3` under the decoupled
+    gauge, not the `|y|` proxy of fact 7): 3 of 70 scanned gap sources qualify
+    at `w = 24`. Cubic-spline interpolation error in `log w`, as
+    `max|spline - truth| / max|E|`:
+
+        gamma  |y|    |E|/|F|     n=8       n=12      n=16      n=24
+        1.519  1.787  8.70e-02  8.51e-04  1.69e-04  2.56e-05  9.36e-06
+        1.585  1.851  3.56e-02  9.69e-04  1.00e-04  4.37e-05  1.82e-05
+        1.518  1.559  1.83e-03  1.39e-02  7.57e-03  1.63e-03  4.63e-04
+
+    Those are errors in `E`. The SERVED error is that times `|E|/|F|`, and at
+    `n = 8` it is 7.4e-05, 3.4e-05 and 2.5e-05 respectively — all ~1e-5,
+    two orders under the 1e-3 bar.
+
+    The envelope's own smallness suppresses its interpolation error in the
+    served quantity, so the residual oscillation of fact 7 costs almost
+    nothing. Do NOT spend a work package enlarging the `w` axis; the standard
+    `_LOO_SEED_NODES = 8` with the usual LOO-adaptive stop is enough, and the
+    stop will terminate early here.
+
+    Note the tier-2 population is SMALL and its members are strongly
+    envelope-weighted (`|E|/|F|` up to 8.7e-02), so tier 2 is a narrow chart
+    over a well-conditioned target, not a broad one.
+
 ## Scope
 
 IN — a THREE-TIER ladder for the far-from-caustic macro saddle, with NO tier
@@ -205,8 +230,8 @@ falling through to direct evaluation:
   2. for sources the gate rejects, a CHART of the RE-GAUGED ENVELOPE — the
      lowest-order physics is already removed by construction, since `E` is
      what remains after the switched analytic trials are subtracted, so the
-     chart target has small dynamic range. It DOES still oscillate in `w`
-     (fact 7), so size the `w` axis for that;
+     chart target has small dynamic range, and fact 10 measures its node
+     budget as ORDINARY (the existing 8-node seed suffices);
   3. a named refusal ONLY for what neither tier can reach (see below).
 
 Plus the validity gate, the serve-path and census wiring, and tests.
