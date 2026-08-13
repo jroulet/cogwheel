@@ -1708,6 +1708,54 @@ Tag conventions:
   when Inspector + Professor pass) is safe but leaves the gate untested.
 
 
+- **`rho_outer` GOES NEGATIVE NEAR THE PARITY BOUNDARY, SILENTLY EMPTYING THE
+  EXTERIOR BAND** `[→ spec]` — measured 2026-08-12. The lobe-exterior charted
+  band is `rho_lobe in (1, rho_outer]`, with
+
+      rho_outer = 1.0 + _SOURCE_BOX_CORNER - coordinate_radius_min
+
+  (`census_dry_run.py::_saddle_stable_subbands`, mirroring the production
+  packing path). `coordinate_radius_min` comes from
+  `_st._coordinate_radius_bounds(band, parity)` and blows up as `gamma -> 1`,
+  so `rho_outer` falls below 1 and then negative:
+
+      gamma = 1.005   rho_outer = -4.147
+      gamma = 1.02    rho_outer =  0.940
+      gamma = 1.03    rho_outer =  2.235
+      gamma = 1.10    rho_outer =  3.533   (healthy)
+
+  An interval `(1, rho_outer]` with `rho_outer <= 1` is EMPTY. So for those
+  bands no lobe-exterior chart can ever serve anything, whatever the
+  admission says — and nothing anywhere reports this. It is not caught, not
+  logged, and not refused; the band simply produces no exterior coverage and
+  the draws land in the gap under a different label. MEASURED: 144 of the
+  1742 saddle draws reaching `_classify_saddle` sit in such a band.
+
+  This is a THEORETICAL bug, not a tuning issue: a negative-width interval is
+  not a small band, it is an ill-posed one, and the formula that produced it
+  is being evaluated outside its domain of validity.
+
+  ## What to settle
+
+  1. Is the formula right near `gamma = 1`? `coordinate_radius_min` diverging
+     at the parity boundary may be correct physics (the deltoids degenerate
+     as `det A -> 0`) while the SUBTRACTION that turns it into a normalised
+     outer radius is simply not meaningful there.
+  2. Whatever the answer, a computed `rho_outer <= 1` must REFUSE LOUDLY
+     (named error or an explicit recorded skip) rather than silently yield an
+     empty band. The repo's own convention is a named refusal over a silent
+     degradation — this currently fails that convention.
+  3. Decide what serves `gamma` just above 1. It may be that no chart should:
+     as `det A -> 0` the macro magnification diverges and the exact engine or
+     a dedicated near-boundary rung may be the honest answer. `gamma = 1` is
+     already a measure-zero NAMED refusal; the question is the neighbourhood.
+
+  Related: this is a sub-population of Cause 1 in
+  [[lensing_saddle_coverage_gap_breakdown]], but it has a different fix — the
+  other 757 draws there are a genuine reach question, these 144 are a
+  degenerate band definition.
+
+
 - **Born rung for the MACRO-SADDLE (`det A < 0`) — carrier, gate, and census
   landed 2026-07-28 (commit `31ee133`, F024/F026); only the wiring step
   remains.**
@@ -1797,12 +1845,15 @@ Tag conventions:
   different rung; a negative width should probably refuse loudly rather than
   silently yield an empty band.
 
-  OPEN QUESTION before extending `rho_outer`: is a source at `rho_lobe ~ 5-11`
-  physically far-field? NOT necessarily — `rho_lobe` is normalised by the
-  SMALL `r_deltoid`, so a large value can still be physically near the lobe.
-  Measure the field before choosing between (a) extending `rho_outer`,
-  (b) a corridor-specific coordinate, or (c) re-keying the Born gate off
-  something other than origin `rho`.
+  ANSWERED 2026-08-12 — do NOT extend `rho_outer`. The question was whether a
+  source at `rho_lobe ~ 5-11` is physically far-field, since `rho_lobe`
+  divides by the small `r_deltoid`. Measured on 780 of this population: the
+  PHYSICAL distance to the nearest caustic point is `eta` p50 **0.971**, and
+  **99.2% have `eta >= 0.3`** (`ETA_MIN_GEOMETRIC`) while only 0.7% are
+  genuinely near-caustic. They are far from the caustic and do not need a
+  chart at all — this is a ROUTING failure. Full measurement and the ruled-out
+  options are in
+  [[lensing_saddle_gap_is_a_routing_failure_not_coverage]].
 
   ## Causes 2 and 3 (177 + 149) — admission predicates refuse
 
@@ -1919,6 +1970,72 @@ Tag conventions:
   path. The brief said "transcribe the lobe path"; the plan gate then trimmed
   the cusp alignment the lobe actually has. So the lobe is better than the
   wedge was, and still carries the normalised-radius disease.
+
+
+- **THE DOMINANT SADDLE GAP IS A ROUTING FAILURE, NOT MISSING COVERAGE — the
+  sources are FAR from the caustic** `[→ spec]` — measured 2026-08-12.
+
+  For the 780 sampled draws in the largest gap population (`rho_lobe` beyond
+  `rho_outer`, excluding the degenerate-band sub-population), the PHYSICAL
+  distance to the nearest caustic point (`geometry.nearest_caustic_point`
+  `.distance`) is:
+
+      eta   p10 0.617   p50 0.971   p90 1.380   max 2.682
+      eta >= 0.3  (ETA_MIN_GEOMETRIC)  99.2%
+      eta <  0.3  (genuinely near-caustic)  0.7%
+
+      0.0-0.1     1   0.1%
+      0.1-0.3     5   0.6%
+      0.3-1.0   415  53.2%
+      1.0-99    359  46.0%
+
+  Meanwhile `rho_lobe` p50 is 5.70 and `|y|` p50 is only 0.732. So the large
+  normalised radius was an ARTEFACT of dividing by the small `r_deltoid`:
+  these sources are physically close to the origin but ~1.0 away from the
+  caustic — THREE TIMES the engine's own far-from-caustic threshold.
+
+  They do not need a chart. They are in the regime the geometric branch
+  exists to serve. They reach `exact_engine` only because
+  `_classify_saddle` never consults a far-field rung.
+
+  ## Root cause: origin-`rho` is the wrong discriminator for an off-origin caustic
+
+  `census_dry_run.py::_classify` tries `origin rho > 1 -> born` FIRST, and only
+  then routes `gamma >= 1` into the lobe path. For the macro saddle the two
+  deltoids sit OFF the origin, so a source can be physically far from BOTH
+  lobes while having a small origin radius — it is between them. Origin-`rho`
+  cannot express that, which is the same defect already fixed for the chart
+  COORDINATE (origin-polar retired for lobe-local by `LobeExteriorChart`,
+  commit 4c7dc92) but NOT yet for the serve GATE.
+
+  ## Consequence for the fix direction
+
+  This rules OUT the two options that looked most natural before measuring:
+  extending `rho_outer` from ~3.4 to ~11, or giving the corridor its own
+  chart coordinate. Both would build charts for a region that does not need
+  charting. The fix is to re-key the gate off CAUSTIC DISTANCE (and the
+  resolved-image conditions) rather than origin `rho`.
+
+  ## What is NOT yet measured — do this before implementing
+
+  `eta >= ETA_MIN_GEOMETRIC` is NECESSARY but NOT SUFFICIENT.
+  `select_branch` also requires `w * delta_min >= RHO_END = 4.0` (resolved)
+  and `L > L_MAX = 48` (strongly cancelling). This probe measured only the
+  `eta` leg. Measure the fraction of these 780 that clear the FULL gate
+  before claiming they are servable — the honest claim today is "they are far
+  from the caustic", not "they are geometric-servable".
+
+  Note the engine's own `eta` leg is live on BOTH parities and was measured
+  separately (F034: saddle p90 8.95e-1 -> 4.54e-3 with worst case 484x over
+  15% of resolved draws), so the saddle `eta` gate is already trusted
+  machinery — this is about CONSULTING it, not building it.
+
+  ## Acceptance
+
+  The saddle `exact_engine` bucket drops by the measured servable fraction,
+  and the per-cause breakdown in
+  [[lensing_saddle_coverage_gap_breakdown]] shows the drop in
+  `rho_lobe > rho_outer` specifically, not just in the total.
 
 - **Restore the surrogate structural tests once the serving schema settles**
   `[housekeeping]` — three classes were DELETED from

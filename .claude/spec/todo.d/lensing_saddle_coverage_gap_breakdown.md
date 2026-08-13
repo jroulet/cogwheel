@@ -1,6 +1,5 @@
 ---
 section: Backlog
-depends_on: [2026-08-12_lobe_exterior_chart]
 ---
 
 - **THE SADDLE COVERAGE GAP IS 1236/10000 DRAWS AND FOUR DISTINCT CAUSES, ONE
@@ -47,12 +46,15 @@ depends_on: [2026-08-12_lobe_exterior_chart]
   different rung; a negative width should probably refuse loudly rather than
   silently yield an empty band.
 
-  OPEN QUESTION before extending `rho_outer`: is a source at `rho_lobe ~ 5-11`
-  physically far-field? NOT necessarily — `rho_lobe` is normalised by the
-  SMALL `r_deltoid`, so a large value can still be physically near the lobe.
-  Measure the field before choosing between (a) extending `rho_outer`,
-  (b) a corridor-specific coordinate, or (c) re-keying the Born gate off
-  something other than origin `rho`.
+  ANSWERED 2026-08-12 — do NOT extend `rho_outer`. The question was whether a
+  source at `rho_lobe ~ 5-11` is physically far-field, since `rho_lobe`
+  divides by the small `r_deltoid`. Measured on 780 of this population: the
+  PHYSICAL distance to the nearest caustic point is `eta` p50 **0.971**, and
+  **99.2% have `eta >= 0.3`** (`ETA_MIN_GEOMETRIC`) while only 0.7% are
+  genuinely near-caustic. They are far from the caustic and do not need a
+  chart at all — this is a ROUTING failure. Full measurement and the ruled-out
+  options are in
+  [[lensing_saddle_gap_is_a_routing_failure_not_coverage]].
 
   ## Causes 2 and 3 (177 + 149) — admission predicates refuse
 
