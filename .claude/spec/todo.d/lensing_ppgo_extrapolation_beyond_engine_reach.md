@@ -24,6 +24,21 @@ depends_on: [lensing_exterior_followup_four_items]
   case (`xi_min >= _XI_FOLD_THRESHOLD = 4.0` plus a per-pair uniform error
   estimate below `CERTIFICATION_BAR`) — generalise that pattern.
 
+  REFUTED AS FILED, 2026-08-13. The suggestion below assumes the
+  scaling-stripped residual is `w`-flat. Measured on a representative saddle
+  gap source: the demodulated envelope decays ~4 orders of magnitude across
+  `w` in [6, 58] while OSCILLATING (5 sign changes in Re, 7 in Im), and a
+  log-log fit gives residual rms 0.66 — neither flat nor a power law. No
+  smooth analytic divisor flattens an oscillation.
+
+  What the same measurement DID find is better: the envelope becomes
+  negligible (`|E|/|F| ~ 3e-6` median at `w = 58`, under 1e-3 for ~97% of the
+  gap population above `w ~ 24`), so the switched analytic channels alone may
+  serve that region with no chart at all. That route, and the missing gate
+  that currently blocks it, are in
+  [[lensing_saddle_envelope_is_negligible_at_high_w]]. Read that before
+  acting on anything below.
+
   OWNER'S SUGGESTION, worth testing: where a direct high-`w` fit is
   impossible, use the INTERIOR FITS PLUS A SCALING. The `w`-dependence in the
   resolved regime is largely carried by known analytic factors
