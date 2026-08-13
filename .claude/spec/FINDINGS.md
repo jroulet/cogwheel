@@ -4192,3 +4192,72 @@ domain is a level set of the normalisation. `caustic_rho` normalises an astroid
 by its circumscribing radius, so its level sets cross the boundary it is being
 used to detect. Before gating on `x <= 1`, ask what `x = 1` is the locus OF —
 here it is one point per quadrant, not a curve.
+
+## F074 — the Pearcey control map is transposed AND missing its curvature factor (2026-08-13)
+
+Derived from `delta_phi = -delta_y . x(s)` along the reduced manifold
+`x(s) = x_c + s e_s - (phi_ssr/(2 lambda_h)) s^2 e_h`:
+
+    a1 (odd,  coeff s)   = -delta_par                          [soft proj]
+    a2 (even, coeff s^2) = +delta_perp * phi_ssr/(2 lambda_h)  [hard proj x curvature]
+
+`cusp_amplification` ships `a2 = delta_par`, `a1 = delta_perp`: transposed,
+no curvature factor. `_soft_normal_form` already returns `phi_ssr`; the call
+site discards it as `_phi_ssr`.
+
+Measured (54 configs, gamma {0.3,0.5}, on/off axis, w 30-100, F069-safe
+oracle, radius gate lifted): corrected map matches the geometric cluster
+count at 54/54 (shipped: wrong at 44/54, and `n_match=0` at 26/54 — the
+calibration certificate was matching NOTHING and the `n_stat==3` bypass was
+skipping it on transposed controls). Errors: shipped median 3.6e-1 / max 5.9;
+corrected median 2.7e-2 / max 1.2e-1; interior 17/18 under envelope_bar=0.05
+(miss: 5.5e-2 at w=30). On-axis frac=0.99, where NO arm serves today and raw
+ppGO is 1e5-1e6 wrong: corrected serves at 2.7e-2 - 5.5e-2.
+
+Residual >0.05 failures (10/54, mostly w=30 exterior): correlate with
+|P/P_asymp - 1| (log-log +0.815), caused by the missing per-image O(C1/w)
+correction amplified by the uniform ratio — a GATE question, not a control
+question. The shipped `radius < radius_min` gate tests `c_P R^-1.5`, the
+error law of `pearcey_asymptotic` — the thing the uniform form REPLACES —
+and so refuses the near-cusp region where the corrected uniform form is at
+its best. Fourth instance of the F069 defect class (a gate measuring an
+error other than the one served).
+
+Sign convention (measured, no flip needed): `phi_ssr` and `hard_eigenvalue`
+as the code returns them give interior x < 0 (3 roots) at 4/4 checks; sign
+of y irrelevant (P even in y).
+
+## F075 — the fold arm serves exterior sources by de-GO-ing a pair that is not merging, and it SHIPS at 15-216% error for 60 < w <= 150 (2026-08-13)
+
+Exterior to the caustic near a fold arc, the merging pair is the COMPLEX
+ghost pair; the two real images are the far (min, saddle) pair. With 2 real
+images `_merging_fold_pair` selects that far pair and `fold_amplification`
+applies the Airy merging correction to it. The error is O(1), flat in w, and
+does NOT vanish with distance (|y|/rc = 1.40: ppGO 1.6e-4, fold 4.5e-1) —
+not an expansion error, the wrong object.
+
+It ships: `operator._positive_parity_grid` offers the arm BEFORE
+`f_schwinger` for every node 60 < w <= 150 with no accuracy gate, and
+`ChangRefsdalChannels.evaluate().exact_total` equals the fold value exactly
+(residual 0.0 after `t_min` demodulation) at the tested exterior configs.
+Measured extent (F069-safe oracle, 108 points, gamma {0.3,0.5,0.7},
+|y|/r_caustic 1.05-1.40): 100% of served points over 1e-2, 94-97% over 1e-1,
+worst 2.16. `w <= 60` is safe (exact DD batch). The admission gate
+`nearest.distance < _ETA_MAX_FOLD` is satisfiable arbitrarily far exterior
+in the radial gauge, and no leg checks that the selected pair is REAL-merging.
+
+The fix direction, ghost-convention validated: `ppGO + ghost_kernel`
+(carrier `+kernel * exp(1j*w*tau_c)`) closes the exterior residual to
+1e-3..4e-7 for |y|/rc >= 1.15 — 10x to 1e5x better than the served fold
+value at EVERY measured point. At |y|/rc = 1.05 (w*Im tau_c <~ 0.3) both
+stationary-phase forms fail (ghost overshoots to 1.6e1): that band must
+refuse to the exact engine.
+
+Cross-check that earlier numbers were contaminated: the same probe's
+raw-ppGO column (1.295 at a resolved exterior config) was a demodulation
+PHANTOM of `channels.evaluate().exact_total` vs undemodulated arms; the
+validated pairing gives 4.3e-4. The fold column survives the correct
+pairing; the ppGO column does not. See [[pair-frames-before-scoring]].
+
+Related: [[FINDINGS F073]] (same real-pair blindness in xi_min),
+[[FINDINGS F074]] (cusp control map), F069 (arm-before-oracle routing).

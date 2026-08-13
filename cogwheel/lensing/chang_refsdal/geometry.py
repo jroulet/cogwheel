@@ -73,6 +73,7 @@ rather than using the single-image expressions of this module.
 """
 from __future__ import annotations
 
+import math
 from typing import NamedTuple
 
 import numba
@@ -909,6 +910,223 @@ def saddle_coefficients(image: np.ndarray,
     """
     metric = _saddle_metric(image, matrix)
     return _c1_polynomial(*metric), _c2_polynomial(*metric)
+
+
+#: Highest ``eps = w**-1/2`` power retained in the stationary-phase
+#: correction series.  ``eps**6`` is the ``w**-3`` term whose coefficient
+#: ``c3`` is the leading omitted term of the raw geometric-optics (ppGO)
+#: kernel and therefore drives `ppgo_error_estimate`.
+_PPGO_MAXEPS = 6
+
+
+def _pmul(left: dict, right: dict, maxeps: int = _PPGO_MAXEPS) -> dict:
+    """
+    Multiply two ``eps``-graded polynomials.
+
+    Each polynomial is a dict keyed by ``(a, b, eps)`` -- the ``eta1``
+    power, the ``eta2`` power, and the ``eps`` degree -- with complex
+    coefficients.  Products whose ``eps`` degree exceeds ``maxeps`` are
+    dropped (the series is only needed through ``eps**maxeps``).
+    """
+    out: dict = {}
+    for (a1, b1, e1), v1 in left.items():
+        if v1 == 0:
+            continue
+        for (a2, b2, e2), v2 in right.items():
+            eps_degree = e1 + e2
+            if eps_degree > maxeps:
+                continue
+            key = (a1 + a2, b1 + b2, eps_degree)
+            out[key] = out.get(key, 0j) + v1 * v2
+    return out
+
+
+def _padd(left: dict, right: dict) -> dict:
+    """Add two ``eps``-graded polynomials (see `_pmul` for the key form)."""
+    out = dict(left)
+    for key, value in right.items():
+        out[key] = out.get(key, 0j) + value
+    return out
+
+
+def _pscale(poly: dict, scale: complex) -> dict:
+    """Scale every coefficient of an ``eps``-graded polynomial."""
+    return {key: value * scale for key, value in poly.items()}
+
+
+def _linear_power(coeff1: complex, coeff2: complex, power: int) -> dict:
+    """
+    ``(coeff1 * eta1 + coeff2 * eta2) ** power`` as an ``eps``-degree-0
+    polynomial, expanded by the binomial theorem.
+    """
+    out: dict = {}
+    for k in range(power + 1):
+        out[(power - k, k, 0)] = (
+            math.comb(power, k) * coeff1 ** (power - k) * coeff2 ** k)
+    return out
+
+
+def _gaussian_moment_table(sigma: np.ndarray, maxdeg: int) -> dict:
+    """
+    Central moments ``<eta1**a eta2**b>`` of a zero-mean bivariate
+    Gaussian with covariance ``sigma``, for all ``a + b <= maxdeg``.
+
+    Odd-total moments vanish; even ones are assembled from the Isserlis
+    (Wick) expansion of the covariance entries.
+    """
+    s11, s12, s22 = sigma[0, 0], sigma[0, 1], sigma[1, 1]
+    moments: dict = {}
+    for a in range(maxdeg + 1):
+        for b in range(maxdeg + 1 - a):
+            if (a + b) % 2:
+                moments[(a, b)] = 0j
+                continue
+            half = (a + b) // 2
+            total = 0j
+            for i in range(half + 1):
+                for j in range(half + 1 - i):
+                    k = half - i - j
+                    if 2 * i + j != a or j + 2 * k != b:
+                        continue
+                    total += (s11 ** i * (2 * s12) ** j * s22 ** k
+                              / (math.factorial(i) * math.factorial(j)
+                                 * math.factorial(k)))
+            moments[(a, b)] = (total * math.factorial(a) * math.factorial(b)
+                               / 2 ** half)
+    return moments
+
+
+def _series_coefficients(image: np.ndarray,
+                         matrix: np.ndarray,
+                         maxeps: int = _PPGO_MAXEPS
+                         ) -> tuple[complex, complex, complex]:
+    """
+    Stationary-phase correction coefficients ``(c1, c2, c3)`` at an image.
+
+    The single-image amplification carries a slowly varying correction
+    ``Corr(w) = 1 + c1 / w + c2 / w**2 + c3 / w**3 + ...`` on top of the
+    leading geometric-optics term.  This is the polynomial-algebra
+    derivation of those coefficients (through ``eps**6 == w**-3``): the
+    ``-ln|x|`` anharmonicity is expanded about the image, rescaled by
+    ``xi = eps * eta`` with ``eps = w**-1/2`` so the Gaussian covariance
+    ``sigma = 1j * H**-1`` is ``w``-independent, exponentiated, and then
+    averaged term by term against the Gaussian moment table.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Shape (2,), image position (away from the point mass).
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix.
+    maxeps : int
+        Highest ``eps`` power retained; ``6`` keeps the series through
+        the ``w**-3`` coefficient ``c3``.
+
+    Returns
+    -------
+    c1, c2, c3 : complex
+        Coefficients of ``1 + c1 / w + c2 / w**2 + c3 / w**3``.  In the
+        shipped-kernel convention ``c1 = 1j * C1`` and ``c2 = C2`` (see
+        `saddle_coefficients`).
+
+    Raises
+    ------
+    LensDomainError
+        If ``image`` sits at the point mass, where the Hessian (via
+        `hessian`) is singular.
+    """
+    image = np.asarray(image, dtype=float)
+    sigma = 1j * np.linalg.inv(hessian(image, matrix))
+
+    z = complex(image[0], image[1])
+    # Build P = 1j * w * V in the (eps, eta) variables, where V collects
+    # the cubic-and-higher anharmonicity of -ln|x| about the image.
+    poly: dict = {}
+    nmax = 2 * maxeps + 2  # highest single derivative order needed
+    for n in range(3, nmax + 1):
+        coef = (-1) ** n / (2.0 * n)
+        for conjugated, zz in ((False, z), (True, np.conj(z))):
+            # u = (eta1 + 1j eta2) / z, or (eta1 - 1j eta2) / conj(z).
+            sgn = -1j if conjugated else 1j
+            term = _linear_power(1.0 / zz, sgn / zz, n)
+            term = {(a, b, e + n - 2): v * coef * 1j
+                    for (a, b, e), v in term.items() if e + n - 2 <= maxeps}
+            poly = _padd(poly, term)
+
+    # exp(poly) truncated at eps**maxeps; poly has minimum eps degree 1.
+    result = {(0, 0, 0): 1.0 + 0j}
+    powk = {(0, 0, 0): 1.0 + 0j}
+    for k in range(1, maxeps + 1):
+        powk = _pmul(powk, poly, maxeps)
+        result = _padd(result, _pscale(powk, 1.0 / math.factorial(k)))
+
+    maxdeg = max(a + b for (a, b, _e) in result)
+    moments = _gaussian_moment_table(sigma, maxdeg)
+    out = [0j] * (maxeps + 1)
+    for (a, b, e), value in result.items():
+        out[e] += value * moments[(a, b)]
+    return out[2], out[4], out[6]
+
+
+def _c3_coefficient(image: np.ndarray, matrix: np.ndarray) -> complex:
+    """
+    Third stationary-phase coefficient ``c3`` (the ``w**-3`` term) at an
+    image, i.e. the leading omitted term of the raw geometric-optics
+    kernel.  Thin accessor over `_series_coefficients`.
+    """
+    return _series_coefficients(image, matrix)[2]
+
+
+def ppgo_error_estimate(real_images: np.ndarray,
+                        source: np.ndarray,
+                        matrix: np.ndarray,
+                        w_min: float) -> float | None:
+    """
+    Leading-omitted-term error estimate of the raw ppGO kernel.
+
+    The raw geometric-optics (ppGO) amplification truncates each image's
+    stationary-phase series before the ``w**-3`` term.  The magnitude of
+    that omitted term, summed in amplitude over the real images, bounds
+    the raw-ppGO error; evaluated at the smallest frequency ``w_min`` of a
+    band (where ``w**-3`` is largest) it is the worst-case estimate a gate
+    uses to decide whether raw ppGO may serve the band.
+
+    On the true caustic interior every image is real and the ghost
+    contribution is exactly zero, so no ghost term enters this estimate.
+
+    Parameters
+    ----------
+    real_images : np.ndarray
+        Shape (k, 2), the real image positions of the source.
+    source : np.ndarray
+        Shape (2,), the source position.  Accepted for interface
+        symmetry with the ghost-inclusive estimators and reserved for
+        future use; the pure ``w**-3`` estimate does not reference it.
+    matrix : np.ndarray
+        Shape (2, 2), the macro matrix.
+    w_min : float
+        Smallest dimensionless frequency of the band, at which the
+        ``w**-3`` term is largest.  Must be positive.
+
+    Returns
+    -------
+    float or None
+        ``sum_a sqrt|mu_a| * |c3_a| / w_min**3`` over the real images, or
+        ``None`` when the input is degenerate -- ``w_min <= 0``, an empty
+        ``real_images`` array, or any magnification or ``c3`` non-finite
+        (e.g. an image on a critical curve, where ``mu`` diverges).  A
+        gate reads ``None`` as "refuse".
+    """
+    if w_min <= 0.0 or len(real_images) == 0:
+        return None
+    total = 0.0
+    for image in real_images:
+        mu = magnification(image, matrix)
+        c3 = _c3_coefficient(image, matrix)
+        if not (np.isfinite(mu) and np.isfinite(c3)):
+            return None
+        total += math.sqrt(abs(mu)) * abs(c3)
+    return float(total / w_min ** 3)
 
 
 def image_kernel(w_dimensionless, image: np.ndarray,

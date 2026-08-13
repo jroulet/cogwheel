@@ -1,5 +1,6 @@
 """Chang-Refsdal (point mass + external convergence and shear) lens."""
 
+from .geometry import ppgo_error_estimate
 from .channels import (ChangRefsdalChannels, born_carrier_from_partition,
                        farfield_envelope_from_partition, real_image_delays)
 from .operator import RHO_START, RHO_END

@@ -808,6 +808,14 @@ njit nearest-caustic search; certified by the new
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
 
+- `0.13.1` ():
+
+Interior fold-ppGO handoff paragraph: gate description updated for build
+ppgo_interior_certificate (exact 4-image predicate + c3 certificate at
+S=2.0; xi leg dropped by measurement); new suite
+`test_lensing_ppgo_certificate.py` registered. Full paragraph re-sync
+deferred to the Librarian (INS-1-001).
+
 - `0.13.0` ():
 
 The interior fold-ppGO rung now serves RAW ppGO

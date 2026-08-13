@@ -252,11 +252,22 @@ _LENS_PARAMS = ('m_lens_msun', 'z_lens', 'y1', 'y2', 'gamma', 'beta',
 
 _TWO_PI_I = 2j * np.pi
 
-#: Minimum Airy parameter xi = (3*w*Δτ/4)^(2/3) below which the fold-
-#: corrected ppGO is not accurate enough to serve.  The fold-ppGO interior
-#: handoff requires xi_min >= this threshold (well-resolved fold pair)
-#: combined with a per-pair uniform error estimate below CERTIFICATION_BAR.
+#: Minimum Airy parameter xi = (3*w*Δτ/4)^(2/3) below which a fold-corrected
+#: ppGO pair is not well resolved.  Retained as the fold arm's resolution
+#: threshold; the raw-ppGO interior handoff no longer gates on it (Build
+#: ppgo_interior_certificate replaced that leg with the c3 certificate below,
+#: because every 4-image interior config fails this leg yet is served
+#: certifiably under the certificate).
 _XI_FOLD_THRESHOLD = 4.0
+
+#: Safety factor on the raw-ppGO ``w**-3`` (c3) leading-omitted-term
+#: certificate before it is compared against ``CERTIFICATION_BAR`` on the true
+#: caustic interior.  Fact 3 (handoff ppgo_interior_certificate) measured the
+#: ratio true_error / certificate over 1248 interior samples: median 0.587,
+#: p99 0.953, MAX 0.980, 0.0% optimistic -- so S = 1.0 already suffices on the
+#: measured interior; S = 2.0 is a modest margin (never 10x) that still admits
+#: certifiable service (max served interior error 4.8e-5 < the 1e-4 bar).
+_PPGO_INTERIOR_SAFETY = 2.0
 
 
 def _snap(x, dx):
@@ -1774,107 +1785,77 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             except (ValueError, LensDomainError):
                 return None
             if rho <= 1.0 or not born_chart.covers(lens['gamma'], rho):
-                # --- Fold-ppGO interior handoff (Build ppgo_interior_handoff) ---
-                # Interior draws (rho <= 1.0) above the wedge chart's w-ceiling:
-                # the fold-corrected ppGO is accurate when all images are well-
-                # resolved (xi_min >= _XI_FOLD_THRESHOLD) AND the per-pair error
-                # estimate is below CERTIFICATION_BAR.  Reconstruction mirrors the
-                # Born rung (reconstruct_farfield with FARFIELD_KERNEL_SUM).
-                if rho is not None and rho <= 1.0:
-                    if lens['gamma'] > 1.0 and int(geom.real_mask.sum()) != 4:
-                        return None
+                # --- Raw-ppGO interior handoff (Build ppgo_interior_certificate) ---
+                # Serve raw geometric optics on the TRUE caustic interior,
+                # keyed on the EXACT interior predicate: exactly four real
+                # images.  ``ppgo_map.caustic_rho`` normalises ``|y|`` by the
+                # caustic's MAXIMUM angular reach, so ``rho <= 1`` is NECESSARY
+                # but not sufficient for the interior (F073 -- it admits
+                # exterior sources at 58.7% of points); the four-real-image
+                # count is the exact, free predicate (0/2400 disagreements vs
+                # the closed-form caustic).  Four real roots also prove the
+                # ghost is exactly zero (geometry.GhostAbsentError), so NO
+                # ghost term enters and no per-serve ghost_kernel is called.
+                # Admission uses the raw-ppGO leading-omitted-term certificate
+                # -- the ``w**-3`` (c3) estimate DERIVED from what this rung
+                # serves, not the fold arm's uniform estimate -- with a modest
+                # safety factor ``_PPGO_INTERIOR_SAFETY``.  On the measured
+                # interior it is conservative with zero optimistic points (max
+                # true/certificate ratio 0.980 over 1248 samples, Fact 3).
+                # The former fold-resolution leg (xi_min >= _XI_FOLD_THRESHOLD)
+                # is dropped from this rung: over the interior evidence sweep
+                # EVERY 4-image config fails that leg (deep-interior fold pairs
+                # give xi_min < 4), yet the c3 certificate at S = 2.0 admits
+                # 230 of those band points with MAX true error 4.8e-5 <
+                # CERTIFICATION_BAR (1e-4) and NONE over the bar -- so the
+                # fold-resolution leg only suppressed certifiable service.
+                # Near-caustic merging configs (sqrt|mu| divergent) self-refuse
+                # through ``ppgo_error_estimate`` (None or an over-bar estimate)
+                # and never reach the serve.  Reconstruction mirrors the Born
+                # rung (reconstruct_farfield with FARFIELD_KERNEL_SUM).
+                if int(geom.real_mask.sum()) == 4:
                     try:
-                        from cogwheel.lensing.chang_refsdal._airy_fold import (
-                            _merging_fold_pair,
-                            _uniform_error_estimate, _image_at_delay)
+                        from cogwheel.lensing.chang_refsdal.geometry import (
+                            ppgo_error_estimate)
                         from cogwheel.lensing.chang_refsdal.operator import (
                             geometric_amplification)
                         source = np.array([lens['y1'], lens['y2']],
                                           dtype=float)
                         matrix = macro_matrix(
                             lens['gamma'], lens['beta'], lens['kappa'])
-                        images = list(geom.images)
-                        pair = _merging_fold_pair(images, source, matrix)
-                        if pair is not None:
-                            tau_plus, tau_minus = pair
-                            delta_tau = tau_minus - tau_plus
-                            if delta_tau > 0.0:
-                                w_min = float(dense_w.min())
-                                xi_min = (3.0 * w_min * delta_tau
-                                          / 4.0) ** (2.0 / 3.0)
-                                if xi_min >= _XI_FOLD_THRESHOLD:
-                                    # Fine gate: error estimate on the
-                                    # fold pair.
-                                    image_plus = _image_at_delay(
-                                        images, source, matrix, tau_plus)
-                                    image_minus = _image_at_delay(
-                                        images, source, matrix, tau_minus)
-                                    if (image_plus is not None
-                                            and image_minus is not None):
-                                        error_est = (
-                                            _uniform_error_estimate(
-                                                image_plus, image_minus,
-                                                matrix, xi_min))
-                                        if (error_est is not None
-                                                and error_est
-                                                <= CERTIFICATION_BAR):
-                                            # All gates pass -- serve RAW
-                                            # ppGO, NOT the fold correction
-                                            # (F069).  The correction is a
-                                            # net LOSS on this rung's
-                                            # domain: in closed form the
-                                            # gate serves iff
-                                            # w*dtau >= 13344*c_A, so it
-                                            # SELECTS well-separated pairs
-                                            # far from the caustic --
-                                            # exactly where the fold normal
-                                            # form is invalid.  Measured vs
-                                            # the exact engine over
-                                            # w in [30, 60] (the
-                                            # oracle-valid band; F_op
-                                            # returns the ARM above 60 and
-                                            # is no oracle there):
-                                            # fold-corrected 1.22e-1 vs raw
-                                            # ppGO 1.49e-4, an 818x gain.
-                                            # Raw ppGO also IMPROVES with w
-                                            # (~w^-2.75) while the fold
-                                            # residual is w-independent, so
-                                            # the gap widens toward the
-                                            # w ~ 5e4 where this gate first
-                                            # opens.
-                                            f_total = np.atleast_1d(
-                                                geometric_amplification(
-                                                    dense_w, source,
-                                                    lens['gamma']))
-                                            f_minrel = f_total * np.exp(
-                                                -1j * dense_w * geom.t_min)
-                                            real = np.asarray(
-                                                geom.real_mask, dtype=bool)
-                                            ppgo_sum = np.sum(
-                                                geom.saddle_kernels[:, real]
-                                                * np.exp(
-                                                    1j * dense_w[:, None]
-                                                    * geom.delays[real]
-                                                    [None, :]),
-                                                axis=1)
-                                            envelope = (
-                                                (f_minrel - ppgo_sum)
-                                                * np.exp(1j * dense_w
-                                                         * geom.t_min))
-                                            kernels, _total = (
-                                                reconstruct_farfield(
-                                                    dense_w, envelope,
-                                                    geom.delays,
-                                                    geom.saddle_kernels,
-                                                    geom.real_mask,
-                                                    FARFIELD_KERNEL_SUM,
-                                                    geom.t_min))
-                                            k0, k1 = (
-                                                self._reduce_dense_kernels(
-                                                    kernels))
-                                            delays = self._image_delays(
-                                                lens, geom)
-                                            return delays, k0, k1, geom
+                        real = np.asarray(geom.real_mask, dtype=bool)
+                        real_images = np.asarray(geom.images)[real]
+                        w_min = float(dense_w.min())
+                        est = ppgo_error_estimate(
+                            real_images, source, matrix, w_min)
+                        if (est is not None
+                                and est * _PPGO_INTERIOR_SAFETY
+                                <= CERTIFICATION_BAR):
+                            # All gates pass -- serve RAW ppGO (F069): the
+                            # far-field envelope is the exact minus-relative
+                            # amplification with the resolved ppGO channels
+                            # subtracted, demodulated to the caustic frame.
+                            f_total = np.atleast_1d(
+                                geometric_amplification(
+                                    dense_w, source, lens['gamma']))
+                            f_minrel = f_total * np.exp(
+                                -1j * dense_w * geom.t_min)
+                            ppgo_sum = np.sum(
+                                geom.saddle_kernels[:, real]
+                                * np.exp(
+                                    1j * dense_w[:, None]
+                                    * geom.delays[real][None, :]),
+                                axis=1)
+                            envelope = (
+                                (f_minrel - ppgo_sum)
+                                * np.exp(1j * dense_w * geom.t_min))
+                            kernels, _total = reconstruct_farfield(
+                                dense_w, envelope, geom.delays,
+                                geom.saddle_kernels, geom.real_mask,
+                                FARFIELD_KERNEL_SUM, geom.t_min)
+                            k0, k1 = self._reduce_dense_kernels(kernels)
+                            delays = self._image_delays(lens, geom)
+                            return delays, k0, k1, geom
                     except (LensDomainError, ValueError,
                             ZeroDivisionError):
                         pass  # Structural refusal: fall through.
