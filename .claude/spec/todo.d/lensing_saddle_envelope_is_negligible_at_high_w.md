@@ -154,6 +154,30 @@ section: Backlog
     - `InteriorWedgeChart` and `LobeInteriorChart` both store the
       `tau_c`-demodulated SACR-C envelope, i.e. the same object tier 2 needs.
 
+  THE BORN RUNG DOES NOT SUBTRACT THE GHOST — it DECLINES where the ghost
+  matters. `_born.py` Guard A (band split, re-keyed): refuse once the two real
+  images are RESOLVED, `w * Delta_tau >= RHO_END`, because above that split
+  "the served lead-only carrier is superseded by the two-real-image ppGO +
+  ghost branch". Ghost subtraction lives in the separate
+  `FARFIELD_KERNEL_SUM_MINUS_GHOST` label, which is declared in `channels.py`
+  and stamped by NO producer (see
+  [[lensing_built_but_unused_machinery_guards]]).
+
+  THAT MAPS TIER 2 ONTO BORN'S WINDOW EXACTLY. Tier 1's gate is switch
+  saturation `w*|tau_a - tau_c| >= RHO_END`; the sources it REJECTS are those
+  below that threshold — the unresolved-pair regime, which is precisely the
+  window Born serves on the `rho > 1` side. So tier 2 is the `rho <= 1`
+  analogue of the Born rung: same `w` window, same lead-carrier-plus-charted-
+  residual structure, differing only in region and therefore in what plays the
+  role of the lead carrier.
+
+  CONSEQUENCE: tier 2 should NOT reach for ghost subtraction. The ghost
+  belongs to the resolved band that tier 1 already serves analytically, and
+  the saddle ghost branch is independently suspect — [[lensing_saddle_forensics]]
+  item (f) records its `+-sqrt` pin as positive-parity reasoning
+  (`geometry.py:2343-2344`) that may be a SIGN error for `det A < 0`, with no
+  test exercising `ghost_kernel` above `gamma = 1`.
+
   WHY IT DOES NOT ALREADY COVER US: the Born rung is gated on `rho > 1`
   (exterior-to-caustic, both parities). The tier-2 population has origin
   `rho <= 1` — that gate is exactly what routes them into `_classify_saddle`.
