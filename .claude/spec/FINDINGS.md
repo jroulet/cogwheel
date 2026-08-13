@@ -4112,8 +4112,83 @@ in place; measured `err_fold/err_raw` locks at 0.41 while BOTH diverge to 1e7
 as `frac -> 1`. Unlike `_uniform_arm_value`, `fold_ppgo_correction` has no
 cusp handoff at all.
 
-This affects `fold_amplification`, which SHIPS through
-`operator._uniform_arm_value`, so it is not confined to the rung under
-review. NOT YET FIXED: the diagnosis is inferred from reading the guard,
-dumping the census and matching the constant 2.45x asymptote — nobody has
-patched the guard and re-measured, so causation is argued, not demonstrated.
+### FIXED, and the blast-radius claim above is CORRECTED (2026-08-13, same day)
+
+The guard now tests both sides of the SELECTED PAIR (`_airy_fold.py`). A first
+attempt scanned every delay globally and OVER-refused — at gamma=1.2, r=1.0,
+angle=0 the two SADDLES tie at +1.602562013515 while the selected pair
+(+1.367475874468, +1.523086213098) is well separated and valid; the suite's
+own `FoldOffAxisRegressionTestCase` caught it. Pair-scoped still catches the
+cusp, because there the tie IS the pair's minimum. 207 passed across
+`airy_fold`, `fold_ppgo_handoff`, `ppgo_above_ceiling`, `levers`.
+
+**The sentence "This affects `fold_amplification`, which SHIPS" was asserted,
+not measured, and it is WRONG.** Measured directly, with the tie check
+disabled to recover pre-fix behaviour, at both census configs and w = 30, 60:
+
+    gamma=0.5, gamma=0.3, theta=pi/2, frac=0.99:
+      BEFORE (guard off) = DECLINED      AFTER (pair-scoped) = DECLINED
+
+`fold_amplification` declines at those loci for reasons unrelated to this
+guard, so it was never serving a cusp merge in production. The guard's real
+consumers are `fold_ppgo_correction` and the rung's `xi_min`. The fix is
+correct and worth having; its production blast radius is UNDEMONSTRATED, and
+the original text claimed otherwise.
+
+Same error class as F071 and F069: **a claim about what SHIPS, inferred from
+reading code rather than from calling it.** The census and the 2.45x asymptote
+proved the guard was structurally wrong; neither showed that anything shipped
+through it. Two different questions, and the second was never asked.
+
+## F073 — `caustic_rho <= 1` DOES NOT MEAN "caustic interior", so the interior rung is gated on a coordinate that admits the exterior — where raw ppGO is missing a whole image (2026-08-13)
+
+`ppgo_map.caustic_rho` normalises the source radius by the caustic's **maximum**
+reach over angle, attained on the cusp axis. The astroid is not a circle, so
+`rho <= 1` is satisfied far outside the caustic along every non-cusp ray: at
+`gamma = 0.5, theta = pi/4` the caustic sits at `caustic_rho = 0.354`.
+
+Consequence, measured over the interior fold-ppGO rung's own gate (434
+configs passing legs 1+2, gamma 0.2-0.9, kappa = beta = 0):
+
+**356 of 434 — 82% — have only TWO real images. They are caustic EXTERIOR.**
+
+That matters because the two regimes have different error physics:
+
+- Interior (4 real images): the leading omitted term is the `c3` term of the
+  stationary-phase series, decaying as `w^-3`.
+- Exterior (2 real images): raw ppGO omits the **ghost** (complex-saddle)
+  image entirely. That term is not in the `1/w` series at all — it decays as
+  `exp(-w * Im tau_c)`.
+
+Measured at gamma=0.9, rho=0.5, theta=1.5:
+
+| w  | err(raw ppGO) | err(ppGO + `ghost_kernel`) | the `w^-3` term |
+|----|---------------|----------------------------|-----------------|
+| 20 | 1.13e+00      | 2.37e-01                   | 4.33e-05        |
+| 40 | 8.21e-01      | 3.22e-02                   | 5.41e-06        |
+| 60 | **5.81e-01**  | 8.25e-03                   | **1.60e-06**    |
+
+A series-only certificate is **362,000x optimistic** here. `geometry.ghost_kernel`
+already exists and nothing consumes it.
+
+The blindness is structural, not just a mis-set threshold: `_merging_fold_pair`
+computes `xi_min` from **real** images. For a 2-image exterior source it picks
+the two well-separated real images and reports a comfortable `xi_min`, while
+the pair that is actually merging is the **complex** one it cannot see. So
+legs 1+2 of the gate cannot detect the regime they are wrongest in — measured,
+gamma=0.5, rho=0.4, theta=1.0 passes both legs with `w_open = 7.07` and a flat
+**1.078 absolute** ppGO error against `|F| ~ 0.2-1.9`. **85% of the 434
+gate-passing configs exceed 1e-4 somewhere in their band.**
+
+The rung is nonetheless SAFE today, for a reason unrelated to its design: the
+third leg (`_uniform_error_estimate <= CERTIFICATION_BAR`) is so tight that it
+refuses almost everything (146 of 2496 sources at `w_min = 60`). Removing that
+leg without adding a ghost term would expose all of the above at once. This is
+why [[lensing_fold_ppgo_gate_is_inverted_in_xi]] is blocked rather than a
+one-line deletion.
+
+**Transferable rule.** A normalised radius is only a domain indicator if the
+domain is a level set of the normalisation. `caustic_rho` normalises an astroid
+by its circumscribing radius, so its level sets cross the boundary it is being
+used to detect. Before gating on `x <= 1`, ask what `x = 1` is the locus OF —
+here it is one point per quadrant, not a curve.

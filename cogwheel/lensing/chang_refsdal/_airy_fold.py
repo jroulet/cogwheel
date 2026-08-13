@@ -315,10 +315,28 @@ def _merging_fold_pair(images: list[np.ndarray], source: np.ndarray,
                 best = (tau_low, tau_high)
 
     if best is not None:
-        _, tau_high = best
-        tie_count = sum(
-            1 for tau, _ in entries
-            if abs(tau - tau_high) <= _CUSP_TIE_EPS)
+        # Refuse a degenerate cluster: two images sharing a delay to within
+        # `_CUSP_TIE_EPS` means three or more critical points are merging --
+        # a cusp, which the two-image Airy form does not represent.
+        #
+        # Test BOTH sides of the SELECTED PAIR.  Testing `tau_high` alone
+        # (the saddle) misses the cusp, where the tie is between the two
+        # MINIMA: measured by pure geometry at `theta = pi/2, frac = 0.99`,
+        # gamma = 0.5 and 0.3 both give 4 images with the two minima tied and
+        # the saddles distinct.  Scanning every delay globally instead
+        # over-refuses: at gamma=1.2, r=1.0, angle=0 the two SADDLES tie
+        # while the selected pair is well separated and valid.
+        #
+        # `fold_amplification` declines at those cusp loci for other reasons,
+        # so this guard's effect is on the other consumers of the pair
+        # (`fold_ppgo_correction` and the rung's `xi_min`).  See FINDINGS
+        # F072.
+        tau_low_best, tau_high_best = best
+        tie_count = max(
+            sum(1 for tau, _ in entries
+                if abs(tau - tau_low_best) <= _CUSP_TIE_EPS),
+            sum(1 for tau, _ in entries
+                if abs(tau - tau_high_best) <= _CUSP_TIE_EPS))
         if tie_count >= 2:
             return None
 
