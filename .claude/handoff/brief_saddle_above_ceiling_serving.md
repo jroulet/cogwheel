@@ -113,11 +113,25 @@ the per-branch instrumentation in
    the images are 0.251 apart and 0.333 is needed — which is exactly the case
    the midpoint gauge fails.
 
-   Under this rule the envelope decays MONOTONICALLY (1.4e-01 -> 6.1e-04
-   across the band) with no oscillation, so it is a well-conditioned spline
-   target. This is why tier 2 is a chart of the RE-GAUGED envelope
-   specifically: in the shipped gauge the same object oscillates and is not
-   splineable.
+   WHAT THE RULE DOES AND DOES NOT BUY. It guarantees switch saturation
+   across the band — that is what makes tier 1 work, and it is measured
+   (fact 8). It does NOT make the envelope monotone. An earlier draft of this
+   brief claimed it did, on the strength of ONE source that showed zero sign
+   changes; re-measured over 8 residual-region sources the result does not
+   generalise at all:
+
+       sign changes over w in [12,58]:  4 to 8   (0/8 had <= 1)
+       max|2nd diff| / max|v|:          0.17 to 2.11
+
+   including all four of those sources that actually need tier 2
+   (`|E|/|F| > 1e-3`). So TIER 2 CHARTS AN OSCILLATORY ENVELOPE.
+
+   That is normal, not a blocker: every existing chart splines an oscillatory
+   envelope, which is what the LOO-adaptive `w` grid
+   (`_LOO_SEED_NODES = 8`, ceiling `_LOO_MAX_NODES = 48`) exists to resolve.
+   The design consequence is a NODE BUDGET question, not a feasibility one —
+   tier 2 must size its `w` axis for an oscillating target and must not be
+   planned as if a handful of nodes will do.
 
    NOTE the two tiers share ONE gauge rule, so there is no gauge
    discontinuity between them — the handover is only about whether the
@@ -144,7 +158,8 @@ falling through to direct evaluation:
   2. for sources the gate rejects, a CHART of the RE-GAUGED ENVELOPE — the
      lowest-order physics is already removed by construction, since `E` is
      what remains after the switched analytic trials are subtracted, so the
-     chart target has small dynamic range and no carrier oscillation;
+     chart target has small dynamic range. It DOES still oscillate in `w`
+     (fact 7), so size the `w` axis for that;
   3. a named refusal ONLY for what neither tier can reach (see below).
 
 Plus the validity gate, the serve-path and census wiring, and tests.
