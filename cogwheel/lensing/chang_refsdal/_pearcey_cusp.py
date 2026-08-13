@@ -811,7 +811,24 @@ def cusp_amplification(w: float, source, gamma: float, *,
     # the corner with a different answer (measured 44% disagreement).
     r_ppgo_min = (_R_PPGO_ERROR_CONST * _UNIFORM_ERROR_CONST
                   / (envelope_bar / _PPGO_BAR_DIVISOR)) ** (2.0 / 3.0)
-    if (radius >= r_ppgo_min and w >= _W_PPGO_FLOOR
+    # ``len(images) < 4`` is the EXTERIOR discriminator, and it is
+    # structural where the distance test is not.  The distance term above
+    # was the whole exterior guard until 2026-08-13, and it silently
+    # stopped being one when `_R_PPGO_ERROR_CONST` fell 3.0 -> 0.10 in
+    # c8cad0c: r_ppgo_min dropped ~71.1 -> 7.37, which let INTERIOR
+    # 4-image sources clear the radius term for the first time.  They then
+    # cleared the distance term too -- an interior source can sit outside
+    # the fold band (gamma=0.5 lands at 0.3018 against _ETA_MAX_FOLD=0.3,
+    # over by 0.0018) -- and were served by a FOLD-PAIR correction that
+    # leaves the cusp cluster's third near-degenerate image on divergent
+    # raw ppGO.  Measured error at w=60: 1.15e-2 (gamma=0.5) and 1.50e-1
+    # (gamma=0.7) where the Pearcey uniform form gives 7.1e-3 and 1.4e-3;
+    # an interior sweep reached 155% wrong.  c8cad0c's own suite asserts
+    # interior sources stay on Pearcey, but its only interior fixture is
+    # ON-AXIS, where `_merging_fold_pair` is None and the resolution gate
+    # holds by accident -- so the contract was real and merely unenforced
+    # off-axis.
+    if (len(images) < 4 and radius >= r_ppgo_min and w >= _W_PPGO_FLOOR
             and nearest.distance >= _airy_fold._ETA_MAX_FOLD):
         delays = sorted(geometry.delay(image, source, matrix)
                         for image in images)

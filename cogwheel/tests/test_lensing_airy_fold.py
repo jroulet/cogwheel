@@ -421,6 +421,69 @@ _PEARCEY_AT_ORIGIN = 0.5 * scipy_gamma(0.25) * cmath.exp(1j * math.pi / 8.0)
 #: Cusp-neighbourhood fixtures ``(gamma, radius, angle)`` at which the
 #: cusp arm SERVES (found by a coarse scan): a near-cusp source inside a
 #: positive-parity Chang-Refsdal caustic.  ``beta = kappa = 0``.
+#:
+#: DO NOT re-point these to values that "happen to pass".  They are
+#: CORRECT, and the two gated tests below are RED because of a PRODUCTION
+#: regression in `_pearcey_cusp.cusp_amplification`, not because the
+#: fixtures drifted out of the arm's neighbourhood.
+#:
+#: MEASURED 2026-08-13 at ``fdd0f93``.  The ppGO fast rung inside
+#: `cusp_amplification` fires when ``radius >= r_ppgo_min and w >=
+#: _W_PPGO_FLOOR and nearest.distance >= _airy_fold._ETA_MAX_FOLD``.  Its
+#: three predicates carry NO interior/exterior discriminator, so on these
+#: INTERIOR (4-image) sources it preempts the Pearcey uniform path and
+#: serves `_airy_fold.fold_ppgo_correction` instead -- a FOLD-pair
+#: correction that leaves the cusp cluster's third near-degenerate image
+#: on raw (divergent ``sqrt|mu|``) ppGO.  Envelope error vs the exact
+#: Schwinger engine at ``w = 60``, served value / Pearcey-uniform value at
+#: the SAME node:
+#:
+#:     fixture[0] gamma=0.5  eta=0.3018  ppGO fires  1.146e-02 / 7.09e-03
+#:     fixture[1] gamma=0.7  eta=0.4544  ppGO fires  1.501e-01 / 1.38e-03
+#:     fixture[2] gamma=0.3  eta=0.2373  eta gate blocks it, 8.38e-03
+#:
+#: Only fixture[2] sits inside the ``_ETA_MAX_FOLD = 0.3`` fold band, which
+#: is why it alone still reaches `pearcey`.  Across a gamma in [0.3, 0.8] x
+#: radius in [0.10, 0.25] interior sweep at ``w = 60``, EVERY node the ppGO
+#: rung takes is served 5.3e-2 to 1.55e+0 wrong while the uniform path is
+#: 5.3e-4 to 2.4e-2 -- up to a 500x degradation.
+#:
+#: Cause: ``c8cad0c`` (2026-08-12) recalibrated ``_R_PPGO_ERROR_CONST``
+#: 3.0 -> 0.10, dropping ``r_ppgo_min`` from ~71.1 to ~7.37.  At 3.0 no
+#: fixture reached the rung below ``w = 60`` (max control radius 23.0).
+#: That widening was intended for EXTERIOR sources -- both accuracy points
+#: quoted in the constant's docstring, ``(1.5, 0.05)`` and ``(2.0, 0.3)``,
+#: are 2-image saddle-exterior nodes at ``eta ~ 1.4-1.8`` -- and the
+#: interior capture is unintended collateral.
+#:
+#: That the interior capture was NOT intended is positively evidenced by
+#: ``c8cad0c``'s own new suite, `test_lensing_ppgo_midw_and_minus_ghost.py`:
+#: its TD-2 class is named `PpgoResolutionGatePreservesPearceyTestCase` and
+#: asserts that an interior 4-image source "enters the ppGO rung ... but
+#: the resolution gate ... causes the rung to return None -- the function
+#: falls through to the Pearcey uniform form", byte-identical to the old
+#: path.  The build's stated contract is therefore that interior sources
+#: STAY on Pearcey.  Its only interior fixture (``_TD2_SOURCE = [0.2,
+#: 0.0]``) is ON-AXIS, where ``_merging_fold_pair`` is None and
+#: ``w * delta_min = 0 < _PPGO_RESOLUTION_GATE``, so the resolution gate
+#: happens to hold.  Off-axis that assumption fails: these fixtures have a
+#: merging pair AND ``w * delta_min = 13.7 / 16.1`` at ``w = 60``, so the
+#: gate passes and the rung fires.  The contract is real; its enforcement
+#: is incomplete.
+#:
+#: Two further signs the shipped 0.10 was never re-measured: ``c8cad0c``'s
+#: test-side comments re-anchor against ``_R_PPGO_ERROR_CONST = 1.0``
+#: (``r_ppgo_min ~ 34``), a value that never shipped -- the constant went
+#: 50.0 (``c00899e``) -> 3.0 (``d5da155``) -> 0.10 (``c8cad0c``) -- and the
+#: TD-1 fixtures (``R ~ 34.5``) are green at BOTH 1.0 and 0.10, so nothing
+#: in the fast tier discriminates the shipped calibration.  The two tests
+#: that would have caught it are `_brute_accuracy_tier`-gated and so were
+#: outside the "all 367 affected tests pass" tally.
+#:
+#: Production fix: add an exterior gate (``len(images) < 4``) to the ppGO
+#: rung's predicate.  VERIFIED with the rung suppressed -- the fitted
+#: exponents land on 0.5000 / 0.7500 and the three envelope errors become
+#: 7.09e-03 / 1.38e-03 / 8.38e-03, all inside `_CUSP_ENVELOPE_TOL`.
 _CUSP_FIXTURES = (
     (0.5, 0.20, 0.25 * math.pi),
     (0.7, 0.25, 0.25 * math.pi),

@@ -487,27 +487,63 @@ class PpgoMidwSaddleSelfFalsificationTestCase(_PpgoMidwTestCase):
 
 
 class PpgoResolutionGateSelfFalsificationTestCase(_PpgoMidwTestCase):
-    """Prove the TD-2 resolution gate has teeth: if we LOWER the resolution
-    gate to 0.0, the source's w*delta_min=0 ≥ 0 passes and the ppGO rung
-    serves (not the Pearcey fallthrough)."""
+    """An INTERIOR source stays off the ppGO rung even with the resolution
+    gate wide open.
 
-    def test_lowered_resolution_gate_changes_route(self) -> None:
-        """Set ``_PPGO_RESOLUTION_GATE=0.0`` — the on-axis source should
-        be served via the ppGO path instead of the Pearcey fallthrough."""
+    This class previously asserted the opposite: that lowering
+    ``_PPGO_RESOLUTION_GATE`` to 0.0 WOULD route this source through ppGO,
+    as a demonstration that the resolution gate had teeth.  It did have
+    teeth -- and that was the problem.  It was the ONLY thing standing
+    between production and serving an interior 4-image source with a
+    fold-pair correction that leaves the cusp cluster's third
+    near-degenerate image on divergent raw ppGO (measured 2026-08-13: up
+    to 155% wrong on an interior sweep at w=60, against a Pearcey uniform
+    form that is 5.3e-4 to 2.4e-2).
+
+    It held here only by accident of geometry: ``_TD2_SOURCE`` is ON-AXIS,
+    where `_merging_fold_pair` is None and ``w*delta_min = 0``, so the
+    resolution gate refused it.  Move the same source off-axis and nothing
+    refused it at all.
+
+    `cusp_amplification` now carries a STRUCTURAL exterior guard
+    (``len(images) < 4``), so interior sources cannot reach the rung
+    regardless of the resolution gate.  That is what this class pins now,
+    and it is the regression test for the c8cad0c widening.
+    """
+
+    def test_interior_refused_even_with_the_resolution_gate_open(self) -> None:
+        """With ``_PPGO_RESOLUTION_GATE=0.0`` the interior source still
+        does NOT take the ppGO route -- the structural guard, not the
+        resolution gate, is what keeps it off."""
         import cogwheel.lensing.chang_refsdal._pearcey_cusp as pcu
+        from cogwheel.lensing.chang_refsdal import geometry
+
+        # Premise: this fixture really is interior (4 images).  If it ever
+        # stops being, this class stops testing the guard.
+        matrix = geometry.macro_matrix(_TD2_GAMMA, 0.0, 0.0)
+        n_images = len(geometry.find_images(
+            np.asarray(_TD2_SOURCE, dtype=float), matrix))
+        self.n_checks += 1
+        self.assertEqual(
+            n_images, 4,
+            f'premise lost: _TD2_SOURCE now has {n_images} images, so it '
+            f'no longer exercises the interior guard.')
+
         old_gate = pcu._PPGO_RESOLUTION_GATE
         try:
             pcu._PPGO_RESOLUTION_GATE = 0.0
-            served, route = _capture_route_and_value(
+            _served, route = _capture_route_and_value(
                 _W, _TD2_SOURCE, _TD2_GAMMA)
         finally:
             pcu._PPGO_RESOLUTION_GATE = old_gate
-        self.n_checks += 2
-        self.assertIsNotNone(served,
-                             'FALSIFICATION: with gate=0 the source should '
-                             'be served via ppGO')
-        self.assertEqual(route, 'ppgo',
-                         f'Expected ppgo route with gate=0, got {route}')
+        self.n_checks += 1
+        self.assertNotEqual(
+            route, 'ppgo',
+            'an INTERIOR 4-image source took the ppGO route with the '
+            'resolution gate open: the structural len(images) < 4 guard in '
+            'cusp_amplification is gone or ineffective, and interior '
+            'sources are being served by a fold-pair correction that is up '
+            'to 155% wrong.')
 
 
 class MinusGhostSelfFalsificationTestCase(_PpgoMidwTestCase):
