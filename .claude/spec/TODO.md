@@ -2009,6 +2009,28 @@ Tag conventions:
   covers this region should be sized and sequenced by the `60 < w <= 150`
   sub-population FIRST.
 
+  ## HALF THE EXPENSIVE POPULATION CANNOT BE CHARTED AT ALL
+
+  A chart node requires the engine to evaluate, and the 1F1 kernel refuses
+  above the product ceiling `_DD_PRODUCT_MARGIN = 58` (`w * |y| <= 58`;
+  training grids cap `w_max` so no node exceeds it). Measured over the 216
+  mpmath-band draws (`|y|` p50 0.667, `w` p50 91.0):
+
+      w * |y|   p10 10.5   p50 61.2   p90 188.8   max 394.1
+      w*|y| <= 58   48.1%   a chart CAN be trained (at ~100 s/node)
+      w*|y| >  58   51.9%   kernel refuses -- NO training node can exist
+
+  So ~112 of the 216 are not a tiling problem at all: no amount of chart
+  extent reaches them, because the producer cannot generate a node there.
+  They need [[lensing_ppgo_extrapolation_beyond_engine_reach]] — train where
+  the engine is cheap and extrapolate in `w` with the known analytic scaling
+  divided out — or another named rung. The remaining ~104 are chartable but
+  cost ~100 s per node, so a chart over them must be sized deliberately, not
+  tiled at the density used below the ceiling.
+
+  This also sharpens the ppGO fragment: it was filed as a general idea, and
+  this is its concrete motivating population.
+
   ## Corrections worth keeping — three, all from partial measurement
 
   1. First pass called this a ROUTING failure needing no charts. That rested
