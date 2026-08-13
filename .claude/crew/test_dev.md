@@ -139,6 +139,27 @@ are unittest). Tests mirror source structure; names describe behavior
 `self.subTest` for sweeps rather than pytest parametrize; no test interdependence; cover happy
 path, edge cases, error paths, boundaries; integration tests clearly labeled and separate.
 
+**DERIVE fixtures from the boundary; do not pin them as literals.** When a
+fixture is a WITNESS to a domain — served / refused / admitted / in-box /
+resolvable — compute it from the live predicate at test time and assert the
+premise explicitly. A pinned literal is correct only until the gate moves,
+and then it strands SILENTLY: it still compiles, still runs, and either goes
+green while measuring nothing or goes red for a reason that looks like
+breakage. Measured 2026-08-13: one slow-tier sweep surfaced 45 red tests
+across 8 files, and five of the eight were stranded literals, not defects.
+
+    # brittle -- strands the day the floor moves
+    ADMITTED_RHO = 2.5
+    # durable -- follows the floor, and says so when the premise dies
+    ADMITTED_RHO = _SADDLE_FARFIELD_RHO_FLOOR + 0.5
+    self.assertGreaterEqual(rho, _SADDLE_FARFIELD_RHO_FLOOR,
+                            'premise lost: fixture no longer admitted')
+
+This costs LINES and is still right: a derived fixture is longer than a
+constant and saves the next reader from an archaeology session. Where
+derivation is genuinely impractical, pin the literal WITH an adjacent premise
+assertion that fails FIRST and names what moved.
+
 **House idiom — read `cogwheel/tests/test_lensing_dd.py` and reproduce its signature moves**:
 a helper base `TestCase` carrying the domain assertion; an ANTI-VACUITY `tearDown` that FAILS
 if zero comparisons actually ran (this is what stops a silently-skipping suite from reading

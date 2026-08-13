@@ -42,6 +42,7 @@ You do NOT fix code. You do NOT commit.
 - **Determinism**: matched-filter timeseries, lookup tables, and sky dictionaries must be
   reproducible for a fixed seed. |
 | 8 | **No secrets or absolute paths** | API keys, credentials, machine-specific paths in committed code. |
+| 9 | **New fixtures must be DERIVED, not pinned** | When a NEW test fixture witnesses a domain (served / refused / admitted / in-box / resolvable), it must be computed from the live predicate or constant, not written as a literal. `rho = 2.5` strands the day the floor moves; `rho = _SADDLE_FARFIELD_RHO_FLOOR + 0.5` follows it. A pinned literal with NO adjacent premise assertion is a finding (severity: design) — it will strand silently and read as either a false green or an unexplained red. Measured 2026-08-13: one slow-tier sweep surfaced 45 red tests across 8 files, five of eight being stranded literals rather than defects. Accept a literal only when derivation is genuinely impractical AND a premise assertion sits next to it naming what would have to move. |
 
 ### Tests
 
