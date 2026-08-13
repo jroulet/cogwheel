@@ -10,8 +10,15 @@ not share an author. Never name a suite after a module that does not exist.
 
 ## Workflow
 1. Read memories: `test_dev_knowledge`, `coder_knowledge`.
-2. Assess coverage needs: new public API → needs tests; pure refactor → verify
-   existing tests pass; docs/style → no tests needed.
+2. Settle the contract, THEN triage existing tests, THEN author — in that
+   order. (a) Establish what the WP's code now serves, refuses, and promises;
+   the physics/contract decides everything downstream. (b) Run the step-7
+   audit and delete or rewrite whatever that contract made moot. (c) Only
+   then decide which new tests are genuinely missing. Authoring before (b)
+   buries the moot tests under a green run, and green is exactly what stops
+   anyone from re-reading them. Coverage triage: new public API → needs
+   tests; pure refactor → verify existing tests pass; docs/style → no tests
+   needed.
 3. Design tests probing failure modes: boundary conditions, None inputs, numerical
    edge cases (empty arrays, single-element inputs, all-null columns),
    interaction edge cases.
@@ -43,9 +50,11 @@ not share an author. Never name a suite after a module that does not exist.
      for a known approximant + parameters.
    Save diagnostic plots to `cogwheel/tests/output/<test_name>_<desc>.png`.
 7. **Backward-compatibility audit of EXISTING tests (mandatory whenever the WP
-   changes an API, signature, convention, coordinate system, gauge, or the
-   meaning of a constant).** This is a READING task, not a running task — you
-   must do it even for tests you are not permitted or able to run.
+   changes an API, signature, convention, coordinate system, gauge, the
+   meaning of a constant, or the DOMAIN the code serves — a new admission
+   threshold, refusal predicate, floor, or gate term).** This is a READING
+   task, not a running task — you must do it even for tests you are not
+   permitted or able to run. Do it BEFORE authoring new tests (step 2).
 
    For every symbol the WP changed — a function whose signature moved, a
    module constant whose value or meaning changed, a coordinate/gauge whose
@@ -56,7 +65,12 @@ not share an author. Never name a suite after a module that does not exist.
    b. Read each hit and decide, by reading, whether the test still holds:
       does it call a signature that gained a required argument? assert a
       constant that changed? encode the retired criterion? build a fixture in
-      the old coordinate system?
+      the old coordinate system? **build a fixture the new gate now REFUSES?**
+      That last one does not break — it compiles, it runs, it goes green, and
+      it certifies nothing, because it measures the code somewhere production
+      never reaches. Its tolerance is the tell: a bar calibrated outside the
+      served domain is usually far looser than the domain supports, and reads
+      to the next person as the code's real accuracy.
    c. Update the ones that broke, and say in your change report which files
       you audited and what you changed.
 
@@ -76,6 +90,17 @@ not share an author. Never name a suite after a module that does not exist.
    If you conclude a test cannot be made to hold because the behaviour it
    pinned is genuinely gone, say so and propose deletion with the reason —
    do not leave it broken-but-skipped, and do not weaken it to pass.
+
+   A PASSING test can be moot too, and that is the harder case: if its
+   fixture now sits outside the served domain, move the fixture to the
+   worst case production actually serves (typically just inside the new
+   threshold, where the handover happens) and retighten the tolerance to
+   what that domain really supports — then say by how much it moved. Do
+   not patch a stale call site into compiling and call the test rescued;
+   ask first whether it should still exist. Measured 2026-08-13: a saddle
+   handover fixture left at `rho = 1.5` after a `rho >= 2.0` serve floor
+   landed was certifying a 5e-3 bar on a source the gate refuses; the
+   served domain supports 2e-4, a 25x overstatement of the rung's accuracy.
 
 8. Memory checkpoint: write at least one line to `test_dev_short_term` via
    `mcp__serena__edit_memory`.

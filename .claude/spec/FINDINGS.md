@@ -3674,3 +3674,110 @@ Related: `todo.d/lensing_built_but_unused_machinery_guards.md` proposes the
 one-line greps that would catch this class — assert every declared envelope
 label is stamped by some producer. This finding is the case that justifies
 the cost of adding them.
+
+## F066 — a mutation probe that patches the test module's binding under-reports whenever the suite reaches the code through production (2026-08-13)
+
+**Context.** The tier-1 saddle rung shipped a two-term serve gate
+(`_saddle_farfield_analytic_serves(real_delays, w_lo, rho)`: resolvability AND
+`rho >= _SADDLE_FARFIELD_RHO_FLOOR`). The Inspector flagged that the
+self-falsification checks "make zero gate comparisons". To settle it the
+driver ran a mutation probe: replace the gate with degraded variants and check
+each suite goes RED.
+
+**The trap.** The first probe patched the name inside each TEST module
+(`test_mod._saddle_farfield_analytic_serves = mutant`), because that is where
+the tests import it. Result: the refusal suite survived BOTH single-term
+mutations, reading as a vacuous suite whose entire job is pinning refusal.
+
+That reading was wrong. The refusal suite reaches the gate through
+`self._serve(...)` — the live dispatch — which resolves the gate as a
+module-global of `likelihood` at call time. Patching the test module's binding
+never touched the code those tests actually run, so the probe mutated nothing
+and "survived" meant "was never mutated".
+
+Re-running against `likelihood._saddle_farfield_analytic_serves` (the
+production attribute) inverted the verdict: refusal caught the resolvability
+mutation in 6 of 11 tests, accuracy caught the rho-floor mutation in 2 of 14,
+and each shard's survival of the OTHER term was the deliberate shard split its
+own module docstring declares.
+
+**Rule.** A mutation probe is only valid at the binding the code under test
+actually resolves. Before believing "SURVIVED", confirm the mutant was reached
+at all — a probe with no positive control cannot distinguish a vacuous test
+from an unmutated one, and the two have opposite fixes. Cheapest positive
+control: include a degenerate mutant (`always_true` / `always_false`) that
+MUST be caught; if it is not, the probe is broken, not the suite.
+
+Corollary for shard splits: when suites deliberately divide a multi-term
+predicate, score each shard against the term it CLAIMS to own (read its
+docstring) and expect it to survive the terms it delegates. Scoring every
+shard against every term manufactures false gaps.
+
+## F067 — escalation fix instructions compete with the fix for the same turn budget (2026-08-13)
+
+**Context.** The `saddle_analytic_rung` build exhausted its revision loops and
+escalated three findings. The driver dispositioned FIX with detailed
+instructions: four fix areas (stale call sites, fixture recalibration,
+anti-vacuity repair, docstrings), plus a kappa fix, plus a constant
+de-duplication, plus a "why the last two rounds failed" preamble and a
+four-point acceptance list.
+
+The fix agent (`foreman_lite`) died with `error_max_turns`. It had completed
+both blocking implementation fixes and driven the acceptance suites from
+10 failed/19 errors/24 passed down to 1 failed/1 error/44 passed — then ran out
+of turns on the last stale call site. The build committed nothing; every fix
+survived only as uncommitted working-tree state the driver had to finish and
+verify by hand.
+
+**Rule.** An escalation FIX round is a fixed turn budget, and instruction
+prose does not buy more of it. When the remaining work exceeds one agent's
+budget, either narrow the round to the blocking findings and take the rest in
+a follow-up, or expect to finish it at the driver. Ordering matters: put the
+mechanical, highest-count item FIRST (here, the stale call sites causing 19 of
+the 29 red tests), because a round that dies partway should die having removed
+the most failures, not the most prose.
+
+Signal to watch for: a fix round that begins by re-reading files the
+instructions already quoted is spending budget re-deriving context. Quote the
+verified fact AND its location so the agent does not have to go find it.
+
+## F068 — a repo-wide "never duplicate this constant" rule can be locally forbidden, and checking for import cycles is not checking whether the import is allowed (2026-08-13)
+
+**Context.** The tier-1 saddle build introduced `_RHO_END = 4.0` in
+`_gauge.py`, a third literal copy of the SACR-C resolution scale.
+`_born.py:82` carries an explicit instruction against exactly that —
+"imported from `operator` as the ONE authoritative home ... (do not introduce
+a second literal)" — so the driver escalated it to blocking and instructed the
+fix agent to bind `_RHO_END = operator.RHO_END` the way `_born` does.
+
+Before instructing it, the driver DID verify something: that the import was
+acyclic (`operator` imports only geometry, _schwinger, _airy_fold,
+_pearcey_cusp, _dd, _hyp1f1 — never `channels` or `_gauge`). That check
+passed, and it was the wrong check.
+
+**What was actually true.** `_gauge.py` is a SHARED LEAF, and
+`test_lensing_gauge.GaugeIndependenceTestCase` pins that it imports nothing
+but numpy — with a companion test naming `operator` explicitly in its
+forbidden list. The rationale is in the class docstring: the module is
+imported by both the production channel tracker and the crossing-scenario
+builders, and reaching back into the operator couples those two consumers
+through it. The full-suite gate caught the violation.
+
+So the DRY rule and the leaf-isolation rule are in genuine tension at this one
+site, and isolation wins: a guarded duplicate is a smaller failure than a
+broken leaf. The resolution is the literal PLUS a test pinning
+`_gauge._RHO_END == operator.RHO_END`, so the copy cannot drift silently, plus
+a comment at the declaration recording why the obvious fix is forbidden.
+
+**Rule.** Before applying a convention you read at one site to another site,
+check whether the second site is ALLOWED to follow it — modules carry
+isolation constraints that are invisible from the convention's own
+declaration. "Is this import cyclic?" and "is this import permitted?" are
+different questions, and passing the first says nothing about the second. The
+cheapest way to ask the second: grep the test suite for the target module's
+name before editing its import block; an architectural invariant that anyone
+bothered to pin will have a test with the module in its name.
+
+Corollary for cross-site instructions: `_born.py`'s comment stated the rule
+without stating its scope, which is what made it look universal. A convention
+comment should name where it does NOT apply if any such place exists.
