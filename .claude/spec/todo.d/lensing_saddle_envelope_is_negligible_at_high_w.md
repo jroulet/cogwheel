@@ -142,6 +142,30 @@ section: Backlog
     outlier, rather than moving the weight to a different channel. That is a
     direct measurement and must be made before any build.
 
+  ## TIER 2 IS AN ESTABLISHED PATTERN, NOT A NEW CAPABILITY
+
+  Do not design the tier-2 chart from scratch. "Divide out the lowest-order
+  physics, chart the residual, ship the artifact" is already in production:
+
+    - `cogwheel/data/born_residual_chart.npz` — TRAINED and SHIPPED as package
+      data (~8 KB, 2026-08-04), produced by `scripts/train_born_residual.py`.
+      The Born lead carrier is divided out and the residual `R` is splined;
+      the serve path reconstructs `F_carrier + R`.
+    - `InteriorWedgeChart` and `LobeInteriorChart` both store the
+      `tau_c`-demodulated SACR-C envelope, i.e. the same object tier 2 needs.
+
+  WHY IT DOES NOT ALREADY COVER US: the Born rung is gated on `rho > 1`
+  (exterior-to-caustic, both parities). The tier-2 population has origin
+  `rho <= 1` — that gate is exactly what routes them into `_classify_saddle`.
+  They sit INSIDE the reach ball, between and around the lobes, where a
+  far-field expansion in `1/|y'|^2` does not apply.
+
+  So tier 2 is the THIRD instance of a proven pattern in a new region. The
+  training script, the chart-class shape, the provenance/registration path and
+  the serve-side reconstruction all have working precedents to copy. Budget it
+  as a port, not an invention — and start from `train_born_residual.py` and
+  `born_residual_chart.py` rather than a blank file.
+
   ## Process note
 
   A build was launched to adjudicate the `w`-flatness question and killed
