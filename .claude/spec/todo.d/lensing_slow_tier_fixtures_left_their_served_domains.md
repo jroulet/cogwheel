@@ -28,9 +28,10 @@ section: Backlog
   was `W_CEILING_SCHWINGER_QD = 150` (disjoint by ~330x). It is 60.
   `F_op` RETURNS THE UNIFORM ARM for `60 < w <= 150` rather than the exact
   engine, so it is not an independent oracle there — [[FINDINGS F069]].
-  And the rung does not merely lack verification: it is measurably WRONG
-  by ~21% where it serves, see
-  [[lensing_fold_ppgo_rung_serves_wrong]].
+  And the rung did not merely lack verification: it was measurably WRONG
+  by ~21% where it served, see
+  [[2026-08-13_ppgo_interior_certificate]] — closed by that build's re-gate
+  (exact 4-image predicate + raw-ppGO c3 certificate).
 
   ## OPEN 1 — `test_lensing_airy_fold`, the cusp arm's fixtures
 

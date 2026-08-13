@@ -164,7 +164,7 @@ Flagged three times by the Inspector during the `subdivision_recursion` build
 (INS-1-001) and correctly routed to doc-sync each time; applied here by the
 driver after the tree gate blocked the build's own Librarian phase.
 
-- `0.4.1` (2026-08-01):
+- `0.5.1` (2026-08-01):
 
 `lens_amplification_surrogate` artifact: lobe-interior charts now persist a
 `theta_to_s` axis map (2 × N_map array) under the new
@@ -172,7 +172,7 @@ driver after the tree gate blocked the build's own Librarian phase.
 tag. Legacy V1 charts (no map) load under the old schema tag with
 `theta_to_s=None`. The map is gamma-independent (depends only on tile bounds).
 
-- `0.4.0` (2026-07-31):
+- `0.5.0` (2026-07-31):
 
 ### Far-field surrogate charts use gamma-resolved fold coordinates
 
@@ -189,7 +189,7 @@ wrong-frame artifact. Macro-saddle far-field charts intentionally remain
 unavailable: those queries fall through to the exact engine until a
 per-deltoid-edge design is certified.
 
-- `0.3.0` (2026-07-30):
+- `0.4.0` (2026-07-30):
 
 ### TubeChart records gain a `theta_to_s` arc-length axis map
 
@@ -212,6 +212,23 @@ map `s = theta - theta_lo`, under which splining in `s` is the previous
 
 No trained artifact exists yet, so nothing on disk needs migrating — the
 window in which this is free closes when the first surrogate is trained.
+
+- `0.3.0` ():
+
+Registered the test-only callers of `LensAmplificationSurrogate.load` (31
+call sites, `test_lensing_surrogate.py`, `test_lensing_surrogate_lobe.py`,
+`test_lensing_surrogate_training.py`, `test_lensing_farfield_envelope.py`)
+and `CertifiedPpgoMap.load` (7 call sites, `test_lensing_saddle_rho_guards.py`,
+`test_lensing_ppgo_bandsplit.py`) as consumer entries on `lens_amplification_surrogate`
+and `certified_ppgo_map`, each tagged `kind: test`. No suppression flag
+existed in `scripts/sync_derived_docs.py`'s `check_consumer_graph` (it only
+matches on `module`/`function`, so `kind` is inert to the check but documents
+the distinction for readers); adding a filter for `kind: test` there would be
+a code change outside the Librarian's remit. These 38 callers were genuine,
+recurring `consumer_graph` advisories on every commit (`todo.d/
+surrogate_contract_test_consumer_warning.md`, open since 2026-08-0x across
+4+ Librarian sessions for the 4-entry subset now folded into this larger
+list) — registering them clears the noise and the fragment.
 
 - `0.2.10` ():
 Update the `lens_amplification_surrogate` description in DATA_CONTRACTS.yaml:

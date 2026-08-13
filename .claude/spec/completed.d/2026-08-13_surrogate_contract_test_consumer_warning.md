@@ -1,6 +1,7 @@
 ---
 section: Backlog
 tags: [housekeeping]
+date: 2026-08-13
 ---
 
 # Resolve recurring test-only consumer warning for lens_amplification_surrogate
@@ -35,3 +36,16 @@ as warnings rather than errors.
    comment in the consumer-graph cache.
 
 Until resolved, every Librarian post-commit run will re-flag this and re-note it.
+
+## RESOLVED 2026-08-13
+
+Option 1, generalized: registered every ACTUAL test-only caller of
+`LensAmplificationSurrogate.load` (31, not just the original 4 — the
+surface had grown across several builds) and `CertifiedPpgoMap.load` (7,
+not previously enumerated here) as consumer entries tagged `kind: test`
+in DATA_CONTRACTS.yaml. `check_consumer_graph` matches only on
+`module`/`function`, so the extra `kind` key satisfies the check while
+documenting the distinction for readers — no code change to
+`scripts/sync_derived_docs.py` was needed. `python scripts/
+sync_derived_docs.py --check` now exits 0. See `contracts_changelog.d/
+2026-08-13_register_test_consumers.md`.
