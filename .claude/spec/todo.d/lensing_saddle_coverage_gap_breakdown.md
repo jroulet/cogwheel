@@ -46,18 +46,17 @@ section: Backlog
   different rung; a negative width should probably refuse loudly rather than
   silently yield an empty band.
 
-  ANSWERED 2026-08-12 — the answer SPLITS by frequency. The question was whether a
-  source at `rho_lobe ~ 5-11` is physically far-field, since `rho_lobe`
-  divides by the small `r_deltoid`. Measured on 780 of this population: the
-  PHYSICAL distance to the nearest caustic point is `eta` p50 **0.971**, and
-  **99.2% have `eta >= 0.3`** (`ETA_MIN_GEOMETRIC`) while only 0.7% are
-  genuinely near-caustic. They are far from the caustic and do not need a
-  chart at all. BUT frequency decides what can serve them: w > 60 (216 draws,
-  27.7%) are already served by the saddle stationary-phase arm and only the
-  INSTRUMENT mislabels them, while w <= 60 (564 draws, 72.3%) genuinely need
-  chart coverage, so extending `rho_outer` remains on the table for THAT
-  sub-population. Full measurement in
-  [[lensing_saddle_gap_is_a_routing_failure_not_coverage]].
+  ANSWERED 2026-08-12 — all 901 are a genuine coverage gap, and the COST is
+  concentrated in a quarter of them. The large `rho_lobe` was an artefact of
+  dividing by the small `r_deltoid`: `|y|` p50 is 0.732 and `eta` p50 is
+  0.971, so these sit near the origin but a full unit from the caustic. That
+  does NOT reach a fast rung — the saddle takes stationary phase only above
+  `W_CEILING_SCHWINGER_QD = 150`, and this population's max `w` is 147.5, so
+  ZERO of them are geometric-served. By cost: 216 draws in the mpmath band
+  (`60 < w <= 150`, ~100 s/call) are ~6.0 hours of engine time against ~1.9
+  minutes for the 564 double-double draws — about 99.5% of the cost in 24% of
+  the draws. Full measurement, and the three corrections it took to get there,
+  in [[lensing_saddle_gap_is_a_routing_failure_not_coverage]].
 
   ## Causes 2 and 3 (177 + 149) — admission predicates refuse
 

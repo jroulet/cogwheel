@@ -2,63 +2,59 @@
 section: Backlog
 ---
 
-- **THE DOMINANT SADDLE GAP SPLITS 28/72 BETWEEN A ROUTING MISLABEL AND A
-  GENUINE COVERAGE HOLE** `[→ spec]` — measured 2026-08-12. Population: the
-  780 draws beyond `rho_outer` (Cause 1 of
-  [[lensing_saddle_coverage_gap_breakdown]], excluding the 144 with a
-  degenerate band).
+- **THE DOMINANT SADDLE GAP IS ALL GENUINE COVERAGE, AND 24% OF IT CARRIES
+  ~99.5% OF THE ENGINE COST** `[→ spec]` — measured 2026-08-12. Population:
+  the 901 draws with `rho_lobe > rho_outer`, Cause 1 of
+  [[lensing_saddle_coverage_gap_breakdown]].
 
-  ## They are all FAR from the caustic
-
-  Physical distance to the nearest caustic point
-  (`geometry.nearest_caustic_point(...).distance`):
+  ## They are far from the caustic, and NONE reach the geometric arm
 
       eta   p10 0.617   p50 0.971   p90 1.380   max 2.682
       eta >= 0.3 (ETA_MIN_GEOMETRIC): 99.2%
-      eta <  0.3 (genuinely near-caustic): 0.7%
 
-  `rho_lobe` p50 is 5.70 but `|y|` p50 is only 0.732 — the large normalised
+  `rho_lobe` p50 is 5.70 while `|y|` p50 is only 0.732 — the large normalised
   radius is an ARTEFACT of dividing by the small `r_deltoid`. These sources
   sit near the origin, between the lobes, a full unit from the caustic.
 
-  ## But frequency decides what can serve them, and it splits the population
+  But being far from the caustic does NOT reach a fast rung here. The saddle
+  takes stationary phase ONLY when resolved AND
+  `w > W_CEILING_SCHWINGER_QD = 150` (`operator.py` module docstring, ~L105).
+  Measured `w` over this population: p10 7.2, p50 28.0, p90 104.4,
+  **max 147.5** — so ZERO draws clear 150 and none are geometric-served.
+  Every one of the 901 is a genuine coverage gap.
 
-      w   p10 7.2   p50 28.0   p90 104.4   max 147.5
-      w >  60   216 (27.7%)   saddle stationary-phase arm serves, FAST
-      w <= 60   564 (72.3%)   Schwinger exact, SLOW
+  ## Cost weighting inverts the priority
 
-  `channels.py` does NOT call `select_branch` for a saddle host — not because
-  the saddle lacks geometric routing, but because `cancellation_exponent` is
-  positive-parity-only by design and **the operator's saddle arm owns the
-  per-node routing internally**: resolved AND above the `w <= 60` ceiling ->
-  stationary phase, otherwise Schwinger (`channels.py` ~L666-700).
+      w <= 60          564 (62.6%)  Schwinger double-double  ~0.2 s/call
+      60 < w <= 150    216 (24.0%)  Schwinger MPMATH        ~85-120 s/call
+      degenerate band  121 (13.4%)  see the rho_outer todo
 
-  ## Two different fixes, do not conflate them
+      564 x 0.2 s   ~=  1.9 minutes
+      216 x 100 s   ~=  6.0 HOURS      <- ~99.5% of the engine cost
 
-  **216 draws (w > 60) — INSTRUMENT.** The engine already serves these
-  quickly via the saddle stationary-phase arm. The census does not model that
-  internal routing, so it labels them `exact_engine`. Teach
-  `census_dry_run.py` the saddle operator's own gate and they become served
-  with no library change at all.
+  The mpmath band (F061) is the whole story. 24% of the draws by count are
+  ~190x more valuable to chart per draw than the other 76%. Any chart that
+  covers this region should be sized and sequenced by the `60 < w <= 150`
+  sub-population FIRST.
 
-  **564 draws (w <= 60) — GENUINE.** Far from the caustic but low frequency,
-  where diffraction still matters and Schwinger is the CORRECT evaluator, just
-  slow. A fast path here means interpolation, i.e. chart coverage. So
-  extending `rho_outer` to reach `rho_lobe ~ 11` IS on the table for this
-  sub-population — unlike for the `w > 60` group, which needs no chart.
+  ## Corrections worth keeping — three, all from partial measurement
 
-  ## Correction worth keeping
+  1. First pass called this a ROUTING failure needing no charts. That rested
+     on `eta` alone: `eta >= 0.3` says a source is far from the caustic, NOT
+     that a fast rung exists at its `w`.
+  2. Second pass split it 28/72 using `w > 60` as the geometric threshold.
+     WRONG CONSTANT — 60 is `W_CEILING_SCHWINGER`, the double-double/mpmath
+     boundary INSIDE the wave branch. The geometric threshold is
+     `W_CEILING_SCHWINGER_QD = 150`. Three distinct ceilings exist and none
+     implies the others (F019); picking the wrong one turned the most
+     expensive sub-population into an imagined "already served fast" one.
+  3. The corrected reading: nothing here is served fast, and the population I
+     had twice dismissed is the one that matters most.
 
-  An earlier pass of this analysis concluded "routing failure, not coverage —
-  this rules out extending `rho_outer`". That was drawn from the `eta`
-  measurement ALONE, before checking frequency. `eta >= 0.3` says the source
-  is far from the caustic; it does NOT say a fast rung exists at that source's
-  `w`. The two-leg conclusion was right for 28% of the population and wrong
-  for 72%. Measure every leg of a gate before concluding which side of it a
-  population lands on.
+  Read a threshold out of the code that OWNS the decision before classifying a
+  population by it.
 
   ## Acceptance
 
-  Split reporting by `w` band, not just by cause. The instrument fix should
-  move ~216 draws with zero library change; anything more means it is
-  crediting coverage that does not exist.
+  Report by `w` band and by COST, not by count. A fix that serves the 564 and
+  not the 216 removes ~0.5% of the engine time this region costs.
