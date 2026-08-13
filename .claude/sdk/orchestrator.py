@@ -969,6 +969,22 @@ class BuildOrchestrator:
 
         except GateFailure as e:
             self._log(f"GATE FAILURE: {e}")
+            # Doc findings deferred by the Inspector loop are consumed by the
+            # Librarian stage, which runs AFTER the tree gate (before the
+            # commit -- F051 moved it ahead of the commit so the owner of a
+            # changelog fragment could satisfy the gate demanding one). A RED
+            # gate therefore kills the build before its Librarian, and every
+            # deferred finding evaporates with it.
+            #
+            # MEASURED 2026-08-12: INS-5-001 (SPEC.md/DATA_CONTRACTS.yaml never
+            # mention the new `lobe_exterior` chart kind) was raised, deferred,
+            # and lost on TWO consecutive builds that both died at the gate.
+            # The driver only recovered it by reading the escalation JSON by
+            # hand. Persist it instead, into the same file the post-commit hook
+            # and `/doc-sync --post-commit` already consume, so a stranded
+            # build's doc debt is picked up by the next sync rather than
+            # depending on someone reconstructing it.
+            self._persist_deferred_doc_findings(reason=f"gate failure: {e}")
             raise
         except EscalationNeeded as e:
             self._log(f"ESCALATION: {e}")
@@ -4481,6 +4497,48 @@ class BuildOrchestrator:
             capture_output=True, text=True, cwd=self.project_root,
         )
         return result.stdout.strip() if result.returncode == 0 else None
+
+    def _persist_deferred_doc_findings(self, reason: str) -> None:
+        """Write `_librarian_deferred` to `.claude/sync_issues.json`.
+
+        The Librarian stage consumes these, but it runs after the tree gate,
+        so a stranded build drops them. `.claude/sync_issues.json` is the
+        channel the post-commit hook already writes and `/doc-sync
+        --post-commit` already reads, so appending here routes the debt to
+        the same place without inventing a second mechanism.
+        """
+        if not self._librarian_deferred:
+            return
+        path = Path(self.project_root) / ".claude" / "sync_issues.json"
+        try:
+            existing = (json.loads(path.read_text())
+                        if path.exists() else {})
+        except (OSError, ValueError):
+            existing = {}
+        entries = existing.setdefault("deferred_doc_findings", [])
+        for f in self._librarian_deferred:
+            entries.append({
+                "finding_id": getattr(f, "finding_id", "?"),
+                "file": getattr(f, "file", ""),
+                "description": getattr(f, "description", ""),
+                "suggested_fix": getattr(f, "suggested_fix", ""),
+                "stranded_because": reason,
+            })
+        existing.setdefault("trigger", "stranded-build")
+        try:
+            # The whole point is not to lose the findings, so do not fail on a
+            # missing parent dir and log a warning nobody reads.
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(existing, indent=2))
+            self._log(
+                f"  Persisted {len(self._librarian_deferred)} deferred doc "
+                f"finding(s) to .claude/sync_issues.json for the next "
+                f"/doc-sync: "
+                + ", ".join(getattr(f, "finding_id", "?")
+                            for f in self._librarian_deferred))
+        except OSError as exc:
+            self._log(f"  WARNING: could not persist deferred doc findings: "
+                      f"{exc}")
 
     def _staged_paths(self) -> set:
         """Return the set of paths currently staged in the index."""
