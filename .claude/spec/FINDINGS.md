@@ -3440,6 +3440,14 @@ runtime below it is affordable. It is not: the cliff is at 60, and it is a
 factor of ~250 at the very BOTTOM of the mpmath band. Nothing refuses in
 `(60, 150]` — it serves, slowly, forever.
 
+**Scope note (added 2026-08-13).** The routing above is `f_schwinger`'s OWN,
+and the cost table is for a DIRECT `f_schwinger` call. Do not transfer it to
+`operator.F_op` / `F_op_grid`: `_positive_parity_grid` offers the uniform arm
+BEFORE the engine for `60 < w <= 150`, so an `F_op` call in that band is often
+fast precisely because it never reaches the mpmath path — and, for the same
+reason, is not an independent oracle there (F069). "Cheap `F_op` above 60"
+means "the arm served", not "the engine was affordable".
+
 **How it bit.** `test_lensing_wedge_dd_arclength.py::DDWCeilingTestCase` says
 in its own docstring:
 

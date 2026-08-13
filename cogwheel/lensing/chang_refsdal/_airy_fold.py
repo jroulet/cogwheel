@@ -330,6 +330,23 @@ def _uniform_error_estimate(image_plus: np.ndarray, image_minus: np.ndarray,
     """
     Leading relative uniform-error estimate ``c_A xi^{-3/2}``.
 
+    NOT A BOUND ON THE ERROR -- do not gate on it as though it were.
+    Substituting ``xi = (3 w dtau / 4)^{2/3}`` gives exactly
+    ``(4/3) c_A / (w * dtau)`` (driver-verified to 1e-6 at every ``w`` from
+    40 to 5e4), so this quantity decays as ``1/w`` BY CONSTRUCTION.  The
+    true error does not: measured at gamma=0.5, rho=0.3 it is
+    w-INDEPENDENT, flat at ~2e-1 from w=40 to w=2e5.  So the ratio
+    estimate/true-error degrades linearly in ``w`` without bound --
+    measured 2.1x optimistic at w=60, 538x at w=1e4, 2581x at w=5e4.  A
+    gate of the form ``estimate <= bar`` therefore opens exactly where this
+    estimate is least trustworthy.  See FINDINGS F069 and
+    `todo.d/lensing_fold_ppgo_rung_serves_wrong`.
+
+    The residual it cannot see is the cubic normal form's O(eta)
+    truncation plus a vanishing ``q_amplitude``; neither is a function of
+    ``xi``, which is why no xi-based certificate can ever detect it (the
+    same shape as F028).
+
     ``c_A`` is the magnitude of the ``C1`` saddle coefficient
     (`geometry.saddle_coefficients`) in the fold frame, taken as the larger
     of the two merging images' values.  Near the fold the metric inversion
@@ -497,11 +514,23 @@ def fold_ppgo_correction(w, source, gamma: float, *,
     where the fold pair has small xi and standard ppGO (divergent sqrt|mu|)
     breaks down.
 
-    The DO-NOTHING control property holds: even when the Airy form is
-    inaccurate, it cannot make things worse than raw ppGO for a merging
-    pair, so no error-estimate gate or ETA_MAX distance gate is applied.
-    Only structural gates (pair exists, non-degenerate fold geometry) are
-    checked.
+    THE DO-NOTHING CONTROL PROPERTY IS FALSE.  This docstring asserted
+    until 2026-08-13 that the Airy form "cannot make things worse than raw
+    ppGO for a merging pair", and used that to justify applying NO
+    error-estimate gate and NO ETA_MAX distance gate -- only structural
+    gates (pair exists, non-degenerate fold geometry).  Measured against
+    the exact engine at gamma=0.5, rho=0.3, w=100: raw ppGO errs by
+    8.7e-6, this corrected value by 2.1e-1 -- **24,000x WORSE than doing
+    nothing**.  The correction beats raw ppGO only for rho >= 0.93
+    (xi <~ 0.6), i.e. very close to the caustic; away from it, it is a
+    large net loss.  See FINDINGS F069.
+
+    Consequences you must not rely on: this function is NOT safe to call
+    unconditionally, and its callers cannot treat a structural success as
+    an accuracy claim.  The caller's gate is what bounds the error, and the
+    interior rung's gate is itself broken in the opposite direction (it
+    opens where the fold form is invalid) --
+    `todo.d/lensing_fold_ppgo_rung_serves_wrong` owns that decision.
 
     On any structural refusal, the function falls back transparently to
     raw `geometric_amplification` (byte-identical to the uncorrected path).

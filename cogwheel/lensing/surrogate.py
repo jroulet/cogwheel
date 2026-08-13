@@ -2820,6 +2820,25 @@ def _log_w_band_serveable(chart, log_w_min: float, log_w_max: float) -> bool:
     nearly constant below the first Airy fringe — O(w_min^2) correction
     to the geometric limit).  The HIGH end remains strict: no upward
     extrapolation (the envelope is oscillatory above w_max).
+
+    THAT JUSTIFICATION IS LABEL-DEPENDENT AND IS FALSE FOR
+    ``FARFIELD_KERNEL_SUM``.  "Smooth and nearly constant below the first
+    Airy fringe" describes the tube / SACR-C envelope this licence was
+    written for.  The far-field kernel-sum envelope does the opposite: it
+    DIVERGES into the diffractive bottom below the region's
+    ``farfield_w_floor``.  The trainer knows this and clips every exterior
+    tile to ``[w_floor, w_trust]`` (`_farfield_region_w_floor`); the serve
+    path does not -- ``farfield_w_floor`` appears nowhere in this module or
+    in `likelihood.py`, so a kernel-sum chart queried below its floor is
+    clamped and served silently.
+
+    Measured 2026-08-13 on a chart tiled exactly as `surrogate_training`
+    tiles it: every gate passes, ``eps`` is 1.5e-3 above the floor (inside
+    the 3e-3 registration bar) and **4.7e+02 -- 468x max|F| -- below it**.
+    Not reachable today only because no `lens_amplification_surrogate.npz`
+    ships; it is a blocker on the full-box training campaign.  See FINDINGS
+    F070 and OPEN 5 of
+    `todo.d/lensing_slow_tier_fixtures_left_their_served_domains`.
     """
     return log_w_max <= chart.log_w_grid[-1]
 
