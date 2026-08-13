@@ -89,6 +89,40 @@ the per-branch instrumentation in
    approach. It is OUT of scope: it must be REFUSED by name, not served
    wrongly, and not used to justify stretching tier 1 or tier 2.
 
+7. **THE GAUGE RULE IS DETERMINED, and it makes the envelope splineable.**
+   `tau_c` must be `w`-INDEPENDENT or each node of a chart's `w` axis stores a
+   differently-gauged object. Three candidates measured on a residual-region
+   source (`gamma=1.486`, `|y|=1.798`, real delays `[0, 0.2509]`, band
+   `w in [12, 58]`), reporting sign changes and `max|2nd diff| / max|v|` —
+   the quantities a spline actually cares about:
+
+       per-w minimisation of |E|   6-7 sign changes   2nd diff 1.09 / 1.45
+       tau_c = image midpoint      5   sign changes   2nd diff 0.111 / 0.250
+       tau_c OUTSIDE the cluster   0   sign changes   2nd diff 0.023 / 0.022
+
+   THE RULE: place `tau_c` outside the real-image cluster, at distance
+   `RHO_END / w_min` from the nearest image, where `w_min` is the chart
+   band's LOWEST frequency:
+
+       tau_c = min_a(tau_a) - RHO_END / w_min
+
+   `w_min` binds because the switch argument `w*|tau_a - tau_c|` is smallest
+   there; satisfying it at `w_min` saturates every switch across the whole
+   band (measured 4.0 -> 19.3 for the band above). A `tau_c` BETWEEN the
+   images cannot work when the pair is closer than `RHO_END / w_min` — here
+   the images are 0.251 apart and 0.333 is needed — which is exactly the case
+   the midpoint gauge fails.
+
+   Under this rule the envelope decays MONOTONICALLY (1.4e-01 -> 6.1e-04
+   across the band) with no oscillation, so it is a well-conditioned spline
+   target. This is why tier 2 is a chart of the RE-GAUGED envelope
+   specifically: in the shipped gauge the same object oscillates and is not
+   splineable.
+
+   NOTE the two tiers share ONE gauge rule, so there is no gauge
+   discontinuity between them — the handover is only about whether the
+   envelope is large enough to need charting.
+
 ## Scope
 
 IN — a THREE-TIER ladder for the far-from-caustic macro saddle, with NO tier
