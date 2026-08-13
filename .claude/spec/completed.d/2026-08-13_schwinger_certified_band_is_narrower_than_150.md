@@ -1,4 +1,5 @@
 ---
+date: 2026-08-13
 section: Backlog
 ---
 
@@ -73,3 +74,16 @@ section: Backlog
   both `gamma'` fixtures. Report seconds/call at the shipped order and the
   new one on an UNCONTENDED box — the 1.29x ratio is trustworthy, absolute
   timings from a loaded box are not.
+
+  ## RESOLVED 2026-08-13 (5451ab9)
+
+  Both actions shipped together. `test_lensing_schwinger.py`:
+  `ORACLE_MAXDEGREE` 5 -> 6 (7 is bit-identical to 6 at w=130 and w=190,
+  2e-61 at w=210, so 6 is converged across the exercised band).
+  `_schwinger.py`: `_MP_PANEL_ORDER` 32 -> 40, certifying through `w ~ 204`
+  on both `gamma'` fixtures (1.3 and 0.7) at ~1.29x cost (99s -> 128s at
+  w=190). Acceptance table (order, TRUE rel err, cert rel, certifies?):
+  32/8.99e-16/8.11e-07/NO and 40/8.99e-16/1.45e-28/yes at gp=1.3, w=150;
+  matching pattern at gp=0.7. The "watch out" item is moot: `THREE_OUTCOME_W`
+  is `W_CEILING_SCHWINGER_QD + 1.0` (derived, not a `151.0` literal), so it
+  tracks the ceiling automatically and needed no re-pin.

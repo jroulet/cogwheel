@@ -1,4 +1,5 @@
 ---
+date: 2026-08-13
 section: Backlog
 ---
 
@@ -48,3 +49,24 @@ section: Backlog
   the fix, with the served value before/after against the exact engine. Plus
   a check that legitimate FOLD pairs (degeneracy genuinely on the saddle
   side) still admit — the guard must not become a blanket refusal.
+
+  ## RESOLVED 2026-08-13 (252e7c2)
+
+  `_merging_fold_pair` (`_airy_fold.py`) now tests BOTH sides of the
+  SELECTED PAIR, not `tau_high` alone: `tie_count` is the max of the tie
+  count against `tau_low_best` and against `tau_high_best`. A first attempt
+  that scanned every delay globally OVER-refused (gamma=1.2, r=1.0, angle=0:
+  the two SADDLES tie while the selected pair is well separated and valid;
+  caught by `FoldOffAxisRegressionTestCase`). Pair-scoped still catches the
+  cusp, because there the tie IS the pair's own minimum. 207 passed across
+  `airy_fold`, `fold_ppgo_handoff`, `ppgo_above_ceiling`, `levers`.
+
+  CORRECTED, per FINDINGS F072: the "why this is not confined to the rung
+  being retired" section above asserted `fold_amplification` SHIPS and is
+  affected. That was inferred, not measured, and is WRONG — measured
+  directly with the tie check disabled, `fold_amplification` DECLINES at
+  both census cusp loci for reasons unrelated to this guard, so it was
+  never serving a cusp merge in production. The guard's real (and correct)
+  consumers are `fold_ppgo_correction` and the rung's `xi_min`.
+
+  ## RETIRED 2026-08-13 — fragment moved to completed.d

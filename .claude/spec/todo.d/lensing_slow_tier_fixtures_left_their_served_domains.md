@@ -185,10 +185,25 @@ section: Backlog
   site — `_surrogate_coefficients` already holds `geom.delays` and
   `geom.real_mask` — and should mirror the existing `w_trust` split.
 
-  ## OPEN 4 — known, unchanged
+  CLOSED (serve side) 2026-08-13, 8dfb8ca: `likelihood.py` now re-checks
+  `farfield_w_floor(geom.delays, geom.real_mask)` against the served
+  chart's sub-band bottom for every `_FARFIELD_KERNEL_FAMILY` label and
+  refuses (falls through) below it, mirroring the `w_trust` split as
+  proposed above. The training-side half of this gap — no
+  `FARFIELD_DIFFRACTIVE` tile is ever trained for the sub-floor band, so a
+  refusal is the best case, not full coverage — remains open and is
+  tracked in [[lensing_low_mass_exterior_training_registers_zero_charts]].
+
+  ## CLOSED 2026-08-13 — OPEN 4, known_failures.txt
 
   `test_lensing_marginalized_likelihood::test_refusal_precedes_coherent_score`
-  — the single entry in `.claude/sdk/known_failures.txt`.
+  was the single entry in `.claude/sdk/known_failures.txt`. FIXED, not
+  re-listed, by b5a09e3: its `cancellation` witness was anchored to a
+  certification threshold that had drifted three times; retired in favour
+  of the surviving `over_critical` witness, which sits on the structural
+  `kappa >= 1` boundary and cannot drift with a threshold move.
+  `known_failures.txt` is now empty and the tree gate is re-armed on this
+  test.
 
   ## The pattern, and the guard that would have caught it
 

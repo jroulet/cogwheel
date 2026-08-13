@@ -8,6 +8,161 @@ Archived from `TODO.md`. Items retain their original section classification and 
 ## Backlog
 
 
+- **`_merging_fold_pair`'s CUSP-TIE GUARD WATCHES THE WRONG SIDE OF THE
+  PAIR, IN SHIPPED CODE** `[→ spec]` — found 2026-08-13 while measuring the
+  fold-ppGO gate; see [[FINDINGS F072]].
+
+  `_airy_fold._merging_fold_pair` (~L319) refuses a degenerate cluster with
+
+      tie_count = sum(1 for tau, _ in entries
+                      if abs(tau - tau_high) <= _CUSP_TIE_EPS)
+      if tie_count >= 2: return None
+
+  It counts ties against `tau_high`, the SADDLE. Measured census at
+  `gamma=0.5, theta=pi/2, frac=0.99` — a cusp, not a fold:
+
+      tau=+0.15342641  morse=0  sqrt|mu|=7.089   <-- degenerate PAIR
+      tau=+0.15342641  morse=0  sqrt|mu|=7.089   <-- degenerate PAIR
+      tau=+0.15347645  morse=1  sqrt|mu|=9.956
+      tau=+2.55878866  morse=1  sqrt|mu|=0.206
+
+  The degeneracy is on the MINIMUM side, so the guard never fires and the
+  function returns a "fold pair" built from one of the two tied minima. The
+  caller then de-ppGOs one merging image and leaves the other divergent one
+  in place. Measured `err_fold/err_raw` locks at 0.41 while BOTH diverge to
+  1e7 as `frac -> 1`. `fold_ppgo_correction` has no cusp handoff at all,
+  unlike `_uniform_arm_value`.
+
+  ## Why this is not confined to the rung being retired
+
+  `fold_amplification` SHIPS — `operator._uniform_arm_value` offers it before
+  the exact engine. So the guard protects a live serving path, and a 3-image
+  cusp merge reaching it is served by a 2-image fold form.
+
+  ## Before fixing, PROVE the causation
+
+  The diagnosis is inferred: the guard was read, the census dumped, and the
+  constant 2.45x asymptote matched. Nobody patched the guard and re-measured.
+  Do that first — patch the tie test to count ties on BOTH sides (or on the
+  merging pair actually selected), re-run the same census config, and confirm
+  the arm now declines and the 0.41 lock disappears. If it does not, the
+  diagnosis is wrong and the real cause is elsewhere.
+
+  ## Acceptance
+
+  A config that currently returns a spurious fold pair, shown declining after
+  the fix, with the served value before/after against the exact engine. Plus
+  a check that legitimate FOLD pairs (degeneracy genuinely on the saddle
+  side) still admit — the guard must not become a blanket refusal.
+
+  ## RESOLVED 2026-08-13 (252e7c2)
+
+  `_merging_fold_pair` (`_airy_fold.py`) now tests BOTH sides of the
+  SELECTED PAIR, not `tau_high` alone: `tie_count` is the max of the tie
+  count against `tau_low_best` and against `tau_high_best`. A first attempt
+  that scanned every delay globally OVER-refused (gamma=1.2, r=1.0, angle=0:
+  the two SADDLES tie while the selected pair is well separated and valid;
+  caught by `FoldOffAxisRegressionTestCase`). Pair-scoped still catches the
+  cusp, because there the tie IS the pair's own minimum. 207 passed across
+  `airy_fold`, `fold_ppgo_handoff`, `ppgo_above_ceiling`, `levers`.
+
+  CORRECTED, per FINDINGS F072: the "why this is not confined to the rung
+  being retired" section above asserted `fold_amplification` SHIPS and is
+  affected. That was inferred, not measured, and is WRONG — measured
+  directly with the tie check disabled, `fold_amplification` DECLINES at
+  both census cusp loci for reasons unrelated to this guard, so it was
+  never serving a cusp merge in production. The guard's real (and correct)
+  consumers are `fold_ppgo_correction` and the rung's `xi_min`.
+
+  ## RETIRED 2026-08-13 — fragment moved to completed.d
+
+
+- **THE mpmath ORACLE IS RED BY CONSTRUCTION ABOVE w ~ 100, AND PRODUCTION
+  SPURIOUSLY REFUSES CORRECT ANSWERS FROM w ~ 139** `[→ spec]` — measured
+  2026-08-13. REPLACES an earlier version of this fragment which claimed the
+  exact evaluator's certified band was narrower than 150; that claim came
+  from [[FINDINGS F071]], which is RETRACTED — the oracle was the thing that
+  was wrong, not `f_schwinger`.
+
+  ## 1. Fix the oracle FIRST — it currently convicts production of its own error
+
+  `_oracle_1d` in `cogwheel/tests/test_lensing_schwinger.py` ships
+  `ORACLE_MAXDEGREE = 5`, and its own calibration comment says the knobs are
+  converged "at `w = 30, 45, 55`". Above `w ~ 100` it is NOT converged, and
+  its error is amplified by the same `e^{+pi w/4}` factor as everything else
+  in this problem. Measured at w=130, gp=1.3, y=(0.3,0.2):
+
+      oracle maxdeg5 vs maxdeg6     1.7056e-04
+      PRODUCTION vs oracle maxdeg5  1.7058e-04    <- the false signal
+      PRODUCTION vs oracle maxdeg6  2.0896e-15    <- production is correct
+      oracle maxdeg6 vs maxdeg7     0.0000e+00    <- converged at 6
+
+  Confirmed at w=190 (maxdeg6 identical to maxdeg7) and w=210 (converged to
+  2e-61).
+
+  ACTION: raise `ORACLE_MAXDEGREE` 5 -> 6, and amend the calibration comment
+  to say the knobs must be validated in the AMPLIFICATION band, not only at
+  w = 30/45/55. Until then
+  `MpmathPathOracleAgreementTestCase::test_mpmath_path_matches_oracle_uniformly`
+  is red under `COGWHEEL_TRAIN_TIER=1` and reports production's error when it
+  is reporting its own.
+
+  Do NOT trim the test's `w` grid to make it pass. The grid is right; the
+  oracle is under-resolved.
+
+  ## 2. Then raise `_MP_PANEL_ORDER` 32 -> 40 — for REFUSALS, not wrong values
+
+  At order 32 the paired N/2N certificate blows the `3e-10` gate from
+  `w ~ 139` — INSIDE the advertised `60 < w <= 150` band — while the value is
+  right to 9e-16. So `f_schwinger` raises `SchwingerCertificationError` on
+  correct answers over the top ~11 units of its own band. Measured at w=150,
+  against a converged oracle:
+
+      gp    order  TRUE rel err   cert rel   certifies?   s/call
+      1.3     32     8.99e-16     8.11e-07      NO          57
+      1.3     40     8.99e-16     1.45e-28     yes          72
+      0.7     32     3.24e-16     3.09e-07      NO          96
+      0.7     40     3.24e-16     5.61e-29     yes          74
+
+  Order 40 certifies through `w ~ 204` for BOTH fixtures. Cost ratio 1.29x
+  (cleanest at w=190: 99s -> 128s), so the ceiling's RUNTIME rationale
+  survives — the 150 ceiling stays a budget decision, not an accuracy one.
+
+  The certificate is structurally CONSERVATIVE, not optimistic: it reports
+  the N-rule error while the function returns the 2N value, so it refuses
+  before the value degrades (measured margin ratio 1.65e19 vs 2^64 = 1.85e19
+  at w=190). Raising the order does not create a certified-but-wrong band.
+
+  ## Watch out when you change the order
+
+  `THREE_OUTCOME_W = 151.0` with its `THREE_OUTCOME_FOLD/CUSP/REFUSE`
+  fixtures encodes WHICH arms certify at exactly w=151. Raising
+  `_MP_PANEL_ORDER` changes certification outcomes there; expect those three
+  to need re-calibration, and re-derive them from the live gate rather than
+  re-pinning.
+
+  ## Acceptance
+
+  Quote error-vs-`w` against the HARDENED oracle (maxdeg >= 6), and state the
+  refusal onset (not the accuracy crossing) as the number that moved. Confirm
+  both `gamma'` fixtures. Report seconds/call at the shipped order and the
+  new one on an UNCONTENDED box — the 1.29x ratio is trustworthy, absolute
+  timings from a loaded box are not.
+
+  ## RESOLVED 2026-08-13 (5451ab9)
+
+  Both actions shipped together. `test_lensing_schwinger.py`:
+  `ORACLE_MAXDEGREE` 5 -> 6 (7 is bit-identical to 6 at w=130 and w=190,
+  2e-61 at w=210, so 6 is converged across the exercised band).
+  `_schwinger.py`: `_MP_PANEL_ORDER` 32 -> 40, certifying through `w ~ 204`
+  on both `gamma'` fixtures (1.3 and 0.7) at ~1.29x cost (99s -> 128s at
+  w=190). Acceptance table (order, TRUE rel err, cert rel, certifies?):
+  32/8.99e-16/8.11e-07/NO and 40/8.99e-16/1.45e-28/yes at gp=1.3, w=150;
+  matching pattern at gp=0.7. The "watch out" item is moot: `THREE_OUTCOME_W`
+  is `W_CEILING_SCHWINGER_QD + 1.0` (derived, not a `151.0` literal), so it
+  tracks the ceiling automatically and needed no re-pin.
+
+
 ### One build monitor, three blind spots closed
 
 Closes `todo.d/sdk_killing_a_build_leaves_its_monitor_armed.md`, and takes the

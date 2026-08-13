@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "generated_by": "scripts/regenerate_consumer_graph.py (jedi.goto + ripgrep)",
-  "generated_at": "2026-07-20",
+  "generated_at": "2026-08-13",
   "loaders": {
     "EventData.from_npz": {
       "artifact": "event_data_npz",
@@ -45,6 +45,106 @@
       ],
       "callers": [
         {
+          "name": "AstroidByteIdentityTestCase.test_astroid_exterior_polar_npz_round_trip_is_bit_identical",
+          "file": "cogwheel/tests/test_lensing_surrogate.py"
+        },
+        {
+          "name": "DefinitionTagLoaderRefusalTestCase.test_known_tag_loads_and_serves",
+          "file": "cogwheel/tests/test_lensing_farfield_envelope.py"
+        },
+        {
+          "name": "DefinitionTagLoaderRefusalTestCase.test_legacy_single_box_missing_tag_refuses",
+          "file": "cogwheel/tests/test_lensing_farfield_envelope.py"
+        },
+        {
+          "name": "DefinitionTagLoaderRefusalTestCase.test_multichart_missing_tag_refuses_with_rebuild_message",
+          "file": "cogwheel/tests/test_lensing_farfield_envelope.py"
+        },
+        {
+          "name": "DefinitionTagLoaderRefusalTestCase.test_multichart_unknown_tag_refuses_naming_the_tag",
+          "file": "cogwheel/tests/test_lensing_farfield_envelope.py"
+        },
+        {
+          "name": "DefinitionTagLoaderRefusalTestCase.test_tube_only_artifact_is_unaffected",
+          "file": "cogwheel/tests/test_lensing_farfield_envelope.py"
+        },
+        {
+          "name": "EpsRegistrationGateTestCase.test_only_healthy_chart_packed_into_artifact",
+          "file": "cogwheel/tests/test_lensing_surrogate_training.py"
+        },
+        {
+          "name": "ExteriorPolarCuspAdaptedAxisTestCase.test_npz_round_trip_preserves_theta_to_u",
+          "file": "cogwheel/tests/test_lensing_farfield_envelope.py"
+        },
+        {
+          "name": "ExteriorPolarCuspAdaptedSerializationTestCase._roundtrip_npz",
+          "file": "cogwheel/tests/test_lensing_surrogate.py"
+        },
+        {
+          "name": "ExteriorPolarCuspAdaptedSerializationTestCase.test_carrier_rate_preserved_through_npz_roundtrip",
+          "file": "cogwheel/tests/test_lensing_surrogate.py"
+        },
+        {
+          "name": "ExteriorPolarRhoLogAxisSerializationTestCase.test_rho_log_axis_preserved_through_npz_roundtrip",
+          "file": "cogwheel/tests/test_lensing_surrogate.py"
+        },
+        {
+          "name": "LobePersistenceTestCase.test_absent_axis_schema_hard_refuses",
+          "file": "cogwheel/tests/test_lensing_surrogate_lobe.py"
+        },
+        {
+          "name": "LobePersistenceTestCase.test_current_lobe_schema_round_trips",
+          "file": "cogwheel/tests/test_lensing_surrogate_lobe.py"
+        },
+        {
+          "name": "LobePersistenceTestCase.test_farfield_tag_on_lobe_chart_refuses",
+          "file": "cogwheel/tests/test_lensing_surrogate_lobe.py"
+        },
+        {
+          "name": "LobePersistenceTestCase.test_lobe_frame_and_splines_round_trip_exactly",
+          "file": "cogwheel/tests/test_lensing_surrogate_lobe.py"
+        },
+        {
+          "name": "LobePersistenceTestCase.test_serve_bit_identical_pre_post_save",
+          "file": "cogwheel/tests/test_lensing_surrogate_lobe.py"
+        },
+        {
+          "name": "LobePersistenceTestCase.test_unknown_axis_schema_hard_refuses",
+          "file": "cogwheel/tests/test_lensing_surrogate_lobe.py"
+        },
+        {
+          "name": "LobeSchemaHardRefuseTestCase._save_with_meta",
+          "file": "cogwheel/tests/test_lensing_surrogate_lobe.py"
+        },
+        {
+          "name": "MacroSaddleFarFieldFallthroughTestCase.test_manual_and_loaded_macro_saddle_chart_fall_through",
+          "file": "cogwheel/tests/test_lensing_farfield_envelope.py"
+        },
+        {
+          "name": "NewGateSelfFalsificationTestCase.test_detagging_a_serving_artifact_flips_it_to_refused",
+          "file": "cogwheel/tests/test_lensing_farfield_envelope.py"
+        },
+        {
+          "name": "PositiveParityGoldenTestCase.test_load_preserves_rho_theta_c_axes_bits",
+          "file": "cogwheel/tests/test_lensing_surrogate_lobe.py"
+        },
+        {
+          "name": "RhoLogAxisNpzRoundTripTestCase.setUpClass",
+          "file": "cogwheel/tests/test_lensing_surrogate_training.py"
+        },
+        {
+          "name": "RhoLogAxisSchemaHardRefusalTestCase.test_carrier_demod_v2_schema_raises_valueerror",
+          "file": "cogwheel/tests/test_lensing_surrogate_training.py"
+        },
+        {
+          "name": "RhoLogAxisSchemaHardRefusalTestCase.test_new_v3_schema_loads_successfully",
+          "file": "cogwheel/tests/test_lensing_surrogate_training.py"
+        },
+        {
+          "name": "RhoLogAxisSelfFalsificationTestCase.test_reloaded_surrogate_rho_log_axis_absent_sets_false",
+          "file": "cogwheel/tests/test_lensing_surrogate_training.py"
+        },
+        {
           "name": "SerializationMultiChartTestCase.test_round_trip_preserves_every_chart_field",
           "file": "cogwheel/tests/test_lensing_surrogate.py"
         },
@@ -61,12 +161,72 @@
           "file": "cogwheel/tests/test_lensing_surrogate.py"
         },
         {
+          "name": "StaleFarfieldAxisSchemaRefusalTestCase.test_absent_axis_schema_refuses_at_load",
+          "file": "cogwheel/tests/test_lensing_farfield_envelope.py"
+        },
+        {
+          "name": "StaleFarfieldAxisSchemaRefusalTestCase.test_current_axis_schema_loads",
+          "file": "cogwheel/tests/test_lensing_farfield_envelope.py"
+        },
+        {
+          "name": "StaleFarfieldAxisSchemaRefusalTestCase.test_old_axis_schema_refuses_at_load",
+          "file": "cogwheel/tests/test_lensing_farfield_envelope.py"
+        },
+        {
+          "name": "TubeChartMapSerializationTestCase.test_npz_round_trip_preserves_map_and_served_values",
+          "file": "cogwheel/tests/test_lensing_surrogate.py"
+        },
+        {
           "name": "_load_or_build",
           "file": "cogwheel/lensing/surrogate_training.py"
         },
         {
+          "name": "_shard_d_fixture",
+          "file": "cogwheel/tests/test_lensing_surrogate_training.py"
+        },
+        {
           "name": "run",
           "file": "cogwheel/lensing/surrogate_census.py"
+        }
+      ]
+    },
+    "CertifiedPpgoMap.load": {
+      "artifact": "certified_ppgo_map",
+      "defined_in": [
+        "cogwheel/lensing/ppgo_map.py"
+      ],
+      "callers": [
+        {
+          "name": "CensusBandSplitMirrorIntegrityTestCase.setUpClass",
+          "file": "cogwheel/tests/test_lensing_saddle_rho_guards.py"
+        },
+        {
+          "name": "CensusBandSplitMirrorSelfFalsificationTestCase.test_site4_rho_none_is_load_bearing",
+          "file": "cogwheel/tests/test_lensing_saddle_rho_guards.py"
+        },
+        {
+          "name": "LoaderCeilingRefusalTestCase.test_ceiling_less_artifact_is_hard_refused",
+          "file": "cogwheel/tests/test_lensing_ppgo_bandsplit.py"
+        },
+        {
+          "name": "LoaderCeilingRefusalTestCase.test_tampered_ceiling_value_is_hard_refused",
+          "file": "cogwheel/tests/test_lensing_ppgo_bandsplit.py"
+        },
+        {
+          "name": "MapRefusalTestCase.test_corrupt_and_absent_artifacts_refuse_loudly",
+          "file": "cogwheel/tests/test_lensing_ppgo_bandsplit.py"
+        },
+        {
+          "name": "PpgoMapDefenseInDepthSelfFalsificationTestCase.setUpClass",
+          "file": "cogwheel/tests/test_lensing_saddle_rho_guards.py"
+        },
+        {
+          "name": "PpgoMapDefenseInDepthTestCase.setUpClass",
+          "file": "cogwheel/tests/test_lensing_saddle_rho_guards.py"
+        },
+        {
+          "name": "use_certified_ppgo_map",
+          "file": "cogwheel/lensing/ppgo_map.py"
         }
       ]
     }
