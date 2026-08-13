@@ -1099,23 +1099,31 @@ class BandSplitReconstructionTestCase(_PpgoTestCase):
         # caustic-fixed polar coordinates (rho, theta_c) are computed directly
         # by mapping the physical box corners through `_to_caustic_fixed`.
         gamma_range = (0.25, 0.35)
-        rho_crn = []
-        theta_c_crn = []
-        for g in gamma_range:
-            for y1 in (2.0, 3.3):
-                for y2 in (0.6, 0.95):
-                    r, tc = surrogate._to_caustic_fixed(float(g), float(y1),
-                                                        float(y2))
-                    rho_crn.append(r)
-                    theta_c_crn.append(tc)
-        rho_range = (min(rho_crn), max(rho_crn))
-        theta_c_range = (min(theta_c_crn), max(theta_c_crn))
-        surrogate = LensAmplificationSurrogate.from_engine(
+        # The tile MUST contain the source, or the chart correctly declines
+        # and every assertion below degrades to "did not serve".  Derive the
+        # box from the source's OWN caustic-fixed coordinates rather than
+        # from hard-coded physical corners: the corners this fixture used to
+        # carry (y1 in (2.0, 3.3), y2 in (0.6, 0.95)) bracketed the source
+        # under the retired `_to_caustic_fixed` convention and stopped doing
+        # so when the coordinate changed -- measured 2026-08-13, the source
+        # mapped to rho 2.537 / theta_c 0.785 against a tile spanning rho
+        # (2.693, 4.145) / theta_c (0.180, 0.443), missing on BOTH axes.
+        # Deriving from the source keeps the containment invariant true
+        # through any future coordinate change.
+        r_src, tc_src = surrogate._to_caustic_fixed(
+            float(cls.GAMMA), float(cls.SOURCE[0]), float(cls.SOURCE[1]))
+        rho_range = (r_src * 0.90, r_src * 1.10)
+        theta_c_range = (tc_src - 0.15, tc_src + 0.15)
+        # NOT named `surrogate`: this function reads the MODULE `surrogate`
+        # above (`surrogate._to_caustic_fixed`), and any assignment to that
+        # name anywhere in the function makes it local for the whole scope,
+        # so the earlier module read raises UnboundLocalError.
+        trained = LensAmplificationSurrogate.from_engine(
             gamma_range=gamma_range, rho_range=rho_range,
             theta_c_range=theta_c_range,
             w_range=(2.0, 40.0), n_gamma=4,
             n_rho=4, n_theta_c=4, w_nodes_per_decade=8)
-        cls.env_chart, cls.served, cls.definition = surrogate.serve(
+        cls.env_chart, cls.served, cls.definition = trained.serve(
             cls.DENSE_W[cls.below], gamma=cls.GAMMA, y1=cls.SOURCE[0],
             y2=cls.SOURCE[1], beta=0.0, eta=cls.geom.caustic_distance,
             theta=cls.geom.caustic_theta,

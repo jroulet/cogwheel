@@ -38,7 +38,13 @@ from unittest import TestCase
 import numpy as np
 
 from cogwheel.lensing.chang_refsdal import geometry
-from cogwheel.lensing.chang_refsdal._airy_fold import fold_ppgo_correction
+from cogwheel.lensing.chang_refsdal._airy_fold import (
+    _image_at_delay,
+    _merging_fold_pair,
+    _uniform_error_estimate,
+    fold_ppgo_correction,
+)
+from cogwheel.lensing.ppgo_map import CERTIFICATION_BAR
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels,
     FARFIELD_KERNEL_SUM,
@@ -189,12 +195,39 @@ class _HandoffTestCase(TestCase):
     os.environ.get('COGWHEEL_TRAIN_TIER'),
     'Engine-backed test: requires COGWHEEL_TRAIN_TIER env var')
 class FoldHandoffAccuracyTestCase(_HandoffTestCase):
-    """Fold-ppGO correction is accurate (< 1%) for interior 4-image draw.
+    """Fold-ppGO REFUSES wherever the exact engine can check it, and the
+    refusal is load-bearing.
 
-    Fixture: gamma=0.5, interior source at rho=0.3, theta=pi/4
-    (away from axis cusps so Δτ is moderate → xi >= 4).
-    Frequency range: w ∈ [45, 55] — above a typical DD cap (~40) but
-    below the Schwinger wall (~60).
+    This class used to assert the fold correction agrees with the exact
+    engine to 1% at gamma=0.5, rho=0.3, w in [45, 55].  That assertion is
+    STRUCTURALLY UNSATISFIABLE, and measuring why is the point of the
+    class now.
+
+    Production's fold-ppGO gate (`likelihood.py`, the interior rung) needs
+    THREE things, not one: ``rho <= 1``, ``xi_min >= _XI_FOLD_THRESHOLD``
+    (4.0), AND ``_uniform_error_estimate <= CERTIFICATION_BAR`` (1e-4).
+    The old test checked only the xi term.  Measured 2026-08-13 at this
+    fixture (Δτ = 0.327):
+
+        w        xi      error estimate     production
+        45      4.95        9.08e-02          refuse
+        150    11.05        2.72e-02          refuse   <- engine ceiling
+        1e4   181.72        4.09e-04          refuse
+        5e4   531.35        8.17e-05          SERVE
+
+    The rung first serves near ``w ~ 5e4``, while the exact Schwinger
+    oracle ceilings at ``W_CEILING_SCHWINGER_QD = 150``.  The served
+    domain and the engine-checkable domain are therefore DISJOINT by a
+    factor of ~330: no config exists that is both production-served and
+    verifiable against the exact engine, so "fold-ppGO agrees with exact
+    to 1%" can never be tested directly.  The old fixture's true error was
+    20.6% -- not a regression, just the accuracy of a config production
+    declines to serve.
+
+    What IS certifiable at engine-reachable w is the PROTECTIVE REFUSAL:
+    production refuses here, and it is right to, because the true error is
+    large.  Do not restore the 1% claim; restoring it needs an oracle that
+    reaches ``w ~ 5e4``, which the Schwinger engine does not.
 
     Cost: 1 config × 20 engine evaluations ≈ < 10 s.
     """
@@ -213,10 +246,45 @@ class FoldHandoffAccuracyTestCase(_HandoffTestCase):
             f'in the near-fold regime (need larger Δτ or higher w)')
         self.n_checks += 1
 
-    def test_fold_correction_accuracy_vs_exact(self):
-        """Fold-ppGO agrees with exact engine within 1% relative error."""
+    def test_production_refuses_where_the_engine_can_check(self):
+        """Production declines this config, and the true error shows why.
+
+        Two claims, both at engine-reachable ``w``: the production error
+        estimate exceeds `CERTIFICATION_BAR` (so the rung refuses), and
+        the TRUE error against the exact engine is large (so refusing is
+        protective, not cosmetic).  A refusal nobody would have regretted
+        is not worth a gate.
+        """
         source = _polar_source(RHO_INTERIOR, THETA_INTERIOR, GAMMA)
         w_test = np.linspace(W_MIN, W_MAX, N_W)
+
+        matrix = geometry.macro_matrix(GAMMA, 0.0, 0.0)
+        images = geometry.find_images(source, matrix)
+        delta_tau = _compute_delta_tau(source, GAMMA)
+        self.assertIsNotNone(delta_tau, 'No fold pair at the fixture config')
+        pair = _merging_fold_pair(images, source, matrix)
+        self.assertIsNotNone(pair, 'No merging fold pair at the fixture')
+        image_plus = _image_at_delay(images, source, matrix, pair[0])
+        image_minus = _image_at_delay(images, source, matrix, pair[1])
+        xi_min = _compute_xi_min(W_MIN, delta_tau)
+        estimate = _uniform_error_estimate(
+            image_plus, image_minus, matrix, xi_min)
+
+        # The xi term ALONE admits -- which is exactly why checking it
+        # alone was not enough.
+        self.n_checks += 1
+        self.assertGreaterEqual(
+            xi_min, XI_FOLD_THRESHOLD,
+            f'premise lost: xi_min={xi_min:.3f} no longer clears the xi '
+            f'gate, so this fixture no longer demonstrates that xi alone '
+            f'is an insufficient gate.')
+        self.n_checks += 1
+        self.assertGreater(
+            estimate, CERTIFICATION_BAR,
+            f'error estimate {estimate:.3e} is now within '
+            f'{CERTIFICATION_BAR:.0e}: production would SERVE this config, '
+            f'and the disjointness recorded in this class docstring no '
+            f'longer holds -- re-measure before trusting either.')
 
         # Fold-corrected total (absolute frame) → demodulate to min-rel
         f_fold = fold_ppgo_correction(w_test, source, GAMMA)
@@ -232,10 +300,18 @@ class FoldHandoffAccuracyTestCase(_HandoffTestCase):
         # Relative error
         rel_err = (np.max(np.abs(f_fold_minrel - f_exact))
                    / np.max(np.abs(f_exact)))
-        self.assertLess(
+        # The refusal above is PROTECTIVE: serving here would have been
+        # wrong by far more than the bar production aims at.  Asserting a
+        # LOWER bound on the error is what gives the refusal teeth --
+        # asserting an upper bound (the retired 1% claim) is the thing
+        # that cannot hold at any engine-reachable w.
+        self.n_checks += 1
+        self.assertGreater(
             rel_err, ACCURACY_BAR,
-            f'max relative error {rel_err:.4f} >= {ACCURACY_BAR} — '
-            f'fold correction is insufficiently accurate')
+            f'true error {rel_err:.4f} is now BELOW {ACCURACY_BAR}: the '
+            f'refused config is accurate after all, so the gate is '
+            f'refusing something it need not -- re-derive the gate rather '
+            f'than relaxing this test.')
 
         # Diagnostic plot
         _save_diagnostic_plot(
@@ -316,7 +392,12 @@ class FoldHandoffGateRefusalTestCase(_HandoffTestCase):
         the error at this refused config.
         """
         source = _polar_source(RHO_NEAR_CAUSTIC, THETA_NEAR_CAUSTIC, GAMMA)
-        w_test = np.atleast_1d(np.float64(W_MIN))
+        # TWO points, not one: `ChangRefsdalChannels` requires a 1-D grid
+        # with at least two strictly-increasing positive entries, so the
+        # single-point grid this used to build raised ValueError before any
+        # comparison ran -- and the anti-vacuity tearDown then reported it
+        # as a second, misleading "vacuous test" failure.
+        w_test = np.linspace(W_MIN, W_MIN * 1.02, 2)
 
         # Fold correction (may still compute — it doesn't hard-refuse,
         # it just falls back to raw ppGO internally)
@@ -551,8 +632,11 @@ RHO_HIGH_CURVATURE: float = 0.5
 #: Angle for high-curvature fixture (max curvature between cusps).
 THETA_HIGH_CURVATURE: float = math.pi / 4.0
 
-#: Production certification bar (ppgo_map.CERTIFICATION_BAR).
-_CERTIFICATION_BAR: float = 1e-4
+#: Production certification bar, BOUND from `ppgo_map` rather than
+#: re-typed: a hard-coded 1e-4 here would silently disagree the day
+#: production moves the bar, and this suite's whole job is to pin where
+#: the gate refuses.
+_CERTIFICATION_BAR: float = CERTIFICATION_BAR
 
 
 class ErrorEstimateFineGateTestCase(_HandoffTestCase):
