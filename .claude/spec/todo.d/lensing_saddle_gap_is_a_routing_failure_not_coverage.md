@@ -29,25 +29,33 @@ section: Backlog
       60 < w <= 150    216 (24.0%)  Schwinger MPMATH        ~85-120 s/call
       degenerate band  121 (13.4%)  see the rho_outer todo
 
-  MEASURE AGAINST THE SERVING BUDGET, NOT AGAINST EACH OTHER. The warm
-  single-thread lnlike is **9.8 ms** (ratio layer); the exact-engine crown is
-  751 ms. Per call:
+  COST IS THE WRONG AXIS — FALLING THROUGH IS A FAILED SERVE, NOT A SLOW ONE.
+  Production is never supposed to reach direct evaluation: the surrogate IS
+  the speed layer, and the exact engine is the ladder's last rung for
+  correctness, not a path a production serve takes. And an evaluation is not
+  one engine call — the envelope is built on a LOO-adaptive grid
+  (`_LOO_SEED_NODES = 8`, ceiling `_LOO_MAX_NODES = 48`), so a gapped draw
+  costs 8-48 calls:
 
-      double-double   200 ms   =     20x the ENTIRE lnlike budget
-      mpmath      100,000 ms   =  10204x the ENTIRE lnlike budget
+      double-double   8 x 200 ms  =   1.6 s   (up to 9.6 s)   vs a 9.8 ms budget
+      mpmath          8 x 100 s   = 800 s
 
-  A single such node does not fit inside an evaluation — it IS the
-  evaluation. Amortised over all draws at the measured hit rates:
+  Both are orders of magnitude past usable. The ~500x ratio between them is
+  real and irrelevant to whether either can ship: neither can.
 
-      dd      5.64% x 200 ms   =   11.3 ms/draw  =   1.2x budget
-      mpmath  2.16% x 100 s    = 2160.0 ms/draw  =   220x budget
+  So rank by PRIOR MASS UNSERVED, modulated by how hard each region is to
+  fix — not by engine wall-clock:
 
-  So BOTH populations must be served. mpmath is worse by ~190x and is
-  correctly first, but the 564 double-double draws are NOT cheap: on their
-  own they more than double the cost of every likelihood evaluation. An
-  earlier version of this note called them "worth ~1.9 minutes" — that is
-  wall-clock over a 10k census sample, which is the wrong denominator
-  entirely. Cost belongs against the budget a draw must fit in.
+      564 draws  5.64%   extend rho_outer; chartable, cheap to train
+      326 draws  3.26%   route to the uniform arms
+      216 draws  2.16%   new rung; ~half unchartable at any price
+      121 draws  1.21%   degenerate band (closed 2026-08-12)
+
+  The 564 is the LARGEST unserved population AND the cheapest to fix. Two
+  earlier versions of this note ranked it last, first by comparing wall-clock
+  against the mpmath band and then by amortising a single call across all
+  draws. Both were the wrong denominator; the engine cost of a region says
+  how expensive it is to CERTIFY or TRAIN there, not how much it matters.
 
   ## HALF THE EXPENSIVE POPULATION CANNOT BE CHARTED AT ALL
 
