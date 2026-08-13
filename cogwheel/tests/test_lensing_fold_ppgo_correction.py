@@ -76,17 +76,20 @@ W_HIGH = np.array([1000.0, 2000.0, 5000.0, 10000.0, 50000.0])
 #: Machine-precision tie tolerance for monotone improvement checks.
 MONOTONE_TIE_TOL = 1e-12
 
-#: Expected approximate magnitude of the flat-in-w geometric error
-#: the correction removes at the axis-angle witness (measured ~7-9%).
-CORRECTION_MAGNITUDE_FLOOR = 0.04
+#: Expected approximate magnitude of the flat-in-w geometric error the
+#: correction removes at the off-axis fold witness (rho=0.8, angle=pi/4;
+#: measured 0.032-0.218 over W_HIGH, 2026-08-13).  The former on-axis
+#: witness sat on the tied-minima cusp locus that F072's guard refuses,
+#: so its ~7-9% figure pinned a wrongly-admitted pair.
+CORRECTION_MAGNITUDE_FLOOR = 0.02
 
 #: Upper bound on correction magnitude (oscillates with w due to
-#: carrier-phase interference; measured peak ~0.15-0.39 at specific w,
-#: but typically ~0.07-0.15).
+#: carrier-phase interference; measured 0.032-0.218 over W_HIGH at the
+#: off-axis witness).
 CORRECTION_MAGNITUDE_CEIL = 0.40
 
 #: Minimum improvement factor at the near-caustic interior witness
-#: (measured 2.8-3.8x at w=5..15).
+#: (measured 4.6-28.6x at w=5..15 at rho=0.8, angle=pi/4).
 MIN_IMPROVEMENT_FACTOR = 2.0
 
 
@@ -171,14 +174,19 @@ class MonotoneImprovementTestCase(_FoldCorrectionTestCase):
     better than the uncorrected raw ppGO for every w element.
 
     Tested configs:
-      (a) interior 4-image, rho=0.7, angle=pi/2 (near-fold on axis)
+      (a) interior 4-image, rho=0.7, angle=pi/2 — tied-minima cusp locus:
+          `_merging_fold_pair` refuses (F072) and the correction is a
+          deliberate no-op.  Kept as a monotone TIE case: a guard
+          regression that re-admits the wrong pair and worsens the error
+          fails this bound.  The refusal itself is pinned once, in
+          test_lensing_airy_fold.
       (b) interior 4-image, rho=0.8, angle=pi/4 (near-fold off axis)
       (c) exterior 2-image, rho=1.1, angle=pi/2 (correction is a no-op)
     """
 
     #: (rho, angle, description)
     CONFIGS = [
-        (0.7, math.pi / 2, 'interior_4img_axis'),
+        (0.7, math.pi / 2, 'interior_4img_axis_noop_f072'),
         (0.8, math.pi / 4, 'interior_4img_off_axis'),
         (1.1, math.pi / 2, 'exterior_2img_axis'),
     ]
@@ -242,8 +250,7 @@ class MonotoneImprovementTestCase(_FoldCorrectionTestCase):
         form should provide >= 2x improvement over raw ppGO at every
         tested w point.
         """
-        for rho, angle, desc in [(0.7, math.pi / 2, 'axis'),
-                                  (0.8, math.pi / 4, 'off_axis')]:
+        for rho, angle, desc in [(0.8, math.pi / 4, 'off_axis')]:
             with self.subTest(config=desc):
                 source = _polar_source(rho, angle, GAMMA)
                 exact = _exact_total(W_LOW, source, GAMMA)
@@ -373,25 +380,27 @@ class LargeXiNoOpTestCase(_FoldCorrectionTestCase):
 # TEST CLASS 3: AXIS-ANGLE CORRECTION MAGNITUDE (7% witness)
 # ======================================================================
 
-class AxisAngleCorrectionTestCase(_FoldCorrectionTestCase):
-    """The fold correction removes the known ~7% flat-in-w geometric error.
+class OffAxisFoldCorrectionTestCase(_FoldCorrectionTestCase):
+    """The fold correction removes the flat-in-w geometric fold-pair error.
 
-    At the witness config (gamma=0.5, rho=0.7, angle=pi/2), the raw ppGO
-    has a persistent ~7% error from the fold pair's image_kernel using a
-    local-quadratic approximation that breaks down when two images are
-    near-degenerate.  The Airy form uses the uniform fold approximation
-    which correctly handles this regime.
+    Witness config gamma=0.5, rho=0.8, angle=pi/4: a genuine adjacent
+    (min, saddle) pair approaching a fold arc, with no tied twin.  The
+    former on-axis witness (rho=0.7, angle=pi/2) sat on the cusp
+    SYMMETRY AXIS, where the two minima tie exactly and
+    `_merging_fold_pair` refuses (F072): the ~7% "correction" it pinned
+    came from a wrongly-admitted pair whose two-image Airy form does not
+    represent the cusp cluster.
 
     The correction magnitude is measured as |corrected - raw| / |raw|
     at high w (geometric limit) where the difference IS the fold pair
-    error being removed.  At low w, we additionally verify against the
-    exact wave operator that the correction genuinely reduces the total
-    error.
+    error being removed (measured 0.032-0.218 over W_HIGH).  At low w,
+    we additionally verify against the exact wave operator that the
+    correction genuinely reduces the total error.
     """
 
-    #: Witness source position: rho=0.7, angle=pi/2 (on the y-axis,
-    #: where the fold pair merges).
-    SOURCE = _polar_source(0.7, math.pi / 2, GAMMA)
+    #: Witness source position: rho=0.8, angle=pi/4 (approaching the
+    #: fold arc, off the symmetry axes).
+    SOURCE = _polar_source(0.8, math.pi / 4, GAMMA)
 
     def test_correction_magnitude_at_high_w(self):
         """At high w, corrected differs from raw by ~4-15% (the 7% fix).
@@ -515,8 +524,8 @@ class AxisAngleCorrectionTestCase(_FoldCorrectionTestCase):
                    label='7% reference')
         ax.set_xlabel('Dimensionless frequency w')
         ax.set_ylabel('F-normalized error |exact - approx| / max|exact|')
-        ax.set_title('Axis-angle accuracy: raw vs corrected ppGO\n'
-                     f'gamma={GAMMA}, rho=0.7, angle=pi/2')
+        ax.set_title('Off-axis fold-witness accuracy: raw vs corrected ppGO\n'
+                     f'gamma={GAMMA}, rho=0.8, angle=pi/4')
         ax.legend()
         ax.grid(True, alpha=0.3)
         _save_diagnostic_plot(fig,
@@ -783,8 +792,8 @@ class SelfFalsificationTestCase(_FoldCorrectionTestCase):
     these pass WITHOUT the corruption, the gate is dead code.
     """
 
-    #: Interior witness source (the same config used throughout).
-    SOURCE = _polar_source(0.7, math.pi / 2, GAMMA)
+    #: Interior witness source (the off-axis fold witness, F072-safe).
+    SOURCE = _polar_source(0.8, math.pi / 4, GAMMA)
 
     def test_monotone_fails_with_wrong_sign(self):
         """If the correction WORSENS the error, the monotone test fails.

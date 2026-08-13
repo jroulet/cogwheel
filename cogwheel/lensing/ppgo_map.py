@@ -720,7 +720,10 @@ def caustic_geometry(gamma: float, kappa: float = 0.0
         point, canonicalised so its first non-zero component is
         non-negative (the caustic's 4-fold symmetry makes the quadrant
         physically irrelevant).  A source placed at ``rho * reach`` along
-        it is interior for ``rho < 1`` and exterior for ``rho > 1``.
+        THIS direction is interior for ``rho < 1`` and exterior for
+        ``rho > 1`` -- along it alone, because it is where the reach is
+        attained.  The statement does not generalise to other angles, where
+        the caustic sits well inside ``rho = 1`` (see `caustic_rho`).
 
     Raises
     ------
@@ -805,17 +808,41 @@ def caustic_rho(gamma: float, y_magnitude: float, kappa: float = 0.0) -> float:
 
     where ``caustic_reach`` is element 0 of `caustic_geometry` -- the MAXIMUM
     source-plane caustic radius over polar angle (a single scalar per
-    ``gamma``).  ``rho`` is dimensionless (Einstein-radius-normalised): the
-    caustic sits at ``rho = 1``, the interior at ``rho < 1`` and the exterior
-    at ``rho > 1``.
+    ``gamma``).  ``rho`` is dimensionless (Einstein-radius-normalised).
 
-    This is the SINGLE authoritative converter into the caustic-relative gauge.
-    It is DISTINCT from the additive directional interior/exterior gauge used
-    by the far-field charts (``rho = 1 + |y| - r_caustic``); the two gauges
-    must not be conflated.  Both `likelihood._ppgo_cell_coords` and
+    ``rho`` IS NOT A CAUSTIC-ADAPTED COORDINATE, and ``rho <= 1`` IS NOT THE
+    CAUSTIC INTERIOR.  The caustic is an astroid, so a single scalar reach
+    cannot be its level set: ``rho = 1`` is the CIRCLE circumscribing the
+    caustic, touching it only on the cusp axis where the reach is attained.
+    Measured over 2400 points (gamma 0.2-0.9), ``rho <= 1`` holds at
+    caustic-EXTERIOR sources 58.7% of the time, and ``caustic_reach /
+    r_caustic(theta)`` ranges from 1.45 to 6.20 (F073).
+
+    Which direction is safe therefore matters, because
+    ``caustic_reach >= r_caustic(theta)`` always:
+
+    * ``rho > 1`` DOES imply the exterior (``|y|`` exceeds every caustic
+      radius) -- sound;
+    * ``rho <= 1`` does NOT imply the interior -- unsound as a predicate;
+    * a far-from-caustic FLOOR (``rho >= x``) is conservative: it refuses
+      more than necessary, never less.
+
+    For an exact interior test use the real-image count (four real images
+    is the caustic interior, exactly), or compare ``|y|`` against the
+    directional `geometry.r_caustic(gamma, theta)`.  For a genuinely
+    caustic-ADAPTED chart -- one whose level sets are nested scaled
+    astroids, with the caustic exactly at ``rho = 1`` for EVERY angle --
+    use `surrogate._to_caustic_fixed`, which divides by the directional
+    ``r_caustic(theta_c)`` rather than by this scalar reach.
+
+    This is the SINGLE authoritative converter into the SCALAR-reach gauge.
+    It is DISTINCT from that adapted chart and from the additive directional
+    exterior gauge used by the far-field charts; the gauges must not be
+    conflated.  Both `likelihood._ppgo_cell_coords` and
     `surrogate_training._train_band_charts` obtain their ppGO ``rho``
     exclusively through this function, so the map is always queried in the
-    gauge it was certified in.
+    gauge it was certified in -- which is what makes this gauge legitimate as
+    a map COORDINATE even though it is wrong as a domain PREDICATE.
 
     Parameters
     ----------
