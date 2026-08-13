@@ -1,122 +1,164 @@
-# Build Brief: serve the saddle band where the engine is expensive or refuses
+# Build Brief: serve the far-from-caustic macro saddle from the analytic channels
 
 ## Mission
 
-For the macro saddle (`gamma > 1`), a measured population of prior draws is
-served today by the SLOWEST path in the codebase, and about half of it cannot
-be charted at all because the kernel refuses to produce a training node there.
-Give that region a named serving rung.
+For the macro saddle (`gamma > 1`), a measured 1236/10000 prior draws reach no
+serving rung and fall through to direct evaluation. Production must never
+reach direct evaluation, so these are UNSERVED, not merely slow.
 
-Do NOT re-open the deltoid exterior coordinate work (`LobeExteriorChart`,
-lobe-local `(rho_lobe, u)`) — it shipped in `4c7dc92` and is passing.
+Measurement (below) shows the largest sub-population needs NO chart: the
+SACR-C transition envelope is negligible there, so the switched analytic
+channels alone reproduce the total. Wire that as a named rung, with the gauge
+choice that makes it hold.
 
-## Measured facts (driver, 2026-08-12, at HEAD 4e72409)
+## Measured facts (driver, 2026-08-13, at HEAD 1d7487a)
 
-Instrument: `scripts/census_dry_run.py --n-samples 10000 --seed 42`, then
-per-branch instrumentation. Structural only, no engine calls, ~1 min to
-reproduce.
+Reproduce with `scripts/census_dry_run.py --n-samples 10000 --seed 42` plus
+the per-branch instrumentation in
+`todo.d/lensing_saddle_coverage_gap_breakdown.md`.
 
-1. Whole-prior structural coverage is **87.61%**. Of the 1239-draw gap, 1236
-   are macro-saddle. The largest single cause is 901 draws with
-   `rho_lobe > rho_outer` — beyond the charted lobe-exterior shell.
+1. **The envelope is negligible at moderate-to-high `w`.** `|E| / |F_total|`
+   over draws sampled from the real gap population:
 
-2. Those draws are FAR FROM THE CAUSTIC, not near it:
-   `eta` p10 0.617, p50 **0.971**, p90 1.380; `eta >= ETA_MIN_GEOMETRIC = 0.3`
-   for **99.2%**. `rho_lobe` p50 5.70 is an artefact of dividing by the small
-   `r_deltoid` — `|y|` p50 is only 0.732. They sit near the origin, between
-   the lobes, a full unit from the caustic.
+       w = 24   p50 3.60e-05   p90 1.47e-04    93.3% below 1e-3
+       w = 40   p50 4.98e-06   p90 2.76e-05    93.3% below 1e-3
+       w = 58   p50 2.97e-06   p90 1.17e-05    96.7% below 1e-3
 
-3. None of them reach the geometric arm. The saddle takes stationary phase
-   ONLY when resolved AND `w > W_CEILING_SCHWINGER_QD = 150`
-   (`operator.py` module docstring ~L105). This population's `w` is
-   p50 28.0, p90 104.4, **max 147.5** — zero draws clear 150.
+2. **The exceptions are a GAUGE artifact, not physics.** The excluded cases
+   are FARTHER from the caustic than the served ones (`eta` p50 1.169 vs
+   0.992), 0% sit inside the Airy fold fence, and `r(eta, delta_min) = -0.118`
+   — uncorrelated. They are not merging images. `delta_min = |tau_a - tau_c|`
+   compares a real image's delay to the CRITICAL CARRIER, which far from the
+   caustic is a virtual reference where no image sits. The switch
+   `S_a = smootherstep(w*|tau_a - tau_c|, 0.5, 4)` then turns OFF and hands
+   that channel to the envelope by construction. The failure threshold
+   matching `RHO_END = 4.0` exactly is the tell.
 
-4. COST IS CONCENTRATED. Splitting by the wave-branch boundary
-   `W_CEILING_SCHWINGER = 60`:
+3. **The SACR-C identity, verified to 3.8e-16** from a partition's own fields:
 
-       w <= 60         564 draws   Schwinger double-double  ~0.2 s/call
-       60 < w <= 150   216 draws   Schwinger MPMATH        ~85-120 s/call  (F061)
+       envelope = conj(exp(1j*w*tau_c)) * (F - sum_a exp(1j*w*tau_a) * S_a * SK_a)
 
-   Measured against the SERVING BUDGET, which is the denominator that
-   matters — warm single-thread lnlike is 9.8 ms (ratio layer), the
-   exact-engine crown is 751 ms:
+   where `SK` is `partition.saddle_kernels`. NOT `partition.kernels` — those
+   already have the envelope apportioned back in with weights
+   `1 - S_a + _ENVELOPE_WEIGHT_FLOOR` (`_gauge.py`).
 
-       double-double     200 ms/call =     20x the ENTIRE lnlike budget
-       mpmath        100,000 ms/call =  10204x the ENTIRE lnlike budget
+4. **Re-gauging works, and it is a TAIL fix.** Choosing `tau_c` to saturate
+   every switch, on the worst measured case (`gamma=1.5859`,
+   `y=(-1.1208,-0.9002)`, `w=58`): `|E|/|F|` 4.165e-01 -> 5.126e-04, an 813x
+   improvement. The value PLATEAUS for every `tau_c` that saturates the
+   switches — once saturated the residual is fixed and only a phase changes,
+   which cannot alter a magnitude — so 5.13e-04 is that source's
+   gauge-independent intrinsic error.
 
-   A single such node does not fit inside an evaluation; it IS the
-   evaluation. Amortised at the measured hit rates:
+   Across the whole excluded population (`w*delta_min < 16`, n = 37):
 
-       dd      5.64% x 200 ms =   11.3 ms/draw =   1.2x budget
-       mpmath  2.16% x 100 s  = 2160.0 ms/draw =   220x budget
+                      p50        p90        MAX      frac < 1e-3
+       shipped     4.53e-05   1.31e-02   6.71e-01      81.1%
+       re-gauged   3.55e-05   2.45e-04   9.65e-03      97.3%
 
-   So the mpmath band is ~190x worse and is correctly this build's target,
-   but the double-double population is NOT cheap either — on its own it more
-   than doubles every likelihood evaluation.
+   MEDIAN IMPROVEMENT IS 1x. Most of that population was already fine; what
+   re-gauging fixes is the TAIL (p90 53x, max 70x, coverage 81% -> 97%).
 
-5. HALF THE EXPENSIVE POPULATION CANNOT BE CHARTED. A training node needs the
-   1F1 kernel, which refuses above `_DD_PRODUCT_MARGIN = 58` (`w*|y| <= 58`).
-   Over the 216: `w*|y|` p50 61.2, p90 188.8, max 394.1 —
-   **48.1% under the ceiling (chartable at ~100 s/node), 51.9% over it (no
-   training node can exist)**.
+5. **A residual 2.67% is NOT a gauge problem — it needs a CHART, and it is
+   mostly chartable.** Over 300 (source, w) pairs, re-gauged `|E|/|F|` is
+   p50 6.11e-06, p90 1.22e-04, p99 1.45e-02, max 2.99e-02; **8 pairs (2.67%)**
+   exceed 1e-3. Since the re-gauged value is the gauge-independent floor,
+   their analytic trials genuinely fail to reproduce `F`, so the envelope must
+   be carried — i.e. splined, exactly as every other chart does.
+
+   That residual is a DISTINCT REGION, not scattered noise:
+
+       residual  eta p50 0.426 (range 0.233-1.037)   |y| p50 1.797   gamma p50 1.486
+       served    eta p50 0.984                        |y| p50 0.915   gamma p50 1.369
+
+   Closer to the caustic AND farther out — the deltoid's outer edge.
+
+   Chartability (`w*|y| <= _DD_PRODUCT_MARGIN = 58` for a training node):
+
+       w*|y|  p50 44.4   min 30.6   max 103.0
+       chartable: 75% (6 of 8)
+       w = 24: n=7, 85.7% chartable      w = 58: n=1, 0% chartable
+
+   The two constraints pull APART in our favour: the envelope shrinks with `w`
+   (p50 3.6e-5 at w=24 -> 3.0e-6 at w=58), so the population that still needs
+   it thins exactly where charting gets hard. 7 of the 8 sit at `w = 24`.
+
+6. **A ~0.7% sliver is still open.** 2 of 300 pairs both exceed the bar after
+   re-gauging AND have `w*|y| > 58`, so no training node can exist for them
+   and no gauge choice fixes them. That is the honest residual of this whole
+   approach. It is OUT of scope: it must be REFUSED by name, not served
+   wrongly, and not used to justify stretching tier 1 or tier 2.
 
 ## Scope
 
-IN — a named serving rung for the saddle region above the DD product ceiling,
-its validity gate, its wiring into the serve path, and tests.
+IN — a THREE-TIER ladder for the far-from-caustic macro saddle, with NO tier
+falling through to direct evaluation:
 
-OUT — the deltoid exterior coordinate (shipped); extending `rho_outer` for the
-`w <= 60` population — a SEPARATE build, but NOT optional: at 200 ms/call and
-a 5.64% hit rate it amortises to 11.3 ms/draw against a 9.8 ms lnlike budget,
-so it more than doubles every evaluation on its own; the `gamma -> 1`
-degenerate-band question (recorded, deliberately open);
-any training run; the cusp/fold carve-out population (326 draws, separate).
+  1. re-gauged switched analytic channels (serves ~97.3%, no chart);
+  2. for sources the gate rejects, a CHART of the RE-GAUGED ENVELOPE — the
+     lowest-order physics is already removed by construction, since `E` is
+     what remains after the switched analytic trials are subtracted, so the
+     chart target has small dynamic range and no carrier oscillation;
+  3. a named refusal ONLY for what neither tier can reach (see below).
 
-## The idea to evaluate (Professor must adjudicate before the Coder codes)
+Plus the validity gate, the serve-path and census wiring, and tests.
 
-`todo.d/lensing_ppgo_extrapolation_beyond_engine_reach.md` proposes: where a
-direct fit is impossible, train where the engine is CHEAP and extrapolate in
-`w` with the known analytic scaling divided out. The `w`-dependence in the
-resolved regime is carried by known factors (`exp(i w tau_a)` carriers,
-`w^{1/6}` / `w^{-1/6}` Airy weights, `w^{1/2}` / `w^{3/4}` Pearcey control
-arguments), so splining the DEMODULATED, scaling-stripped residual — flat in
-`w` by construction — may extrapolate where the envelope itself cannot.
+OUT — the ~0.7% sliver of fact 6 (2 of 300 pairs, `w*|y| > 58` AND needing the
+envelope: unchartable by construction, still open — do NOT invent a rung for
+it here, and do NOT let it justify widening any other tier); the
+`w <= 60` chartable population (separate, and NOT optional — see
+`todo.d/lensing_saddle_gap_is_a_routing_failure_not_coverage.md`); the
+`gamma -> 1` degenerate-band question (recorded); the cusp/fold carve-out
+population (326 draws, belongs to the uniform arms); any training run.
 
-The Professor must decide:
-- whether that residual is genuinely `w`-flat for the macro saddle, or whether
-  the saddle's own asymptotics differ from the positive-parity case the
-  existing arms were built for;
-- what the VALIDITY GATE is, keyed on something that actually degrades (the
-  `_airy_fold` fence is permanent precisely because a self-certificate blind
-  to caustic distance read 1.2e-2 where the true error was O(1) — F028, F032,
-  F033);
-- whether the existing fold-ppGO handoff (`likelihood.py`,
-  `_XI_FOLD_THRESHOLD = 4.0` plus a per-pair uniform error estimate) is the
-  right precedent to extend, or whether the saddle needs its own.
+## Design points the Architect must settle
+
+These are DESIGN decisions. The measurements above are DONE — do not
+re-derive them and do not send agents to re-measure them.
+
+- **Where the gauge choice lives.** `tau_c` must be a pure function of the
+  source, computed identically at train and serve time. A gauge chosen one
+  way when the envelope is stored and another when it is served is a
+  train/serve skew — the bug class already recorded for the ghost gate. Name
+  the single authoritative home.
+- **Regional handover.** Near the caustic the critical-point `tau_c` is
+  CORRECT: the merging pair's delays converge to it and the envelope handles
+  them smoothly. This is therefore a REGIONAL gauge switch keyed on distance
+  from the caustic, and the handover needs a continuity requirement stated as
+  a test.
+- **The gate.** It must key on something that degrades with the served
+  quantity. `eta` alone does NOT (fact 2). The measured discriminator is
+  post-re-gauge switch saturation, `min_a w*|tau_a - tau_c| >= RHO_END` under
+  the CHOSEN gauge. State how a source that cannot be re-gauged into
+  saturation is refused.
+- **Refusal, not degradation.** A source failing the gate falls to the next
+  ladder rung by a NAMED refusal. The `_airy_fold` fence is permanent
+  precisely because a self-certificate blind to what degrades it read 1.2e-2
+  where the true error was O(1) (F028, confirmed against GLoW in F032; no
+  amplitude refinement removes it, F033).
 
 ## Acceptance
 
-1. A NAMED rung serves a measured subset of the 216, with a gate that
-   REFUSES outside its validity domain rather than degrading.
-2. Accuracy certified against the exact engine INSIDE the reachable band
-   (`w*|y| <= 58`), reported as an eps DISTRIBUTION (p50/p90/max) plus the
-   worst-sample locus — never a bare max.
-3. The error DECREASES with `w` across the certified band. This is the only
-   honest basis for trusting the rung above the ceiling, and it is a
-   falsifiable claim: report the trend, do not assert it.
-4. `scripts/census_dry_run.py` models the new rung, and the saddle
-   `exact_engine` bucket drops by the amount the rung actually claims. Report
-   the per-cause breakdown (the six-way split above), not just the total.
-5. Astroid (`parity == 1`) behaviour byte-identical.
+1. A named rung serves far-from-caustic saddle sources from the analytic
+   channels: no chart, no engine call, no fall-through to exact.
+2. Accuracy vs the exact Schwinger engine reported as a DISTRIBUTION
+   (p50/p90/max) with the worst-sample locus — never a bare max. Bar: 1e-3.
+3. The gate REFUSES the residual population rather than serving it wrongly; a
+   test drives a known-bad source and asserts the refusal.
+4. Train/serve gauge identity: a test asserts the stored and served `tau_c`
+   agree for the same source.
+5. `scripts/census_dry_run.py` models the rung; the saddle `exact_engine`
+   bucket drops by what the rung claims, reported against the six-way
+   per-cause breakdown, not just the total.
+6. Astroid (`parity == 1`) byte-identical.
 
 ## Constraints
 
 - Branch `claude-dev`. Fast tests only; no training run; slow tiers stay empty.
 - Every domain-test description MUST begin with its SHARD letter and target
-  suite FILE PATH, and shards must be DISJOINT — one file per shard (F057).
-  A plan was rejected at this gate on 2026-08-12 for omitting exactly this.
+  suite FILE PATH; shards DISJOINT, one file per shard (F057).
 - The oracle for `gamma > 1` is the exact Schwinger path. `operator.F_op`
   DIVERGES for the saddle and must NOT be used.
-- Do not raise `_DD_PRODUCT_MARGIN`. It is the 1F1 kernel's certified domain,
-  not a tunable.
+- `w <= 60` keeps the engine cheap (~0.2 s/call); `60 < w <= 148` is the
+  mpmath band at ~85-120 s/call (F061). Certify in the cheap band.
 - Keep the WP count at or below 3.
