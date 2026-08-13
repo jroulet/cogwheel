@@ -61,25 +61,60 @@ section: Backlog
   was intended (the `zero_quadrature_pearcey` build killed the live-
   quadrature fallback) before re-pointing any fixture at it.
 
-  ## OPEN 2 — `test_lensing_ratio_layer`, refusal symmetry
+  ## CLOSED 2026-08-13 (test-debt audit) — 2, 3 and the training file
 
-  `test_uncertifiable_branch_refused_symmetrically` requires
+  `test_lensing_ratio_layer` — RETIRED, not repointed.
+  `test_uncertifiable_branch_refused_symmetrically` required
   `CANCELLATION_CONFIG` (gamma=0.47, y=(0.1,0.1), m_lens=360) to be REFUSED
-  by all three paths with the same named exception. All three now SUCCEED.
+  by all three paths; all three now SUCCEED and agree to **1.93e-2 nats**,
+  inside the 0.05-nat target. Its own constant recorded a first hand-repoint
+  (Build 8e) for exactly this, so a third witness would drift again. Deleted
+  with `CANCELLATION_CONFIG`. Symmetric NAMED refusal is now carried solely
+  by `test_lensing_fast_path::test_paths_refuse_over_critical_symmetrically`,
+  which sits on the STRUCTURAL over-critical boundary (`kappa >= 1`) and
+  cannot move with a certification threshold; the surviving
+  `test_macro_saddle_evaluated_symmetrically` carries path AGREEMENT.
 
-  This is NOT a lost guard: the three paths agree to **1.93e-2 nats**
-  (ratio -575.05928, direct -575.05928, bruteforce -575.03997), inside the
-  0.05-nat target, so the engine now certifies what it used to refuse. The
-  fixture has left the REFUSAL domain — the mirror image of the usual case.
+  `test_lensing_surrogate_census` — `LnlTierTestCase::
+  test_real_likelihood_tiers_within_bars` DELETED (with the now-dead
+  `_likelihoods` and `_dense_farfield_source` fixtures) for the reasons in
+  OPEN 3 below, which stands as the record of why. The "leave it red, it is
+  the only thing pointing at the serve gap" instruction is superseded:
+  8dfb8ca closed that gap, and the test's failure mode moved from
+  `dlnL 0.2394` to `surrogate declined` — production now refuses the chart,
+  which is the correct behaviour. The tier routing, the per-tier max/target
+  reporting and the three bars stay pinned by the two surviving engine-free
+  members of the class.
 
-  Note the constant's own comment records it was already replaced once for
-  exactly this ("symmetry premise died. HARD-CORE replacement..."). This is
-  the SECOND drift. A third hand-picked config will drift again; either
-  derive the witness from the certification boundary at test time, or retire
-  the symmetry test and keep the agreement test (which is the stronger
-  claim and is what actually held here).
+  `test_lensing_surrogate` — `LnlikeAccuracyTestCase::
+  test_positive_served_lnlike_tracks_engine` REPAIRED BY DERIVATION, because
+  unlike the census one its box (`POS_BOX`, `rho ~ 2.3-2.8`) is a genuine
+  exterior box; only the WITNESS MASS was stranded. `M_LENS_MSUN = 90` puts
+  the band bottom at `w = 0.234` against a crown `farfield_w_floor` of
+  `0.352`, so 8dfb8ca's guard declines it. The class now trains its own
+  `_pos_surrogate_bandwide` chart over `LNL_ACC_W_RANGE = (0.1, 28)` — the
+  shared `_pos_surrogate_ship` w-grid and every eps literal measured against
+  it are untouched — and `_bandwide_lens_mass()` returns the GEOMETRIC CENTRE
+  of the admissible mass interval `[max_config_w_floor / w(f_lo, 1),
+  chart_w_max / w(f_hi, 1)]`, raising an attributed AssertionError if a gate
+  move ever empties it. Measured: 150 Msun, band `[0.390, 26.62]`, all three
+  probes clear their floor and sit at 47-68% of `DELTA_T_MAX`.
+
+  `test_lensing_surrogate_training` — 18 failed + 25 errors -> **196 passed
+  in 2m46s** (was 40m17s at `-n 4`; the runtime was almost entirely one
+  deleted class's `train()` in `setUpClass`). 15 of the 18 were ONE fixture
+  arithmetic error: `_GATE_NAN_CENTER = (2.5, 1.4)` with
+  `_GATE_HALF = (0.25, 0.2)` spans `theta_c` to **1.6 > pi/2**, which nothing
+  caught until bca9534 added `_wedge_cusp_axis_map`'s domain guard — and the
+  constant's own comment claimed it kept "every box inside (0, pi/2)". The
+  three centres are now the odd columns of a 7-column partition of the live
+  D2-folded domain, so leaving the domain, touching a cusp ray and
+  overlapping each other are all structurally impossible; `_wp1_gate_fixture`
+  additionally probes each span through the PRODUCTION guard first, so the
+  next domain move fails at the premise with the offending tile named.
 
   ## OPEN 3 — `test_lensing_surrogate_census` crown dlnL — ATTRIBUTED
+  ## (kept as the attribution record; the test itself is now deleted)
 
   `LnlTierTestCase::test_real_likelihood_tiers_within_bars`: crown
   dlnL **0.2394** against `CROWN_LNL_TOL = 0.05`.
@@ -126,8 +161,10 @@ section: Backlog
   `run` test, `test_node_exactness`, and
   `test_trough_normalization_stays_bounded`, which needs a genuine `|E|`
   trough the exterior may not provide). Derive the witness FROM the window
-  rather than hand-picking it. **Leave the test red until then — it is
-  currently the only thing pointing at the serve gap below.**
+  rather than hand-picking it. SUPERSEDED 2026-08-13: the test is deleted
+  rather than left red — 8dfb8ca closed the serve gap it was pointing at, so
+  its only remaining function was to fail. If the Section-D fixture is ever
+  rebuilt, the recipe above is the one to use.
 
   ## OPEN 5 — SUB-`w_floor` SERVE GAP: blocks the full-box training campaign
 

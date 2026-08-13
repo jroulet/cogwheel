@@ -1637,6 +1637,79 @@ Tag conventions:
   not a repair of `InteriorWedgeChart`.
 
 
+- **A FULL EXTERIOR `train()` AT `m_lens_range = (10, 15)` M_sun REGISTERS
+  ZERO CHARTS — UNSERVED PRIOR MASS AT LOW LENS MASS, AND ITS ONLY WATCHER
+  WAS JUST DELETED** `[→ spec]` — found 2026-08-13 by the test-debt audit
+  while clearing fixture rot; NOT investigated, because the answer is
+  production-side and the audit was fenced to tests.
+
+  `ValueError: A surrogate needs at least one chart.` Seven of the audit's
+  25 errors in `test_lensing_surrogate_training.py` were this, raised from a
+  full exterior training run at the low-mass stratum.
+
+  ## This is a COVERAGE GAP, not a fallback
+
+  FALLING THROUGH TO THE EXACT ENGINE IS A FAILED SERVE, NOT A SLOW ONE. The
+  surrogate IS the speed layer; production is never supposed to reach direct
+  evaluation (standing rule — see
+  [[lensing_saddle_gap_is_a_routing_failure_not_coverage]], where the same
+  mistake was made and corrected for the saddle gap). Rank this by UNSERVED
+  PRIOR MASS, exactly like every other gap. Do NOT record it as "covered by
+  the engine".
+
+  ## The mechanism is structural, and it SPREADS with falling mass
+
+  `farfield_w_floor = (RHO_END/2) / min|dtau|` is set by DIMENSIONLESS Fermat
+  delays. Those are O(1) and independent of `m_lens` at fixed dimensionless
+  `y`: the physical delay factorises as
+  `Delta_t = (4 G M_L (1+z) / c^3) * tau`, so the mass lives ENTIRELY in
+  `w = 8 pi G M_L (1+z) f / c^3` and `tau` depends only on `(y, gamma,
+  kappa)`. (Caveat: mass-independent at fixed dimensionless `y`. Holding a
+  PHYSICAL offset fixed while varying mass changes `y`, since the Einstein
+  radius goes as sqrt(M_L).)
+
+  So the band `w in [w_lo, w_hi]` slides DOWN linearly with mass past a FIXED
+  floor, and the trainer's `[w_floor, w_trust]` window empties. Measured
+  floors at `gamma = 0.42`: 1.33 at `rho ~ 1.05`, 0.73 at `rho = 1.5`, 0.46
+  at `rho = 2.0`; a 60 M_sun band is `w in [0.119, 7.60]`, so a 10 M_sun band
+  is roughly `[0.020, 1.27]`. The NEAR-exterior (where the floor is highest)
+  empties first and the hole spreads OUTWARD as mass falls.
+
+  Consequence: no tiling density fixes an empty window. This is the same
+  `w_floor` mechanism as [[FINDINGS F070]], seen from the TRAINING side
+  rather than the serving side.
+
+  ## The question worth answering is the SIZE, not yes/no
+
+  Because the hole spreads rather than switching on, the useful measurement
+  is the fraction of the prior's `(m_lens, rho)` plane where
+  `[w_floor, w_trust]` is empty or too narrow to train. That is pure
+  geometry — `dimensionless_frequency` + `farfield_w_floor`, no engine calls,
+  no training — so it is cheap and re-runnable.
+
+  Report it as unserved prior mass, and state whether the emptied region
+  overlaps where the exterior charts are the ONLY rung (if another rung
+  covers it, the gap is smaller than the window arithmetic suggests).
+
+  ## Why this needs an owner NOW
+
+  The test that surfaced it has been DELETED (justifiably — it lived in
+  `FoldCarrierTrainingIntegrationTestCase`, which ran a full production
+  `train()` in `setUpClass`, cost 40 minutes per suite run, and had its own
+  claims duplicated by `test_lensing_exterior_polar_fold.py` on sub-second
+  fixtures). This failure mode currently has NO watcher.
+
+  Do not restore that test to cover it. The right artifact is a census /
+  coverage assertion over the `(m_lens, rho)` plane, not a 40-minute
+  integration test.
+
+  ## Acceptance
+
+  Quote the unserved prior mass fraction and the `(m_lens, rho)` region where
+  the window is empty. If some other rung covers part of it, say which and
+  net it off.
+
+
 - **SERVE ppGO WHERE THE EXACT ENGINE CANNOT REACH, INSTEAD OF REFUSING**
   `[→ spec]` — owner-directed 2026-08-06. Distinct from the ppGO ROUTING item
   in [[lensing_exterior_followup_four_items]] (which is about choosing ppGO
@@ -2591,63 +2664,77 @@ Tag conventions:
   domain OVERLAPS `rho <= 1`.
 
 
-- **THE EXACT EVALUATOR'S CERTIFIED BAND IS `w <~ 110`, NOT 150 — AND IT
-  CERTIFIES WRONG ANSWERS ABOVE THAT** `[→ spec]` — measured 2026-08-13 by
-  the driver against the independent `_oracle_1d`. Full measurement and
-  mechanism in [[FINDINGS F071]].
+- **THE mpmath ORACLE IS RED BY CONSTRUCTION ABOVE w ~ 100, AND PRODUCTION
+  SPURIOUSLY REFUSES CORRECT ANSWERS FROM w ~ 139** `[→ spec]` — measured
+  2026-08-13. REPLACES an earlier version of this fragment which claimed the
+  exact evaluator's certified band was narrower than 150; that claim came
+  from [[FINDINGS F071]], which is RETRACTED — the oracle was the thing that
+  was wrong, not `f_schwinger`.
 
-  `f_schwinger` is the reference every accuracy claim in this repo is
-  measured against. In `(110, 150]` it RETURNS (certifies) values wrong by up
-  to **1.7e-4** against its own suite's 1e-10 bar. The error grows as
-  `e^{+pi w/4}` — fitted `d(ln err)/dw = 0.785` vs `pi/4 = 0.7854` — because
-  a fixed absolute quadrature floor is amplified by the `1/Gamma(iw/2)`
-  prefactor. The paired N/2N certificate cannot see it: both rules share the
-  floor and the amplification.
+  ## 1. Fix the oracle FIRST — it currently convicts production of its own error
 
-  ## The decision, which is NOT taken here
+  `_oracle_1d` in `cogwheel/tests/test_lensing_schwinger.py` ships
+  `ORACLE_MAXDEGREE = 5`, and its own calibration comment says the knobs are
+  converged "at `w = 30, 45, 55`". Above `w ~ 100` it is NOT converged, and
+  its error is amplified by the same `e^{+pi w/4}` factor as everything else
+  in this problem. Measured at w=130, gp=1.3, y=(0.3,0.2):
 
-  Three options, and they are not equivalent:
+      oracle maxdeg5 vs maxdeg6     1.7056e-04
+      PRODUCTION vs oracle maxdeg5  1.7058e-04    <- the false signal
+      PRODUCTION vs oracle maxdeg6  2.0896e-15    <- production is correct
+      oracle maxdeg6 vs maxdeg7     0.0000e+00    <- converged at 6
 
-  1. **Lower `W_CEILING_SCHWINGER_QD` to ~110** and refuse above it. Honest
-     and cheap. COST: it removes serving coverage in `(110, 150]`, and the
-     cusp-exterior windows where the exact engine is the LAST rung would
-     start refusing — `_MP_PANEL_ORDER`'s own docstring says protecting that
-     coverage is why order-32 was chosen over order-24. Measure what actually
-     falls off before choosing this.
-  2. **Raise the working precision so the floor stays below the
-     amplification.** `dps = 30 + ceil(w)` grows 1.0 decimal digit per unit
-     `w` while the amplification needs `pi/4 / ln(10) = 0.341` digits per
-     unit `w`, so dps is NOT the binding constraint — suspect the fixed
-     `_MP_PANEL_ORDER = 32` composite rule instead. The fold investigation
-     already found that raising it 32 -> 48 made a refusing node return at
-     w=150. Measure error-vs-order at fixed `w = 130` before assuming.
-  3. **Keep the band and make the certificate honest** — replace paired N/2N
-     with a check that does not share the floor (e.g. a coarse independent
-     high-dps spot check, or a Richardson estimate across ORDER rather than
-     panel count).
+  Confirmed at w=190 (maxdeg6 identical to maxdeg7) and w=210 (converged to
+  2e-61).
 
-  Option 2 is the most likely to preserve coverage AND correctness; option 1
-  is the only one that is certainly safe today.
+  ACTION: raise `ORACLE_MAXDEGREE` 5 -> 6, and amend the calibration comment
+  to say the knobs must be validated in the AMPLIFICATION band, not only at
+  w = 30/45/55. Until then
+  `MpmathPathOracleAgreementTestCase::test_mpmath_path_matches_oracle_uniformly`
+  is red under `COGWHEEL_TRAIN_TIER=1` and reports production's error when it
+  is reporting its own.
 
-  ## What must be re-checked once the band moves
+  Do NOT trim the test's `w` grid to make it pass. The grid is right; the
+  oracle is under-resolved.
 
-  - `_ppgo_above_ceiling`'s boundary tests pin agreement "at w=150" and at
-    w=55/60. The w=150 anchors are inside the untrustworthy band.
-  - Any arm-vs-engine comparison in `(110, 150]`. Note this COMPOUNDS with
-    [[FINDINGS F069]]: in `60 < w <= 150` the positive-parity grid may return
-    the ARM rather than the engine, so such a test can be comparing an arm
-    against an arm above 110, and against a wrong engine below it.
-  - `test_lensing_schwinger.py::MpmathPathOracleAgreementTestCase` — its
-    `MPMATH_EXT_WS` currently reaches into the bad band; it is the test that
-    FOUND this, and it should keep failing until the band is fixed rather
-    than have its grid trimmed.
+  ## 2. Then raise `_MP_PANEL_ORDER` 32 -> 40 — for REFUSALS, not wrong values
+
+  At order 32 the paired N/2N certificate blows the `3e-10` gate from
+  `w ~ 139` — INSIDE the advertised `60 < w <= 150` band — while the value is
+  right to 9e-16. So `f_schwinger` raises `SchwingerCertificationError` on
+  correct answers over the top ~11 units of its own band. Measured at w=150,
+  against a converged oracle:
+
+      gp    order  TRUE rel err   cert rel   certifies?   s/call
+      1.3     32     8.99e-16     8.11e-07      NO          57
+      1.3     40     8.99e-16     1.45e-28     yes          72
+      0.7     32     3.24e-16     3.09e-07      NO          96
+      0.7     40     3.24e-16     5.61e-29     yes          74
+
+  Order 40 certifies through `w ~ 204` for BOTH fixtures. Cost ratio 1.29x
+  (cleanest at w=190: 99s -> 128s), so the ceiling's RUNTIME rationale
+  survives — the 150 ceiling stays a budget decision, not an accuracy one.
+
+  The certificate is structurally CONSERVATIVE, not optimistic: it reports
+  the N-rule error while the function returns the 2N value, so it refuses
+  before the value degrades (measured margin ratio 1.65e19 vs 2^64 = 1.85e19
+  at w=190). Raising the order does not create a certified-but-wrong band.
+
+  ## Watch out when you change the order
+
+  `THREE_OUTCOME_W = 151.0` with its `THREE_OUTCOME_FOLD/CUSP/REFUSE`
+  fixtures encodes WHICH arms certify at exactly w=151. Raising
+  `_MP_PANEL_ORDER` changes certification outcomes there; expect those three
+  to need re-calibration, and re-derive them from the live gate rather than
+  re-pinning.
 
   ## Acceptance
 
-  Report error-vs-`w` against `_oracle_1d` at the CHOSEN configuration, and
-  state the ceiling as the `w` where the fitted `e^{pi w/4}` law crosses
-  1e-10 — not as a round number. Do not trim the test grid to make the
-  existing ceiling look earned.
+  Quote error-vs-`w` against the HARDENED oracle (maxdeg >= 6), and state the
+  refusal onset (not the accuracy crossing) as the number that moved. Confirm
+  both `gamma'` fixtures. Report seconds/call at the shipped order and the
+  new one on an UNCONTENDED box — the 1.29x ratio is trustworthy, absolute
+  timings from a loaded box are not.
 
 
 - **THE SLOW TIERS WERE UNRUN FOR WEEKS AND SURFACED SIX RED FILES — EVERY
@@ -2709,25 +2796,60 @@ Tag conventions:
   was intended (the `zero_quadrature_pearcey` build killed the live-
   quadrature fallback) before re-pointing any fixture at it.
 
-  ## OPEN 2 — `test_lensing_ratio_layer`, refusal symmetry
+  ## CLOSED 2026-08-13 (test-debt audit) — 2, 3 and the training file
 
-  `test_uncertifiable_branch_refused_symmetrically` requires
+  `test_lensing_ratio_layer` — RETIRED, not repointed.
+  `test_uncertifiable_branch_refused_symmetrically` required
   `CANCELLATION_CONFIG` (gamma=0.47, y=(0.1,0.1), m_lens=360) to be REFUSED
-  by all three paths with the same named exception. All three now SUCCEED.
+  by all three paths; all three now SUCCEED and agree to **1.93e-2 nats**,
+  inside the 0.05-nat target. Its own constant recorded a first hand-repoint
+  (Build 8e) for exactly this, so a third witness would drift again. Deleted
+  with `CANCELLATION_CONFIG`. Symmetric NAMED refusal is now carried solely
+  by `test_lensing_fast_path::test_paths_refuse_over_critical_symmetrically`,
+  which sits on the STRUCTURAL over-critical boundary (`kappa >= 1`) and
+  cannot move with a certification threshold; the surviving
+  `test_macro_saddle_evaluated_symmetrically` carries path AGREEMENT.
 
-  This is NOT a lost guard: the three paths agree to **1.93e-2 nats**
-  (ratio -575.05928, direct -575.05928, bruteforce -575.03997), inside the
-  0.05-nat target, so the engine now certifies what it used to refuse. The
-  fixture has left the REFUSAL domain — the mirror image of the usual case.
+  `test_lensing_surrogate_census` — `LnlTierTestCase::
+  test_real_likelihood_tiers_within_bars` DELETED (with the now-dead
+  `_likelihoods` and `_dense_farfield_source` fixtures) for the reasons in
+  OPEN 3 below, which stands as the record of why. The "leave it red, it is
+  the only thing pointing at the serve gap" instruction is superseded:
+  8dfb8ca closed that gap, and the test's failure mode moved from
+  `dlnL 0.2394` to `surrogate declined` — production now refuses the chart,
+  which is the correct behaviour. The tier routing, the per-tier max/target
+  reporting and the three bars stay pinned by the two surviving engine-free
+  members of the class.
 
-  Note the constant's own comment records it was already replaced once for
-  exactly this ("symmetry premise died. HARD-CORE replacement..."). This is
-  the SECOND drift. A third hand-picked config will drift again; either
-  derive the witness from the certification boundary at test time, or retire
-  the symmetry test and keep the agreement test (which is the stronger
-  claim and is what actually held here).
+  `test_lensing_surrogate` — `LnlikeAccuracyTestCase::
+  test_positive_served_lnlike_tracks_engine` REPAIRED BY DERIVATION, because
+  unlike the census one its box (`POS_BOX`, `rho ~ 2.3-2.8`) is a genuine
+  exterior box; only the WITNESS MASS was stranded. `M_LENS_MSUN = 90` puts
+  the band bottom at `w = 0.234` against a crown `farfield_w_floor` of
+  `0.352`, so 8dfb8ca's guard declines it. The class now trains its own
+  `_pos_surrogate_bandwide` chart over `LNL_ACC_W_RANGE = (0.1, 28)` — the
+  shared `_pos_surrogate_ship` w-grid and every eps literal measured against
+  it are untouched — and `_bandwide_lens_mass()` returns the GEOMETRIC CENTRE
+  of the admissible mass interval `[max_config_w_floor / w(f_lo, 1),
+  chart_w_max / w(f_hi, 1)]`, raising an attributed AssertionError if a gate
+  move ever empties it. Measured: 150 Msun, band `[0.390, 26.62]`, all three
+  probes clear their floor and sit at 47-68% of `DELTA_T_MAX`.
+
+  `test_lensing_surrogate_training` — 18 failed + 25 errors -> **196 passed
+  in 2m46s** (was 40m17s at `-n 4`; the runtime was almost entirely one
+  deleted class's `train()` in `setUpClass`). 15 of the 18 were ONE fixture
+  arithmetic error: `_GATE_NAN_CENTER = (2.5, 1.4)` with
+  `_GATE_HALF = (0.25, 0.2)` spans `theta_c` to **1.6 > pi/2**, which nothing
+  caught until bca9534 added `_wedge_cusp_axis_map`'s domain guard — and the
+  constant's own comment claimed it kept "every box inside (0, pi/2)". The
+  three centres are now the odd columns of a 7-column partition of the live
+  D2-folded domain, so leaving the domain, touching a cusp ray and
+  overlapping each other are all structurally impossible; `_wp1_gate_fixture`
+  additionally probes each span through the PRODUCTION guard first, so the
+  next domain move fails at the premise with the offending tile named.
 
   ## OPEN 3 — `test_lensing_surrogate_census` crown dlnL — ATTRIBUTED
+  ## (kept as the attribution record; the test itself is now deleted)
 
   `LnlTierTestCase::test_real_likelihood_tiers_within_bars`: crown
   dlnL **0.2394** against `CROWN_LNL_TOL = 0.05`.
@@ -2774,8 +2896,10 @@ Tag conventions:
   `run` test, `test_node_exactness`, and
   `test_trough_normalization_stays_bounded`, which needs a genuine `|E|`
   trough the exterior may not provide). Derive the witness FROM the window
-  rather than hand-picking it. **Leave the test red until then — it is
-  currently the only thing pointing at the serve gap below.**
+  rather than hand-picking it. SUPERSEDED 2026-08-13: the test is deleted
+  rather than left red — 8dfb8ca closed the serve gap it was pointing at, so
+  its only remaining function was to fail. If the Section-D fixture is ever
+  rebuilt, the recipe above is the one to use.
 
   ## OPEN 5 — SUB-`w_floor` SERVE GAP: blocks the full-box training campaign
 

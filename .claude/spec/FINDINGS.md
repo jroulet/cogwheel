@@ -3906,7 +3906,81 @@ Same shape as F028 — an admission certificate that cannot see the axis along
 which the approximation dies. Here the invisible axis is the envelope
 definition rather than distance from the caustic.
 
-## F071 — `f_schwinger` CERTIFIES AND IS WRONG above w ~ 110: the paired N/2N check cannot see a floor both rules share, and it is amplified by e^{+pi w/4} (2026-08-13)
+## F071 — RETRACTED THE SAME DAY IT WAS FILED. The exact evaluator was fine; the TEST ORACLE was under-converged, and I measured its error and blamed production (2026-08-13)
+
+**RETRACTION — read this before the original text below.**
+
+F071 claimed `f_schwinger` certifies wrong answers above `w ~ 110`. That is
+FALSE within the shipped band. What the numbers measured was `_oracle_1d`
+diverging, not production.
+
+Measured after the retraction (commissioned investigation, w=130, gp=1.3,
+y=(0.3,0.2)):
+
+    oracle maxdeg5 vs maxdeg6     1.7056e-04   <- F071's whole table
+    PRODUCTION vs oracle maxdeg5  1.7058e-04   <- what F071 reported
+    PRODUCTION vs oracle maxdeg6  2.0896e-15   <- production is CORRECT
+    oracle maxdeg6 vs maxdeg7     0.0000e+00   <- oracle now converged
+
+Confirmed at w=190 (maxdeg6 identical to maxdeg7; production 1.85e-12
+against both) and w=210 (oracle converged to 2e-61). Production is genuinely
+wrong only at w=210 — SIXTY units above the advertised ceiling, reachable
+only by lifting `W_CEILING_SCHWINGER_QD` in a probe.
+
+**Root cause of the false finding, in the oracle's own comment**
+(`test_lensing_schwinger.py`): the oracle knobs are "calibrated so the oracle
+is converged to < 2e-17 of itself ... **at `w = 30, 45, 55`**". F071 used it
+at `w = 105-130` and never asked whether it was still converged there.
+
+**How I fooled myself, and it is the same trap F071 itself warns about.**
+The fitted growth matched `pi/4` to three digits, and I read that as
+production's signature. BOTH evaluators share the `e^{+pi w/4}`
+amplification, so an unconverged floor on EITHER side produces exactly that
+slope — the fit could not distinguish them, and I resolved it toward the
+hypothesis I already held. F071's own closing rule says "ask what the two
+rules SHARE; if that includes the dominant error term, the certificate is
+measuring the wrong thing." I wrote that about `f_schwinger`'s internal N/2N
+check and failed to apply it to my own production-vs-oracle comparison.
+
+**The mechanism was also backwards.** The certificate reports the N-rule
+error while the function returns the 2N value, so it is structurally
+CONSERVATIVE by ~2^(2*order) (measured ratio 1.65e19 vs 2^64 = 1.85e19). It
+refuses BEFORE the value degrades. There is no certified-but-wrong band
+inside the shipped ceiling.
+
+**What is actually true, and is worth fixing** — tracked in
+[[lensing_schwinger_certified_band_is_narrower_than_150]], which has been
+rewritten around these two:
+
+1. `MpmathPathOracleAgreementTestCase` is RED BY CONSTRUCTION under
+   `COGWHEEL_TRAIN_TIER=1`: its oracle is under-converged above `w ~ 100`
+   and it blames production. Fix `ORACLE_MAXDEGREE` 5 -> 6 (7 is
+   bit-identical to 6, so 6 is converged), and record in the calibration
+   comment that the knobs must be validated in the AMPLIFICATION band, not
+   only at w = 30/45/55.
+2. At `_MP_PANEL_ORDER = 32` production SPURIOUSLY REFUSES correct answers
+   from `w ~ 139` — inside the advertised band — because the (conservative)
+   certificate blows the 3e-10 gate while the value is right to 9e-16.
+   Order 40 restores certification through `w ~ 204` at ~1.29x cost
+   (~72-74 s/call at w=150), so the ceiling's runtime rationale survives.
+
+**Rule.** An oracle is only an oracle where its own convergence has been
+DEMONSTRATED. Before using one to convict production in a new regime, refine
+it against itself there — if the oracle moves, it is the thing that is wrong.
+A validation band is part of an oracle's contract, and this one stated its
+band plainly; nobody read it.
+
+**Provenance note.** The retraction rests on the commissioned measurement
+above, confirmed at three frequencies. I killed my own one-point re-run
+rather than spend more of the session on probe tooling, so the driver did
+NOT independently reproduce it. If a later measurement disagrees, this
+retraction is the thing to re-examine first.
+
+---
+
+ORIGINAL TEXT, PRESERVED (FALSE — see the retraction above):
+
+## F071 (RETRACTED) — `f_schwinger` CERTIFIES AND IS WRONG above w ~ 110: the paired N/2N check cannot see a floor both rules share, and it is amplified by e^{+pi w/4} (2026-08-13)
 
 `f_schwinger` is THE exact evaluator — the reference the uniform arms, the
 charts, the ppGO rungs and every accuracy number in this repo are measured
