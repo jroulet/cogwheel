@@ -1,107 +1,91 @@
 # Librarian Short-Term Observations
 
-## Run: 2026-08-12 — post-commit sync for {2eeab69, 34035eb, 4c7dc92} (PRIMARY: 4c7dc92 / INS-5-001)
+## Run: 2026-08-13 — post-commit sync, primary c0da6cb (tier-1 saddle analytic rung)
 
-**Scope**: 3 commits in `.claude/sync_issues.json`.
+**Scope**: `.claude/sync_issues.json` listed ~20 pending commits back through
+`5fbd024`. Triaged: all but three touch only `.claude/spec/`, `.claude/handoff/`,
+`.claude/agent_state/`, `.serena/memories/` — each already self-rendered
+(TODO.md/COMPLETED.md changed in the SAME commit) — genuine no-ops for doc
+surfaces, confirmed by pattern (agent-authored spec fragments are the
+authoritative record, not something Librarian propagates further).
 
-**Triage**:
-1. `2eeab69` (build_monitor.sh) and `34035eb` (orchestrator.py) — pure
-   `.claude/sdk/` agent-infra commits, each with its own already-rendered
-   `TODO.md`/`COMPLETED.md` fragments committed in the same commit. No
-   `cogwheel/` or `docs/source/` touch. NO-OP for doc surfaces (agent-only
-   paths, out of Librarian's tracked scope per CLAUDE.md EXCLUDE_PATHS).
-2. `4c7dc92` (lensing Build WP2, deltoid exterior fix) — PRIMARY. Verified
-   INS-5-001 independently against the actual diff (surrogate.py,
-   surrogate_training.py) before editing, per standing practice: confirmed
-   `LobeExteriorChart` (frozen dataclass sibling of `LobeInteriorChart`,
-   `image_count=2`, `FARFIELD_KERNEL_SUM` envelope, no `other_centroid`/
-   `corridor_half`/fold-carrier, `rho_lobe` domain `(1, rho_outer]`),
-   `from_lobe_exterior_engine`, `_lobe_exterior_serves`, NPZ kind
-   `lobe_exterior`, and the explicit code comment "the origin-polar
-   saddle-exterior tiler is RETIRED" in `surrogate_training.py` (~line 4899).
-   Confirmed `_deltoid_cusp_axis_map` still DEFINED in surrogate.py but no
-   longer imported/called by `surrogate_training.py` (orphaned for the
-   macro-saddle-exterior path it used to serve; still referenced by tests).
+Code-touching commits:
+- `3f4106e` (`scripts/census_dry_run.py`, new file) — a GEOMETRY-ONLY
+  structural dry-run script with its own duplicated `_classify_saddle`
+  (does not reuse `surrogate_census.characterize_sample`). No disk-persisted
+  artifact, console output only -> SCRIPTS/ REWRITE NO-OP RULE applies
+  (long-term memory). Skipped.
+- `4e724097` (`cogwheel/lensing/surrogate_training.py`, degenerate exterior
+  band recording) — training-report diagnostic addition (`chart_<label>_
+  exterior_band_degenerate` record), fully self-documented in its own
+  completed.d fragment, same family as the already-SPEC'd `beyond_w_cap`
+  loud-recording convention. Judged too deep/narrow for a SPEC sentence
+  (fragment itself says "NOT settled here, left open deliberately" —
+  design still in flux) and not the driver's flagged primary. Skipped as
+  proportionate; flag for a future pass if this recording pattern becomes
+  load-bearing.
+- `c0da6cb` (PRIMARY) — new tier-1 far-from-caustic macro-saddle analytic
+  serve rung. Verified independently against code before editing:
+  - Read `LensedRelativeBinningLikelihood._amplification_coefficients`
+    (likelihood.py ~2129-2271) in full: confirmed dispatch order is
+    surrogate intercept -> ppGO above-ceiling (`w_max > W_CEILING_SCHWINGER_QD`)
+    -> tier-1 saddle analytic (`gamma > 1`, via `_saddle_farfield_analytic`)
+    -> exact seed engine. Matches driver's context exactly.
+  - Confirmed `_gauge.py`'s new `_saddle_switch_delay`/`_saddle_phase_delay`
+    have NO production callers (grepped, only referenced in their own
+    docstrings and the tier-1 function's docstring disclaiming use of them).
+  - Confirmed `surrogate_census.py` imports `_saddle_farfield_analytic_serves`
+    and `characterize_sample` gained a `'saddle-farfield-analytic'` served
+    category — but per the build's own todo fragment
+    (`lensing_saddle_tier1_cannot_reach_the_census_gap.md`), this category
+    is currently UNREACHABLE in production census runs (the `rho > 1 -> born`
+    routing upstream means saddle draws never carry `rho >= 2`). Chose NOT
+    to add this category to SPEC's CENSUS 7-way-breakdown sentence (unlike
+    `ppgo_fold`, which fires and is genuinely observed) — a category that
+    provably never populates would misrepresent the breakdown as richer
+    than it behaves; the disjointness is already the single most important
+    fact of this build and I said it in the new dispatch-order sentence
+    instead. Revisit if a later build makes the routing order-independent.
+  - No new disk artifact confirmed (checked `_saddle_farfield_analytic` body
+    — reconstructs via `switched_analytic_channels` with zero envelope,
+    nothing serialized) -> DATA_CONTRACTS.yaml needs NO new entry; existing
+    `surrogate_census.py` consumer row (function: `run`) stays accurate,
+    the new import is a code dependency not a data-contract concern.
+  - FINDINGS.md F066-F068: read in full, sequential after F065, no dangling
+    cross-refs, self-contained process/methodology findings (mutation-probe
+    binding trap, escalation turn-budget, DRY-vs-leaf-isolation tension) —
+    no action needed.
+  - `docs/source/` has zero mentions of any saddle/gauge symbol from this
+    build — confirms (again) the lensing surrogate/engine internals are
+    correctly absent from the Sphinx narrative.
 
-**Fixed** (SPEC.md, 7 targeted edits; DATA_CONTRACTS.yaml, 3 targeted edits;
-fragments `spec_changelog.d/2026-08-12_lobe_exterior_chart.md` +
-`contracts_changelog.d/2026-08-12_lobe_exterior_chart.md`, both `bump: patch`
-— confirmed by precedent, e.g. `2026-08-03_interior_wedge_chart.md`, that
-even a whole-new-chart-type addition is `patch` in this repo's convention,
-not minor):
-- `ExteriorPolarChart` now documented positive-parity (astroid) ONLY in both
-  files (was "positive-parity astroid and macro-saddle alike").
-- `LobeExteriorChart` added alongside `LobeInteriorChart`: pipeline table row,
-  "Key abstractions" far-field coordinate contract (SPEC.md), and the
-  `lens_amplification_surrogate` description (DATA_CONTRACTS.yaml).
-- Corridor-serve correction: the old sentence "a source inside the corridor
-  falls through to the exact-engine ladder as a named refusal" is now WRONG
-  — a corridor source is served by the canonical `+y1` lobe's
-  `LobeExteriorChart` via the D2 reflection fold (`_lobe_exterior_serves`
-  drops the corridor test entirely). Fixed in SPEC.md; this is a genuine
-  BEHAVIOR-CHANGE staleness pattern (an outcome clause, not just a missing
-  entity) — worth watching for again: "X falls through to Y" sentences need
-  re-verification whenever a build adds a new serving tier between the named
-  refusal point and Y.
-- GATED-subdivider kind list "(far-field, wedge, lobe; bounded by
-  MAX_SUBDIVISION_DEPTH)" was ambiguous now that there are two lobe kinds —
-  clarified to `lobe-interior`; lobe-exterior (like tube) has NO subdivider,
-  a gated/flipped tile there is a ladder-served gap (verified via the
-  `surrogate_training.py` code comment at the `region == 'lobe_exterior'`
-  branch, ~line 5596-5611). NEW instance of the "ENUMERATED-KIND-LIST
-  CROSS-REF" fragile-pair pattern already in long-term memory.
-- Extended the `test_lensing_surrogate_lobe.py` certified-by sentence: that
-  file now also carries 7 `LobeExterior*` test classes (verified via
-  `get_symbols_overview`, not assumed from the file being in `changed_files`).
+**Fixed**: SPEC.md, one paragraph extended (row 55, "Microlensed waveform &
+likelihood"): (a) reworded "opens with a ppGO rung" -> "dispatches, after the
+surrogate intercept, a ppGO rung" (was misleadingly implying ppGO is first);
+(b) appended a new TIER-1 FAR-FROM-CAUSTIC MACRO-SADDLE ANALYTIC INTERCEPT
+sentence: full dispatch order, two-term gate, measured accuracy, and an
+EXPLICIT non-improvement statement ("does not move structural coverage") per
+the driver's fact 5 — deliberately did NOT quote the literal 87.61% figure,
+since SPEC.md has never quoted a coverage percentage anywhere (grepped, zero
+hits) and introducing the first-ever number there is a bigger narrative
+commitment than this sync warranted; the qualitative disjointness statement
+carries the same "do not read this as an improvement" force without minting
+a number SPEC would then need to keep in sync with every future tier's
+measurement. `spec_changelog.d/2026-08-13_saddle_tier1_analytic_rung.md`
+(bump: patch, precedent: other single-new-rung additions are patch in this
+repo). Rendered via `scripts/render_fragments.py` (0.37.16).
 
-**Skipped / out of scope, recorded for a future pass (do NOT re-derive from
-scratch — verify against current code first)**:
-- **theta_to_u REQUIRED-vs-OPTIONAL contradiction, LobeInteriorChart**
-  (pre-existing, NOT touched by 4c7dc92): SPEC.md and DATA_CONTRACTS.yaml
-  both currently claim the lobe-interior loader "reads theta_to_u
-  unconditionally... an absent map hard-refuses (KeyError)". I read the
-  ACTUAL CURRENT `_chart_from_npz` body (fresh `find_symbol`, this session)
-  and the `'lobe'` branch uses `theta_to_u = data.get(prefix + 'theta_to_u')`
-  — a SOFT read, never raises KeyError. `mem:lobe_interior_chart` (2026-08-08)
-  independently corroborates this WAS a known open bug at the time ("Open
-  non-blocking note: the cusp_angle=None raw-theta fallback builds charts
-  that cannot survive an NPZ round-trip (`_chart_from_npz` reads
-  `theta_to_u` unconditionally while `_chart_to_npz` writes it only when not
-  None)") — so a commit between 2026-08-08 and now likely fixed the reader
-  to be soft (fixing the round-trip bug) WITHOUT updating SPEC.md/
-  DATA_CONTRACTS.yaml's "REQUIRED/hard-refuse" sentence. I did NOT fix this
-  — out of my assigned scope (INS-5-001 only) and not flagged by Inspector
-  this run. I deliberately wrote the NEW `LobeExteriorChart` theta_to_u
-  description WITHOUT any comparison to LobeInteriorChart's contract (no
-  "unlike/matching the lobe-interior loader" language) specifically to avoid
-  propagating this unresolved contradiction. NEXT LIBRARIAN/INSPECTOR PASS:
-  verify `_chart_to_npz`'s `'lobe'` branch write-side too, then fix the
-  "REQUIRED... hard-refuses (KeyError)" sentence in both SPEC.md (near
-  "Lobe-interior artifacts carry a SINGLE axis-schema tag") and
-  DATA_CONTRACTS.yaml (near "mapped from theta_local at serve time through
-  the REQUIRED theta_to_u map").
-- **`_to_caustic_fixed` astroid-exterior multiplicative-vs-additive
-  contradiction** (pre-existing, unrelated to lobe_exterior): SPEC.md's
-  "CAUSTIC-FIXED RADIAL COORDINATE" section says the astroid EXTERIOR arm is
-  directional-MULTIPLICATIVE (only the saddle exterior arm is scalar
-  ADDITIVE), but DATA_CONTRACTS.yaml's `ExteriorPolarChart` paragraph says
-  "additive exterior on both parities... multiplicative only on the astroid
-  interior arm" (i.e. astroid exterior = additive too). Did not verify
-  against code or fix — deep, unrelated tangent, flag for a dedicated pass.
-- Verified `docs/source/` has ZERO mentions of `ExteriorPolarChart`,
-  `LobeInteriorChart`, `lens_amplification_surrogate`, or
-  `LensAmplificationSurrogate` — confirms the surrogate speed layer is
-  correctly absent from the Sphinx narrative (internal/offline, no
-  user-facing doc page needed). Did not invent one.
-- `.claude/spec/todo.d/tests_cross_class_attribute_borrowing.md` (in
-  4c7dc92's changed_files) is test-only housekeeping, already
-  self-rendered into TODO.md within the same commit — no action needed.
+**Skipped / no-op, with reason** (see above): `3f4106e`, `4e724097`, all
+spec/handoff-only commits, DATA_CONTRACTS.yaml (no new artifact), docs/source
+(zero references), `_gauge.py` tier-2 helpers (correctly left undocumented —
+build's own docstrings already say "no production caller yet", nothing to
+sync).
 
-**Verification method note**: for two huge single-line SPEC.md/
-DATA_CONTRACTS.yaml prose blocks (the pipeline-table cell and the
-`lens_amplification_surrogate` YAML description are each ONE physical line
-of several KB), used a Python script with `text.count(old) == 1` assertions
-per edit BEFORE writing, all edits batched into one script, applied only
-after every count verified — avoids the backslash-pipe (`\|`) escaping traps
-already in long-term memory and catches an accidental double-match before
-it corrupts the file.
+**Process note**: `scripts/render_fragments.py` again left a stray diff in
+`.claude/tidy_advisory.json` (matches the long-term-memory rule) — reverted
+with `git checkout --`. Confirmed the Serena-heredoc-silent-noop trap once
+more: a `python3 - <<'EOF' ... EOF` command via `execute_shell_command`
+printed nothing (stdout empty, rc 0) even for a two-line `print()` script —
+switched to writing the script to a file (Write tool) and running
+`python3 <path>`, which worked immediately. Do this from the start next time
+instead of re-discovering it.
