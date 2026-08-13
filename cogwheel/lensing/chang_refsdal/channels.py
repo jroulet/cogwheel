@@ -1586,9 +1586,10 @@ def born_carrier_from_partition(
             # NOTE (maintenance): this block duplicates the fold-correction
             # logic of `_airy_fold.fold_ppgo_correction`.  The duplication is
             # intentional: `fold_ppgo_correction` re-solves the geometry from
-            # scratch (needed for its standalone public interface), whereas this
-            # block reuses pre-computed ``partition.images`` / ``partition.matrix``
-            # to avoid a redundant `geometric_amplification` call.  If the
+            # scratch (needed for its standalone public interface), whereas
+            # this block reuses pre-computed ``partition.images`` /
+            # ``partition.matrix`` to avoid a redundant
+            # `geometric_amplification` call.  If the
             # correction formula or its structural gates change, BOTH locations
             # must be updated together.  See INS-c8-003.
             from cogwheel.lensing.chang_refsdal._airy_fold import (

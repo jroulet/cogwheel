@@ -112,6 +112,11 @@ def _collapse_blank_runs(text: str) -> str:
     return '\n'.join(out)
 
 
+#: How many over-long line numbers to print per file before eliding.  The
+#: elision is always announced -- see the note at the format site.
+_LONGS_SHOWN = 6
+
+
 def _long_lines(text: str) -> list[tuple[int, int]]:
     """``(lineno, width)`` for lines over the pylint ceiling."""
     return [(i, len(line)) for i, line in enumerate(text.split('\n'), 1)
@@ -144,7 +149,13 @@ def tidy_file(path: pathlib.Path, *, check_only: bool) -> tuple[bool, str]:
 
     longs = _long_lines(updated)
     if longs:
-        shown = ', '.join(f'{n}({w})' for n, w in longs[:6])
+        # Say so when the list is elided.  A bare "10 line(s) over 79"
+        # followed by six entries reads as the complete list, and a
+        # consumer that works the printed list believes it is done at 6
+        # of 10 (measured 2026-08-13, by the Tidier, against this file).
+        shown = ', '.join(f'{n}({w})' for n, w in longs[:_LONGS_SHOWN])
+        if len(longs) > _LONGS_SHOWN:
+            shown += f', ... (+{len(longs) - _LONGS_SHOWN} more)'
         note += f'; {len(longs)} line(s) over {MAX_LINE}: {shown}'
     return updated != original, note
 

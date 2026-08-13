@@ -255,8 +255,8 @@ _KNOWN_ENVELOPE_DEFINITIONS = (
 # finite-but-wrong reconstruction.
 _EXTERIOR_POLAR_AXIS_SCHEMA_V4 = 'exterior_polar_rho_log_carrier_v1'
 _EXTERIOR_POLAR_AXIS_SCHEMA_V5 = 'exterior_polar_rho_u_carrier_v2'
-_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({_EXTERIOR_POLAR_AXIS_SCHEMA_V4,
-                                                _EXTERIOR_POLAR_AXIS_SCHEMA_V5})
+_KNOWN_EXTERIOR_POLAR_AXIS_SCHEMAS = frozenset({
+    _EXTERIOR_POLAR_AXIS_SCHEMA_V4, _EXTERIOR_POLAR_AXIS_SCHEMA_V5})
 _EXTERIOR_POLAR_CARRIER_STEP_MAX = 1.0
 _LOBE_AXIS_SCHEMA_NEW = 'lobe_caustic_relative_v1'
 _KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_NEW})
@@ -1890,7 +1890,9 @@ class ExteriorPolarChart:
                 'theta_to_u and u_grid must both be None or both provided.')
         if rho_u_carrier is not None:
             rho_u_carrier = np.ascontiguousarray(rho_u_carrier, dtype=float)
-            if rho_u_carrier.ndim != 2 or rho_u_carrier.shape != (rho_grid.size, theta_c_grid.size):
+            if (rho_u_carrier.ndim != 2
+                    or rho_u_carrier.shape
+                    != (rho_grid.size, theta_c_grid.size)):
                 raise ValueError(
                     f'rho_u_carrier shape {rho_u_carrier.shape} must equal '
                     f'({rho_grid.size}, {theta_c_grid.size}).')
@@ -1956,7 +1958,9 @@ class ExteriorPolarChart:
                 f'carrier_rate must be finite, got {carrier_rate}.')
         if rho_u_carrier is not None:
             rho_u_carrier = np.ascontiguousarray(rho_u_carrier, dtype=float)
-            if rho_u_carrier.ndim != 2 or rho_u_carrier.shape != (rho_grid.size, theta_c_grid.size):
+            if (rho_u_carrier.ndim != 2
+                    or rho_u_carrier.shape
+                    != (rho_grid.size, theta_c_grid.size)):
                 raise ValueError(
                     f'rho_u_carrier shape {rho_u_carrier.shape} must equal '
                     f'({rho_grid.size}, {theta_c_grid.size}).')
@@ -3345,7 +3349,8 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
     if isinstance(chart, ExteriorPolarChart) and chart.carrier_rate != 0.0:
         w_query = np.exp(log_w_clamped)
         result *= np.exp(1j * chart.carrier_rate * w_query)
-    if isinstance(chart, ExteriorPolarChart) and chart.rho_u_carrier is not None:
+    if (isinstance(chart, ExteriorPolarChart)
+            and chart.rho_u_carrier is not None):
         if chart.theta_to_u is not None:
             u_axis = np.interp(chart.theta_c_grid,
                                chart.theta_to_u[0], chart.theta_to_u[1])
@@ -4089,7 +4094,8 @@ class LensAmplificationSurrogate:
                           n_gamma: int = _DEFAULT_PARAM_NODES,
                           n_r: int = _DEFAULT_PARAM_NODES,
                           n_theta_wedge: int = _DEFAULT_PARAM_NODES,
-                          w_nodes_per_decade: int = _DEFAULT_W_NODES_PER_DECADE,
+                          w_nodes_per_decade: int = (
+                              _DEFAULT_W_NODES_PER_DECADE),
                           definition: str = _INTERIOR_ENVELOPE_DEFINITION,
                           axis_origin: str | None = None
                           ) -> 'LensAmplificationSurrogate':
@@ -4160,7 +4166,8 @@ class LensAmplificationSurrogate:
         r_table = np.empty((gamma_grid.size, map_theta_nodes.size))
         for i_g, gamma in enumerate(gamma_grid):
             for i_th, th in enumerate(map_theta_nodes):
-                r_table[i_g, i_th] = geometry.r_caustic(float(gamma), float(th))
+                r_table[i_g, i_th] = geometry.r_caustic(
+                    float(gamma), float(th))
         wedge_map = _WedgeCausticMap(gamma_nodes=gamma_grid,
                                      theta_nodes=map_theta_nodes,
                                      r_table=r_table)

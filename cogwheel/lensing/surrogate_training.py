@@ -121,7 +121,8 @@ _SADDLE_CUSP_MIN_HALFWIDTH = 0.08
 #: Minimum distance (physical source-plane units) from a tile corner to a
 #: cusp vertex below which the tile is excluded from exterior charting for
 #: BOTH astroid and deltoid/saddle cusps.  Calibrated from the measured
-#: FARFIELD_KERNEL_SUM envelope turn-on distance (scripts/measure_cusp_exclusion.py).
+#: FARFIELD_KERNEL_SUM envelope turn-on distance
+#: (scripts/measure_cusp_exclusion.py).
 _CUSP_EXCLUSION_DISTANCE = 0.35
 #: Fractional shrink of each fold arc away from its bounding walls.
 _ARC_MARGIN_FRAC = 0.03
@@ -500,8 +501,8 @@ def _radial_slope(gamma: float, branch: int, theta: float) -> float:
     A cusp is a distinct kind of ``|y|`` minimum -- there ``y' -> 0`` so ``h``
     need not vanish and a root solver degenerates; cusp angles are handled by
     their own closed-form set, not this slope.  Uses the exact caustic point
-    and first derivative (`geometry.critical_point` / `geometry.caustic_derivatives`);
-    no finite difference.
+    and first derivative (`geometry.critical_point` /
+    `geometry.caustic_derivatives`); no finite difference.
     """
     y = np.asarray(
         geometry.critical_point(gamma, theta, 0.0, 0.0, branch).source,
@@ -3170,7 +3171,8 @@ def _build_lobe_chart(*, gamma_band: tuple[float, float], parity: int,
     rho_lobe_c, theta_local_c = box_center
     half_rho, half_theta = half
     rho_lobe_range = (rho_lobe_c - half_rho, rho_lobe_c + half_rho)
-    theta_local_range = (theta_local_c - half_theta, theta_local_c + half_theta)
+    theta_local_range = (theta_local_c - half_theta,
+                          theta_local_c + half_theta)
     single = LensAmplificationSurrogate.from_lobe_engine(
         admission=lobe, gamma_range=gamma_band,
         rho_lobe_range=rho_lobe_range, theta_local_range=theta_local_range,
@@ -4221,7 +4223,8 @@ def _subdivide_tile(
         *, tile: dict, parent_tag: str, band: tuple[float, float],
         parity: int, config: TrainingConfig, rng: np.random.Generator,
         outdir: Path, charts: list, chart_reports: list[dict],
-        split_children: Callable[[dict], list], build_child: Callable[..., tuple],
+        split_children: Callable[[dict], list],
+        build_child: Callable[..., tuple],
         gate_kind: str, eps_bar: float,
         admit_child: Callable[[tuple, tuple], bool] | None = None,
         max_depth: int = MAX_SUBDIVISION_DEPTH, depth: int = 1) -> dict:
@@ -4940,7 +4943,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             # ``r_caustic``, so it inherits the interior's slope kinks.  Reuse the
             # band's ``gamma_mid`` (already computed above); cusp rays are
             # gamma-dependent, so never recompute at a band edge.
-            cusp_angles = _cusp_source_angles(gamma_mid, config.n_caustic_samples)
+            cusp_angles = _cusp_source_angles(
+                gamma_mid, config.n_caustic_samples)
             exterior_tiles = _farfield_exterior_tiles(
                 rho_outer_region, config.n_farfield_tiles_per_side,
                 admission=exterior_admission,
@@ -4948,7 +4952,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 cusp_angles=cusp_angles, gamma=gamma_mid,
                 gamma_band=band, ghost_drop_count=ghost_drop_count)
             region_exclusion_rho = (
-                min(center[0] - half[0] for center, half, _, _ in exterior_tiles)
+                min(center[0] - half[0]
+                    for center, half, _, _ in exterior_tiles)
                 if exterior_tiles else exclusion_rho)
         # caustic-relative inner edge (WP1 defect 1).  Derive it from the NARROWED
         # served region ``region_exclusion_rho`` -- NOT the pre-narrowing outer
@@ -5039,8 +5044,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 # w-segment must lie within [w_floor, w_trust] to 1e-12 -- a
                 # self-consistency invariant replacing the strata whole-band
                 # containment bookkeeping.
-                contained, containment_report = _farfield_window_contains_draws(
-                    box, window)
+                contained, containment_report = (
+                    _farfield_window_contains_draws(box, window))
                 # Per-column admitted set (`_farfield_exterior_tiles`); every
                 # tile's inner edge already clears the caustic + tube shell and
                 # lies inside the prior box for its direction.  (Positive parity
@@ -5060,8 +5065,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                                   'm_lo': m_lo_region, 'm_hi': m_hi_region,
                                   'w_range': window, 'region': 'exterior'}
                     n_rec, reprovision_report = _reprovision_w_nodes(
-                        band=band, parity=parity, tile=probe_tile, window=window,
-                        config=config, rng=rng)
+                        band=band, parity=parity, tile=probe_tile,
+                        window=window, config=config, rng=rng)
                 for center, half, i, j in tiles:
                     fold_carrier = _needs_fold_carrier(
                         gamma=gamma_mid, center=center, half=half,
@@ -5072,7 +5077,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     # ``force_minus_ghost`` consumer stays byte-identical.
                     force_minus_ghost = False
                     admitted.append({
-                        'si': 0, 'i': i, 'j': j, 'center': center, 'half': half,
+                        'si': 0, 'i': i, 'j': j,
+                        'center': center, 'half': half,
                         'm_lo': m_lo_region, 'm_hi': m_hi_region,
                         'w_range': window, 'w_nodes_per_decade': int(n_rec),
                         'fold_carrier': fold_carrier,
@@ -5241,7 +5247,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 # ``(rho_lobe, theta_local)`` coordinates, so the lobe-centroid
                 # offset now flows through the serve pipeline.  ``si = lobe_index``
                 # disambiguates the two lobes' per-chart tags.
-                centroid_mag = float(np.hypot(lobe.centroid[0], lobe.centroid[1]))
+                centroid_mag = float(np.hypot(
+                    lobe.centroid[0], lobe.centroid[1]))
                 r_deltoid_max = float(np.max(lobe.boundary_r))
                 for center, half, i, j in lobe_tiles:
                     rho_lobe_max = float(center[0]) + float(half[0])
@@ -5290,7 +5297,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             # ``reach_max`` are the band-level bounds already computed above
             # (bit-identical to ``np.min(admission.radius_grid)``, so no per-band
             # ``_interior_admission`` object is built here).
-            int_rho = 0.0  # near-origin: the hardest interior region (Build 8h-a)
+            # near-origin: the hardest interior region (Build 8h-a)
+            int_rho = 0.0
             int_boundary = _stratum_ppgo_boundary(
                 parity, gamma_mid, int_rho, ppgo_map)
             int_ceiling = _stratum_ppgo_ceiling(
@@ -5315,7 +5323,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                         'w_range': [round(int_w_range[0], 6),
                                     round(int_w_range[1], 6)],
                         'w_trust': round(float(int_boundary), 6),
-                        'reason': 'ppGO certified over the whole stratum w-band'})
+                        'reason':
+                            'ppGO certified over the whole stratum w-band'})
                     continue
                 int_w_range = trimmed_w_range
                 # Cap the wedge radial extent one tube-shell inside the caustic so
@@ -5345,9 +5354,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     'admitted_tiles': len(tiles)})
                 for center, half, i, j, axis_origin in tiles:
                     admitted.append({
-                        'si': si, 'i': i, 'j': j, 'center': center, 'half': half,
+                        'si': si, 'i': i, 'j': j,
+                        'center': center, 'half': half,
                         'm_lo': m_lo, 'm_hi': m_hi, 'w_range': int_w_range,
-                        'region': 'wedge_interior', 'axis_origin': axis_origin})
+                        'region': 'wedge_interior',
+                        'axis_origin': axis_origin})
 
     # Loud interior summary.  Where geometry permits an interior region (origin
     # enclosed, reach clears the tube shell) admission MUST be non-empty; a
@@ -5492,8 +5503,9 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     lobe_path, build_lobe,
                     {'schema': 'build8c-chart', 'parity': parity})
             except CarrierDiscontinuityError as exc:
-                # The tile straddles a critical-basin flip; subdivision cannot fix phase
-                # discontinuities, so the tile is recorded as a ladder-served gap.
+                # The tile straddles a critical-basin flip; subdivision
+                # cannot fix phase discontinuities, so the tile is recorded
+                # as a ladder-served gap.
                 chart_reports.append({
                     'name': lobe_tag, 'parity': parity,
                     'file': str(lobe_path), 'region': region,

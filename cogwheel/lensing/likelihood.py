@@ -2070,10 +2070,11 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         with max ~7e-4 at the ``rho = 2.0`` floor (certified by
         ``test_lensing_saddle_tier1_accuracy.py`` against p90 <= 1e-3).
         Accuracy degrades as ``rho`` falls toward the caustic, which is
-        what the rho-floor gate term exists to bound.  A near-caustic (small ``rho``)
-        resolvable source is the DEFERRED tier-2 population and is REFUSED
-        here.  On any gate miss, returns ``None`` and the caller falls
-        through to the exact seed engine, byte-identical to HEAD.
+        what the rho-floor gate term exists to bound.  A near-caustic
+        (small ``rho``) resolvable source is the DEFERRED tier-2
+        population and is REFUSED here.  On any gate miss, returns
+        ``None`` and the caller falls through to the exact seed engine,
+        byte-identical to HEAD.
 
         The rung never uses ``geom.switch`` / ``geom.critical_delay``: the
         ``FARFIELD_KERNEL_SUM`` tag is the switched-analytic sum on the
@@ -2221,11 +2222,11 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # the resolvable FAR-FROM-CAUSTIC macro saddle (gamma > 1) the
         # switched analytic channel sum carries the whole band to within
         # the certified bar (p90 ~5e-5, max ~7e-4 at the rho floor), so it
-        # serves with a zero envelope and no per-candidate engine cost.  The gamma > 1
-        # guard keeps the astroid (gamma <= 1) path byte-identical; the
-        # two saddle rungs are mutually exclusive in effect (ppGO already
-        # served the w_max > 150 resolvable case above).  On gate miss,
-        # fall through to the exact seed engine.
+        # serves with a zero envelope and no per-candidate engine cost.
+        # The gamma > 1 guard keeps the astroid (gamma <= 1) path
+        # byte-identical; the two saddle rungs are mutually exclusive in
+        # effect (ppGO already served the w_max > 150 resolvable case
+        # above).  On gate miss, fall through to the exact seed engine.
         if lens['gamma'] > 1.0:
             served = self._saddle_farfield_analytic(lens, dense_w)
             if served is not None:
