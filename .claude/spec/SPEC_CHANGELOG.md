@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.37.14` (2026-08-12):
+- `0.37.15` (2026-08-12):
 
 Update INTERIOR CUSP SERVING: interior discriminator changed from origin-based
 `r_caustic` directional check to image-count gate `_is_interior = len(images) >= 4`.
@@ -17,7 +17,7 @@ corridor between the two lobes.  The generic interior case condition is now
 `len(images) >= 4, len(stationary_values) == 1`.  Exterior sources now described
 as `len(images) < 4` (was `rho > 1`).
 
-- `0.37.13` (2026-08-12):
+- `0.37.14` (2026-08-12):
 ### Saddle corridor refusal in ppGO map; caustic_rho is origin-based, not an interior discriminator
 
 SPEC.md FOLD-PPGO INTERIOR HANDOFF paragraph: added the PARITY-GATED saddle
@@ -32,7 +32,7 @@ decided by image count (`len(images) >= 4`) on both parities.
 Module list: `caustic_rho` annotated as an origin-based scalar-reach gauge
 that is NOT a saddle interior discriminator.
 
-- `0.37.12` (2026-08-12):
+- `0.37.13` (2026-08-12):
 ### Pearcey ppGO rung full mid-w band + MINUS_GHOST saddle exterior window
 
 SPEC.md Microlensing engine row (ppGO rung description): the rung is no
@@ -48,7 +48,7 @@ MINUS_GHOST` envelope label (ghost gates become the admission authority;
 `_CUSP_EXCLUSION_DISTANCE` reduced for saddle near-cusp tiles), closing the
 exterior cusp neighbourhood quadrature-free on both parities.
 
-- `0.37.11` (2026-08-12):
+- `0.37.12` (2026-08-12):
 ### Pearcey arm: interior degenerate cluster bypass + on-axis fold detection
 
 Extended the INTERIOR CUSP SERVING description in the Microlensing engine row:
@@ -61,7 +61,7 @@ Added description of `_merging_fold_pair` detecting the degenerate cluster via
 cusp arm as last rung). Exterior sources (`rho > 1`) still validate
 delay-to-image alignment.
 
-- `0.37.10` (2026-08-12):
+- `0.37.11` (2026-08-12):
 
 ### Document LobeExteriorChart, retire ExteriorPolarChart for macro-saddle exterior
 
@@ -90,7 +90,7 @@ the GATED-subdivider kind list clarified to `far-field, wedge, lobe-interior`
 certified-by sentence extended to cover the new `LobeExteriorChart` test
 classes.
 
-- `0.37.9` (2026-08-12):
+- `0.37.10` (2026-08-12):
 ### CUSP-EXCLUSION FILTER paragraph: saddle parity now admits near-cusp tiles
 
 SPEC.md TRAINING section, CUSP-EXCLUSION FILTER paragraph: the sentence
@@ -109,6 +109,48 @@ determined by `_deltoid_cusp_source_angles` at band edges, but used for labeling
 rather than exclusion.  The certified-by sentence is qualified to "astroid cusp
 exclusion boundary" to reflect that saddle tiles near the cusp are no longer
 excluded.
+
+- `0.37.9` (2026-08-12):
+
+### Correct two SPEC.md claims that contradicted the code
+
+Both surfaced by the Librarian during the `LobeExteriorChart` post-commit sync
+and correctly left for someone who can adjudicate accuracy — the Librarian
+owns SYNC, and the Inspector that would normally flag these is READ-ONLY.
+Verified against the code, not against the other document.
+
+**1. `_to_caustic_fixed` is additive on every exterior arm, both parities.**
+SPEC.md claimed the coordinate was directional-MULTIPLICATIVE "on the astroid
+interior, the astroid exterior arm, and the saddle interior arm". The code
+(`surrogate.py::_to_caustic_fixed`) is multiplicative on the ASTROID INTERIOR
+ARM ONLY (`|gamma| < 1` and `|y| <= r_caustic`); the astroid exterior uses
+`rho = 1 + |y| - r_caustic`, and the macro saddle uses
+`rho = 1 + |y| - _caustic_reach(gamma)` for every source regardless of side.
+`DATA_CONTRACTS.yaml` already had this right ("additive exterior on both
+parities ... multiplicative only on the astroid interior arm"), so the two
+canonical surfaces contradicted each other.
+
+Also noted: the saddle interior is not served through this coordinate at all —
+it is charted lobe-locally by `LobeInteriorChart`/`LobeExteriorChart`. The
+claim about a "saddle interior arm" of `_to_caustic_fixed` described a code
+path that does not branch on side.
+
+This matters beyond bookkeeping: the additive scalar form is exactly what made
+the saddle corridor unrepresentable (a corridor source mapped to rho = -0.214
+and `_from_caustic_fixed` raised), which is what the lobe-local exterior chart
+was built to replace.
+
+**2. `LobeInteriorChart.theta_to_u` is OPTIONAL, not required.**
+SPEC.md said the loader "reads it unconditionally, so an absent map
+hard-refuses (KeyError)". `_chart_from_npz` uses a soft `data.get` for
+`lobe_interior`, `lobe_exterior` AND `exterior_polar`, deliberately: those
+producers build the map only when given a `cusp_angle` and store `None` on the
+raw-theta fallback, so a hard read would break the NPZ round-trip of a
+legitimately map-less chart. ONLY the WEDGE (v3) hard-requires it, because the
+wedge producer always builds one — there, an absent map means a stale
+artifact.
+
+No code changed. In both cases the code was correct and the spec was stale.
 
 - `0.37.8` (2026-08-11):
 ### Pearcey arm: ppGO fast rung fold-pair-existence-or-resolution gate
