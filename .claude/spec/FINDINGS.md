@@ -4261,3 +4261,49 @@ pairing; the ppGO column does not. See [[pair-frames-before-scoring]].
 
 Related: [[FINDINGS F073]] (same real-pair blindness in xi_min),
 [[FINDINGS F074]] (cusp control map), F069 (arm-before-oracle routing).
+
+## F076 — `_ppgo_above_ceiling` has no caustic-distance gate and serves the divergent asymptotic series near the caustic, BOTH parities (2026-08-13)
+
+The rung's only admission is `w_lo * min(delta_tau) >= RHO_END`, computed on
+REAL image pairs — the F073/F075 blindness again: near a caustic the min gap
+belongs to the far pair (saddle mirror pairs even have `delta_tau == 0`
+exactly, vacuously resolved), so the gate passes while `image_kernel`'s
+C1/w + C2/w^2 corrections diverge (measured C1 = 409, C2 = -9.4e5 at a
+gamma=1.2 exterior cusp: |C2/w^2| < 1 only above w ~ 969). Measured serves,
+F069-safe oracle: gamma=1.2 on-axis rho=1.02: rel err 2.4e3 (w=30), 277
+(w=60), 74 (w=100); gamma=0.5: 1.6e4 / 7.0e3; flat-in-w 0.2-0.8 at side
+cusps. Admission floors w_lo ~ 0.3-1.6, so any band with w_hi > 150 reaches
+it. Same rung also serves `fold_ppgo_correction` on non-merging pairs out to
+|y|/r_c ~ 1.8 (extends F075's band): measured 2.9e5x-1.1e7x worse than raw
+ppGO at configs where ppGO is 1e-6-1e-8. Also latent: non-finite `f_total`
+is replaced by 0.0 instead of refusing (likelihood.py:2056).
+
+Measured fix direction: a directional caustic-distance leg. Every audited
+point with `eta >= 0.5` (via `nearest_caustic_point`) had ppGO error <= 1e-4
+at w >= 30; every point with `eta <= 0.05` was over the bar by >= 2 orders.
+
+## F077 — the chart-serving layer is DEAD CODE: no artifact is wired, so two shipped artifacts and two rungs are unreachable (2026-08-13)
+
+`amplification_surrogate` and `born_residual_chart` default to None and
+nothing auto-loads them; `lens_amplification_surrogate.npz` does not exist;
+`get_certified_ppgo_map()` reads a process global that no production code
+sets. Consequences, verified by serve-path trace: the SHIPPED
+`born_residual_chart.npz` is unreachable (the Born rung lives inside
+`_surrogate_coefficients`, entered only when a surrogate is attached); the
+just-rebuilt raw-ppGO interior rung is one level deeper still — also
+unreachable until a surrogate ships; `certified_ppgo_map.npz`'s saddle rows
+already certify the connecting region (w_cert 16-28 at rho < 0.5, matching
+an independent measurement to within its bands) and are never consulted.
+The ONLY live analytic rungs today are `_ppgo_above_ceiling` (F076) and
+`_saddle_farfield_analytic` (rho >= 2.0 scalar floor — over-refusing the
+transverse cone where ppGO measures 1.4e-5 at rho=1.5, w=30).
+
+Transferable rule: an artifact is not coverage until a serve-path trace
+shows a production entry point reaching it; "shipped" and "wired" are
+different claims (same family as F069/F075's route-vs-oracle conflation).
+
+Saddle-parity oracle note (audit 2026-08-13): `_saddle_mass_sheet_map` +
+`f_schwinger` reconstructs `F_op` at machine zero (0.0e0 at gamma
+1.2/1.5/2.0, kappa 0 and 0.2, w 5-30), so the F069-safe oracle pattern
+extends to the macro saddle by swapping the map function; no t_min
+demodulation needed (all objects share the absolute Fermat frame).
