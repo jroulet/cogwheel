@@ -154,17 +154,32 @@ the per-branch instrumentation in
    discontinuity between them — the handover is only about whether the
    envelope is large enough to need charting.
 
-8. **THE RULE COSTS NOTHING vs the (invalid) per-`w` optimum.** Over 220
-   (source, w) pairs from the real gap population:
+8. **THE RULE COSTS NOTHING vs the (invalid) per-`w` optimum, and TIER SIZES
+   DEPEND ON THE `w` DISTRIBUTION.** Over 220 (source, w) pairs probed at
+   fixed `w in {24, 58}`:
 
        per-w minimisation (NOT a valid gauge)   p50 8.48e-06  p90 1.11e-04  96.8% < 1e-3
        tau_c = min(tau) - RHO_END/w_min         p50 8.48e-06  p90 1.20e-04  96.4% < 1e-3
 
-   Identical median, p90 within 8%, coverage within 0.4 points. The
-   implementable `w`-independent rule is essentially optimal, so tier 1 is
-   sized at **96.4%** and tier 2 at **3.6%** — and those are the numbers under
-   the rule the build will actually implement, not under an estimator it
-   cannot use.
+   The implementable `w`-independent rule is essentially optimal — that
+   comparison stands.
+
+   BUT 96.4% IS NOT THE TIER-1 SIZE. Those probe frequencies oversample high
+   `w`; the population's own `w` is `LogU(5, 148)` and reaches down to 5,
+   where the envelope is NOT negligible. Re-measured with EACH SOURCE'S OWN
+   `w`:
+
+       w <= 60        n=65   p50 1.12e-04   p90 4.53e-01   tier 1 serves  69.2%
+       60 < w <= 148  n=25   p50 1.97e-06   p90 1.98e-05   tier 1 serves  96.0%
+
+   Weighted over the beyond-shell population: **tier 1 ~77%, tier 2 ~23%** —
+   tier 2 is SIX TIMES the 3.6% an earlier draft of this brief claimed. Size
+   the work accordingly: the chart is a substantial part of this build, not a
+   corner case.
+
+   Note the inversion vs cost intuition: the EXPENSIVE mpmath band
+   (`60 < w <= 148`) is the part tier 1 serves almost completely (96%), while
+   the cheap-to-evaluate `w <= 60` band is where the chart is actually needed.
 
 9. **THE `w` AXIS DOES NOT NEED A COORDINATE CHANGE — `log w` is near-optimal.**
    F064 records the hard-won positive-parity lesson: minimising oscillation was
@@ -226,7 +241,8 @@ the per-branch instrumentation in
 IN — a THREE-TIER ladder for the far-from-caustic macro saddle, with NO tier
 falling through to direct evaluation:
 
-  1. re-gauged switched analytic channels (serves 96.4%, no chart);
+  1. re-gauged switched analytic channels (serves ~77% of the beyond-shell
+     population, no chart);
   2. for sources the gate rejects, a CHART of the RE-GAUGED ENVELOPE — the
      lowest-order physics is already removed by construction, since `E` is
      what remains after the switched analytic trials are subtracted, so the
