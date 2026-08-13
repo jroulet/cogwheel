@@ -35,6 +35,15 @@ set -u
 
 LOG="${1:?usage: build_monitor.sh <log_path> [poll_seconds] [build_pid]}"
 POLL="${2:-120}"
+# Stall threshold. Do NOT cry stall before the SDK itself would: the
+# orchestrator's own patience is SDK_INTER_MESSAGE_TIMEOUT_SECONDS (1200 s
+# here), and below that it considers the build healthy. The planning phase in
+# particular goes silent for the whole of a Professor/Simplifier consult --
+# a subagent emits no log line until it RETURNS -- so a 12 min rule fires on
+# every domain-heavy plan. Measured 2026-08-12: a false stall at 13 min while
+# the Architect sat in two Agent consults, build alive and well inside every
+# real timeout.
+STALL_SECONDS="${STALL_SECONDS:-${SDK_INTER_MESSAGE_TIMEOUT_SECONDS:-1200}}"
 # Optional: the PID this log belongs to. STRONGLY preferred — without it the
 # liveness check matches ANY sdk/build.py, so a second, unrelated build keeps
 # this monitor alive at a dead log, which is the very failure it exists to
@@ -105,11 +114,11 @@ while :; do
     [ "$gate_mtime" -gt "$mtime" ] && mtime="$gate_mtime"
     [ "$mtime" -eq 0 ] && mtime="$now"
     quiet=$(( now - mtime ))
-    if [ "$quiet" -ge "$(( 6 * POLL ))" ]; then
+    if [ "$quiet" -ge "$STALL_SECONDS" ]; then
       stall=$((stall + 1))
       # Announce ONCE on entering the stall, then stay quiet.
       if [ "$stall" -eq 1 ]; then
-        echo "STALL: log has not advanced in ~$(( quiet / 60 )) min (count $seen) — investigate, do not wait"
+        echo "STALL: neither log has advanced in ~$(( quiet / 60 )) min (count $seen), past the SDK's own $(( STALL_SECONDS / 60 ))-min patience — investigate, do not wait"
       fi
     else
       stall=0
