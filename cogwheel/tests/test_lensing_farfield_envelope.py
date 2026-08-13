@@ -1829,7 +1829,9 @@ STALE_TMIN_FOIL_MIN = 1.0e-3
 #: The exterior carrier-continuity bound: a normalized complex INCREMENT, not
 #: a phase step (F022).  Mirrors the production
 #: ``surrogate._EXTERIOR_POLAR_CARRIER_STEP_MAX`` and is asserted equal to it.
-CARRIER_STEP_MAX = 1.0
+#: BOUND from that constant rather than re-typed as ``1.0``, so the mirror
+#: holds by construction rather than only where the equality test runs.
+CARRIER_STEP_MAX = surrogate_module._EXTERIOR_POLAR_CARRIER_STEP_MAX
 
 #: The OLD (pre-8h-d2) far-field axis-schema tag: the frame-DEPENDENT
 #: caustic-fixed coordinate, before the ``framewinv`` demodulation.  A chart

@@ -36,6 +36,7 @@ from cogwheel.lensing.surrogate import (
     CarrierDiscontinuityError,
     InteriorWedgeChart,
     LensAmplificationSurrogate,
+    _FARFIELD_ARC_MAP_SIZE,
     _KNOWN_WEDGE_AXIS_SCHEMAS,
     _WEDGE_AXIS_SCHEMA,
     _WedgeCausticMap,
@@ -1683,8 +1684,9 @@ T1_HELDOUT_PAD: float = 3e-3
 
 #: Fine-grid size for the arc-length quadrature (matches the production
 #: `_FARFIELD_ARC_MAP_SIZE`; a 2001-node trapezoid resolves the caustic
-#: speed to ~1e-6, far below the axis-choice error under test).
-T1_ARC_MAP_SIZE: int = 2001
+#: speed to ~1e-6, far below the axis-choice error under test).  BOUND from
+#: production rather than re-typed, so "matches" holds by construction.
+T1_ARC_MAP_SIZE: int = _FARFIELD_ARC_MAP_SIZE
 
 #: Accuracy bar for the cusp-adapted axis at the 90th percentile of the
 #: held-out relative error (measured u p90 ~3.7e-4; ~2.7x headroom).  This is
@@ -2114,9 +2116,10 @@ class MedialAxisServingTestCase(_WedgeTestCase):
 #: below one; 0.85 is a representative in-range value.
 WEDGE_TILE_R_EXTENT: float = 0.85
 
-#: Radial-row count for the structural test (mirrors the production
-#: ``TrainingConfig.n_farfield_tiles_per_side`` default of 5).
-WEDGE_TILE_N_PER_SIDE: int = 5
+#: Radial-row count for the structural test, BOUND from the production
+#: ``TrainingConfig.n_farfield_tiles_per_side`` default rather than re-typed
+#: as ``5``, so the mirror cannot silently strand.
+WEDGE_TILE_N_PER_SIDE: int = TrainingConfig().n_farfield_tiles_per_side
 
 #: Row counts swept in the row-count contract test.
 WEDGE_TILE_N_SWEEP: tuple[int, ...] = (1, 2, 3, 5, 8)

@@ -191,7 +191,10 @@ GHOST_SEPARATION_MIN: float = ch._GHOST_SEPARATION_MIN
 #: admit/refuse criterion (re-keyed to the geometric separation above); kept
 #: only as the carrier-resolution / frame-collapse target used by
 #: `GhostFrameCollapseTestCase`, whose probes are chosen to clear it.
-GHOST_GATE: float = 2.0
+#: BOUND from production rather than typed as ``2.0``: it IS
+#: ``channels._FARFIELD_WINDOW_RADIANS`` (``RHO_END / 2``), and a literal
+#: would silently stop tracking it the day ``RHO_END`` moves.
+GHOST_GATE: float = ch._FARFIELD_WINDOW_RADIANS
 
 #: Number of exterior tiles per axis for the tiler-geometry checks.
 N_PER_SIDE: int = 5
@@ -395,7 +398,9 @@ SACRC_CONTRAST_FLOOR: float = 50.0
 #: this fraction of the local caustic reach between adjacent nodes straddles
 #: a nearest-caustic basin ridge and must be subdivided (reseated).  Asserted
 #: against the live module constant so the test cannot drift from production.
-CARRIER_FLIP_FRACTION: float = 0.5
+#: BOUND from that constant rather than re-typed, so "cannot drift" holds by
+#: construction and not only where the pin test happens to run.
+CARRIER_FLIP_FRACTION: float = surrogate._CARRIER_FLIP_FRACTION
 
 #: --- WP1: interior_w_nodes_per_decade density lever tests ---
 

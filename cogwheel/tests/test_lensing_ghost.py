@@ -149,9 +149,13 @@ from cogwheel.lensing.chang_refsdal.operator import (  # noqa: E402
 from cogwheel.lensing import ppgo_map  # noqa: E402
 
 
-#: Relative imaginary part above which a quartic root is a ghost; the
-#: production default (`geometry.ghost_kernel`'s ``root_tolerance``).
-ROOT_TOLERANCE = 3e-7
+#: Relative imaginary part above which a quartic root is a ghost, READ OFF
+#: the production default (`geometry.ghost_kernel`'s ``root_tolerance``)
+#: rather than re-typed as ``3e-7``: the independent oracles below classify
+#: roots with THIS number, so a literal would quietly start disagreeing with
+#: production's classification the day the default moves.
+ROOT_TOLERANCE = inspect.signature(
+    geometry.ghost_kernel).parameters['root_tolerance'].default
 
 #: Off-axis source angles (radians, relative to the caustic-reach
 #: direction) at which the ghost pair is genuine.  The exact principal

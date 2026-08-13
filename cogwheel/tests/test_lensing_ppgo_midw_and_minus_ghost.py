@@ -75,8 +75,11 @@ from cogwheel.lensing.surrogate_training import (
 # Module constants
 # ---------------------------------------------------------------------------
 
-#: Envelope bar matching production default.
-_ENVELOPE_BAR: float = 0.05
+#: Envelope bar BOUND to the production default (already imported above)
+#: rather than re-typed as ``0.05``: the r_ppgo_min figures below are built
+#: from it, so a literal would silently mis-predict the serving radius the
+#: day production moves the bar.
+_ENVELOPE_BAR: float = _DEFAULT_ENVELOPE_BAR
 
 #: r_ppgo_min at the lowered _R_PPGO_ERROR_CONST=1.0 (the WP-1 change).
 _NEW_R_PPGO_MIN: float = float(

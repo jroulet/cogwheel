@@ -142,8 +142,11 @@ DD_N_THETA: int = 4
 #: W-nodes per decade (sparse for speed).
 DD_W_NODES_PER_DECADE: int = 8
 
-#: The DD margin constant (duplicated here for the test's oracle).
-DD_MARGIN: float = 58.0
+#: The DD margin constant, BOUND from production (already imported above)
+#: rather than duplicated as a literal: the oracle below is built from it,
+#: and a re-typed 58.0 would silently certify the wrong band the day
+#: production moves the margin.
+DD_MARGIN: float = _DD_PRODUCT_MARGIN
 
 # ---------------------------------------------------------------------------
 #: Module-level constants — non-DD-cap low-w fixture (SHARED build)

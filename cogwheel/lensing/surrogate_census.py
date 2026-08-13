@@ -56,7 +56,9 @@ from cogwheel.lensing import surrogate as _surrogate
 from cogwheel.lensing.chang_refsdal import (ChangRefsdalChannels,
                                             farfield_envelope_from_partition)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
-from cogwheel.lensing.likelihood import _saddle_farfield_analytic_serves
+from cogwheel.lensing.likelihood import (
+    _saddle_farfield_analytic_serves,
+    _XI_FOLD_THRESHOLD as _likelihood_xi_fold_threshold)
 from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
                                        CERTIFICATION_BAR, caustic_rho,
                                        get_certified_ppgo_map)
@@ -123,8 +125,14 @@ _FALLTHROUGH_CATEGORIES = ('gamma-guard', 'dropped-sliver', 'born',
 _SERVED_CATEGORIES = ('chart', 'ppgo_fold', 'saddle-farfield-analytic')
 
 #: Minimum Airy parameter xi for the fold-ppGO interior handoff gate.
-#: Mirrors the canonical definition in cogwheel.lensing.likelihood.
-_XI_FOLD_THRESHOLD = 4.0
+#: BOUND from `likelihood`, not re-typed.  This file's whole job is to
+#: report what production WOULD serve, so any gate constant it copies can
+#: drift and make the census report a served set production does not serve.
+#: It already imports `_saddle_farfield_analytic_serves` from `likelihood`
+#: for exactly that reason -- this constant was the one place the same file
+#: still carried its own copy, with a comment claiming it "mirrors the
+#: canonical definition" and nothing enforcing that (found 2026-08-13).
+_XI_FOLD_THRESHOLD = _likelihood_xi_fold_threshold
 
 
 class CensusError(RuntimeError):

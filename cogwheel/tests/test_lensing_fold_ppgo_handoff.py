@@ -44,6 +44,7 @@ from cogwheel.lensing.chang_refsdal._airy_fold import (
     _uniform_error_estimate,
     fold_ppgo_correction,
 )
+from cogwheel.lensing.likelihood import _XI_FOLD_THRESHOLD
 from cogwheel.lensing.ppgo_map import CERTIFICATION_BAR
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels,
@@ -77,8 +78,11 @@ W_MIN: float = 45.0
 W_MAX: float = 55.0
 N_W: int = 20
 
-#: xi threshold from production (fold correction refuses below this).
-XI_FOLD_THRESHOLD: float = 4.0
+#: xi threshold BOUND from production (`likelihood`'s interior fold-ppGO
+#: rung refuses below this) rather than re-typed: a hard-coded 4.0 here
+#: would silently stop meaning "the gate" the day production moves it, and
+#: every fixture in this suite is chosen to sit on one side of it.
+XI_FOLD_THRESHOLD: float = _XI_FOLD_THRESHOLD
 
 #: Accuracy bar for fold correction vs exact (1% relative error).
 ACCURACY_BAR: float = 0.01

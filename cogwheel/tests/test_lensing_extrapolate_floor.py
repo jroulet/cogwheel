@@ -50,6 +50,7 @@ from cogwheel.lensing.ppgo_map import (
     _measure_cell,
     ASTROID_WALL,
     CERTIFICATION_BAR,
+    _EXTRAP_W_CERT_DEFLATION,
     STATUS_BEYOND_WALL,
     STATUS_CERTIFIED,
 )
@@ -82,8 +83,11 @@ _W_GRID_POSITIVE = np.geomspace(10.0, 2000.0, 50)
 #: W-grid for refusal tests (narrower -- only needs to produce error arrays).
 _W_GRID_REFUSAL = np.geomspace(1.0, 60.0, 24)
 
-#: Deflation factor applied by the function.
-_DEFLATION = 2.0
+#: Deflation factor applied by the function, BOUND from production rather
+#: than re-typed: `_ANALYTIC_W_CERT` below is the ORACLE this suite compares
+#: `_extrapolate_floor` against, so a literal 2.0 would keep the oracle
+#: agreeing with a stale expectation the day production moves the factor.
+_DEFLATION = _EXTRAP_W_CERT_DEFLATION
 
 #: Analytic prediction: (C / bar)^(1/alpha) * deflation.
 _ANALYTIC_W_CERT = (_C / _BAR) ** (1.0 / _ALPHA) * _DEFLATION

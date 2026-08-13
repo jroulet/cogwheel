@@ -90,7 +90,7 @@ from cogwheel.lensing import waveform
 from cogwheel.lensing.chang_refsdal import (
     operator, geometry, _airy_fold, _pearcey_cusp)
 from cogwheel.lensing.chang_refsdal._schwinger import (
-    SchwingerCertificationError)
+    SchwingerCertificationError, W_CEILING_SCHWINGER_QD)
 
 
 try:  # Diagnostics only; never gate a test on plotting being present.
@@ -143,6 +143,12 @@ _FLOOR_F0_HZ = 100.0
 
 #: Directory for diagnostic figures.
 _OUTPUT_DIR = pathlib.Path(__file__).resolve().parent / 'output'
+
+#: A probe frequency strictly ABOVE the Schwinger QD ceiling, DERIVED from
+#: the production ceiling rather than typed as ``151.0``: the whole point of
+#: the HARD_CORE probe is that it sits above the ceiling, and a literal stops
+#: meaning that the day production moves ``W_CEILING_SCHWINGER_QD``.
+_ABOVE_QD_CEILING_W = W_CEILING_SCHWINGER_QD + 1.0
 
 
 @dataclass(frozen=True)
@@ -219,7 +225,7 @@ BAND_EDGE = _LensConfig(
 #: branch of the conditional serving contract.
 HARD_CORE = _LensConfig(
     name='hard-core', y=(0.26, 0.00), gamma=0.10, beta=0.0, kappa=0.0,
-    w_probes=(30.0, 151.0))
+    w_probes=(30.0, _ABOVE_QD_CEILING_W))
 
 #: Weak-lens configuration for the unlensed-limit floor sweep.
 FLOOR_CONFIG = _LensConfig(
@@ -609,6 +615,9 @@ class MacroSaddleControlTestCase(WaveformTestCase):
         probe grid propagates the `SchwingerCertificationError` unswallowed
         (never a ``nan`` or a finite-but-wrong factor).
         """
+        # Premise: the hard-core probe is above the production QD ceiling,
+        # which is what makes the refusal a ceiling refusal at all.
+        self.assertGreater(_ABOVE_QD_CEILING_W, W_CEILING_SCHWINGER_QD)
         refusals = [w for w in HARD_CORE.w_probes
                     if not _f_op_returns(HARD_CORE, w)]
         self.assertTrue(
