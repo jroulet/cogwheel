@@ -2019,13 +2019,25 @@ Tag conventions:
       60 < w <= 150    216 (24.0%)  Schwinger MPMATH        ~85-120 s/call
       degenerate band  121 (13.4%)  see the rho_outer todo
 
-      564 x 0.2 s   ~=  1.9 minutes
-      216 x 100 s   ~=  6.0 HOURS      <- ~99.5% of the engine cost
+  MEASURE AGAINST THE SERVING BUDGET, NOT AGAINST EACH OTHER. The warm
+  single-thread lnlike is **9.8 ms** (ratio layer); the exact-engine crown is
+  751 ms. Per call:
 
-  The mpmath band (F061) is the whole story. 24% of the draws by count are
-  ~190x more valuable to chart per draw than the other 76%. Any chart that
-  covers this region should be sized and sequenced by the `60 < w <= 150`
-  sub-population FIRST.
+      double-double   200 ms   =     20x the ENTIRE lnlike budget
+      mpmath      100,000 ms   =  10204x the ENTIRE lnlike budget
+
+  A single such node does not fit inside an evaluation — it IS the
+  evaluation. Amortised over all draws at the measured hit rates:
+
+      dd      5.64% x 200 ms   =   11.3 ms/draw  =   1.2x budget
+      mpmath  2.16% x 100 s    = 2160.0 ms/draw  =   220x budget
+
+  So BOTH populations must be served. mpmath is worse by ~190x and is
+  correctly first, but the 564 double-double draws are NOT cheap: on their
+  own they more than double the cost of every likelihood evaluation. An
+  earlier version of this note called them "worth ~1.9 minutes" — that is
+  wall-clock over a 10k census sample, which is the wrong denominator
+  entirely. Cost belongs against the budget a draw must fit in.
 
   ## HALF THE EXPENSIVE POPULATION CANNOT BE CHARTED AT ALL
 

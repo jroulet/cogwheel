@@ -37,8 +37,22 @@ reproduce.
        w <= 60         564 draws   Schwinger double-double  ~0.2 s/call
        60 < w <= 150   216 draws   Schwinger MPMATH        ~85-120 s/call  (F061)
 
-       564 x 0.2 s  ~=  1.9 minutes
-       216 x 100 s  ~=  6.0 HOURS        <- ~99.5% of the engine cost
+   Measured against the SERVING BUDGET, which is the denominator that
+   matters — warm single-thread lnlike is 9.8 ms (ratio layer), the
+   exact-engine crown is 751 ms:
+
+       double-double     200 ms/call =     20x the ENTIRE lnlike budget
+       mpmath        100,000 ms/call =  10204x the ENTIRE lnlike budget
+
+   A single such node does not fit inside an evaluation; it IS the
+   evaluation. Amortised at the measured hit rates:
+
+       dd      5.64% x 200 ms =   11.3 ms/draw =   1.2x budget
+       mpmath  2.16% x 100 s  = 2160.0 ms/draw =   220x budget
+
+   So the mpmath band is ~190x worse and is correctly this build's target,
+   but the double-double population is NOT cheap either — on its own it more
+   than doubles every likelihood evaluation.
 
 5. HALF THE EXPENSIVE POPULATION CANNOT BE CHARTED. A training node needs the
    1F1 kernel, which refuses above `_DD_PRODUCT_MARGIN = 58` (`w*|y| <= 58`).
@@ -52,8 +66,10 @@ IN — a named serving rung for the saddle region above the DD product ceiling,
 its validity gate, its wiring into the serve path, and tests.
 
 OUT — the deltoid exterior coordinate (shipped); extending `rho_outer` for the
-`w <= 60` population (worth ~1.9 min of engine time, do it separately if at
-all); the `gamma -> 1` degenerate-band question (recorded, deliberately open);
+`w <= 60` population — a SEPARATE build, but NOT optional: at 200 ms/call and
+a 5.64% hit rate it amortises to 11.3 ms/draw against a 9.8 ms lnlike budget,
+so it more than doubles every evaluation on its own; the `gamma -> 1`
+degenerate-band question (recorded, deliberately open);
 any training run; the cusp/fold carve-out population (326 draws, separate).
 
 ## The idea to evaluate (Professor must adjudicate before the Coder codes)
