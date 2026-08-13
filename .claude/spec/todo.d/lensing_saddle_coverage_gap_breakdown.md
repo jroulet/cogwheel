@@ -60,13 +60,14 @@ section: Backlog
 
   ## Causes 2 and 3 (177 + 149) — admission predicates refuse
 
-  177 sources lie inside the charted exterior band yet fail
-  `admits_exterior()`; 149 lie inside a lobe yet fail `admits()`. Both are the
-  `caustic_cloud` nearest-distance `>= eta_max` tube-shell exclusion doing its
-  job — the cusp/fold neighbourhoods are deliberately carved out. The question
-  is not whether to remove the carve-out but WHICH named rung serves the
-  carved region: the Pearcey cusp arm and the Airy fold arm exist for exactly
-  this, and `_classify_saddle` never consults them.
+  ANSWERED 2026-08-12: the carve-out is correct and the arms own the region.
+  Measured `eta` for both populations — inside a lobe p50 0.062, in the
+  exterior band p50 0.100 — with **100% below 0.3** in each. Every one of the
+  326 sits inside `_ETA_MAX_FOLD`, the Airy fold arm's certified fence. So
+  these are exactly the cusp/fold neighbourhoods the tube-shell exclusion is
+  meant to carve, and the uniform arms are the intended rung; nothing routes
+  them there. Details, and the saddle-validity question that must be settled
+  first, in [[lensing_saddle_carveout_belongs_to_the_uniform_arms]].
 
   ## Cause 4 (9) — was 292, and was an INSTRUMENT artifact
 
