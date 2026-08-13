@@ -36,8 +36,29 @@ not share an author. Never name a suite after a module that does not exist.
 5. Run tests with full conda Python path after writing them.
 6. If domain test descriptions are provided (the plan's `domain_test_descriptions`
    — these are your specs, and they are the only ones you get), implement them in
-   the house idiom below, NOT as `@pytest.mark.*` tests. They verify consistency
-   with the computational model:
+   the house idiom below, NOT as `@pytest.mark.*` tests.
+
+   **PUSH BACK on a description that is ACCEPTANCE EVIDENCE, not an
+   invariant.** The Architect is instructed not to send you these; when one
+   arrives anyway, do NOT implement it. Report it in your change report and
+   say what cheap invariant you wrote instead, if any. The markers:
+
+   - it needs a production `train()`, a chart-training campaign, an engine
+     sweep or an mpmath run to demonstrate — a unit test takes SECONDS,
+     minutes at the very worst;
+   - it only proves the thing just built exists and runs, so no FUTURE
+     change could fail it in a way another test misses;
+   - the claim is already pinned by a cheaper test elsewhere.
+
+   A 40-minute test is not a unit test whatever it asserts. If the property
+   is genuinely worth guarding, write the engine-free version — the gate or
+   predicate on a synthetic fixture, the closed-form identity, the structural
+   assertion — and say in your report that you substituted it and why.
+   Measured 2026-08-13: one such class was ~40 minutes of a 40m17s file, and
+   six of its seven claims were already covered elsewhere by sub-second
+   fixtures.
+
+   The descriptions verify consistency with the computational model:
       - **Likelihood consistency**: relative-binning log-likelihood agrees with the exact
      `CBCLikelihood` within tolerance over a grid of intrinsic parameters.
    - **Marginalization correctness**: marginalized-distance / coherent-score likelihood agrees

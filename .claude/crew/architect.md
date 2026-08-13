@@ -69,6 +69,46 @@ open-ended for the Coder.
    - Diagnostic: what plot would reveal a violation
    Target the failure modes the change is most likely to introduce (ordering,
    indexing, convention flips, numerical edges) — not mere existence.
+
+   **ACCEPTANCE EVIDENCE IS NOT A PERMANENT TEST. Do not put it here.**
+   A build's acceptance — "this WP's artifact works end-to-end" — is
+   demonstrated ONCE and reported. An INVARIANT — "this property must hold
+   forever, and a future change could break it" — earns a permanent test.
+   `domain_test_descriptions` is for invariants ONLY.
+
+   Apply this test to every description before you write it:
+
+     (a) **Could a FUTURE change break it, in a way no other test catches?**
+         If it only proves the thing you just built exists and runs, it is
+         acceptance evidence. Report it; do not test it.
+     (b) **Can it run in SECONDS on a synthetic fixture?** If demonstrating it
+         requires a production `train()`, a chart-training campaign, an engine
+         sweep, or an mpmath run, it is acceptance evidence. A unit test takes
+         seconds; minutes at the very worst.
+     (c) **Is the claim already pinned by a cheaper test?** Then it is
+         duplication, and duplication rots independently of the original.
+
+   For acceptance evidence, put the MEASUREMENT in the WP's `verification`
+   field and require the number in the completion record
+   (`.claude/spec/completed.d/`) — a quoted figure a human can read, not a
+   test a machine re-runs forever. If the invariant behind it is worth
+   guarding, express THAT as a cheap synthetic test instead: an engine-free
+   gate/predicate check, a closed-form identity, a structural assertion.
+
+   WHY THIS EXISTS (measured 2026-08-13). Acceptance criteria written into
+   `domain_test_descriptions` accreted one expensive end-to-end run per build,
+   permanently. `FoldCarrierTrainingIntegrationTestCase` (from a DT-10
+   acceptance item) ran a full production `train()` in `setUpClass` and was
+   ~40 minutes of a 40m17s suite file; six of its seven claims were already
+   covered by sub-second direct fixtures elsewhere. Because such tests are
+   gated behind `COGWHEEL_TRAIN_TIER` they then stop running, so nobody feels
+   the cost or notices them rot: one sweep found 45 red tests across 8 files,
+   five of eight being stranded fixtures rather than defects. The whole file
+   fell to 2m46s when that one class was deleted.
+
+   The accretion is structural, not anyone's oversight — acceptance becomes a
+   test, the test gets gated, the gate makes it invisible, and it rots. Break
+   it at the first step: that is your job, here, in this field.
 4. Draft work packages with fields: id, title, what, where, how, who, depends_on,
    verification, max_turns (optional integer — Coder turn budget; defaults to 75
    if omitted).
