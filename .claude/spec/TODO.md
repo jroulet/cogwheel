@@ -1845,14 +1845,17 @@ Tag conventions:
   different rung; a negative width should probably refuse loudly rather than
   silently yield an empty band.
 
-  ANSWERED 2026-08-12 — do NOT extend `rho_outer`. The question was whether a
+  ANSWERED 2026-08-12 — the answer SPLITS by frequency. The question was whether a
   source at `rho_lobe ~ 5-11` is physically far-field, since `rho_lobe`
   divides by the small `r_deltoid`. Measured on 780 of this population: the
   PHYSICAL distance to the nearest caustic point is `eta` p50 **0.971**, and
   **99.2% have `eta >= 0.3`** (`ETA_MIN_GEOMETRIC`) while only 0.7% are
   genuinely near-caustic. They are far from the caustic and do not need a
-  chart at all — this is a ROUTING failure. Full measurement and the ruled-out
-  options are in
+  chart at all. BUT frequency decides what can serve them: w > 60 (216 draws,
+  27.7%) are already served by the saddle stationary-phase arm and only the
+  INSTRUMENT mislabels them, while w <= 60 (564 draws, 72.3%) genuinely need
+  chart coverage, so extending `rho_outer` remains on the table for THAT
+  sub-population. Full measurement in
   [[lensing_saddle_gap_is_a_routing_failure_not_coverage]].
 
   ## Causes 2 and 3 (177 + 149) — admission predicates refuse
@@ -1972,70 +1975,66 @@ Tag conventions:
   wedge was, and still carries the normalised-radius disease.
 
 
-- **THE DOMINANT SADDLE GAP IS A ROUTING FAILURE, NOT MISSING COVERAGE — the
-  sources are FAR from the caustic** `[→ spec]` — measured 2026-08-12.
+- **THE DOMINANT SADDLE GAP SPLITS 28/72 BETWEEN A ROUTING MISLABEL AND A
+  GENUINE COVERAGE HOLE** `[→ spec]` — measured 2026-08-12. Population: the
+  780 draws beyond `rho_outer` (Cause 1 of
+  [[lensing_saddle_coverage_gap_breakdown]], excluding the 144 with a
+  degenerate band).
 
-  For the 780 sampled draws in the largest gap population (`rho_lobe` beyond
-  `rho_outer`, excluding the degenerate-band sub-population), the PHYSICAL
-  distance to the nearest caustic point (`geometry.nearest_caustic_point`
-  `.distance`) is:
+  ## They are all FAR from the caustic
+
+  Physical distance to the nearest caustic point
+  (`geometry.nearest_caustic_point(...).distance`):
 
       eta   p10 0.617   p50 0.971   p90 1.380   max 2.682
-      eta >= 0.3  (ETA_MIN_GEOMETRIC)  99.2%
-      eta <  0.3  (genuinely near-caustic)  0.7%
+      eta >= 0.3 (ETA_MIN_GEOMETRIC): 99.2%
+      eta <  0.3 (genuinely near-caustic): 0.7%
 
-      0.0-0.1     1   0.1%
-      0.1-0.3     5   0.6%
-      0.3-1.0   415  53.2%
-      1.0-99    359  46.0%
+  `rho_lobe` p50 is 5.70 but `|y|` p50 is only 0.732 — the large normalised
+  radius is an ARTEFACT of dividing by the small `r_deltoid`. These sources
+  sit near the origin, between the lobes, a full unit from the caustic.
 
-  Meanwhile `rho_lobe` p50 is 5.70 and `|y|` p50 is only 0.732. So the large
-  normalised radius was an ARTEFACT of dividing by the small `r_deltoid`:
-  these sources are physically close to the origin but ~1.0 away from the
-  caustic — THREE TIMES the engine's own far-from-caustic threshold.
+  ## But frequency decides what can serve them, and it splits the population
 
-  They do not need a chart. They are in the regime the geometric branch
-  exists to serve. They reach `exact_engine` only because
-  `_classify_saddle` never consults a far-field rung.
+      w   p10 7.2   p50 28.0   p90 104.4   max 147.5
+      w >  60   216 (27.7%)   saddle stationary-phase arm serves, FAST
+      w <= 60   564 (72.3%)   Schwinger exact, SLOW
 
-  ## Root cause: origin-`rho` is the wrong discriminator for an off-origin caustic
+  `channels.py` does NOT call `select_branch` for a saddle host — not because
+  the saddle lacks geometric routing, but because `cancellation_exponent` is
+  positive-parity-only by design and **the operator's saddle arm owns the
+  per-node routing internally**: resolved AND above the `w <= 60` ceiling ->
+  stationary phase, otherwise Schwinger (`channels.py` ~L666-700).
 
-  `census_dry_run.py::_classify` tries `origin rho > 1 -> born` FIRST, and only
-  then routes `gamma >= 1` into the lobe path. For the macro saddle the two
-  deltoids sit OFF the origin, so a source can be physically far from BOTH
-  lobes while having a small origin radius — it is between them. Origin-`rho`
-  cannot express that, which is the same defect already fixed for the chart
-  COORDINATE (origin-polar retired for lobe-local by `LobeExteriorChart`,
-  commit 4c7dc92) but NOT yet for the serve GATE.
+  ## Two different fixes, do not conflate them
 
-  ## Consequence for the fix direction
+  **216 draws (w > 60) — INSTRUMENT.** The engine already serves these
+  quickly via the saddle stationary-phase arm. The census does not model that
+  internal routing, so it labels them `exact_engine`. Teach
+  `census_dry_run.py` the saddle operator's own gate and they become served
+  with no library change at all.
 
-  This rules OUT the two options that looked most natural before measuring:
-  extending `rho_outer` from ~3.4 to ~11, or giving the corridor its own
-  chart coordinate. Both would build charts for a region that does not need
-  charting. The fix is to re-key the gate off CAUSTIC DISTANCE (and the
-  resolved-image conditions) rather than origin `rho`.
+  **564 draws (w <= 60) — GENUINE.** Far from the caustic but low frequency,
+  where diffraction still matters and Schwinger is the CORRECT evaluator, just
+  slow. A fast path here means interpolation, i.e. chart coverage. So
+  extending `rho_outer` to reach `rho_lobe ~ 11` IS on the table for this
+  sub-population — unlike for the `w > 60` group, which needs no chart.
 
-  ## What is NOT yet measured — do this before implementing
+  ## Correction worth keeping
 
-  `eta >= ETA_MIN_GEOMETRIC` is NECESSARY but NOT SUFFICIENT.
-  `select_branch` also requires `w * delta_min >= RHO_END = 4.0` (resolved)
-  and `L > L_MAX = 48` (strongly cancelling). This probe measured only the
-  `eta` leg. Measure the fraction of these 780 that clear the FULL gate
-  before claiming they are servable — the honest claim today is "they are far
-  from the caustic", not "they are geometric-servable".
-
-  Note the engine's own `eta` leg is live on BOTH parities and was measured
-  separately (F034: saddle p90 8.95e-1 -> 4.54e-3 with worst case 484x over
-  15% of resolved draws), so the saddle `eta` gate is already trusted
-  machinery — this is about CONSULTING it, not building it.
+  An earlier pass of this analysis concluded "routing failure, not coverage —
+  this rules out extending `rho_outer`". That was drawn from the `eta`
+  measurement ALONE, before checking frequency. `eta >= 0.3` says the source
+  is far from the caustic; it does NOT say a fast rung exists at that source's
+  `w`. The two-leg conclusion was right for 28% of the population and wrong
+  for 72%. Measure every leg of a gate before concluding which side of it a
+  population lands on.
 
   ## Acceptance
 
-  The saddle `exact_engine` bucket drops by the measured servable fraction,
-  and the per-cause breakdown in
-  [[lensing_saddle_coverage_gap_breakdown]] shows the drop in
-  `rho_lobe > rho_outer` specifically, not just in the total.
+  Split reporting by `w` band, not just by cause. The instrument fix should
+  move ~216 draws with zero library change; anything more means it is
+  crediting coverage that does not exist.
 
 - **Restore the surrogate structural tests once the serving schema settles**
   `[housekeeping]` — three classes were DELETED from

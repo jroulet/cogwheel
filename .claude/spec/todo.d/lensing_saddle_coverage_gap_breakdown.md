@@ -46,14 +46,17 @@ section: Backlog
   different rung; a negative width should probably refuse loudly rather than
   silently yield an empty band.
 
-  ANSWERED 2026-08-12 — do NOT extend `rho_outer`. The question was whether a
+  ANSWERED 2026-08-12 — the answer SPLITS by frequency. The question was whether a
   source at `rho_lobe ~ 5-11` is physically far-field, since `rho_lobe`
   divides by the small `r_deltoid`. Measured on 780 of this population: the
   PHYSICAL distance to the nearest caustic point is `eta` p50 **0.971**, and
   **99.2% have `eta >= 0.3`** (`ETA_MIN_GEOMETRIC`) while only 0.7% are
   genuinely near-caustic. They are far from the caustic and do not need a
-  chart at all — this is a ROUTING failure. Full measurement and the ruled-out
-  options are in
+  chart at all. BUT frequency decides what can serve them: w > 60 (216 draws,
+  27.7%) are already served by the saddle stationary-phase arm and only the
+  INSTRUMENT mislabels them, while w <= 60 (564 draws, 72.3%) genuinely need
+  chart coverage, so extending `rho_outer` remains on the table for THAT
+  sub-population. Full measurement in
   [[lensing_saddle_gap_is_a_routing_failure_not_coverage]].
 
   ## Causes 2 and 3 (177 + 149) — admission predicates refuse
