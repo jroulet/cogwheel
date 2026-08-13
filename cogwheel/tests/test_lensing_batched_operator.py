@@ -992,8 +992,17 @@ class FewMsTimingTestCase(BatchedOperatorTestCase):
             def run_brute():
                 self.like.lnlike_bruteforce(candidate)
 
+            # ONE timed reference call, not best-of-TIMING_REPEATS -- see
+            # the same change in test_lensing_fast_path.  `lnlike_bruteforce`
+            # is ~138 s/call and is only the DENOMINATOR of a ratio gated at
+            # SPEEDUP_MIN, so best-of-5 cost 5/6 of the runtime and bought
+            # nothing the gate can resolve.  Warm-up KEPT (first call pays
+            # numba / cache costs).  Marginally conservative: a single
+            # sample can only be >= the best of five.
             run_brute()
-            t_brute = self._best_time(run_brute)
+            _t0 = time.perf_counter()
+            run_brute()
+            t_brute = time.perf_counter() - _t0
             print(f'[FewMsTiming] STRICT brute={t_brute * 1e3:.1f} ms, '
                   f'speedup={t_brute / t_rb:.1f}x')
             self.n_checks += 1

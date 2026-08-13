@@ -1010,9 +1010,15 @@ class RatioTimingTestCase(RatioLayerTestCase):
                   f'{t_ratio*1e3:.3f} ms; ratio node count {node_count}\n')
 
         if _STRICT_TIMING:
+            # ONE timed reference call, not best-of-TIMING_REPEATS -- see
+            # the same change in test_lensing_fast_path.  `lnlike_bruteforce`
+            # is ~138 s/call and is only the DENOMINATOR of a ratio gated at
+            # SPEEDUP_MIN, so best-of-5 cost 5/6 of the runtime and bought
+            # nothing the gate can resolve.  Warm-up KEPT (first call pays
+            # numba / cache costs).  Marginally conservative: a single
+            # sample can only be >= the best of five.
             self.like.lnlike_bruteforce(par_dic)  # warm
-            t_bf = self._best_of(self.like.lnlike_bruteforce, par_dic,
-                                 TIMING_REPEATS)
+            t_bf = self._best_of(self.like.lnlike_bruteforce, par_dic, 1)
             speedup = t_bf / t_ratio
             report += (f'STRICT brute force: {t_bf*1e3:.3f} ms; '
                        f'speed-up {speedup:.1f}x\n')

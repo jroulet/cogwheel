@@ -5,11 +5,19 @@
 #
 # 1. It is SERIAL by necessity. Every assertion here is a speed comparison;
 #    under the sweep's 8-wide contention it would measure the sweep.
-# 2. It is EXPENSIVE. Measured 2026-07-30: 44:44 wall clock, because the
-#    strict branches time `lnlike_bruteforce` as the reference — ~18 brute
-#    evaluations across the sites. Bolting that onto a ~25 min sweep would
-#    nearly triple every build's post-step to re-check ratios that do not
-#    silently drift.
+# 2. It is EXPENSIVE, though far less so since 2026-08-13. Measured
+#    2026-07-30: 44:44 wall clock, because the strict branches time
+#    `lnlike_bruteforce` (~138 s/call) as the reference. The old header said
+#    "~18 brute evaluations across the sites", which mis-attributed the cost
+#    and pointed at the wrong lever: there are only THREE call sites, each
+#    running 1 warm-up + best-of-TIMING_REPEATS(5) = 6 evaluations. The
+#    repeats were the cost, not the sites.
+#    Best-of-N suppresses scheduler noise, which matters for the
+#    millisecond-scale `lnlike` but is meaningless on a 138 s reference that
+#    is only the DENOMINATOR of a ratio gated at SPEEDUP_MIN. The three sites
+#    now take ONE timed call after the warm-up: 18 brute evaluations -> 6,
+#    so expect ~15 min rather than ~45. Bolting even that onto a ~25 min
+#    sweep would still re-check ratios that do not silently drift.
 # 3. Nothing had EVER run it (F052). COGWHEEL_STRICT_TIMING gates four
 #    `if _STRICT_TIMING:` branches that tighten assertions rather than skip
 #    tests, so the suite always took the loose path and no job set the
@@ -39,7 +47,7 @@ $REPO_ROOT/cogwheel/tests/test_lensing_surrogate.py
 
 echo "serial timing pass -> $OUT"
 echo "  tiers: COGWHEEL_STRICT_TIMING=1 COGWHEEL_RUN_TIMING_SMOKE=1"
-echo "  expect ~45 min; the brute-force reference calls dominate"
+echo "  expect ~15 min; the brute-force reference calls still dominate"
 echo "  NOTE absolute wall-clock numbers are machine-dependent; the SPEEDUP"
 echo "       ratios are the portable claims and are what is gated."
 
