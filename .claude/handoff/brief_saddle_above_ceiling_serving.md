@@ -166,6 +166,36 @@ the per-branch instrumentation in
    the rule the build will actually implement, not under an estimator it
    cannot use.
 
+9. **THE `w` AXIS DOES NOT NEED A COORDINATE CHANGE — `log w` is near-optimal.**
+   F064 records the hard-won positive-parity lesson: minimising oscillation was
+   not enough, and only a COORDINATE CHANGE (`u = d^(2/3)`, worth 171x) made
+   the structure splineable. Tested here on a genuine tier-2 source
+   (`gamma=1.535`, `|y|=1.499`, `|E|/|F|` max 2.10), as spline interpolation
+   error `max|spline - truth| / max|E|`:
+
+       coordinate      n=8        n=12       n=16
+       log w        5.34e-04   1.02e-04   2.58e-05
+       w            2.11e-02   7.13e-03   2.89e-03     40-100x worse
+       1/w          9.90e-04   2.83e-04   1.27e-04
+       w^-1/2       2.14e-04   6.06e-05   1.26e-05     best, ~2x over log w
+
+   The axis choice MATTERS — linear `w` is badly wrong — but `log w`, which
+   the charts already use, is within ~2x of the best candidate found. That is
+   nothing like the 171x of the positive-parity angular fix, so do NOT spend a
+   work package inventing a `w` coordinate.
+
+   WHY the pathology is absent here: F064's disease is a NORMALISING
+   DENOMINATOR dragging a cusp's `theta^(2/3)` across every radius. Nothing
+   analogous acts in `w` — the re-gauged residual is a smooth asymptotic
+   decay. The axes that COULD carry that pathology in this region are the
+   SPATIAL ones, and they already use the lobe-local cusp-adapted `u`.
+
+   Note `1/w` — the coordinate an asymptotic-series argument predicts — is
+   WORSE than `log w`. The measurement, not the argument, settled it.
+
+   LIMIT: one source. If tier 2's chart misses its eps bar, re-run this
+   comparison across the tier-2 population before adding nodes.
+
 ## Scope
 
 IN — a THREE-TIER ladder for the far-from-caustic macro saddle, with NO tier
