@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.37.13` (2026-08-12):
+- `0.37.14` (2026-08-12):
 
 Update INTERIOR CUSP SERVING: interior discriminator changed from origin-based
 `r_caustic` directional check to image-count gate `_is_interior = len(images) >= 4`.
@@ -17,7 +17,7 @@ corridor between the two lobes.  The generic interior case condition is now
 `len(images) >= 4, len(stationary_values) == 1`.  Exterior sources now described
 as `len(images) < 4` (was `rho > 1`).
 
-- `0.37.12` (2026-08-12):
+- `0.37.13` (2026-08-12):
 ### Saddle corridor refusal in ppGO map; caustic_rho is origin-based, not an interior discriminator
 
 SPEC.md FOLD-PPGO INTERIOR HANDOFF paragraph: added the PARITY-GATED saddle
@@ -32,7 +32,7 @@ decided by image count (`len(images) >= 4`) on both parities.
 Module list: `caustic_rho` annotated as an origin-based scalar-reach gauge
 that is NOT a saddle interior discriminator.
 
-- `0.37.11` (2026-08-12):
+- `0.37.12` (2026-08-12):
 ### Pearcey ppGO rung full mid-w band + MINUS_GHOST saddle exterior window
 
 SPEC.md Microlensing engine row (ppGO rung description): the rung is no
@@ -48,7 +48,7 @@ MINUS_GHOST` envelope label (ghost gates become the admission authority;
 `_CUSP_EXCLUSION_DISTANCE` reduced for saddle near-cusp tiles), closing the
 exterior cusp neighbourhood quadrature-free on both parities.
 
-- `0.37.10` (2026-08-12):
+- `0.37.11` (2026-08-12):
 ### Pearcey arm: interior degenerate cluster bypass + on-axis fold detection
 
 Extended the INTERIOR CUSP SERVING description in the Microlensing engine row:
@@ -60,6 +60,35 @@ Added description of `_merging_fold_pair` detecting the degenerate cluster via
 `_CUSP_TIE_EPS = 1e-12` (two saddles at tied delay returns None, routing to
 cusp arm as last rung). Exterior sources (`rho > 1`) still validate
 delay-to-image alignment.
+
+- `0.37.10` (2026-08-12):
+
+### Document LobeExteriorChart, retire ExteriorPolarChart for macro-saddle exterior
+
+Post-commit sync for 4c7dc92 (WP2, deltoid exterior geometry fix), deferred
+via INS-5-001 on two builds stranded at the tree gate.
+
+SPEC.md described the macro-saddle (`gamma > 1`) exterior as an
+`ExteriorPolarChart` in origin-centred caustic-fixed polar coordinates with
+an additive scalar-reach `rho`. The build retired that path: the two deltoid
+lobes sit off the origin and neither encloses it, so a single origin-ray
+crosses EXT(2img) -> INT(4img lobe) -> EXT(2img), making origin-polar
+coordinates topologically ill-posed for the saddle exterior. The macro-saddle
+exterior is now charted per lobe as `LobeExteriorChart`, in the SAME
+lobe-local `(rho_lobe, theta_local)` frame as `LobeInteriorChart` but over
+the exterior shell `rho_lobe` in `(1, rho_outer]`, trained by
+`from_lobe_exterior_engine` and served by `_lobe_exterior_serves`.
+
+Updates: `ExteriorPolarChart` is now documented as positive-parity (astroid)
+only; `LobeExteriorChart` added alongside `LobeInteriorChart` in the pipeline
+table row and the "Key abstractions" far-field coordinate contract; the
+inter-lobe-corridor sentence corrected (a corridor source is now served by
+the canonical `+y1` lobe's exterior chart via the D2 reflection fold,
+superseding the earlier "falls through to the exact engine" description);
+the GATED-subdivider kind list clarified to `far-field, wedge, lobe-interior`
+(lobe-exterior and tube charts have no subdivider); the lobe test-file
+certified-by sentence extended to cover the new `LobeExteriorChart` test
+classes.
 
 - `0.37.9` (2026-08-12):
 ### CUSP-EXCLUSION FILTER paragraph: saddle parity now admits near-cusp tiles
