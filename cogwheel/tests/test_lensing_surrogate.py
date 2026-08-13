@@ -97,6 +97,7 @@ import dataclasses
 import functools
 import inspect
 import json
+import math
 import os
 import pathlib
 import pickle
@@ -112,7 +113,7 @@ from cogwheel import data, waveform
 from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal.channels import (
     farfield_envelope_from_partition, reconstruct_from_envelope,
-    reconstruct_farfield)
+    reconstruct_farfield, farfield_w_floor)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing import surrogate_training
@@ -396,12 +397,34 @@ def _pos_surrogate_ship() -> LensAmplificationSurrogate:
     return _train(POS_BOX, SHIP_PARAM_NODES)
 
 
+#: ``w`` top for the BAND-CONTAINING variant of the positive ship chart used
+#: by `LnlikeAccuracyTestCase`.  Raised from `TRAIN_W_RANGE`'s 20 because an
+#: end-to-end lnL comparison needs the chart to span the WHOLE detector band
+#: at a lens mass whose band BOTTOM clears the config's far-field
+#: ``w_floor`` -- and the band spans ``f_hi/f_lo = 68.3``, so a ceiling of 20
+#: makes those two requirements mutually unsatisfiable (see
+#: `_bandwide_lens_mass`).  Kept well under `W_CEILING_SCHWINGER = 60` and
+#: under the point-mass ``DD_PRODUCT_CEILING`` at this box's outer corner
+#: (measured 2026-08-13: `from_engine` trains this window without a single
+#: engine refusal).  Only `LnlikeAccuracyTestCase` uses it, so the shared
+#: `_pos_surrogate_ship` w-grid -- and every eps literal measured against it
+#: -- is untouched.
+LNL_ACC_W_RANGE = (TRAIN_W_RANGE[0], 28.0)
+
+
+@functools.lru_cache(maxsize=1)
+def _pos_surrogate_bandwide() -> LensAmplificationSurrogate:
+    """`_pos_surrogate_ship`'s box over a band-containing ``w`` window."""
+    return _train(POS_BOX, SHIP_PARAM_NODES, w_range=LNL_ACC_W_RANGE)
+
+
 @functools.lru_cache(maxsize=1)
 def _sad_surrogate_ship() -> None:
     """Macro-saddle far field is deliberately served by the exact engine."""
     return None
 
-def _train(box: tuple, n_param: int) -> LensAmplificationSurrogate:
+def _train(box: tuple, n_param: int,
+           w_range: tuple = TRAIN_W_RANGE) -> LensAmplificationSurrogate:
     """Train a local positive chart wholly inside one smooth-foot basin."""
     gamma_range, _y1_range, _y2_range = box
     if gamma_range[0] >= 1.0:
@@ -423,7 +446,7 @@ def _train(box: tuple, n_param: int) -> LensAmplificationSurrogate:
     theta_c_range = (float(np.min(theta_cs)), float(np.max(theta_cs)))
     return LensAmplificationSurrogate.from_engine(
         gamma_range=gamma_range, rho_range=rho_range,
-        theta_c_range=theta_c_range, w_range=TRAIN_W_RANGE,
+        theta_c_range=theta_c_range, w_range=w_range,
         n_gamma=n_param, n_rho=n_param, n_theta_c=n_param,
         w_nodes_per_decade=TRAIN_W_NODES_PER_DECADE)
 
@@ -500,6 +523,83 @@ def _positive_lens_configs() -> tuple[tuple[str, dict, bool], ...]:
     inverse so it is a genuine served query rather than a stale fixture.
     """
     chart = _pos_surrogate_ship().charts[0]
+    probes = (
+        ('crown', 1, 1, 1, True),
+        ('deep', 2, 2, 2, True),
+        ('box-edge', 4, 4, 4, False),
+    )
+    configs = []
+    for label, i_gamma, i_rho, i_thetac, nat_tier in probes:
+        gamma = float(chart.gamma_grid[i_gamma])
+        y1, y2 = surrogate_module._from_caustic_fixed(
+            gamma, float(chart.rho_grid[i_rho]),
+            float(chart.theta_c_grid[i_thetac]))
+        configs.append(
+            (label, dict(gamma=gamma, y1=float(y1), y2=float(y2)), nat_tier))
+    return tuple(configs)
+
+
+@functools.lru_cache(maxsize=1)
+def _bandwide_lens_mass() -> float:
+    """Lens mass [Msun] putting the WHOLE detector band inside the window the
+    far-field label is defined on, for `_pos_surrogate_bandwide`'s probes.
+
+    DERIVED, not pinned.  ``w`` scales linearly in ``m_lens``, so the band
+    ``[w(f_lo, m), w(f_hi, m)]`` slides rigidly (in log) with the mass between
+    two LIVE walls:
+
+    * BELOW -- the largest per-config far-field ``w_floor``
+      (`channels.farfield_w_floor`, ``= (RHO_END/2) / min|tau_a - tau_b|``).
+      `FARFIELD_KERNEL_SUM` is the bounded mid-band label only at and above
+      it; below it the residual is the divergent diffractive-bottom object,
+      and since 8dfb8ca the serve path REFUSES there (F070).  The shared
+      `M_LENS_MSUN = 90` puts the band bottom at ``w = 0.234`` against a
+      crown floor of ``0.352``, which is exactly why every probe here started
+      reading "surrogate declined".
+    * ABOVE -- the chart's own ``w_max``, which `_log_w_band_serveable`
+      enforces strictly (no high-end clamp).
+
+    The band spans ``f_hi/f_lo = 68.3``, so the two walls admit a mass window
+    only because `LNL_ACC_W_RANGE` raised the ceiling; this returns its
+    GEOMETRIC CENTRE, i.e. the mass with the largest multiplicative margin on
+    both walls at once.  If a gate move ever closes the window,
+    `_assert_served_close`'s premise check reports the two walls rather than
+    letting the class die on an unattributable "declined".
+    """
+    chart = _pos_surrogate_bandwide().charts[0]
+    channels = ChangRefsdalChannels(np.array([1.0, 2.0]))
+    floors = []
+    for _label, lens, _tier in _bandwide_lens_configs():
+        partition = channels.evaluate(
+            gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
+            beta=0.0, kappa=0.0)
+        floors.append(float(farfield_w_floor(partition.delays,
+                                             partition.real_mask)))
+    _event_data, _wfg, edges = _shared_fixture()
+    f_lo, f_hi = float(edges[0]), float(edges[-1])
+    # w = C * m  =>  the admissible mass interval is [m_floor, m_ceiling].
+    c_lo = dimensionless_frequency(f_lo, 1.0, Z_LENS)
+    c_hi = dimensionless_frequency(f_hi, 1.0, Z_LENS)
+    m_floor = max(floors) / c_lo
+    m_ceiling = float(np.exp(chart.log_w_grid[-1])) / c_hi
+    if not m_floor < m_ceiling:
+        raise AssertionError(
+            f'no lens mass puts the {f_hi / f_lo:.1f}x detector band between '
+            f'the far-field w_floor ({max(floors):.4f}) and the chart ceiling '
+            f'({np.exp(chart.log_w_grid[-1]):.4f}): m_floor={m_floor:.1f} >= '
+            f'm_ceiling={m_ceiling:.1f} Msun.  Raise LNL_ACC_W_RANGE, do NOT '
+            'hand-pick a mass.')
+    return float(math.sqrt(m_floor * m_ceiling))
+
+
+@functools.lru_cache(maxsize=1)
+def _bandwide_lens_configs() -> tuple[tuple[str, dict, bool], ...]:
+    """`_positive_lens_configs`'s probes rebuilt on `_pos_surrogate_bandwide`.
+
+    Same node indices, same physical intent; the only difference is the
+    chart's ``w`` window, so the probes must come from ITS grids.
+    """
+    chart = _pos_surrogate_bandwide().charts[0]
     probes = (
         ('crown', 1, 1, 1, True),
         ('deep', 2, 2, 2, True),
@@ -1795,7 +1895,7 @@ class LnlikeAccuracyTestCase(SurrogateTestCase):
         event_data, wfg, edges = _shared_fixture()
         cls.pos_like = LensedRelativeBinningLikelihood(
             event_data, wfg, _reference_par_dic(), delta_t_max=DELTA_T_MAX,
-            fbin=edges, amplification_surrogate=_pos_surrogate_ship())
+            fbin=edges, amplification_surrogate=_pos_surrogate_bandwide())
         cls.sad_like = LensedRelativeBinningLikelihood(
             event_data, wfg, _reference_par_dic(), delta_t_max=DELTA_T_MAX,
             fbin=edges, amplification_surrogate=_sad_surrogate_ship())
@@ -1836,11 +1936,19 @@ class LnlikeAccuracyTestCase(SurrogateTestCase):
 
     def _assert_served_close(self, like, sur, label, lens, nat_tier,
                              relationship_gate=True):
-        candidate = _lens_candidate(**lens)
+        m_lens = _bandwide_lens_mass()
+        candidate = _lens_candidate(m_lens=m_lens, **lens)
         # Confirm the surrogate actually served (else the gate is vacuous).
         served = like._surrogate_coefficients(candidate)
         self.assertIsNotNone(
-            served, f'{label}: surrogate declined -- config not in its box')
+            served,
+            f'{label}: surrogate declined -- the config left the window the '
+            f'far-field label is defined on.  Derived witness mass '
+            f'{m_lens:.1f} Msun puts the band at '
+            f'[{dimensionless_frequency(float(_shared_fixture()[2][0]), m_lens, Z_LENS):.4f}, '
+            f'{dimensionless_frequency(float(_shared_fixture()[2][-1]), m_lens, Z_LENS):.4f}]; '
+            f'see `_bandwide_lens_mass` for the two walls it is derived '
+            f'between')
         lnl_sur = like.lnlike(candidate)
         lnl_exact = self.exact.lnlike(candidate)
         dlnl = abs(lnl_sur - lnl_exact)
@@ -1887,8 +1995,9 @@ class LnlikeAccuracyTestCase(SurrogateTestCase):
 
     def test_positive_served_lnlike_tracks_engine(self):
         table = {label: self._assert_served_close(
-                     self.pos_like, _pos_surrogate_ship(), label, lens, tier)
-                 for label, lens, tier in _positive_lens_configs()}
+                     self.pos_like, _pos_surrogate_bandwide(), label, lens,
+                     tier)
+                 for label, lens, tier in _bandwide_lens_configs()}
         # Diagnostic table (per config dlnL, eps_dense against the tiers).
         print('\n[LnlikeAccuracy] positive (dlnL, eps_dense):',
               {k: (f'{d:.3e}', f'{e:.3e}') for k, (d, e) in table.items()})

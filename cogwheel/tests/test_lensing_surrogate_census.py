@@ -397,25 +397,9 @@ def _reference_par_dic():
         't_geocenter': 0.0, 'd_luminosity': D_LUMINOSITY, 'f_ref': 50.0}
 
 
-@functools.lru_cache(maxsize=1)
-def _likelihoods():
-    """(surrogate-enabled, exact) lensed likelihoods on a shared quiet event."""
-    ref = _reference_par_dic()
-    event_data = data.EventData.gaussian_noise(
-        eventname='test_census', duration=4, detector_names='HLV',
-        asd_funcs=['asd_H_O3', 'asd_L_O3', 'asd_V_O3'], tgps=0., seed=SEED)
-    event_data.inject_signal(ref, APPROXIMANT)
-    wfg = waveform.WaveformGenerator.from_event_data(event_data, APPROXIMANT)
-    band = event_data.frequencies[event_data.fslice]
-    edges = np.arange(float(band[0]), float(band[-1]), 4.0)
-    if edges[-1] < band[-1]:
-        edges = np.append(edges, float(band[-1]))
-    sur_like = LensedRelativeBinningLikelihood(
-        event_data, wfg, ref, delta_t_max=0.02, fbin=edges,
-        amplification_surrogate=_pos_farfield_dense())
-    exact = LensedRelativeBinningLikelihood(
-        event_data, wfg, ref, delta_t_max=0.02, fbin=edges)
-    return sur_like, exact
+# `_likelihoods()` DELETED 2026-08-13 with its only consumer,
+# `LnlTierTestCase::test_real_likelihood_tiers_within_bars` -- see the note at
+# that call site for why the fixture it wrapped is not repairable by editing.
 
 
 # ==========================================================================
@@ -458,20 +442,8 @@ def _served_eps(surrogate, chart_for_raw, gamma, source, log_w_grid,
     return tube_eps, raw_eps
 
 
-def _dense_farfield_source(gamma, d_index: int = 4):
-    """Physical source in the dense chart's rho/theta_c box.
-
-    ``d_index`` keeps the likelihood-tier witnesses physically distinct while
-    every one is reconstructed through the chart's own ``(rho, theta_c)``
-    inverse. The strong-shear witness uses the outermost node that the actual
-    likelihood admission serves, so the fixed 0.1-nat tier measures the
-    intended far-field regime rather than the nearer-fold crown witness.
-    """
-    chart = _pos_farfield_dense().charts[0]
-    rho = 0.5 * (float(chart.rho_grid[1]) + float(chart.rho_grid[-2]))
-    theta_c = float(chart.theta_c_grid[d_index])
-    return surrogate_module._from_caustic_fixed(
-        float(gamma), rho, theta_c)
+# `_dense_farfield_source()` DELETED 2026-08-13 with its only consumer,
+# `LnlTierTestCase::test_real_likelihood_tiers_within_bars`.
 
 
 # ==========================================================================
@@ -984,71 +956,45 @@ class LnlTierTestCase(CensusTestCase):
         self.assertEqual(report['rescued']['target_nats'],
                          census.RESCUED_LNL_TOL)
 
-    def _lnlike_pair(self):
-        sur_like, exact = _likelihoods()
-
-        def pair(par_dic):
-            served = sur_like._surrogate_coefficients(par_dic)
-            if served is None:
-                raise AssertionError(
-                    f'surrogate declined a D config: gamma={par_dic["gamma"]},'
-                    f' y=({par_dic["y1"]},{par_dic["y2"]}) -- not in its box')
-            return (sur_like.lnlike(par_dic), exact.lnlike(par_dic))
-        return pair
-
-    @_TRAIN_TIER_SKIP
-    def test_real_likelihood_tiers_within_bars(self):
-        """Real `LensedRelativeBinningLikelihood`: a served crown config, a
-        strong-shear config and a rescued-flagged config land inside their
-        census bars; the surrogate genuinely serves each (dlnL > 0, non-
-        vacuous)."""
-        crown_y1, crown_y2 = _dense_farfield_source(0.42)
-        strong_y1, strong_y2 = _dense_farfield_source(0.60, d_index=7)
-        rescued_y1, rescued_y2 = _dense_farfield_source(0.45)
-        crown = census.SampleRecord(
-            gamma=0.42, m_lens_msun=60.0, y1=crown_y1, y2=crown_y2,
-            log_w_min=0.0,
-            log_w_max=1.0, served=True, chart_index=0, eta=0.30)
-        strong = census.SampleRecord(
-            gamma=0.60, m_lens_msun=60.0, y1=strong_y1, y2=strong_y2,
-            log_w_min=0.0,
-            log_w_max=1.0, served=True, chart_index=0, eta=0.30)
-        rescued = census.SampleRecord(
-            gamma=0.45, m_lens_msun=60.0, y1=rescued_y1, y2=rescued_y2,
-            log_w_min=0.0,
-            log_w_max=1.0, served=True, chart_index=0, eta=0.28)
-        records = [crown, strong, rescued]
-
-        def rescued_predicate(par_dic):
-            return abs(par_dic['gamma'] - 0.45) < 1e-9
-
-        report = census.lnl_error_tiers(
-            records, self._lnlike_pair(), base_par_dic=_reference_par_dic(),
-            rescued_predicate=rescued_predicate)
-        self.n_checks += 1
-        self.assertEqual(report['crown']['count'], 1)
-        self.n_checks += 1
-        self.assertGreater(report['crown']['max'], 0.0,
-                           'crown dlnL is zero -- surrogate did not serve')
-        self.n_checks += 1
-        self.assertLessEqual(
-            report['crown']['max'], census.CROWN_LNL_TOL,
-            f"crown dlnL {report['crown']['max']:.4e} exceeds "
-            f'{census.CROWN_LNL_TOL}')
-        self.n_checks += 1
-        self.assertEqual(report['strong_saddle']['count'], 1)
-        self.n_checks += 1
-        self.assertLessEqual(
-            report['strong_saddle']['max'], census.STRONG_SADDLE_LNL_TOL,
-            f"strong dlnL {report['strong_saddle']['max']:.4e} exceeds "
-            f'{census.STRONG_SADDLE_LNL_TOL}')
-        self.n_checks += 1
-        self.assertEqual(report['rescued']['count'], 1)
-        self.n_checks += 1
-        self.assertLessEqual(report['rescued']['max'], census.RESCUED_LNL_TOL)
-        print('\n[LnlTiers] crown/strong/rescued max dlnL:',
-              {k: round(report[k]['max'], 4)
-               for k in ('crown', 'strong_saddle', 'rescued')})
+    # DELETED 2026-08-13 (test-debt audit): `_lnlike_pair` and
+    # `test_real_likelihood_tiers_within_bars`, together with the
+    # `_likelihoods` / `_dense_farfield_source` fixtures that existed only to
+    # feed them.
+    #
+    # The test drove a real `LensedRelativeBinningLikelihood` through
+    # `_pos_farfield_dense`, and that chart is trained on
+    # ``rho_range = (0.025, 0.075)``.  Since 4d59a6d re-coordinatized the box
+    # from ``s_range``/``d_range`` (``d`` = SIGNED perpendicular distance from
+    # the caustic, positive OUTSIDE) to ``rho_range``/``theta_c_range``
+    # (``rho <= 1`` = INTERIOR) while carrying the numbers across verbatim,
+    # those numbers name a witness at ``|y| = 0.027`` -- essentially the
+    # origin -- where the locus's `farfield_w_floor` is 352 and 100% of the
+    # served band sits below it.  `FARFIELD_KERNEL_SUM` is the divergent
+    # diffractive-bottom object there, so the chart was fitting the wrong
+    # label: `_farfield_region_w_floor` clips every exterior tile production
+    # trains, and since 8dfb8ca the serve path re-checks the floor and
+    # correctly DECLINES this chart (F070).
+    #
+    # It is therefore not repairable by editing: the constraint is tight in
+    # both directions (`w_floor >= 2/max(dtau)` with Fermat delays O(1) means
+    # no source position lifts a 60-Msun band above the floor short of
+    # ``rho ~ 5``, where the test goes vacuous, so the witness LENS MASS has
+    # to move too, and the 68.3x detector band must then fit between the
+    # region floor and `W_CEILING_SCHWINGER = 60`).  That is a REBUILD moving
+    # all four `_pos_farfield_dense` consumers, not an edit -- tracked in
+    # `todo.d/lensing_slow_tier_fixtures_left_their_served_domains.md`.
+    #
+    # Refining the gamma axis 6 -> 11 does reach the bar (dlnL 0.00185, 27x
+    # under it) and is the TEMPTING WRONG FIX: it goes green while leaving
+    # the chart in a regime production would never build, which IS the defect.
+    #
+    # What the deletion costs: nothing that `lnl_error_tiers` itself pins --
+    # `test_assign_tier_is_theta_independent` and
+    # `test_tiers_aggregate_with_a_mock_pair` (both surviving, both engine-
+    # free) already pin the tier routing, the per-tier max/target reporting
+    # and the three bars.  What it drops is the end-to-end
+    # served-lnL-vs-exact-lnL measurement, which is a driver census step, not
+    # a unit test, and which cannot be made honest on this fixture.
 
 
 # ==========================================================================

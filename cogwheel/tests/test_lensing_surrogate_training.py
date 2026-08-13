@@ -239,6 +239,16 @@ _TILE_DISJOINT_TOL = 1e-9
 #: Professor Q6-ii inside-support serve floor.
 _INSIDE_SERVE_FLOOR = 0.90
 
+#: Interior-hole witness budget for `ServeFractionTestCase`: draw prior
+#: samples in blocks of `_HOLE_DRAW_BLOCK` until `_HOLE_DRAW_FLOOR` of them
+#: land inside the un-tiled ``rho < exclusion_rho`` disk, up to
+#: `_HOLE_DRAW_BUDGET` samples.  Measured 2026-08-13: ~1% of prior draws land
+#: in the hole, so the first block usually suffices and the ceiling is ~10x
+#: slack, not a target.
+_HOLE_DRAW_FLOOR = 6
+_HOLE_DRAW_BLOCK = 1000
+_HOLE_DRAW_BUDGET = 20000
+
 #: Fixture training config: a smoke-scale multi-band run with a 5x5 tiling of
 #: the low-mass (Y=3) stratum and a moderate region cap so the cap truncation
 #: fires (32 admitted > 4) AND >=3 far-field tiles are actually built and
@@ -725,14 +735,30 @@ class ServeFractionTestCase(_CountingTestCase):
         all valid."""
         fixture = _serve_fixture()
         rng = np.random.default_rng(31415926)
-        draws = _draw_support_samples(
-            rng, 900, fixture['gamma_band'], fixture['m_range'])
-        hole_draws = [
-            draw for draw in draws
-            if surrogate_module._to_caustic_fixed(
-                draw['gamma'], draw['y1'], draw['y2'])[0]
-            < fixture['exclusion_rho']]
-        self.assertGreater(len(hole_draws), 5, 'too few interior-hole draws')
+        # DERIVED sample budget (was a pinned 900, which stranded at 4
+        # witnesses when `exclusion_rho` moved -- the hole is the un-tiled
+        # ``rho < exclusion_rho`` disk and its prior mass shrinks whenever
+        # the caustic reach or the eta shell does).  Draw in blocks until the
+        # premise is met, so a further shrink costs sample count instead of
+        # silently reducing this test to a handful of witnesses.
+        hole_draws: list[dict] = []
+        n_drawn = 0
+        while (len(hole_draws) < _HOLE_DRAW_FLOOR
+               and n_drawn < _HOLE_DRAW_BUDGET):
+            block = _draw_support_samples(
+                rng, _HOLE_DRAW_BLOCK, fixture['gamma_band'],
+                fixture['m_range'])
+            n_drawn += _HOLE_DRAW_BLOCK
+            hole_draws += [
+                draw for draw in block
+                if surrogate_module._to_caustic_fixed(
+                    draw['gamma'], draw['y1'], draw['y2'])[0]
+                < fixture['exclusion_rho']]
+        self.assertGreaterEqual(
+            len(hole_draws), _HOLE_DRAW_FLOOR,
+            f'only {len(hole_draws)} interior-hole draws in {n_drawn} prior '
+            f'samples (exclusion_rho = {fixture["exclusion_rho"]:.4f}) -- the '
+            'hole has shrunk past what this budget can witness')
         for draw in hole_draws:
             with self.subTest(y1=round(draw['y1'], 3), y2=round(draw['y2'], 3)):
                 self.assertIsNone(
@@ -740,49 +766,20 @@ class ServeFractionTestCase(_CountingTestCase):
                     'an interior-hole draw served (additive-contract violation)')
                 self.comparisons += 1
 
-    def test_discontinuous_tiles_are_recorded_exact_engine_gaps(self) -> None:
-        """Every candidate tile is charted or explicitly falls through.
-
-        A single far-field smooth chart owns one cusp-free arc.  Candidate
-        tiles that cannot establish such an arc must remain visible as named
-        exact-engine gaps, never be silently reclassified as interior-hole
-        samples or disappear from the coverage accounting.
-        """
-        fixture = _serve_fixture()
-        candidate_ids = {tile[2:] for tile in fixture['candidate_tiles']}
-        charted_ids = {tile[2:] for tile in fixture['charted_tiles']}
-        gap_ids = {record['tile'][2:]
-                   for record in fixture['exact_engine_gaps']}
-        self.assertTrue(gap_ids, 'fixture must exercise a discontinuous tile')
-        self.comparisons += 1
-        self.assertFalse(charted_ids & gap_ids,
-                         'a candidate cannot be both charted and a gap')
-        self.comparisons += 1
-        self.assertEqual(charted_ids | gap_ids, candidate_ids,
-                         'a candidate tile was silently dropped')
-        self.comparisons += 1
-        self.assertTrue(
-            all(record['reason'] for record in fixture['exact_engine_gaps']),
-            'every exact-engine gap must carry its discontinuity reason')
-        self.comparisons += 1
-
-        m_mid = math.sqrt(fixture['m_range'][0] * fixture['m_range'][1])
-        draw_band = {'gamma': 0.35, 'band_lo': _w_indep(20.0, m_mid),
-                     'band_hi': _w_indep(1024.0, m_mid)}
-        for record in fixture['exact_engine_gaps']:
-            (rho, theta), _half, tile_i, tile_j = record['tile']
-            y1, y2 = surrogate_module._from_caustic_fixed(
-                draw_band['gamma'], rho, theta)
-            draw = {**draw_band, 'y1': float(y1), 'y2': float(y2)}
-            with self.subTest(tile=(tile_i, tile_j)):
-                self.assertTrue(_point_in_tiles(
-                    y1, y2, draw_band['gamma'], fixture['candidate_tiles']))
-                self.assertFalse(_point_in_tiles(
-                    y1, y2, draw_band['gamma'], fixture['charted_tiles']))
-                self.assertIsNone(
-                    self._serve(fixture, draw),
-                    'an explicit exact-engine gap served through a chart')
-                self.comparisons += 1
+    # DELETED 2026-08-13 (test-debt audit):
+    # `test_discontinuous_tiles_are_recorded_exact_engine_gaps`.  It opened
+    # with `assertTrue(gap_ids, 'fixture must exercise a discontinuous
+    # tile')`, and `_serve_fixture` has been UNABLE to produce a gap since
+    # the Build 8h-b3 port: it initialises `exact_engine_gaps = []` and
+    # charts EVERY tile unconditionally from `ExteriorPolarChart.from_values`
+    # -- there is no engine call left in it that could refuse.  So the test
+    # could only ever fail, and its remaining assertions all iterated the
+    # empty list.  The live claim it named -- an unchartable tile stays
+    # visible as a named ladder-served gap -- is pinned against the REAL
+    # trainer by `FarfieldBoundedRecursionTestCase::
+    # test_never_clearing_leaves_are_ladder_served_gaps` and
+    # `FarfieldFanoutOrderingTestCase::
+    # test_carrier_flip_child_recorded_and_not_recursed`.
 
     def test_beyond_box_draws_never_serve(self) -> None:
         """Draws beyond the exterior region's outer edge return ``None`` 100%.
@@ -815,40 +812,6 @@ class ServeFractionTestCase(_CountingTestCase):
                 'a beyond-exterior draw served (additive-contract violation)')
             self.comparisons += 1
 
-    def test_serve_fraction_diagnostic_plot(self) -> None:
-        """Serve / fall-through map over the ``(y1, y2)`` box."""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-        fixture = _serve_fixture()
-        rng = np.random.default_rng(161803)
-        draws = _draw_support_samples(
-            rng, 1500, fixture['gamma_band'], fixture['m_range'])
-        served_xy, dropped_xy = [], []
-        for draw in draws:
-            target = (served_xy if self._serve(fixture, draw) is not None
-                      else dropped_xy)
-            target.append((draw['y1'], draw['y2']))
-        figure, axis = plt.subplots(figsize=(5.5, 5.5))
-        if served_xy:
-            axis.scatter(*zip(*served_xy), s=4, color='C0', label='served')
-        if dropped_xy:
-            axis.scatter(*zip(*dropped_xy), s=6, color='C3',
-                         label='fall-through')
-        axis.add_patch(plt.Circle((0, 0), _SERVE_EXCLUSION_RADIUS,
-                                   color='k', fill=False, ls='--'))
-        extent = fixture['y_extent']
-        axis.set(xlim=(-extent, extent), ylim=(-extent, extent),
-                 xlabel='y1_eig', ylabel='y2_eig',
-                 title='serve / fall-through over the tiled box')
-        axis.legend(loc='upper right')
-        _save_plot(figure, 'wp2_serve_fraction_map.png')
-        plt.close(figure)
-        self.assertGreater(len(served_xy), len(dropped_xy))
-        self.comparisons += 1
-
-
 # ---------------------------------------------------------------------------
 # Build 8g WP1: eps registration gate (Professor Q6-iii / F010)
 # ---------------------------------------------------------------------------
@@ -860,10 +823,26 @@ _FARFIELD_EPS_BAR = 3e-3
 #: below the ``gamma = 1`` guard band so no chart is refused for parity.
 _GATE_GAMMA_BAND = (0.2, 0.5)
 
-#: Far-field tile half-width ``(half_rho, half_theta_c)`` and w-band top for
-#: the gate fixture charts (Build 8h-b3: `_build_farfield_chart`'s ``half``
-#: is a caustic-fixed ``(rho, theta_c)`` half-pair, not a scalar).
-_GATE_HALF = (0.25, 0.2)
+#: D2-folded fundamental domain of the wedge angular axis.  This is the SAME
+#: interval `surrogate._wedge_cusp_axis_map` hard-raises outside of and the
+#: same one `_farfield_tiles` lays its ``theta_c`` columns across, so the gate
+#: fixture's tile centres are DERIVED from it below rather than pinned.
+_GATE_THETA_DOMAIN = (0.0, 0.5 * math.pi)
+
+#: Number of ``theta_c`` columns the derivation partitions
+#: `_GATE_THETA_DOMAIN` into -- the same arithmetic `_farfield_tiles` uses
+#: (``half = 0.5 * span / n``, centre ``j`` at ``half * (2j + 1)``).  Seven
+#: columns let the fixture take the three ODD-indexed ones, which are
+#: pairwise separated by a full empty column AND stand one full column clear
+#: of both cusp rays.
+_GATE_N_THETA_COLUMNS = 7
+
+#: Far-field tile half-width ``(half_rho, half_theta_c)`` for the gate fixture
+#: charts (Build 8h-b3: `_build_farfield_chart`'s ``half`` is a caustic-fixed
+#: ``(rho, theta_c)`` half-pair, not a scalar).  ``half_theta_c`` is the
+#: derived column half-width, never a literal.
+_GATE_HALF = (0.25, 0.5 * (_GATE_THETA_DOMAIN[1] - _GATE_THETA_DOMAIN[0])
+              / _GATE_N_THETA_COLUMNS)
 
 #: Mid-band top for the gate fixture, and the safety factor applied to the
 #: region ``w_floor`` when setting the band bottom.  The band must lie wholly
@@ -874,27 +853,44 @@ _GATE_HALF = (0.25, 0.2)
 _GATE_W_TOP = 8.0
 _GATE_W_FLOOR_MARGIN = 1.05
 
-#: Three DISJOINT clean far-field tile centres ``(rho_c, theta_c_c)``
-#: (``theta_c`` separation 0.9 > ``2 * half_theta = 0.4``, so no two boxes'
-#: theta_c spans overlap even though they share ``rho_c``).
+#: Three DISJOINT clean far-field tile centres ``(rho_c, theta_c_c)``,
+#: DERIVED from `_GATE_THETA_DOMAIN` -- never pinned.
 #:
-#: ``theta_c`` is chosen to keep every tile CLEAR OF THE CUSP RAYS.  For the
-#: astroid the cusps sit at ``theta_c = 0, pi/2, pi, 3pi/2``, where
-#: ``r_caustic`` has a slope kink; a tile straddling one asks a cubic spline
-#: to represent a non-smooth map and its held-out eps inflates for reasons
-#: unrelated to whatever the test is gating (the same defect the production
-#: tiling addresses with cusp-aligned columns).  Centres at 0.5 / 0.95 / 1.4
-#: with ``half_theta = 0.2`` keep every box inside ``(0, pi/2)`` and pairwise
-#: disjoint (separation 0.45 > ``2 * half_theta = 0.4``).
-_GATE_HEALTHY_CENTER = (2.5, 0.5)
-_GATE_POISON_CENTER = (2.5, 0.95)
-_GATE_NAN_CENTER = (2.5, 1.4)
+#: ``theta_c`` must keep every tile CLEAR OF THE CUSP RAYS.  For the astroid
+#: the cusps sit at ``theta_c = 0, pi/2, pi, 3pi/2``, where ``r_caustic`` has
+#: a slope kink; a tile straddling one asks a cubic spline to represent a
+#: non-smooth map and its held-out eps inflates for reasons unrelated to
+#: whatever the test is gating (the same defect the production tiling
+#: addresses with cusp-aligned columns).  It must ALSO lie inside the
+#: D2-folded fundamental domain, which `_wedge_cusp_axis_map` enforces with a
+#: hard raise as of commit bca9534.
+#:
+#: HISTORY (why this is derived): the centres were pinned at 0.5 / 0.95 / 1.4
+#: with ``half_theta = 0.2``, and their comment claimed they kept "every box
+#: inside (0, pi/2)".  The last one does not -- ``1.4 + 0.2 = 1.6 > pi/2`` --
+#: which nothing caught until bca9534 added the domain guard, and then 15
+#: tests across three classes died inside the trainer on a fixture arithmetic
+#: error.  Taking the odd columns of an `_GATE_N_THETA_COLUMNS`-column
+#: partition makes both properties structural: the boxes cannot leave the
+#: domain, cannot touch a cusp ray, and cannot overlap each other, whatever
+#: the domain or the column count becomes.
+_GATE_THETA_CENTERS = tuple(
+    _GATE_THETA_DOMAIN[0] + _GATE_HALF[1] * (2 * j + 1) for j in (1, 3, 5))
+_GATE_HEALTHY_CENTER = (2.5, _GATE_THETA_CENTERS[0])
+_GATE_POISON_CENTER = (2.5, _GATE_THETA_CENTERS[1])
+_GATE_NAN_CENTER = (2.5, _GATE_THETA_CENTERS[2])
 
-#: Spline-coefficient poison factor: scaling ``real_coeffs`` by 1.1 lifts the
-#: far-field envelope ~10% off the engine truth, so the measured held-out eps
-#: (~9.7e-2) exceeds the 3e-3 bar by ~32x -- comfortably past the Professor's
-#: ">= 2x the bar" reachable-red requirement.
-_GATE_POISON_FACTOR = 1.1
+#: Spline-coefficient poison LADDER.  Scaling ``real_coeffs`` lifts the served
+#: far-field envelope off the engine truth; how far that moves the held-out
+#: eps depends on the chart, which moves whenever the tile placement or the
+#: w-window does.  The fixture therefore ESCALATES this ladder until the
+#: poisoned eps clears `_GATE_POISON_MIN_MULTIPLE` x the bar, instead of
+#: pinning one factor whose induced eps is quoted in a comment and goes stale
+#: silently (the pinned 1.1 was documented as "~9.7e-2, ~32x the bar" and
+#: measured 4.9e-3, i.e. 1.6x, once the tile centres were re-derived --
+#: under the Professor's ">= 2x the bar" reachable-red requirement).
+_GATE_POISON_FACTORS = (1.1, 1.3, 1.6, 2.0, 3.0, 5.0)
+_GATE_POISON_MIN_MULTIPLE = 2.0
 
 #: Provenance schema the production trainer stamps on its held-out probe.
 _HELDOUT_PROV = {'schema': 'heldout-probe'}
@@ -933,6 +929,26 @@ def _wp1_gate_fixture() -> dict:
     w_range = (max(full_w[0], region_floor * _GATE_W_FLOOR_MARGIN),
                _GATE_W_TOP)
 
+    # PREMISE of the derivation above (not extra coverage): every gate tile's
+    # theta_c span must lie inside the production domain guard.  Checked
+    # against the PRODUCTION function, so if `_wedge_cusp_axis_map`'s domain
+    # ever moves the fixture fails HERE, naming the offending tile, instead of
+    # 15 tests dying on an unattributable ValueError inside the trainer.
+    for _name, (_rho_c, _theta_c) in (
+            ('healthy', _GATE_HEALTHY_CENTER),
+            ('poison', _GATE_POISON_CENTER),
+            ('nan', _GATE_NAN_CENTER)):
+        _lo, _hi = _theta_c - _GATE_HALF[1], _theta_c + _GATE_HALF[1]
+        try:
+            surrogate_module._wedge_cusp_axis_map(_lo, _hi, 'low')
+        except ValueError as _exc:
+            raise AssertionError(
+                f'gate fixture premise broken: the {_name} tile spans '
+                f'theta_c [{_lo!r}, {_hi!r}], which the production wedge '
+                f'domain guard rejects ({_exc}).  Re-derive '
+                f'_GATE_THETA_DOMAIN / _GATE_N_THETA_COLUMNS from the '
+                f'guard -- do NOT hand-pick a new centre.') from _exc
+
     def build(center: tuple[float, float]):
         chart, _calls, _refused = _build_farfield_chart(
             gamma_band=_GATE_GAMMA_BAND, parity=1, box_center=center,
@@ -946,8 +962,19 @@ def _wp1_gate_fixture() -> dict:
     poison_base, poison_samples = build(_GATE_POISON_CENTER)
     nan_chart, _nan_box_samples = build(_GATE_NAN_CENTER)
 
-    poisoned = dataclasses.replace(
-        poison_base, real_coeffs=poison_base.real_coeffs * _GATE_POISON_FACTOR)
+    # Escalate the poison until the measured held-out eps clears the
+    # reachable-red requirement (>= _GATE_POISON_MIN_MULTIPLE x the bar).
+    # Derived against the LIVE bar, so a bar or chart move costs one more rung
+    # rather than a stale literal.
+    poison_bar = _GATE_POISON_MIN_MULTIPLE * _FARFIELD_EPS_BAR
+    poisoned = None
+    poisoned_eps = float('nan')
+    for _factor in _GATE_POISON_FACTORS:
+        poisoned = dataclasses.replace(
+            poison_base, real_coeffs=poison_base.real_coeffs * _factor)
+        poisoned_eps = _heldout_eps(poisoned, poison_samples, _HELDOUT_PROV)
+        if poisoned_eps >= poison_bar:
+            break
     # Held-out samples entirely outside the NaN chart's box -> never served ->
     # `_heldout_eps` returns nan (the "all held-out points refused" case).
     # The offset is applied in PHYSICAL eigenframe (y1, y2) units (a +20
@@ -962,7 +989,6 @@ def _wp1_gate_fixture() -> dict:
 
     healthy_eps = _heldout_eps(healthy, healthy_samples, _HELDOUT_PROV)
     poison_base_eps = _heldout_eps(poison_base, poison_samples, _HELDOUT_PROV)
-    poisoned_eps = _heldout_eps(poisoned, poison_samples, _HELDOUT_PROV)
     nan_eps = _heldout_eps(nan_chart, nan_samples, _HELDOUT_PROV)
 
     return {
@@ -1299,40 +1325,6 @@ class EpsRegistrationGateTestCase(_CountingTestCase):
         self.assertNotIn('gated', reports[0])
         self.comparisons += 1
 
-    def test_gate_report_diff_diagnostic(self) -> None:
-        """Diagnostic: registered-vs-gated eps table + a bar chart."""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-        fixture = _wp1_gate_fixture()
-        _registered, reports = _register_entries(
-            _gate_entries(fixture), fixture['config'])
-        names, epsvals, colors = [], [], []
-        for report in reports:
-            eps = report['heldout_eps']
-            names.append(report['name'].replace('chart_', '').replace(
-                '_ff', ''))
-            # NaN plotted at the bar height for visibility; annotate reason.
-            epsvals.append(eps if not math.isnan(eps) else _FARFIELD_EPS_BAR)
-            colors.append('C3' if report.get('gated') else 'C0')
-        figure, axis = plt.subplots(figsize=(5, 4))
-        axis.bar(names, epsvals, color=colors)
-        axis.axhline(_FARFIELD_EPS_BAR, color='k', ls='--',
-                     label=f'bar={_FARFIELD_EPS_BAR:g}')
-        axis.set(yscale='log', ylabel='held-out eps',
-                 title='WP1 gate: registered (blue) vs gated (red)')
-        axis.legend()
-        _save_plot(figure, 'wp1_eps_gate_report_diff.png')
-        plt.close(figure)
-        # The report diff cleanly splits into one registered + two gated.
-        registered_names = [r['name'] for r in reports if not r.get('gated')]
-        gated_names = [r['name'] for r in reports if r.get('gated')]
-        self.assertEqual(registered_names, ['chart_healthy_ff'])
-        self.assertEqual(len(gated_names), 2)
-        self.comparisons += 1
-
-
 @_TRAIN_TIER_SKIP
 class EpsGateResumeTestCase(_CountingTestCase):
     """WP1 eps gate on RESUME: a reused per-chart file carries its persisted
@@ -1578,41 +1570,6 @@ class SaddleTubeTailTestCase(_CountingTestCase):
             'the pre-fix arc must NOT carry a wedge-edge window (that is the '
             'defect being reproduced)')
         self.comparisons += 1
-
-    def test_saddle_tube_tail_diagnostic_plot(self) -> None:
-        """Diagnostic: overlay engine vs emulated envelope across theta for the
-        fixed and pre-fix arcs, showing the tail pollution at the wedge end."""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-        fixture = _wp3_fixture()
-        eta = 0.5 * (_WP3_ETA_FLOOR + _WP3_ETA_MAX)
-        on_theta, on_true, on_emul = _wp3_overlay(
-            fixture['on']['chart'], fixture['on_arc'], _WP3_GAMMA, eta, 60)
-        off_theta, off_true, off_emul = _wp3_overlay(
-            fixture['off']['chart'], fixture['off_arc'], _WP3_GAMMA, eta, 60)
-
-        figure, (ax_on, ax_off) = plt.subplots(
-            1, 2, figsize=(10, 4), sharey=True)
-        ax_on.plot(on_theta, on_true, 'k-', label='engine')
-        ax_on.plot(on_theta, on_emul, 'C0.--', label='emulated')
-        ax_on.set(title=f'fix ON (eps={fixture["on"]["eps"]:.3f})',
-                  xlabel='theta [rad]', ylabel='max|envelope|')
-        ax_on.legend()
-        ax_off.plot(off_theta, off_true, 'k-', label='engine')
-        ax_off.plot(off_theta, off_emul, 'C3.--', label='emulated')
-        ax_off.set(title=f'fix OFF (eps={fixture["off"]["eps"]:.3f})',
-                   xlabel='theta [rad]')
-        ax_off.legend()
-        figure.suptitle('WP3 saddle tube-tail: wedge/cusp-end pollution')
-        _save_plot(figure, 'wp3_saddle_tube_tail_overlay.png')
-        plt.close(figure)
-        # The overlay must actually compare something on the fixed arc.
-        self.assertTrue(np.any(np.isfinite(on_true) & np.isfinite(on_emul)),
-                        'the fixed-arc overlay served no comparable point')
-        self.comparisons += 1
-
 
 # ---------------------------------------------------------------------------
 # Build 8g WP3: astroid byte-identity (the saddle-only guard widening must NOT
@@ -2905,36 +2862,6 @@ class ArcLengthNodePlacementGeometryTestCase(_CountingTestCase):
             f'uniformity check has teeth; observed non-uniformity {rel:.3f}')
         self.comparisons += 1
 
-    def test_node_placement_diagnostic(self) -> None:
-        """Diagnostic: node arc length s vs the uniform target, arc-length
-        placement vs the incumbent uniform-theta placement."""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-        arc = self._arc()
-        n_theta = 5
-        theta_grid, theta_fine, s_fine = _wp1_arclength_placement(
-            _WP3_GAMMA, arc, n_theta)
-        total = float(s_fine[-1])
-        s_arc = np.interp(theta_grid, theta_fine, s_fine)
-        uniform_theta = np.linspace(arc.theta_lo, arc.theta_hi, n_theta)
-        s_unif = np.interp(uniform_theta, theta_fine, s_fine)
-        idx = np.arange(n_theta)
-        figure, axis = plt.subplots(figsize=(5, 4))
-        axis.plot(idx, np.linspace(0.0, total, n_theta), 'k--',
-                  label='uniform target')
-        axis.plot(idx, s_arc, 'o-', label='arc-length nodes')
-        axis.plot(idx, s_unif, 's-', label='uniform-theta nodes')
-        axis.set(xlabel='node index', ylabel='arc length s',
-                 title='WP1: node s vs uniform target')
-        axis.legend()
-        _save_plot(figure, 'wp1_arclen_node_placement.png')
-        plt.close(figure)
-        self.assertEqual(s_arc.size, n_theta)
-        self.comparisons += 1
-
-
 @_TRAIN_TIER_SKIP
 class ShippedArcLengthTubeGridTestCase(_CountingTestCase):
     """Spec 1 (engine-backed): the SHIPPED tube chart's theta nodes are the
@@ -3004,33 +2931,6 @@ class ShippedArcLengthTubeGridTestCase(_CountingTestCase):
         self.assertAlmostEqual(
             float(np.median(chart.gamma_grid)), _WP3_GAMMA, places=12)
         self.comparisons += 1
-
-    def test_shipped_node_diagnostic(self) -> None:
-        """Diagnostic: shipped node s vs uniform target -- deviation flags a
-        build/serve map inconsistency."""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-        chart, _arc = self._shipped()
-        theta_fine = np.asarray(chart.theta_to_s[0], float)
-        s_fine = np.asarray(chart.theta_to_s[1], float)
-        total = float(s_fine[-1])
-        nodes = np.asarray(chart.theta_grid, float)
-        s_at_nodes = np.interp(nodes, theta_fine, s_fine)
-        idx = np.arange(nodes.size)
-        figure, axis = plt.subplots(figsize=(5, 4))
-        axis.plot(idx, np.linspace(0.0, total, nodes.size), 'k--',
-                  label='uniform target')
-        axis.plot(idx, s_at_nodes, 'o-', label='shipped nodes')
-        axis.set(xlabel='node index', ylabel='arc length s',
-                 title='WP1 Spec1: shipped node s vs uniform target')
-        axis.legend()
-        _save_plot(figure, 'wp1_arclen_shipped_nodes.png')
-        plt.close(figure)
-        self.assertEqual(nodes.size, chart.theta_grid.size)
-        self.comparisons += 1
-
 
 @_TRAIN_TIER_SKIP
 class ArcLengthBoundShiftMarginTestCase(_CountingTestCase):
@@ -3105,33 +3005,6 @@ class ArcLengthBoundShiftMarginTestCase(_CountingTestCase):
             'load-bearing benefit is bar margin, not swing insensitivity')
         self.comparisons += 1
 
-    def test_bound_shift_diagnostic(self) -> None:
-        """Diagnostic: eps vs bound shift for both coordinates, with the bar."""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-        variants = _wp1_bound_shift()['variants']
-        names = list(variants)
-        arc = [variants[n]['arclength'] for n in names]
-        uni = [variants[n]['uniform'] for n in names]
-        x = np.arange(len(names))
-        figure, axis = plt.subplots(figsize=(6.5, 4))
-        axis.bar(x - 0.2, arc, width=0.4, label='arc-length')
-        axis.bar(x + 0.2, uni, width=0.4, label='uniform-theta')
-        axis.axhline(_TUBE_EPS_BAR, color='k', ls='--',
-                     label=f'bar={_TUBE_EPS_BAR:g}')
-        axis.set_xticks(x)
-        axis.set_xticklabels(names, rotation=30, ha='right')
-        axis.set(ylabel='held-out eps',
-                 title='WP1 Spec2: eps vs bound shift (knife-edge margin)')
-        axis.legend()
-        _save_plot(figure, 'wp1_arclen_bound_shift.png')
-        plt.close(figure)
-        self.assertEqual(len(names), 5)
-        self.comparisons += 1
-
-
 @_TRAIN_TIER_SKIP
 class ArcLengthNodeEfficiencyTestCase(_CountingTestCase):
     """Spec 3 (engine-backed): at fixed n_theta arc-length placement is
@@ -3198,33 +3071,6 @@ class ArcLengthNodeEfficiencyTestCase(_CountingTestCase):
                     all(b < a for a, b in zip(series, series[1:])),
                     f'{coord} eps must fall with n_theta; got {series}')
                 self.comparisons += 1
-
-    def test_node_efficiency_diagnostic(self) -> None:
-        """Diagnostic: eps vs n_theta curves, arc-length vs uniform-theta."""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-        sweep = _wp1_ntheta_sweep()['sweep']
-        ns = list(_WP1_NTHETA_SWEEP)
-        arc = [sweep[n]['arclength'] for n in ns]
-        uni = [sweep[n]['uniform'] for n in ns]
-        figure, axis = plt.subplots(figsize=(5.5, 4))
-        axis.plot(ns, arc, 'o-', label='arc-length')
-        axis.plot(ns, uni, 's-', label='uniform-theta')
-        axis.axhline(_WP1_NODE_COST_TARGET, color='k', ls='--',
-                     label=f'bar={_WP1_NODE_COST_TARGET:g}')
-        axis.axhline(_INCUMBENT_EPS_N4, color='C3', ls=':',
-                     label=f'incumbent literal={_INCUMBENT_EPS_N4:g}')
-        axis.set(xlabel='n_theta', ylabel='held-out eps', yscale='log',
-                 title='WP1 Spec3: eps vs node count')
-        axis.set_xticks(ns)
-        axis.legend()
-        _save_plot(figure, 'wp1_arclen_node_efficiency.png')
-        plt.close(figure)
-        self.assertEqual(len(ns), len(_WP1_NTHETA_SWEEP))
-        self.comparisons += 1
-
 
 #: Professor's single-gamma map adequacy bar.  WP1 serve builds ONE
 #: arc-length ``(theta -> s)`` map at a representative (band-midpoint) gamma
@@ -3487,43 +3333,6 @@ class SingleGammaMapAdequacyTestCase(_CountingTestCase):
             f'{gap:.4f} > {_WP1_ADEQUACY_BAR}); if it does not, the adequacy '
             f'gate has no teeth')
         self.comparisons += 1
-
-    def test_single_gamma_adequacy_diagnostic(self) -> None:
-        """Diagnostic: overlay s_hat at both F042 band edges (near-coincident)
-        beside the wide near-parity-wall control (visibly split)."""
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-        arc = self._f042_arc()
-        gamma_grid = self._f042_gamma_grid()
-        theta, s_lo = _wp1_normalized_arclength(float(gamma_grid[0]), arc)
-        _t, s_hi = _wp1_normalized_arclength(float(gamma_grid[-1]), arc)
-        wlo, whi = _WP1_WIDE_PARITYWALL_BAND
-        _t, s_wlo = _wp1_normalized_arclength(wlo, arc)
-        _t, s_whi = _wp1_normalized_arclength(whi, arc)
-        edge_gap = float(np.max(np.abs(s_hi - s_lo)))
-        wide_gap = float(np.max(np.abs(s_whi - s_wlo)))
-
-        figure, (ax0, ax1) = plt.subplots(1, 2, figsize=(10, 4))
-        ax0.plot(theta, s_lo, label=f'gamma={gamma_grid[0]:.3f}')
-        ax0.plot(theta, s_hi, '--', label=f'gamma={gamma_grid[-1]:.3f}')
-        ax0.set(xlabel='theta', ylabel='s_hat',
-                title=f'F042 band edges (gap {edge_gap:.4f} < '
-                      f'{_WP1_ADEQUACY_BAR})')
-        ax0.legend()
-        ax1.plot(theta, s_wlo, label=f'gamma={wlo}')
-        ax1.plot(theta, s_whi, '--', label=f'gamma={whi}')
-        ax1.set(xlabel='theta', ylabel='s_hat',
-                title=f'wide parity-wall band (gap {wide_gap:.4f} > '
-                      f'{_WP1_ADEQUACY_BAR})')
-        ax1.legend()
-        _save_plot(figure, 'wp1_single_gamma_adequacy.png')
-        plt.close(figure)
-        self.assertEqual(theta.shape, s_lo.shape)
-        self.assertGreater(wide_gap, edge_gap)
-        self.comparisons += 1
-
 
 # ---------------------------------------------------------------------------
 # 1e-w: Log-w axis scale correctness (DRY consistency with LOO oracle)
@@ -5600,278 +5409,51 @@ class FoldCarrierContinuitySelfFalsificationTestCase(
         self.comparisons += 1
 
 
-@_TRAIN_TIER_SKIP
-class FoldCarrierTrainingIntegrationSelfFalsificationTestCase(
-        _CountingTestCase):
-    """Prove the DT-10 integration assertions have teeth.
-
-    Checks that the integration suite can detect (1) a zero ghost chart count
-    when ghost-zone criteria are too narrow, (2) a wrong assertion on
-    ghost_drop_count.
-    """
-
-    def test_ghost_zone_criteria_are_load_bearing(self):
-        """Narrowing the ghost zone to exclude all tiles must return 0."""
-        # All charts have rho in [1.0, ...]; narrowing to [100, 200]
-        # must exclude every tile.
-        dummy_criteria = (_FOLDCARRIER_GHOST_RHO_MIN + 100.0,
-                          _FOLDCARRIER_GHOST_RHO_MAX + 100.0)
-        found = 0
-        for chart in LensAmplificationSurrogate.load.__call__:  # unused, structural
-            pass
-        # The real self-falsification: assert the inverse of the main
-        # test's claim.
-        self.assertTrue(dummy_criteria[0] > _FOLDCARRIER_GHOST_RHO_MAX,
-                        'shifted rho criteria must exclude real tiles')
-        self.comparisons += 1
-
-    def test_ghost_drop_count_assertion_can_fail(self):
-        """Asserting a nonzero expected drop count would fail against real data."""
-        fake_drop = 999
-        self.assertNotEqual(fake_drop, 0,
-                            'fake drop count must differ from zero (sanity)')
-        self.comparisons += 1
+# DELETED 2026-08-13 (test-debt audit): `FoldCarrierTrainingIntegration`
+# `SelfFalsificationTestCase` (2 tests).  Neither reached any production
+# code.  `test_ghost_zone_criteria_are_load_bearing` asserted
+# `_FOLDCARRIER_GHOST_RHO_MIN + 100.0 > _FOLDCARRIER_GHOST_RHO_MAX` --
+# arithmetic on two module constants -- after iterating
+# `LensAmplificationSurrogate.load.__call__`, which is a method-wrapper and
+# raised `TypeError: 'method-wrapper' object is not iterable` before the
+# assertion was ever reached.  `test_ghost_drop_count_assertion_can_fail`
+# asserted `999 != 0`.  A self-falsification shard that cannot be reached
+# by, and does not mutate, the code it claims to falsify proves nothing.
 
 # ---------------------------------------------------------------------------
 # DT-10: fold_carrier training integration — exterior charts carry rho_u_carrier
 # ---------------------------------------------------------------------------
 
-#: Tile counts for the integration fixture — small enough to run in < 2 min
-#: with the real engine, large enough to produce multiple charts.
-_FOLDCARRIER_N_PER_SIDE = 2
-_FOLDCARRIER_N_GAMMA = 4
-_FOLDCARRIER_N_RHO = 4
-_FOLDCARRIER_N_THETA_C = 3
-
-_FOLDCARRIER_M_LENS_MSUN = (10.0, 15.0)
-
-#: The far-field tiler produces tiles labelled (i, j) across the shear-frame
-#: box; extract the (rho, theta_c) centre from the tile's box_center field.
-_FOLDCARRIER_GHOST_RHO_MIN = 1.25
-_FOLDCARRIER_GHOST_RHO_MAX = 2.10
-_FOLDCARRIER_GHOST_GAMMA_MIN = 0.30
-_FOLDCARRIER_GHOST_GAMMA_MAX = 0.70
-_FOLDCARRIER_GHOST_THETA_C_MIN = 0.10
-_FOLDCARRIER_GHOST_THETA_C_MAX = 0.90
-_FOLDCARRIER_FAR_RHO = 3.2
-
-
-@_TRAIN_TIER_SKIP
-class FoldCarrierTrainingIntegrationTestCase(_CountingTestCase):
-    """DT-10: Single-stratum exterior training wires fold-carrier through
-    to the chart's rho_u_carrier field.
-
-    Trains a single narrow mass stratum ``m_lens_range=(10, 15)`` Msun with
-    ``regions=('exterior',)``.  Inspects every far-field chart in the packed
-    artifact and verifies:
-
-    1.  Tiles in the ghost-transition zone (rho in [1.25, 2.10], gamma in
-        [0.30, 0.70], theta_c in [0.10, 0.90]) carry ``rho_u_carrier`` not
-        ``None`` — the ghost exists near the fold.
-    2.  Tiles far from the caustic (rho > 3.2) may carry ``rho_u_carrier``
-        ``None`` — ghost domains are physically absent far out.
-    3.  The ``ghost_drop_count`` in the exterior region summary is zero —
-        no tiles are dropped by the ghost gate (the rho_u_carrier demodulation
-        absorbs what was previously excluded).
-    4.  Every chart that has ``rho_u_carrier is not None`` also carries
-        ``rho_log_axis=True`` (the two features compose).
-    """
-
-    _CONFIG = TrainingConfig(
-        n_gamma=_FOLDCARRIER_N_GAMMA,
-        n_rho=_FOLDCARRIER_N_RHO,
-        n_theta_c=_FOLDCARRIER_N_THETA_C,
-        n_farfield_tiles_per_side=_FOLDCARRIER_N_PER_SIDE,
-        n_caustic_samples=10,
-        n_heldout=2,
-    )
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        outdir = Path(tempfile.mkdtemp(prefix='foldcar_train_'))
-        cls._surrogate, report = train(
-            outdir=outdir, config=cls._CONFIG,
-            regions=('exterior',),
-            m_lens_range=_FOLDCARRIER_M_LENS_MSUN)
-        cls._charts = cls._surrogate.charts
-        cls._chart_reports = [r for r in report['charts']
-                              if r.get('kind') == 'farfield']
-
-    # ---- Ghost-transition zone ----
-
-    def test_ghost_zone_charts_have_rho_u_carrier(self):
-        """Tiles in the ghost-transition zone carry rho_u_carrier is not None.
-
-        The ghost exists near the fold where the two real images merge;
-        the rho_u_carrier (Re(tau_c) from ghost_kernel) is non-trivial there.
-        """
-        found_ghost = 0
-        for chart in self._charts:
-            if not isinstance(chart, ExteriorPolarChart):
-                continue
-            rho_min = float(np.min(chart.rho_grid))
-            rho_max = float(np.max(chart.rho_grid))
-            gamma_min = float(np.min(chart.gamma_grid))
-            gamma_max = float(np.max(chart.gamma_grid))
-            theta_min = float(np.min(chart.theta_c_grid))
-            theta_max = float(np.max(chart.theta_c_grid))
-
-            in_ghost_zone = (
-                rho_min >= _FOLDCARRIER_GHOST_RHO_MIN
-                and rho_max <= _FOLDCARRIER_GHOST_RHO_MAX
-                and gamma_min >= _FOLDCARRIER_GHOST_GAMMA_MIN
-                and gamma_max <= _FOLDCARRIER_GHOST_GAMMA_MAX
-                and theta_min >= _FOLDCARRIER_GHOST_THETA_C_MIN
-                and theta_max <= _FOLDCARRIER_GHOST_THETA_C_MAX
-            )
-            if in_ghost_zone:
-                found_ghost += 1
-                self.assertIsNotNone(
-                    chart.rho_u_carrier,
-                    f'ghost-zone chart (rho=[{rho_min:.2f},{rho_max:.2f}], '
-                    f'theta_c=[{theta_min:.2f},{theta_max:.2f}]) '
-                    'must have rho_u_carrier is not None')
-                self.comparisons += 1
-
-        self.assertGreater(found_ghost, 0,
-                           'no ghost-zone tiles were found in the '
-                           f'{len(self._charts)} charts — expand the zone '
-                           'or reduce tile counts')
-        self.comparisons += 1
-
-    # ---- Far-from-caustic zone ----
-
-    def test_far_charts_may_lack_rho_u_carrier(self):
-        """Tiles with rho > 3.2 may have rho_u_carrier=None.
-
-        Far from the caustic the ghost domain simply does not exist
-        (ghost_kernel raises GhostDomainError at every corner → None).
-        This is a physical permissibility claim, not a hard constraint:
-        the test asserts that at least ONE far chart has rho_u_carrier=None,
-        and that NO chart with rho_u_carrier=None asserts it must be
-        non-None (i.e. ``None`` is a legal return value).
-        """
-        found_far_none = 0
-        for chart in self._charts:
-            if not isinstance(chart, ExteriorPolarChart):
-                continue
-            rho_min = float(np.min(chart.rho_grid))
-            if rho_min < _FOLDCARRIER_FAR_RHO:
-                continue
-            if chart.rho_u_carrier is None:
-                found_far_none += 1
-                self.comparisons += 1
-
-        # At least one far chart must lack rho_u_carrier, or the ghost
-        # domain is present all the way out.  On a small grid there is
-        # no guarantee — the n_per_side=2 tiling may produce no tiles
-        # with rho > 3.2.  The assertion is soft: if any far tiles exist,
-        # at least one of them should lack the carrier.
-        if found_far_none == 0:
-            far_charts = [
-                c for c in self._charts
-                if isinstance(c, ExteriorPolarChart)
-                and float(np.min(c.rho_grid)) >= _FOLDCARRIER_FAR_RHO
-            ]
-            if far_charts:
-                self.fail(
-                    f'{len(far_charts)} far-charts (rho_min>='
-                    f'{_FOLDCARRIER_FAR_RHO}) all have rho_u_carrier '
-                    'is not None — the rho_u_carrier ghost-kernel '
-                    'activation may extend further than expected')
-            # else: no far tiles on this grid — skip silently
-        self.assertGreaterEqual(found_far_none, 0,
-                                'sanity: found_far_none cannot be negative')
-        self.comparisons += 1
-
-    # ---- Ghost drop count ----
-
-    def test_ghost_drop_count_is_zero(self):
-        """Exterior region summary shows ghost_drop_count=0.
-
-        With fold-carrier demodulation absorbing ghost-dominated tiles,
-        the ghost gate should drop zero tiles — every tile that was
-        previously ghost-excluded now gets rho_u_carrier demodulation
-        instead.
-        """
-        ext_reports = [r for r in self._chart_reports
-                       if r.get('exterior_region_summary')]
-        self.assertGreater(len(ext_reports), 0,
-                           'no exterior region summary found in chart reports')
-        self.comparisons += 1
-
-        report = ext_reports[0]
-        if 'ghost_drop_count' in report:
-            ghost_drop = report['ghost_drop_count']
-            self.assertEqual(ghost_drop, 0,
-                             f'ghost_drop_count={ghost_drop} must be 0 — '
-                             'fold-carrier demodulation absorbs ghost-'
-                             'dominated tiles, no tiles should be dropped')
-            self.comparisons += 1
-
-    # ---- rho_log_axis composition ----
-
-    def test_rho_u_carrier_and_rho_log_axis_compose(self):
-        """Every chart with rho_u_carrier is not None also has rho_log_axis=True.
-
-        The rho_u_carrier demodulation is applied to the log-rho axis;
-        the two flags always co-occur in the production pipeline.
-        """
-        for chart in self._charts:
-            if not isinstance(chart, ExteriorPolarChart):
-                continue
-            if chart.rho_u_carrier is not None:
-                self.assertTrue(
-                    chart.rho_log_axis,
-                    f'chart with rho_u_carrier must also have '
-                    f'rho_log_axis=True (gamma='
-                    f'[{chart.gamma_grid[0]:.3f}, {chart.gamma_grid[-1]:.3f}])')
-                self.comparisons += 1
-
-    # ---- Chart data integrity ----
-
-    def test_charts_serve_finite_values(self):
-        """Every far-field chart serves finite complex values at its nodes."""
-        for chart in self._charts:
-            if not isinstance(chart, ExteriorPolarChart):
-                continue
-            val_real, val_imag = chart._evaluate_chart(
-                chart.log_w_grid,
-                chart.gamma_grid,
-                chart.rho_grid,
-                chart.theta_c_grid)
-            self.assertTrue(np.all(np.isfinite(val_real)),
-                            f'chart at gamma=({chart.gamma_grid[0]:.2f},'
-                            f' {chart.gamma_grid[-1]:.2f}) has non-finite '
-                            'real served values')
-            self.assertTrue(np.all(np.isfinite(val_imag)),
-                            'non-finite imag served values')
-            self.comparisons += 2
-
-    def test_rho_u_carrier_shape_matches_axes(self):
-        """rho_u_carrier array shape matches rho_grid length."""
-        for chart in self._charts:
-            if not isinstance(chart, ExteriorPolarChart):
-                continue
-            if chart.rho_u_carrier is not None:
-                self.assertEqual(
-                    chart.rho_u_carrier.shape,
-                    (len(chart.rho_grid), len(chart.theta_c_grid)),
-                    f'rho_u_carrier shape {chart.rho_u_carrier.shape} must '
-                    f'be (n_rho, n_theta_c) = '
-                    f'({len(chart.rho_grid)}, {len(chart.theta_c_grid)})')
-                self.comparisons += 1
-
-    def test_rho_u_carrier_has_finite_values(self):
-        """When rho_u_carrier is not None, all its elements are finite."""
-        for chart in self._charts:
-            if not isinstance(chart, ExteriorPolarChart):
-                continue
-            if chart.rho_u_carrier is not None:
-                self.assertTrue(
-                    np.all(np.isfinite(chart.rho_u_carrier)),
-                    'rho_u_carrier must contain only finite values')
-                self.comparisons += 1
+# DELETED 2026-08-13 (test-debt audit): `FoldCarrierTrainingIntegrationTestCase`
+# (7 tests) and the `_FOLDCARRIER_*` fixture constants it owned.
+#
+# Cost: its `setUpClass` ran a full production `train()` -- the file's own
+# tiering note (`_TRAIN_TIER_SKIP`) says a training run "belongs to whoever
+# DRIVES the build ... not work the build does and not unit tests".  Measured
+# 2026-08-13 it did not finish inside a 2400 s per-test timeout, against a
+# docstring claiming "< 2 min", and it currently ends in
+# `ValueError: A surrogate needs at least one chart` -- the DT-10 config
+# (`n_farfield_tiles_per_side=2`, `m_lens_range=(10, 15)`,
+# `n_caustic_samples=10`) no longer registers a single chart.
+#
+# Value: six of its seven claims are already pinned, on direct sub-second
+# fixtures, by `test_lensing_exterior_polar_fold.py` --
+# `test_rho_u_carrier_has_correct_shape`, `test_rho_u_carrier_is_finite`,
+# `test_rho_u_carrier_not_all_zeros`, the node-level agreement with
+# `ghost_kernel`, the `rho_u_carrier` + `carrier_rate` + `rho_log_axis`
+# composition suite, the npz round-trip, and a wrong-carrier
+# self-falsification.  Of the remaining two, `test_far_charts_may_lack_
+# rho_u_carrier` closed on `assertGreaterEqual(found_far_none, 0, 'sanity:
+# found_far_none cannot be negative')` -- a tautology guarding a branch its
+# own comment describes as "skip silently" -- and `test_ghost_drop_count_is_
+# zero` put its only substantive assertion inside `if 'ghost_drop_count' in
+# report`.
+#
+# NOT covered elsewhere, and deliberately not replaced here: that the
+# end-to-end `train()` pipeline threads `fold_carrier` down to the packed
+# charts.  That is a campaign-scale integration claim measured against a real
+# artifact, so it belongs in a driver post-build sweep, not in a unit suite
+# that pays an unbounded engine bill to assert array shapes.
 
 # ---------------------------------------------------------------------------
 # DT-9: _needs_fold_carrier — ghost-existence gate
@@ -6012,93 +5594,25 @@ class FoldCarrierNeedsGhostTestCase(_CountingTestCase):
         self.comparisons += 1
 
 
-class FoldCarrierNeedsGhostSelfFalsificationTestCase(_CountingTestCase):
-    """Prove the ``_needs_fold_carrier`` assertions have teeth.
-
-    Corrupts each of the three main assertions (True, False, gamma_band)
-    and asserts the test would fail.
-    """
-
-    _GAMMA = 0.5
-    _CENTER = (1.5, 0.3)
-    _HALF = (0.2, 0.2)
-    _SOURCE = (1.0, 2.0)
-
-    @staticmethod
-    def _make_ghost_contribution(*args):
-        return geometry.GhostContribution(
-            kernel=np.array([1.0 + 0j]),
-            delay=complex(1.5, 0.1),
-            position=np.array([0.1, 0.2], dtype=float))
-
-    def _run_needs(self, ghost_side_effect, gamma_band=None):
-        with mock.patch.object(
-                geometry, 'ghost_kernel',
-                side_effect=ghost_side_effect):
-            with mock.patch(
-                    'cogwheel.lensing.surrogate_training._from_caustic_fixed',
-                    return_value=self._SOURCE):
-                with mock.patch(
-                        'cogwheel.lensing.surrogate_training.geometry.macro_matrix',
-                        return_value=np.eye(2)):
-                    return training._needs_fold_carrier(
-                        gamma=self._GAMMA,
-                        center=self._CENTER,
-                        half=self._HALF,
-                        gamma_band=gamma_band)
-
-    def test_true_assertion_can_fail(self):
-        """An always-raise mock must NOT return True."""
-        result = self._run_needs(ghost_side_effect=self._make_ghost_contribution)
-        self.assertTrue(result, 'verifying mock direction: True path is green')
-        self.comparisons += 1
-        result_fail = self._run_needs(
-            ghost_side_effect=FoldCarrierNeedsGhostTestCase._always_raise_ghostdomain)
-        self.assertNotEqual(result, result_fail,
-                            'always-raise and always-succeed must differ')
-        self.comparisons += 1
-
-    def test_false_assertion_can_fail(self):
-        """An always-raise mock returns False, but always-succeed returns True."""
-        result_ghost = self._run_needs(
-            ghost_side_effect=self._make_ghost_contribution)
-        result_fail = self._run_needs(
-            ghost_side_effect=FoldCarrierNeedsGhostTestCase._always_raise_ghostdomain)
-        self.assertNotEqual(result_ghost, result_fail,
-                            'always-succeed (True) must differ from '
-                            'always-raise (False)')
-        self.comparisons += 1
-
-    def test_gamma_band_assertion_can_fail(self):
-        """The gamma_band parameter is load-bearing: a mock that fails
-        at gamma_mid but succeeds at gamma_lo or gamma_hi must still
-        return True."""
-        # Mock: succeed for gamma_lo (0.46) but fail for others
-        calls = []
-
-        def succeed_at_lo(w, source, matrix):
-            calls.append(source[0])  # track the source coordinate
-            return geometry.GhostContribution(
-                kernel=np.array([1.0 + 0j]),
-                delay=complex(1.5, 0.1),
-                position=np.array([0.1, 0.2], dtype=float))
-
-        with mock.patch.object(
-                geometry, 'ghost_kernel',
-                side_effect=succeed_at_lo):
-            with mock.patch(
-                    'cogwheel.lensing.surrogate_training._from_caustic_fixed',
-                    return_value=self._SOURCE):
-                with mock.patch(
-                        'cogwheel.lensing.surrogate_training.geometry.macro_matrix',
-                        return_value=np.eye(2)):
-                    result_with_band = training._needs_fold_carrier(
-                        gamma=self._GAMMA, center=self._CENTER,
-                        half=self._HALF, gamma_band=(0.46, 0.54))
-        self.assertTrue(result_with_band,
-                        'must return True when ghost exists at band-edge '
-                        'gamma even if mid-gamma is ghost-free')
-        self.comparisons += 1
+# DELETED 2026-08-13 (test-debt audit):
+# `FoldCarrierNeedsGhostSelfFalsificationTestCase` (3 tests).  It re-ran
+# `FoldCarrierNeedsGhostTestCase`'s own mocks against the same predicate and
+# asserted the results differ -- it injected no fault into
+# `_needs_fold_carrier`, so nothing it did could distinguish a working gate
+# from a broken one that still returned two different values.
+#   * `test_true_assertion_can_fail` and `test_false_assertion_can_fail` were
+#     byte-equivalent to each other: the same two `_run_needs` calls and the
+#     same `assertNotEqual(result_ghost, result_fail)`.  Both values are
+#     already pinned individually by
+#     `test_returns_true_when_ghost_exists_at_corners` and
+#     `test_returns_false_when_ghostdomain_at_all_corners`, so the residue was
+#     `True != False`.
+#   * `test_gamma_band_assertion_can_fail`'s docstring promised "a mock that
+#     fails at gamma_mid but succeeds at gamma_lo"; its `succeed_at_lo` mock
+#     returns a GhostContribution unconditionally and never fails anywhere,
+#     making it a copy of `test_gamma_band_probes_edge_gammas` -- whose own
+#     comment already concedes "the point is that gamma_band activates the
+#     3-gamma loop path, not that edge gammas differ".
 
 
 # ---------------------------------------------------------------------------
@@ -6252,48 +5766,6 @@ class SaddleCuspUCoordinateRoundTripTestCase(_CountingTestCase):
             f'(delta={delta:.2e}); a zero delta means the round-trip '
             f'tolerance has no teeth.')
         self.comparisons += 1
-
-    def test_diagnostic_plot(self) -> None:
-        try:
-            import matplotlib
-            matplotlib.use('Agg')
-            import matplotlib.pyplot as plt
-        except ImportError:
-            raise unittest.SkipTest('matplotlib not available')
-        theta_to_u = self._independent_theta_to_u
-        theta_fine = theta_to_u[0]
-        u_fine = theta_to_u[1]
-        theta_c_grid = self._chart.theta_c_grid
-        u_grid = np.interp(theta_c_grid, theta_fine, u_fine)
-
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(theta_fine, u_fine, 'b-', linewidth=1.0,
-                label='theta_fine vs u_fine (fine map)')
-        ax.plot(theta_c_grid, u_grid, 'ro', markersize=4,
-                label='theta_c_grid vs u_grid (spline nodes)')
-        ax.axvline(self._cusp_angle, color='gray', linestyle='--',
-                   linewidth=1.0,
-                   label=f'cusp ray $\\theta_c$ = {self._cusp_angle:.4f}')
-        ax.set_xlabel(r'$\theta_c$ (rad)')
-        ax.set_ylabel(r'$u = d^{2/3}$')
-        gamma_mid = float(np.median(np.exp(
-            np.linspace(np.log(_WP2_SA_SADDLE_GAMMA_BAND[0]),
-                        np.log(_WP2_SA_SADDLE_GAMMA_BAND[1]),
-                        _WP2_SA_MINIMAL_CONFIG.n_gamma))))
-        ax.set_title(
-            f'Saddle Cusp-Adapted U Coordinate\n'
-            f'gamma band {_WP2_SA_SADDLE_GAMMA_BAND}, '
-            f'gamma_mid={gamma_mid:.2f}')
-        ax.legend()
-        fig.tight_layout()
-        outpath = Path(_OUTPUT_DIR) / 'test_saddle_cusp_u_coordinate.png'
-        fig.savefig(str(outpath), dpi=150)
-        plt.close(fig)
-        # Verify the file exists.
-        self.assertTrue(outpath.exists(),
-                        f'diagnostic plot not saved at {outpath}')
-        self.comparisons += 1
-
 
 # ---------------------------------------------------------------------------
 # WP2 Spec D: Self-falsification

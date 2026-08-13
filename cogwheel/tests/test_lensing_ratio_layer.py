@@ -33,11 +33,15 @@ contract, gate by gate:
   is a pure function of its cell key, so memoization is BIT-identical and
   order independent -- checked by raw float ``==``, never ``isclose``.
 
-* REFUSAL SYMMETRY & FALLBACK (`RefusalSymmetryTestCase`).  A macro-saddle
-  or an uncertifiable wave-branch makes the ratio path, the direct path
-  and brute force raise the SAME exception; a refusing SNAPPED fiducial
-  must NOT veto a candidate that is itself inside the certified domain --
-  the ratio path falls back to direct and returns a finite matched value.
+* PATH SYMMETRY & FALLBACK (`RefusalSymmetryTestCase`).  A macro-saddle
+  candidate is EVALUATED symmetrically -- the ratio path, the direct path
+  and brute force agree within the inherited RB tolerance; a refusing
+  SNAPPED fiducial must NOT veto a candidate that is itself inside the
+  certified domain -- the ratio path falls back to direct and returns a
+  finite matched value.  Symmetric NAMED REFUSAL is pinned on the
+  STRUCTURAL over-critical boundary by
+  `test_lensing_fast_path::test_paths_refuse_over_critical_symmetrically`,
+  which (unlike a certification threshold) cannot drift.
 
 * GUARD FALLBACK (`GuardFallbackTestCase`).  An image-count mismatch or an
   unhealthy (near-zero-dip) fiducial envelope makes the ratio path fall
@@ -142,8 +146,6 @@ from cogwheel.lensing.likelihood import (
     _lens_from_key, _snap, _ENVELOPE_HEALTH_FLOOR,
     _FID_GAMMA_SPACING, _FID_BETA_SPACING, _FID_Y_SPACING)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
-from cogwheel.lensing.chang_refsdal._schwinger import (
-    SchwingerCertificationError)
 
 # ---------------------------------------------------------------------------
 # Fixture constants (shared with the crown / fast-path suites so the anchors
@@ -259,23 +261,6 @@ ROTATED_ANCHOR = ('rotated', 0.30, 0.10, 0.20, 0.70, 0.0)
 #: end to end, so all three paths now EVALUATE it finitely and agree
 #: within RB tolerance (see `test_macro_saddle_evaluated_symmetrically`).
 MACRO_SADDLE = dict(gamma=0.5, beta=0.0, kappa=0.6, y1=0.20, y2=0.05)
-
-#: A config whose own wave-branch cannot certify: all paths must raise
-#: the SAME named wave-branch refusal (measured: estimated tail ~4e-3 >
-#: 1e-10 target).  Since Build 7a the strong-shear refusal at the base lens mass is
-#: rescued by the cross-parity Schwinger fallback, so ``m_lens`` is
-#: scaled x4 to push the refusing nodes above the ``w = 60`` Schwinger
-#: ceiling, where the named refusal stands on every path (measured:
-#: x2 certifies on all three paths, x4 refuses on all three).
-#: RE-BASELINE (Build 8e uniform arms): the former strong-shear config
-#: (gamma'=0.94, y=(0.20,0.05)) is now ARM-SERVED at the engine and
-#: refuses downstream at the bin guard instead — the wave-refusal
-#: symmetry premise died. HARD-CORE replacement (both arms return
-#: None: fold xi and Pearcey R both small for an interior 4-image
-#: source at w > 60): verified refusing with SchwingerCertificationError
-#: through the full path (same family as the marginalized spy fixture).
-CANCELLATION_CONFIG = dict(gamma=0.47, beta=0.0, kappa=0.0,
-                           y1=0.10, y2=0.10, m_lens=M_LENS_MSUN * 4)
 
 #: Image-count-mismatch config: the candidate has two real images while
 #: its snapped-lattice fiducial has four (verified in the guard test).
@@ -744,9 +729,16 @@ class RefusalSymmetryTestCase(RatioLayerTestCase):
     symmetrically -- Build 7b lifted the saddle guard end to end, so the
     ratio path, the direct path and brute force all return a finite
     ``lnlike`` agreeing within the inherited RB tolerance.
-    (b) A candidate whose own wave-branch cannot certify makes all three
-    raise the SAME named wave-branch refusal
-    (`SchwingerCertificationError`).
+    (b) DELETED 2026-08-13 (test-debt audit): the wave-branch
+    named-refusal shard.  Its ``CANCELLATION_CONFIG`` witness had to be
+    hand-repointed once already (Build 8e) when the engine's certified
+    domain grew under it, and it drifted a SECOND time -- all three paths
+    now certify it and agree to 1.93e-2 nats.  A third hand-picked config
+    would drift again.  The symmetric-NAMED-REFUSAL contract is pinned
+    instead on the STRUCTURAL over-critical boundary (``kappa >= 1``) by
+    `test_lensing_fast_path::test_paths_refuse_over_critical_symmetrically`,
+    which does not move with the certification threshold; the agreement
+    this fixture now demonstrates is (a) on a second config.
     (c) A candidate INSIDE the certified domain whose SNAPPED fiducial
     refuses must NOT raise: the ratio path falls back to direct and returns
     a finite ``lnlike`` matching brute force -- verified by monkeypatching
@@ -772,10 +764,9 @@ class RefusalSymmetryTestCase(RatioLayerTestCase):
         ``lnlike`` and agree within the inherited RB tolerance
         ``max(RB_ATOL, RB_RTOL*|bf|)``.  The named-refusal symmetry that
         used to live here is now carried, for the surviving boundaries, by
-        `test_uncertifiable_branch_refused_symmetrically` (the wave-branch
-        `SchwingerCertificationError`) and by the waveform/marginalized
-        suites (the
-        over-critical ``kappa >= 1`` and ``det A = 0`` `LensDomainError`).
+        `test_lensing_fast_path::test_paths_refuse_over_critical_symmetrically`
+        and by the waveform/marginalized suites (the over-critical
+        ``kappa >= 1`` and ``det A = 0`` `LensDomainError`).
         """
         par_dic = self._candidate(self._lens_dic(**MACRO_SADDLE))
         lnbf = self.like.lnlike_bruteforce(par_dic)
@@ -796,38 +787,6 @@ class RefusalSymmetryTestCase(RatioLayerTestCase):
                     f'{label}: |lnlike_{label} - lnlike_bruteforce| = '
                     f'{abs(value - lnbf):.3e} exceeds max(RB_ATOL, '
                     f'RB_RTOL*|bf|) = {tol:.3e} on the macro saddle')
-
-    @_brute_accuracy_tier  # slow-tier (Build 8d): builds the uncertifiable
-    # config through full likelihood machinery + lnlike_bruteforce under the
-    # ~90 ms/node exact path (vocab re-baseline preserved, not weakened).
-    def test_uncertifiable_branch_refused_symmetrically(self):
-        """All three paths raise the SAME named wave-branch refusal on an
-        uncertifiable config.  RE-BASELINE (8d vocab; 8e hard-core
-        repoint — the old config became arm-served and refused at the
-        bin guard downstream): a genuinely hard-core interior source
-        (both uniform arms uncertifiable at w > 60) refuses with
-        SchwingerCertificationError; the SYMMETRY contract is unchanged -- ratio, direct, and
-        bruteforce must still all refuse with the SAME named type."""
-        named_refusals = (SchwingerCertificationError, LensDomainError)
-        par_dic = self._candidate(self._lens_dic(**CANCELLATION_CONFIG))
-        raised = {}
-        for label, call in (('ratio', self._lnlike_ratio),
-                            ('direct', self._lnlike_direct),
-                            ('bruteforce', self.like.lnlike_bruteforce)):
-            try:
-                call(par_dic)
-                raised[label] = None
-            except named_refusals as exc:
-                raised[label] = type(exc)
-        self.n_checks += 1
-        # Every path must raise a named refusal, and they must AGREE on the
-        # exception type (the symmetry contract; the vocabulary flipped to
-        # SchwingerCertificationError, the symmetry did not).
-        types = set(raised.values())
-        self.assertTrue(
-            None not in raised.values() and len(types) == 1
-            and next(iter(types)) in named_refusals,
-            f'refusal not symmetric across paths: {raised}')
 
     @_brute_accuracy_tier
     def test_refusing_snapped_fiducial_falls_back_to_direct(self):
