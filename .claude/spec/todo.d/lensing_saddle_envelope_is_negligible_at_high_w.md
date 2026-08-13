@@ -87,7 +87,49 @@ section: Backlog
   The region is then served by the switched analytic channels with NO chart,
   NO extrapolation and NO engine call, and nothing falls back to exact.
 
-  WHAT TO SETTLE BEFORE BUILDING:
+  ## MEASURED 2026-08-13: re-gauging works, and it is a TAIL fix
+
+  The SACR-C identity was reproduced from the partition's own pieces to
+  3.8e-16 — `envelope = conj(e^{i w tau_c}) * (F - sum_a e^{i w tau_a} S_a
+  SK_a)`, where the trial uses `saddle_kernels`, NOT `kernels` (the latter
+  already have the envelope apportioned back in by weights
+  `1 - S_a + eta`). With the identity in hand `tau_c` can be varied directly.
+
+  On the measured outlier (`gamma=1.5859`, `y=(-1.1208,-0.9002)`, `w=58`):
+
+      shipped  tau_c = -0.0443  min w|tau-tc| =  2.57  switches [0.667, 1]
+               |E|/|F| = 4.165e-01
+      re-gauged tau_c chosen to switch everything on
+               |E|/|F| = 5.126e-04     -- an 813x improvement
+
+  The value PLATEAUS at 5.126e-04 for every `tau_c` that turns all switches
+  on, which is the tell that it is real: once the switches saturate the
+  residual is fixed and only the phase `e^{-i w tau_c}` changes, which cannot
+  affect `|E|`. So 5.13e-04 is the source's INTRINSIC analytic-trial error,
+  gauge-independent, and it sits inside the already-served population's range
+  (max 7.70e-04). Re-gauged, the outlier is an ordinary member of it.
+
+  Across the whole excluded population (`w*delta_min < 16`, n = 37):
+
+                     p50        p90        MAX      frac < 1e-3
+      shipped     4.53e-05   1.31e-02   6.71e-01      81.1%
+      re-gauged   3.55e-05   2.45e-04   9.65e-03      97.3%
+
+  MEDIAN IMPROVEMENT IS 1x. Re-gauging is not a blanket win — most of the
+  excluded population was already fine and only looked at risk because the
+  gate keyed on `w*delta_min`. What it fixes is the TAIL: p90 by 53x, the max
+  by 70x, and coverage from 81% to 97%.
+
+  ## The residual ~3% is NOT a gauge problem
+
+  One case of 37 remains above the bar after re-gauging (9.65e-03). Since the
+  re-gauged value is the gauge-independent floor, that source's analytic
+  trials genuinely fail to reproduce `F` — the envelope carries real weight
+  and no choice of `tau_c` removes it. That population needs a chart or the
+  engine, and it is the honest residual of this whole approach. Size it
+  before designing for it: 1/37 here is too small a sample to characterise.
+
+  WHAT REMAINS TO SETTLE BEFORE BUILDING:
   - the `tau_c` choice must be a FUNCTION of the source, identical at train
     and serve time, or the stored envelope is in a different gauge than the
     one served (this is the train/serve skew class of bug already recorded
