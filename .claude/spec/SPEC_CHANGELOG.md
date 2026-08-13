@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.38.16` (2026-08-13):
+- `0.39.16` (2026-08-13):
 
 - Documented the new tier-1 far-from-caustic macro-saddle analytic intercept
   (`LensedRelativeBinningLikelihood._saddle_farfield_analytic`, gated by
@@ -20,7 +20,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
   this rung does not move structural coverage — do not read the new prose
   as a coverage improvement.
 
-- `0.38.15` (2026-08-12):
+- `0.39.15` (2026-08-12):
 
 Update INTERIOR CUSP SERVING: interior discriminator changed from origin-based
 `r_caustic` directional check to image-count gate `_is_interior = len(images) >= 4`.
@@ -31,7 +31,7 @@ corridor between the two lobes.  The generic interior case condition is now
 `len(images) >= 4, len(stationary_values) == 1`.  Exterior sources now described
 as `len(images) < 4` (was `rho > 1`).
 
-- `0.38.14` (2026-08-12):
+- `0.39.14` (2026-08-12):
 ### Saddle corridor refusal in ppGO map; caustic_rho is origin-based, not an interior discriminator
 
 SPEC.md FOLD-PPGO INTERIOR HANDOFF paragraph: added the PARITY-GATED saddle
@@ -46,7 +46,7 @@ decided by image count (`len(images) >= 4`) on both parities.
 Module list: `caustic_rho` annotated as an origin-based scalar-reach gauge
 that is NOT a saddle interior discriminator.
 
-- `0.38.13` (2026-08-12):
+- `0.39.13` (2026-08-12):
 ### Pearcey ppGO rung full mid-w band + MINUS_GHOST saddle exterior window
 
 SPEC.md Microlensing engine row (ppGO rung description): the rung is no
@@ -62,7 +62,7 @@ MINUS_GHOST` envelope label (ghost gates become the admission authority;
 `_CUSP_EXCLUSION_DISTANCE` reduced for saddle near-cusp tiles), closing the
 exterior cusp neighbourhood quadrature-free on both parities.
 
-- `0.38.12` (2026-08-12):
+- `0.39.12` (2026-08-12):
 ### Pearcey arm: interior degenerate cluster bypass + on-axis fold detection
 
 Extended the INTERIOR CUSP SERVING description in the Microlensing engine row:
@@ -75,7 +75,7 @@ Added description of `_merging_fold_pair` detecting the degenerate cluster via
 cusp arm as last rung). Exterior sources (`rho > 1`) still validate
 delay-to-image alignment.
 
-- `0.38.11` (2026-08-12):
+- `0.39.11` (2026-08-12):
 
 ### Document LobeExteriorChart, retire ExteriorPolarChart for macro-saddle exterior
 
@@ -104,7 +104,7 @@ the GATED-subdivider kind list clarified to `far-field, wedge, lobe-interior`
 certified-by sentence extended to cover the new `LobeExteriorChart` test
 classes.
 
-- `0.38.10` (2026-08-12):
+- `0.39.10` (2026-08-12):
 ### CUSP-EXCLUSION FILTER paragraph: saddle parity now admits near-cusp tiles
 
 SPEC.md TRAINING section, CUSP-EXCLUSION FILTER paragraph: the sentence
@@ -124,7 +124,7 @@ rather than exclusion.  The certified-by sentence is qualified to "astroid cusp
 exclusion boundary" to reflect that saddle tiles near the cusp are no longer
 excluded.
 
-- `0.38.9` (2026-08-12):
+- `0.39.9` (2026-08-12):
 
 ### Correct two SPEC.md claims that contradicted the code
 
@@ -166,7 +166,7 @@ artifact.
 
 No code changed. In both cases the code was correct and the spec was stale.
 
-- `0.38.8` (2026-08-11):
+- `0.39.8` (2026-08-11):
 ### Pearcey arm: ppGO fast rung fold-pair-existence-or-resolution gate
 
 Updated the `_pearcey_cusp.py` description in the Microlensing engine row
@@ -177,7 +177,7 @@ geometrically resolved (`w * delta_min >= _PPGO_RESOLUTION_GATE = 4.0`,
 mirroring `RHO_END`) — so the geometric-limit serve is never used on an
 unresolved node (restores the `select_branch` one-home routing pin).
 
-- `0.38.7` (2026-08-11):
+- `0.39.7` (2026-08-11):
 ### Schwinger QD band: fixed-order composite Gauss-Legendre rule at mpmath precision
 
 Updated the `_schwinger.py` description in the Microlensing engine row (Key
@@ -190,7 +190,7 @@ deterministic, and order-32 preserves the `_CERTIFICATION_TOL = 3e-10`
 certification bar across the band (serving coverage in the cusp-exterior
 windows is unchanged).
 
-- `0.38.6` (2026-08-11):
+- `0.39.6` (2026-08-11):
 ### Pearcey arm: interior cusp serving + ppGO fold-band gate
 
 Updated the `_pearcey_cusp.py` description in the Microlensing engine row
@@ -204,7 +204,7 @@ bar and the ratio `P/P_asymp` is self-calibrating to leading order — while
 exterior sources (1 stationary point) still validate delay-to-image
 alignment.
 
-- `0.38.5` (2026-08-10):
+- `0.39.5` (2026-08-10):
 
 Update SPEC.md following build saddle_exterior_full_treatment (238d21e):
 
@@ -223,13 +223,13 @@ Update SPEC.md following build saddle_exterior_full_treatment (238d21e):
    charts carry a conditional cusp-adapted theta_to_u map via
    _deltoid_cusp_axis_map, not always raw theta_c.
 
-- `0.38.4` (2026-08-10):
+- `0.39.4` (2026-08-10):
 Add GHOST-EXCLUSION FILTER section to SPEC.md (FAR-FIELD TILING row):
 `_exclude_ghost_dominated` mechanism, `_GHOST_DECAY_IM_THRESHOLD` reuse,
 positive-parity scope, gamma-band probe pattern, `ghost_excluded_tiles`
 counter in region report, and certification tests (DT-1 through DT-8).
 
-- `0.38.3` (2026-08-10):
+- `0.39.3` (2026-08-10):
 ## Exterior rho-axis conditioning: axis schema bump to exterior_polar_rho_log_v3
 
 - `ExteriorPolarChart` axis schema bumped from `'exterior_polar_carrier_demod_v2'`
@@ -242,13 +242,13 @@ counter in region report, and certification tests (DT-1 through DT-8).
 - Key abstractions section updated: schema tag, constant, retired-tag list,
   and `rho_log_axis` field description.
 
-- `0.38.2` (2026-08-10):
+- `0.39.2` (2026-08-10):
 Updated exterior-polar surrogate schema tag to `'exterior_polar_rho_log_carrier_v1'`
 (`_EXTERIOR_POLAR_AXIS_SCHEMA_V4`); added `rho_carrier` field description;
 replaced GHOST-EXCLUSION FILTER with FOLD-CARRIER DEMODULATION section in
 FAR-FIELD TILING.
 
-- `0.38.1` (2026-08-10):
+- `0.39.1` (2026-08-10):
 
 ## Exterior carrier demodulation: axis schema bump to exterior_polar_carrier_demod_v2
 
@@ -266,7 +266,7 @@ Document the shipped carrier-demodulation mechanism in `ExteriorPolarChart`
   envelope splineable despite ~1000x dynamic range (`|E(w)| ~ w^(-0.60)`).
 - Updated in SPEC.md Key abstractions and DATA_CONTRACTS.yaml description.
 
-- `0.38.0` (2026-08-10):
+- `0.39.0` (2026-08-10):
 Updated the exterior-polar surrogate coordinate contract (Key abstractions):
 the fold-carrier is now the 2-D `rho_u_carrier` (`(n_rho, n_theta_c)`,
 `Re(tau_c(rho, u))` at each spline node) replacing the 1-D `rho_carrier`;
@@ -278,7 +278,7 @@ current write tag) — and described demodulation by
 u-coordinate. Also updated the FOLD-CARRIER DEMODULATION sentence in the
 far-field tiling narrative (`_compute_rho_carrier` → `_compute_rho_u_carrier`).
 
-- `0.37.2` (2026-08-09):
+- `0.38.2` (2026-08-09):
 
 ## Exterior cusp-exclusion cut (both parities) and ppGO above-ceiling intercept
 
@@ -300,7 +300,7 @@ exterior_followup WP4 builds:
    `reconstruct_farfield`. On gate miss falls through to exact engine unchanged.
    Certified by `test_lensing_ppgo_above_ceiling.py`.
 
-- `0.37.1` (2026-08-09):
+- `0.38.1` (2026-08-09):
 
 ### High-w ppGO fast rung in the cusp (Pearcey) arm
 
@@ -314,7 +314,7 @@ table or quadrature lookup; the None-fall-through contract is unchanged
 (rung refusal falls to the uniform Pearcey path). The rung serves both the
 astroid (positive-parity) and saddle cusp branches.
 
-- `0.37.0` (2026-08-08):
+- `0.38.0` (2026-08-08):
 
 ### Lobe-interior charts use the cusp-adapted `u = d**(2/3)` angular coordinate
 
@@ -341,7 +341,7 @@ field-name split in the wedge CUSP-ADAPTED ANGULAR AXIS paragraph is
 corrected: the wedge AND lobe-interior maps carry `theta_to_u` /
 `_validate_theta_to_u`; only the tube and far-field maps keep `theta_to_s`.
 
-- `0.36.0` (2026-08-08):
+- `0.37.0` (2026-08-08):
 
 ### Exterior-polar charts use the cusp-adapted `u = d**(2/3)` angular coordinate
 
@@ -360,7 +360,7 @@ The axis-schema tag is bumped from `'exterior_polar_rho_theta_c'` to
 is dropped from the known set and hard-refuses at load. "No arc-length map is
 needed" remains true — the optional map is cusp-adapted, not arc-length.
 
-- `0.35.0` (2026-08-07):
+- `0.36.0` (2026-08-07):
 
 ### Wedge axis schema v3, bounded subdivision recursion, exact-parametrisation `r_caustic`
 
@@ -410,14 +410,14 @@ landed, and both trees return 5.692099788303084 bit-for-bit. The delivered
 change is the speedup alone. See
 `.claude/spec/todo.d/lensing_brief_premises_are_unverified.md`.
 
-- `0.34.2` (2026-08-01):
+- `0.35.2` (2026-08-01):
 
 Lobe-interior charts gain optional `theta_to_s` axis map for wedge-edge
 reparametrization (`s = sqrt(span) - sqrt(theta_max - theta)`). New
 `_LOBE_AXIS_SCHEMA` tag and `_LOBE_ARC_MAP_SIZE` constant. V1 charts
 (theta_to_s=None) retain byte-identical behavior.
 
-- `0.34.1` (2026-08-01):
+- `0.35.1` (2026-08-01):
 
 C6: tube shell is now curvature-relative. `TrainingConfig.eta_max`/`eta_floor`
 renamed to `f_max`/`f_floor`; per-arc `eta_max = f_max * R_c` computed in
@@ -427,7 +427,7 @@ The foot-of-normal skip guard is replaced by `assert f_max < 0.5` — vacuous by
 construction so no chart is ever skipped for curvature. SPEC.md updated to
 reflect the skip is replaced by an assertion.
 
-- `0.34.0` (2026-07-31):
+- `0.35.0` (2026-07-31):
 
 ### Positive-parity far-field charts use fold-adapted `(s, d)` axes
 
@@ -440,7 +440,7 @@ caustic-fixed coordinates remain tile-proposal and admission coordinates only.
 Macro-saddle far-field charts are intentionally not included; they fall through
 to the exact engine until a per-deltoid-edge design is certified.
 
-- `0.33.0` (2026-07-30):
+- `0.34.0` (2026-07-30):
 
 ### Tube charts interpolate in arc length, not raw theta
 
@@ -461,7 +461,7 @@ so the finding could not be resolved from inside the build; recorded as such
 in FINDINGS, since the same shape exhausted the revision budget in two earlier
 builds.
 
-- `0.32.0` (2026-07-30):
+- `0.33.0` (2026-07-30):
 
 ### `geometry.caustic_third_derivative` (y''') joins the public name list
 
@@ -475,7 +475,7 @@ public-name list beside `caustic_derivatives`/`caustic_speed`/
 (owed to the F040 cusp-window step); it ships and certifies the primitive.
 New public API, hence a minor bump.
 
-- `0.31.1` (2026-07-29):
+- `0.32.1` (2026-07-29):
 
 ### Microlensing SPEC rows rewritten to current truth only
 
@@ -503,7 +503,7 @@ Corrected, not merely trimmed:
   `_certify_geometric_census` is named as NOT covering the near-caustic tail,
   which is the reason the leg exists.
 
-- `0.31.0` (2026-07-29):
+- `0.32.0` (2026-07-29):
 
 ### Legacy operator-series contraction fully retired; `CancellationError` deleted; `select_branch` gains an eta (distance-to-caustic) leg
 
@@ -532,7 +532,7 @@ only, so its boundary is not inherited unmeasured).
 (a parameter default threaded through `F_op`/`F_op_grid`/`ChangRefsdalChannels`
 but not consumed by any surviving series) and SPEC.md never named it directly.
 
-- `0.30.0` (2026-07-29):
+- `0.31.0` (2026-07-29):
 
 ### Fold arm gains a caustic-relative admission fence; the macro-saddle eta leg is live too
 
@@ -558,7 +558,7 @@ measured). `_saddle_grid` now measures `eta` via `nearest_caustic_point`
 once per grid and passes it through `select_branch`; the eta leg is live on
 both parities, each independently measured.
 
-- `0.29.1` (2026-07-29):
+- `0.30.1` (2026-07-29):
 
 ### Certified-by lists gain `test_lensing_caustic_cusps.py`
 
@@ -577,7 +577,7 @@ numerical estimators. `COVERAGE_DESIGN.md` needed no change for the same
 reason -- its one relevant mention (`_min_curvature_radius`, item C6) is a
 behavioral description that still holds under the analytic implementation.
 
-- `0.29.0` (2026-07-29):
+- `0.30.0` (2026-07-29):
 
 ### Serving ladder: one authoritative geometric-vs-wave gate; arms and geometric branch are NOT certified
 
@@ -595,7 +595,7 @@ Added F029's finding that the geometric branch is not certified either: a
 residual ~1% O(1) tail (p99 7.1e-1, max 74) controlled by distance to the
 caustic, which `_certify_geometric_census` does not catch.
 
-- `0.28.0` (2026-07-29):
+- `0.29.0` (2026-07-29):
 
 ### `geometry.py` gains analytic caustic derivatives (backward-compatible)
 
@@ -613,7 +613,7 @@ numerical estimators they will eventually retire (`_min_curvature_radius`,
 `_branch_speed_profile`, `_find_cusps`, `_probe_arc_side`, `_cusp_vertex`)
 remain in place, pending later builds.
 
-- `0.27.0` (2026-07-28):
+- `0.28.0` (2026-07-28):
 
 ### Macro-saddle per-lobe interior charts are now servable
 
@@ -641,7 +641,7 @@ entry describes per-chart coefficient/knot arrays generically, so the added
 lobe-frame arrays do not break a contract lock (verified by the Inspector as
 INS-3-001).
 
-- `0.26.0` (2026-07-28):
+- `0.27.0` (2026-07-28):
 
 Update the Born rung Conventions bullet (stale since commit `31ee133`,
 Inspector INS-10-001): the carrier now serves BOTH macro parities, not
@@ -655,7 +655,7 @@ complex ghost explicitly refused. `born_amplification`/`born_envelope`
 remain positive-parity-only diagnostics. Serve slot is still unwired
 (TRAIN_TIER residual chart not yet built) — unchanged on both parities.
 
-- `0.25.0` (2026-07-28):
+- `0.26.0` (2026-07-28):
 
 Update the Born rung Conventions bullet: `b1`/`a0` are now DERIVED closed
 forms (F023), not an unpinned placeholder, and the serve object is the
@@ -668,7 +668,7 @@ built.
 
 Census row: the fall-through breakdown is now six-way MECE, `'born'` added.
 
-- `0.24.1` (2026-07-27):
+- `0.25.1` (2026-07-27):
 
 Doc-sync correction (Librarian post-commit pass over the 14-commit backlog
 ending d0dc6da): two Conventions-section statements had drifted from the
@@ -686,7 +686,7 @@ code they describe.
   previously stated. `cogwheel/lensing/waveform.py` now carries the single
   authoritative statement of this convention.
 
-- `0.24.0` (2026-07-27):
+- `0.25.0` (2026-07-27):
 
 Record the lensing delay-frame convention under Conventions: all
 `chang_refsdal` channel kernels are carried in the partition's min-subtracted
@@ -700,7 +700,7 @@ amplitude-based check: it corrupts phase only, leaving magnitudes and decay
 rates correct. The convention is now stated so any future term added to a
 kernel sum is required to declare its frame.
 
-- `0.23.0` (2026-07-27):
+- `0.24.0` (2026-07-27):
 
 Record the Born rung under Conventions as present but DORMANT: the analytic
 weak-deflection module `chang_refsdal/_born.py` exists, is tested, and is
@@ -711,7 +711,7 @@ its own gate's pass region.
 Recorded rather than omitted so the annulus `3.0 < |y| <= 4.2426` is not
 mistaken for covered: those draws still reach the exact engine.
 
-- `0.22.0` (2026-07-20):
+- `0.23.0` (2026-07-20):
 Build 8a surrogate speed layer: new public module
 `cogwheel/lensing/surrogate.py` (`LensAmplificationSurrogate`) — an
 offline-trained tensor cubic-spline emulator of the SACR-C envelope
@@ -723,7 +723,7 @@ additive `ChangRefsdalChannels.geometry_partition` method; and an
 the Build 7b state (both-parity gamma range; four-refusal posterior
 net; deltoid fold validity).
 
-- `0.21.0` (2026-07-20):
+- `0.22.0` (2026-07-20):
 Build 7b saddle integration: the interim negative-parity refusals are
 lifted end to end — channel layer serves saddle hosts (delegating
 saddle nodes to the operator's own routing), the waveform generator
@@ -734,7 +734,7 @@ gamma'-keyed (crown byte-identical). FINDINGS F016 records the
 falsification of the envelope-limited hypothesis for the rescued
 strong-shear nat-gap (RB-binning/noise-limited).
 
-- `0.20.0` (2026-07-19):
+- `0.21.0` (2026-07-19):
 Negative-parity (macro-saddle) engine branch (Build 6): saddle-capable
 geometry (two deltoid caustic lobes, census certified), the exact 1D
 Schwinger dd-quadrature wave evaluator (`_schwinger.py`, ceiling
@@ -745,7 +745,7 @@ two instances fixed and proven extinct), F012 (near-axial quartic dead
 zone, Build-7 guard precondition), F013 (saddle-branch certification
 summary).
 
-- `0.19.0` (2026-07-19):
+- `0.20.0` (2026-07-19):
 Build 7a engine hardening: runtime index-theorem census guard (F012
 dead zone now a named refusal, both parities, with Morse-theory-correct
 degenerate pass-throughs for fold-merged and on-cusp censuses),
@@ -758,7 +758,7 @@ crash surfaced in production (F015), and the `LensedPosterior` refusal
 net extended to the full named vocabulary (adds
 `SchwingerCertificationError`, `LensedBinningError`).
 
-- `0.18.0` (2026-07-18):
+- `0.19.0` (2026-07-18):
 SACR-C channel construction (Build 3f): switched-analytic saddle
 kernels under criticality-separation smootherstep weights + ONE
 beat-free transition envelope demodulated at the parked critical
@@ -767,14 +767,14 @@ carrier, LOO-adaptive coarse node grid (config-independent, ceiling
 Supersedes the flat artificial-split construction and the F008
 full-cluster switch keying (see the F008 addendum).
 
-- `0.17.0` (2026-07-18):
+- `0.18.0` (2026-07-18):
 Candidate/fiducial ratio layer (Build 3g): lattice-snapped memoized
 fiducial envelope, heterodyned ratio interpolation (~8 LOO nodes,
 config-independent), guard/refusal-symmetric fallback to the direct
 SACR-C path. Measured warm single-thread lnlike ~9.8 ms (~143x brute).
 New test module `cogwheel/tests/test_lensing_ratio_layer.py`.
 
-- `0.16.0` (2026-07-18):
+- `0.17.0` (2026-07-18):
 Microlensed sampling layer (Build 4): `LensedIASPrior` (sampled reduced
 lens coordinates — redshifted ln lens mass, reduced shear, shear-frame
 source box; kappa/beta/z_lens eliminated; astroid quadrant folding; no
@@ -783,7 +783,7 @@ lnL = -inf at the posterior boundary only); fiducial cache dropped on
 pickle for fork-safe determinism. New row in the Layers table; new test
 module `cogwheel/tests/test_lensing_prior.py`.
 
-- `0.15.0` (2026-07-18):
+- `0.16.0` (2026-07-18):
 Marginalized lensed likelihood (Build 5): `LensedMarginalizedExtrinsicLikelihood`
 + registered `LensedMarginalizedExtrinsicIASPrior` — coherent-score
 (higher-mode) extrinsic marginalization for the microlensed model via
@@ -792,14 +792,14 @@ exact per-image time shifts through the unchanged fiducial weights and
 apparent distance d_app (F009 transform deferred to post-analysis).
 New test module `cogwheel/tests/test_lensing_marginalized_likelihood.py`.
 
-- `0.14.0` (2026-07-18):
+- `0.15.0` (2026-07-18):
 Batched engine fast path (Build 3c): new public `operator.F_op_grid`
 (per-order weight-vector contraction over the whole wave-branch node
 grid, refusal thresholds byte-unchanged, scalar `F_op` delegates);
 `channels._exact_total` wired to one batched call; certified by the new
 `cogwheel/tests/test_lensing_batched_operator.py`.
 
-- `0.13.0` (2026-07-17):
+- `0.14.0` (2026-07-17):
 Microlensed likelihood fast path (Builds 3/3b): coarse full-cluster
 kernel-node spline grid (`_DEFAULT_KERNEL_NODES = 100`), numba-njit
 dd/1F1 ladder + operator contraction (refusal contract untouched),
@@ -807,6 +807,35 @@ njit nearest-caustic search; certified by the new
 `cogwheel/tests/test_lensing_fast_path.py` (numba-vs-mpmath
 preservation, null-safe production-grid interpolation gate,
 RB-vs-brute on every lens regime, single-thread timing guards).
+
+- `0.13.0` ():
+
+The interior fold-ppGO rung now serves RAW ppGO
+(`operator.geometric_amplification`) instead of `fold_ppgo_correction`.
+
+Measured against the exact engine over `w in [30, 60]` — deliberately the
+oracle-valid band, since `F_op` returns the uniform arm above 60 and is not an
+independent oracle there (F069) — fold-corrected max relative error is
+1.22e-1 against raw ppGO's 1.49e-4: an **818x** improvement on the rung's own
+domain. Raw ppGO additionally improves with frequency (~`w^-2.75`) while the
+fold residual is w-independent, so the margin widens toward the `w ~ 5e4`
+where this gate first opens.
+
+The correction was a net loss here because the gate's closed form is
+`w*dtau >= 13344*c_A`: it SELECTS well-separated pairs far from the caustic,
+which is exactly where the fold normal form is invalid. The fold correction
+beats raw ppGO only for `rho >= 0.93` (`xi <~ 0.6`), while the gate demands
+`xi >= 4`.
+
+Unchanged: the gate itself, so `surrogate_census` accounting and the
+`ppgo_fold` served-cause label are unaffected (the census evaluates only the
+gate and never called `fold_ppgo_correction`). The label now means "ppGO on
+the fold-pair gate" rather than "fold-corrected".
+
+Still open: the gate remains mis-shaped — it opens away from the region where
+a fold correction would help. Re-deriving it for small `xi` / small `eta`,
+where the correction is valid AND lives inside the engine's checkable domain,
+is tracked in `todo.d/lensing_fold_ppgo_rung_serves_wrong`.
 
 - `0.12.0` ():
 

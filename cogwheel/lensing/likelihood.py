@@ -1785,8 +1785,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                         return None
                     try:
                         from cogwheel.lensing.chang_refsdal._airy_fold import (
-                            fold_ppgo_correction, _merging_fold_pair,
+                            _merging_fold_pair,
                             _uniform_error_estimate, _image_at_delay)
+                        from cogwheel.lensing.chang_refsdal.operator import (
+                            geometric_amplification)
                         source = np.array([lens['y1'], lens['y2']],
                                           dtype=float)
                         matrix = macro_matrix(
@@ -1816,10 +1818,32 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                                         if (error_est is not None
                                                 and error_est
                                                 <= CERTIFICATION_BAR):
-                                            # All gates pass -- serve via
-                                            # fold_ppgo_correction.
+                                            # All gates pass -- serve RAW
+                                            # ppGO, NOT the fold correction
+                                            # (F069).  The correction is a
+                                            # net LOSS on this rung's
+                                            # domain: in closed form the
+                                            # gate serves iff
+                                            # w*dtau >= 13344*c_A, so it
+                                            # SELECTS well-separated pairs
+                                            # far from the caustic --
+                                            # exactly where the fold normal
+                                            # form is invalid.  Measured vs
+                                            # the exact engine over
+                                            # w in [30, 60] (the
+                                            # oracle-valid band; F_op
+                                            # returns the ARM above 60 and
+                                            # is no oracle there):
+                                            # fold-corrected 1.22e-1 vs raw
+                                            # ppGO 1.49e-4, an 818x gain.
+                                            # Raw ppGO also IMPROVES with w
+                                            # (~w^-2.75) while the fold
+                                            # residual is w-independent, so
+                                            # the gap widens toward the
+                                            # w ~ 5e4 where this gate first
+                                            # opens.
                                             f_total = np.atleast_1d(
-                                                fold_ppgo_correction(
+                                                geometric_amplification(
                                                     dense_w, source,
                                                     lens['gamma']))
                                             f_minrel = f_total * np.exp(
