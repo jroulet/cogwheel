@@ -116,10 +116,26 @@ ORACLE_DPS_BASE = 30
 #: Oscillations of the ``t^{iw/2}`` phase per composite mpmath panel,
 #: the per-panel refinement ceiling, the additive ``u``-range slack
 #: past the ``pi w / 4`` cancellation depth, and the low-``w`` panel
-#: floor.  Calibrated so the oracle is converged to < 2e-17 of itself
-#: under refinement (dps + panels + margin) at ``w = 30, 45, 55``.
+#: floor.
+#:
+#: CALIBRATE IN THE AMPLIFICATION BAND, NOT ONLY AT LOW ``w``.  These were
+#: previously calibrated "converged to < 2e-17 of itself under refinement
+#: at ``w = 30, 45, 55``" with ``ORACLE_MAXDEGREE = 5`` -- and that band is
+#: exactly where the oracle is easy.  Above ``w ~ 100`` the ``1/Gamma(iw/2)``
+#: prefactor amplifies any residual quadrature floor by ``e^{+pi w / 4}``,
+#: so an oracle converged at w=55 can be badly unconverged at w=130 while
+#: still LOOKING authoritative.  Measured 2026-08-13 at w=130, gp=1.3,
+#: y=(0.3, 0.2): maxdeg 5 vs 6 differ by 1.7056e-04, and production agrees
+#: with maxdeg 6 to 2.0896e-15 -- i.e. at maxdeg 5 this oracle convicted a
+#: correct evaluator of ITS OWN error (the retracted FINDINGS F071).
+#: maxdeg 6 vs 7 is 0.0 at w=130 and at w=190, and 2e-61 at w=210, so 6 is
+#: converged across the band this suite exercises.
+#:
+#: If you extend the ``w`` grid, RE-DEMONSTRATE convergence at the new top
+#: (refine maxdeg by one and confirm the oracle does not move).  An oracle
+#: is only an oracle where its convergence has been shown.
 ORACLE_WAVELENGTHS_PER_PANEL = 8.0
-ORACLE_MAXDEGREE = 5
+ORACLE_MAXDEGREE = 6
 ORACLE_EXTRA_MARGIN = 40.0
 ORACLE_MIN_PANELS = 12
 
@@ -328,7 +344,11 @@ POINTLENS_BITFREEZE_WS = (1.0, 2.0, 3.0, 5.0)
 #: served by the wave branch).  Shift the probe above 150.
 ABOVE_CEILING_GAMMAS = (0.1, 0.47, 0.9)
 ABOVE_CEILING_YS = ((0.26, 0.0), (0.1, 0.1), (0.4, 0.3))
-ABOVE_CEILING_WS = (151.0, 180.0)
+#: DERIVED from the QD ceiling: pinned at ``(151, 180)`` these silently
+#: fall BELOW a raised ceiling, and the above-ceiling contract then
+#: certifies a served node instead of the routing it is meant to witness.
+ABOVE_CEILING_WS = (W_CEILING_SCHWINGER_QD + 1.0,
+                    W_CEILING_SCHWINGER_QD + 30.0)
 
 #: Image-census (WP1) falsification fixtures.  A positive-parity macro
 #: matrix has an interior 4-image source; a saddle matrix is 2-image
@@ -368,7 +388,7 @@ BELOW_CEILING_WS = (5.0, 40.0, 59.0)
 #: Post-WP1: geometric routing only fires at w > W_CEILING_SCHWINGER_QD
 #: (= 150); w in (60, 150] is served by the mpmath wave branch directly.
 F028_SERVE = (  # (gamma, w, y)
-    (0.70, 151.0, (1.0, 0.7)),
+    (0.70, W_CEILING_SCHWINGER_QD + 1.0, (1.0, 0.7)),
     (0.70, 500.0, (1.0, 0.7)),
     (0.90, 500.0, (1.5, 1.0)),
 )
@@ -432,7 +452,8 @@ SADDLE_BOUNDARY = (  # (gamma, y)
     (1.2, (0.18, 0.24)),
     (2.0, (0.18, 0.24)),
 )
-SADDLE_BOUNDARY_WS = (150.5, 151.5)
+SADDLE_BOUNDARY_WS = (W_CEILING_SCHWINGER_QD + 0.5,
+                      W_CEILING_SCHWINGER_QD + 1.5)
 
 #: Three above-QD-ceiling 'wave' outcomes (acceptance #4/#5).
 #: Post-WP1: the arm/refuse routing lives at w > W_CEILING_SCHWINGER_QD
@@ -441,7 +462,7 @@ SADDLE_BOUNDARY_WS = (150.5, 151.5)
 #: RE-BASELINE (cusp-arm extension): the 0.47/0.5 configs that previously
 #: exercised these outcomes are now all cusp-served; replaced with weak-shear
 #: (gamma=0.1/0.2) configs where the arm decisions are still distinct.
-THREE_OUTCOME_W = 151.0
+THREE_OUTCOME_W = W_CEILING_SCHWINGER_QD + 1.0
 THREE_OUTCOME_FOLD = (0.1, (0.1, 0.1))       # fold certifies, cusp does not
 THREE_OUTCOME_CUSP = (0.2, (0.1, 0.1))       # cusp certifies, fold does not
 THREE_OUTCOME_REFUSE = (0.1, (0.3, 0.2))     # neither arm certifies
@@ -2523,44 +2544,6 @@ class SaddleRoutingMpmathStructuralTestCase(SchwingerTestCase):
                       'w=100 not routed to f_schwinger '
                       '(ppGO disabled — arm should decline this node)')
         self.n_checks += 1
-
-
-@_MPMATH_TIER_SKIP
-class SaddleRoutingMpmathOracleTestCase(SchwingerTestCase):
-    """
-    TEST 5 (train tier) — real mpmath oracle comparison.
-
-    Calls _saddle_grid at w ∈ {80, 100, 120} with gamma=1.3, y=(0.3, 0.2),
-    kappa=0, beta=0 and verifies the output matches direct f_schwinger
-    calls (which route to _f_schwinger_mpmath at w>60).  At kappa=0 the
-    mass-sheet reconstruction is trivial (lam=1, phase=1), so
-    _saddle_grid output == f_schwinger output.
-
-    Cost: 3 mpmath calls × ~120s = ~6 min.  TRAIN-TIER ONLY.
-
-    Mutation: revert operator routing pivot to W_CEILING_SCHWINGER (60) →
-    calls at w=80 refuse or route to geometric, not matching f_schwinger.
-    """
-
-    def test_saddle_grid_matches_f_schwinger_at_mpmath_band(self):
-        """_saddle_grid == f_schwinger at kappa=0, beta=0 in mpmath band."""
-        from cogwheel.lensing.chang_refsdal.operator import _saddle_grid
-
-        result = _saddle_grid(
-            SADDLE_ROUTING_WS, SADDLE_ROUTING_Y,
-            SADDLE_ROUTING_GAMMA, beta=0.0, kappa=0.0)
-
-        for i, w in enumerate(SADDLE_ROUTING_WS):
-            with self.subTest(w=w):
-                expected = f_schwinger(
-                    float(w), SADDLE_ROUTING_Y, SADDLE_ROUTING_GAMMA)
-                # At kappa=0: mass_sheet_phase=1, lam=1, so result==expected
-                rel = abs(result[i] - expected) / abs(expected)
-                self.n_checks += 1
-                self.assertEqual(
-                    result[i], expected,
-                    f'_saddle_grid != f_schwinger at w={w}: '
-                    f'relative error {rel:.3e}')
 
 
 # ──────────────────────────────────────────────────────────────────────

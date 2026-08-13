@@ -134,10 +134,32 @@ _CERTIFICATION_TOL = 3e-10
 #: order-24 under-resolves the upper band (measured N/2N disagreement
 #: ~3e-4 > `_CERTIFICATION_TOL` at w=100), which would REGRESS serving
 #: coverage in the cusp-exterior windows where the exact engine is the
-#: last rung (the surrogate declines those by design).  Order-32 certifies
-#: across the band (measured) and is still cheap on this fallback-only
-#: path.
-_MP_PANEL_ORDER = 32
+#: last rung (the surrogate declines those by design).
+#:
+#: RAISED 32 -> 40 on 2026-08-13 to stop SPURIOUS REFUSALS, not wrong
+#: values.  Order 32 does NOT certify across the advertised band: from
+#: `w ~ 139` the paired N/2N relative difference blows `_CERTIFICATION_TOL`
+#: while the VALUE is right to ~9e-16, so `f_schwinger` was raising
+#: `SchwingerCertificationError` on correct answers over the top ~11 units
+#: of its own `60 < w <= 150` window.  Measured at w=150 against a
+#: converged oracle (both fixtures, gp = 1.3 and 0.7):
+#:
+#:     order   true rel err   cert rel   certifies?
+#:      32       9.0e-16      8.1e-07       NO
+#:      40       9.0e-16      1.5e-28      yes
+#:
+#: Order 40 certifies through `w ~ 204` on both fixtures, at ~1.29x cost
+#: (99s -> 128s per call at w=190), so the `W_CEILING_SCHWINGER_QD = 150`
+#: ceiling remains a RUNTIME budget decision, not an accuracy one.
+#:
+#: The certificate is CONSERVATIVE, not optimistic: it reports the N-rule
+#: error while the function returns the 2N value, so it refuses well before
+#: the value degrades (measured margin ratio 1.65e19 vs 2^64 = 1.85e19 at
+#: w=190).  Raising the order therefore buys band without opening a
+#: certified-but-wrong region.  The earlier claim that this path certifies
+#: wrong answers above w ~ 110 was the retracted FINDINGS F071 -- that was
+#: the TEST ORACLE under-converged, not this evaluator.
+_MP_PANEL_ORDER = 40
 
 #: Fixed Gauss-Legendre order per composite panel.  The (node, weight)
 #: pairs are Newton-refined to double-double ONCE (`_dd_gl_rule`) and
