@@ -158,7 +158,21 @@ SYNC_FILE="$REPO_ROOT/.claude/sync_issues.json"
 # fingerprint the staging: a librarian sync stages its institutional-memory
 # write (.serena/memories/librarian_*.md) and/or the sync trigger file.
 STAGED_EARLY=$(git diff --cached --name-only)
-if echo "$STAGED_EARLY" | grep -qE '^\.serena/memories/librarian_(short_term|knowledge)\.md$|^\.claude/sync_issues\.json$'; then
+if [ -n "${SKIP_LIBRARIAN_GATE:-}" ]; then
+    # TARGETED bypass. This gate's own note says that firing it trains the
+    # operator to reach for --no-verify; the problem is that --no-verify is
+    # a sledgehammer -- it also disables branch safety, the staged-Python
+    # parse, retired-concept enforcement, and fragment rendering, none of
+    # which the operator meant to skip. Measured 2026-08-13: the driver ran
+    # four commits with every hook off because this was the only exit, then
+    # hand-ran branch-safety and py_compile each time to compensate.
+    # Skipping ONE gate deliberately must not cost the other five.
+    # Legitimate use: the backlog's own fix (/doc-sync) cannot run, e.g.
+    # because the Librarian would edit .claude/spec/ while the operator has
+    # changes staged there. The nag still prints.
+    echo "  [advisory] Librarian backlog gate SKIPPED (SKIP_LIBRARIAN_GATE)"
+    echo "             -- all other pre-commit checks still ran."
+elif echo "$STAGED_EARLY" | grep -qE '^\.serena/memories/librarian_(short_term|knowledge)\.md$|^\.claude/sync_issues\.json$'; then
     : # librarian sync commit — clearing the backlog, skip the guard
 elif [ -n "${SDK_BUILD_ACTIVE:-}" ]; then
     # An SDK build cannot run /doc-sync -- it has no session to run it in.
@@ -176,7 +190,12 @@ elif [ -f "$SYNC_FILE" ] && command -v jq >/dev/null 2>&1; then
         echo "===== PRE-COMMIT: Librarian sync backlog too large ====="
         echo "  $PENDING_N commits pending Librarian sync."
         echo "  Run: /doc-sync --post-commit"
-        echo "  Or bypass with: git commit --no-verify"
+        echo "  If that is genuinely blocked (e.g. you have .claude/spec/"
+        echo "  changes staged that the Librarian would also edit), skip"
+        echo "  JUST this gate and keep every other check:"
+        echo "      SKIP_LIBRARIAN_GATE=1 git commit ..."
+        echo "  Prefer that over --no-verify, which also disables branch"
+        echo "  safety, the staged-Python parse, and fragment rendering."
         echo "========================================================"
         exit 1
     elif [ "$PENDING_N" -gt 2 ]; then
