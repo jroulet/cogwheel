@@ -4052,3 +4052,68 @@ label whose envelope diverges), and this.
 **Not affected**: every accuracy number the driver quoted on 2026-08-13 for
 the cusp guard, the fold-ppGO swap and the `w_floor` guard was measured at
 `w <= 60` on the double-double path, clean at 4.3e-15 here.
+
+## F072 — a finding measured on ONE object does not transfer to a DIFFERENT one that shares its name, and the cusp-tie guard watches the wrong side of the pair (2026-08-13)
+
+**The transfer error (mine).** F028/F032/F033 establish that the fold arm's
+residual is the cubic normal form's O(eta) truncation, and that
+`_ETA_MAX_FOLD = 0.3` is its "permanent, load-bearing" fence. The driver
+reasoned from that to a hypothesis about the interior fold-ppGO RUNG: that
+its gate should be `eta < _ETA_MAX_FOLD`, and that `xi` is structurally blind
+to the error. Both legs were REFUTED by measurement (325 config-w points,
+gamma in {0.3,0.5,0.7}, oracle = direct `f_schwinger` validated at 7.7e-17
+against `exact_total`):
+
+    err_fold ~ eta^(-0.036) at w=60          F033 predicts eta^(+1)
+    at eta = 5e-6 the error is 3.99e-2       O(eta) would give ~5e-6
+    crossover eta = 0.030-0.096              NOT 0.3, and it drifts as w^-0.73
+    at eta = 0.30 the correction is 400x-3000x WORSE than raw ppGO
+    crossover xi  = 0.89-1.09                20% spread, stable in w and gamma
+
+So `xi` is the CONSERVED crossover coordinate and `eta` is not. The shipped
+gate's defect is the SIDE, not the coordinate: it demands `xi >= 4` while the
+correction only wins at `xi <= 1`.
+
+**Why the transfer failed.** F028/F032/F033 measured `fold_amplification` —
+the bare pair-only Airy value that `_uniform_arm_value` serves as the WHOLE
+amplification. The rung uses `fold_ppgo_correction`, which keeps the
+non-merging images' ppGO and replaces only the pair. DIFFERENT OBJECTS with
+adjacent names. `fold_amplification`'s eta fence and its
+`_DEFAULT_ENVELOPE_BAR = 0.05` are internally coherent — and the ~4e-2 error
+floor measured here MATCHES that 5e-2 bar, which is why that arm's fence
+works for it. None of it transfers to a rung whose bar is 1e-4.
+
+**Rule.** Before carrying a measured property across, check that the object
+measured is the object you are about to gate. Shared vocabulary ("the fold
+arm", "the fold correction") is not shared behaviour, and a finding's
+validity band is part of its content — the same lesson as the retracted F071,
+where an oracle calibrated at w = 30/45/55 was used at w = 130.
+
+**Second defect, in SHIPPED code — the cusp-tie guard watches the wrong
+side.** `_merging_fold_pair` (`_airy_fold.py`, ~L319) refuses a degenerate
+cluster via
+
+    tie_count = sum(1 for tau, _ in entries
+                    if abs(tau - tau_high) <= _CUSP_TIE_EPS)
+    if tie_count >= 2: return None
+
+It counts ties against `tau_high` (the SADDLE). Measured census at
+gamma=0.5, theta=pi/2, frac=0.99 — a cusp, not a fold:
+
+    tau=+0.15342641  morse=0  sqrt|mu|=7.089   <-- degenerate PAIR
+    tau=+0.15342641  morse=0  sqrt|mu|=7.089   <-- degenerate PAIR
+    tau=+0.15347645  morse=1  sqrt|mu|=9.956
+    tau=+2.55878866  morse=1  sqrt|mu|=0.206
+
+The degeneracy is on the MINIMUM side, so the guard never fires and the
+function returns a "fold pair" built from one of the two tied minima. The
+correction then de-ppGOs one merging image and leaves the other divergent one
+in place; measured `err_fold/err_raw` locks at 0.41 while BOTH diverge to 1e7
+as `frac -> 1`. Unlike `_uniform_arm_value`, `fold_ppgo_correction` has no
+cusp handoff at all.
+
+This affects `fold_amplification`, which SHIPS through
+`operator._uniform_arm_value`, so it is not confined to the rung under
+review. NOT YET FIXED: the diagnosis is inferred from reading the guard,
+dumping the census and matching the constant 2.45x asymptote — nobody has
+patched the guard and re-measured, so causation is argued, not demonstrated.
