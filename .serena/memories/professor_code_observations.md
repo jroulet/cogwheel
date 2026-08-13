@@ -34,6 +34,19 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   in `geometry._ghost_kernel` is a DISTINCT self-merge pathology, kept.
   The 2.0 constant survives only as a carrier-resolution target in the
   ghost-frame-collapse tests, not as an admission gate.
+  UPDATE (2026-08-13, saddle_above_ceiling_serving consult, read directly
+  off current channels.py ~L963): `farfield_ghost_term` now gates on TWO
+  frequency-INDEPENDENT conditions, not one — decay `Im(tau_c) >=
+  _GHOST_DECAY_IM_THRESHOLD = 0.4` AND separation `min|x_a-x_c| >=
+  _GHOST_SEPARATION_MIN = 0.7` (both raise GhostDomainError on miss). This
+  is NOT the old retired decay gate (that one was frequency-DEPENDENT,
+  `w_min*Im(tau_c) >= 2.0`) — a distinct, frequency-independent decay gate
+  was added back at some point after 8h-d1. As a tier-1-rung admission
+  PROXY it is unreliable: it can REFUSE (raise) exactly on far-from-caustic
+  sources a resolvability-based rung wants to admit (ghost well-separated
+  AND decayed there, but a raise is not a magnitude); prefer gating a new
+  rung on post-gauge switch/resolvability saturation instead of routing
+  through this function as an |E| proxy.
 - Ghost delay frame (Build 8h-b7 + 74c1d55): the ghost carrier is now
   min-subtracted like the real kernels — `_frame_delays(source, matrix)`
   returns (images, absolute_delays, t_min) as THE authoritative frame
@@ -503,3 +516,20 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   `_self_estimate`'s per_region dict — confirms the two lobe-adjacent
   regions are priced identically, useful context if a future build adds a
   6th region and needs a cost-model precedent.
+
+## 2026-08-13 (saddle_above_ceiling_serving design consult)
+
+- `reconstruct_farfield` with `FARFIELD_KERNEL_SUM` does NOT re-gauge the
+  switch: `_farfield_switch` (channels.py ~L876-914) HARDCODES S_a=1 on
+  real channels and tau_c=0 — a zero-envelope FARFIELD_KERNEL_SUM serve is
+  therefore a BARE-KERNEL sum (S_a=1), not the re-gauged switched-channel
+  sum; the two are numerically equivalent ONLY where every per-channel
+  switch is saturated (S_a≈1), which is exactly what an admission gate
+  built on this reconstruction path must certify.
+- `switched_analytic_channels` (_gauge.py ~L335, the SACR-C projection) is
+  4-arg with a per-channel switch S_j; the critical delay tau_c enters
+  TWICE — as the switch argument AND as the demod carrier_c
+  (E = conj(carrier_c)*(F - sum carrier*trial)). To decouple a
+  switch-saturation delay from a phase/demod delay, compute `switch` from
+  one delay value but pass a DIFFERENT `critical_delay` to this function
+  for the demod carrier — the two roles are independently steerable.

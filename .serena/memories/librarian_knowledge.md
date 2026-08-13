@@ -1,5 +1,3 @@
-# Librarian Long-Term Knowledge
-
 - Before trusting the caller's framing of what changed, verify
   independently: `git show --stat --name-only <hash>` per commit and
   `git diff --name-only <first>~1 <last>` should match the claimed
@@ -282,3 +280,12 @@
   between two words of the needle ("sitting behind\nthis one") — when a
   literal needle reports no match, verify the raw bytes for line wraps
   before assuming a unicode issue.
+- DON'T DOCUMENT A PROVABLY-UNREACHABLE CENSUS CATEGORY (2026-08-13): a
+  new served-category label can be code-reachable in isolation yet
+  provably never populate in production because an upstream dispatch
+  branch (e.g. a coarser rho>1 routing rule) always intercepts first —
+  documenting it in SPEC's category breakdown would misrepresent the
+  breakdown as richer than it behaves. Say the disjointness/ordering fact
+  instead (which IS true and durable); add the category sentence only
+  once a later build makes the routing order-independent or the category
+  is observed to actually fire.

@@ -60,3 +60,21 @@
 - Long f-string assertion messages inside deep loops: refactor to
   precomputed locals (e.g. `new_label`/`old_label`) keeping the assertion
   message string byte-identical, instead of wrapping the line.
+- `tidy_mechanical.py --check` CAPS its printed long-line list at 6
+  (`longs[:6]`) even though the summary's count is the true total — for a
+  file with >6 long lines, get the full list yourself (e.g. a one-line
+  python `len()`-scan); never trust the printed sample as exhaustive.
+- Long-line wrap judgment: wrap CODE lines (any width over 79) but leave
+  PROSE (comment/docstring) lines alone unless >=85 cols or a trivial
+  2-line reflow fixes them cleanly — hand-wrapping every 80-84 col line in
+  an already-hand-wrapped prose-heavy function is high diff for near-zero
+  readability gain; flag the function's size itself as the real finding.
+- Implicit string-literal concatenation split across lines (e.g. a
+  multi-line f-string/ValueError message) should be left alone even when
+  >82 cols — rebalancing the split point preserves the joined value but
+  changes each individual literal token, violating the "never change
+  string literal content" constraint.
+- Public-API-before-private-helper ordering violations in a large module
+  can be deliberate bottom-up structuring (primitives -> public assembly)
+  rather than disorder — report, don't reorder; diff risk outweighs
+  benefit for large modules.

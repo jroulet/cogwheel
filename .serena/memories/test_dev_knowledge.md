@@ -1,5 +1,3 @@
-# Test Dev Long-Term Knowledge
-
 - Smoke/staging fixture design: use named tuple constants for every
   threshold/seed; derive fixture grids from those constants so rescaling
   doesn't scatter magic numbers. A "shared generator" pattern (one
@@ -499,3 +497,40 @@
   gate decision is train/serve-consistent; the plain KERNEL_SUM label
   (no ghost subtraction) succeeds for the identical source, showing
   refusal is ghost-label-specific, not a general source refusal.
+
+## 2026-08-13 (saddle_above_ceiling_serving, tier-1 shards A/B/C)
+
+- MAGICMOCK FIXTURES HIDE A NEW ATTRIBUTE READ, AND THE CRASH LOOKS LIKE A
+  PRODUCTION BUG. When new production code reads an attribute the fixture's
+  `MagicMock` never set, the mock happily returns another MagicMock;
+  `np.asarray()` turns it into a 0-d array and the failure surfaces as
+  `IndexError: boolean index did not match indexed array` far from the
+  cause. Measured 2026-08-13: the tier-1 census block added
+  `np.asarray(geom.delays)[real_mask]`, and
+  `test_lensing_saddle_rho_guards.CensusBandSplitMirrorIntegrityTestCase`
+  crashed because its mock set `real_mask` but not `delays`.
+  CORRECTED — an earlier version of this entry called that a
+  "reused-vs-fresh partition" PRODUCTION hazard. It is not. Driver measured
+  real `geometry_partition` across corridor, lobe-interior, far,
+  near-origin, astroid and parity-edge sources: `delays` and `real_mask`
+  are equal length ((4,)) in every case, and no mismatch is producible.
+  The fix is to complete the MOCK, never to add a defensive length check to
+  a hot path. Before promoting a mock-only failure to a production defect,
+  reproduce it against real objects — a fixture crash is evidence about the
+  fixture until you show otherwise.
+- DOMAIN CONFOUND WITHIN A GATE-ADMITTED SET: when certifying a new
+  rung's accuracy bar, the raw resolvability/admission-gate-admitted set
+  can still contain a SEPARATE confound (e.g. caustic proximity) that
+  dominates the error and blows the spec's claimed percentile (p90) —
+  measure accuracy stratified by the confound before trusting the
+  gate-admitted set as the rung's certified domain; a config that is
+  gate-admitted but served wrongly (a "leaky-gate witness") is a real
+  spec discrepancy to flag, not a test bug to paper over. Certify the
+  rung's ACTUAL contract domain (e.g. resolvable AND far-from-caustic),
+  not the raw gate's nominal domain.
+- ZERO-ENVELOPE SELF-FALSIFICATION HAS NO t_min TEETH: for a rung that
+  reconstructs with a ZERO complex envelope, a wrong-t_min self-
+  falsification mutation is inert (0*exp(...)=0 regardless of gauge,
+  i.e. the reconstruction is gauge-independent bit-exactly) — pick a
+  different mutation (e.g. a wrong switch/kernel term) to give the
+  self-falsification teeth on such rungs.

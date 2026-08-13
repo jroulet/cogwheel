@@ -1,5 +1,3 @@
-# Inspector Long-Term Knowledge
-
 - To certify an index-clamp or bounds trick, find the degree/step
   invariant bounding index motion and show out-of-range table entries
   are provably zero — don't just confirm "it didn't crash."
@@ -430,3 +428,12 @@
   kind='lobe_exterior' + training-region contract — the spec never names the
   region vocabulary the trainer/CLI now exposes (bidirectional divergence,
   joins the INS-1-001/002/003 doc-staleness lineage carried to Librarian).
+
+## 2026-08-13 (saddle_above_ceiling_serving, pass 3, still open)
+
+- MANIFEST TRUST TRAP: a "files actually changed" manifest that LISTS a
+  test file does NOT mean it was edited — it can be untracked and
+  byte-identical to a prior red state. ALWAYS re-run the named
+  acceptance-gate files directly (don't just diff-stat them); never trust
+  the manifest, or an agent's claim that a signature/fixture skew was
+  fixed, without a fresh pytest run reproducing green.
