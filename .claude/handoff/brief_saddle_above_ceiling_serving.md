@@ -113,25 +113,42 @@ the per-branch instrumentation in
    the images are 0.251 apart and 0.333 is needed — which is exactly the case
    the midpoint gauge fails.
 
-   WHAT THE RULE DOES AND DOES NOT BUY. It guarantees switch saturation
-   across the band — that is what makes tier 1 work, and it is measured
-   (fact 8). It does NOT make the envelope monotone. An earlier draft of this
-   brief claimed it did, on the strength of ONE source that showed zero sign
-   changes; re-measured over 8 residual-region sources the result does not
-   generalise at all:
+   WHAT THE RULE BUYS: switch saturation across the band, which is what makes
+   tier 1 work (fact 8). It does NOT by itself give a smooth envelope.
 
-       sign changes over w in [12,58]:  4 to 8   (0/8 had <= 1)
-       max|2nd diff| / max|v|:          0.17 to 2.11
+   THE RESIDUAL OSCILLATION IS THE GAUGE'S OWN PHASE WINDING, NOT PHYSICS.
+   Tested and REFUTED first: that it is the image-pair beat. Predicted
+   crossings `(w_max - w_min)*|dtau|/pi` span 12 to 1204 across sources while
+   the observed count sits at 4-5 for every one of them — off by up to 240x.
 
-   including all four of those sources that actually need tier 2
-   (`|E|/|F| > 1e-3`). So TIER 2 CHARTS AN OSCILLATORY ENVELOPE.
+   The observed count is instead set by the DEMODULATION OFFSET. With
+   `tau_c = tau_min - RHO_END/w_min` the offset is 0.3333 for every source, so
+   `E` rotates at that rate: `(58-12)*0.3333/pi = 4.9` crossings predicted,
+   4-5 observed, for all of them. Pushing `tau_c` far enough to saturate the
+   switches is exactly what makes `E` wind.
 
-   That is normal, not a blocker: every existing chart splines an oscillatory
-   envelope, which is what the LOO-adaptive `w` grid
-   (`_LOO_SEED_NODES = 8`, ceiling `_LOO_MAX_NODES = 48`) exists to resolve.
-   The design consequence is a NODE BUDGET question, not a feasibility one —
-   tier 2 must size its `w` axis for an oscillating target and must not be
-   planned as if a handful of nodes will do.
+   DECOUPLE THE TWO ROLES. `tau_c` plays two independent parts — it sets the
+   switch argument AND it demodulates `E`. The identity holds for any
+   demodulation phase, so use different values:
+
+       tau_switch = tau_min - RHO_END / w_min     (far: saturates every switch)
+       tau_phase  = tau_min                       (near: minimal winding)
+
+   Measured over 6 sources, sign changes in (Re, Im) and max|2nd diff|/max|v|:
+
+       coupled     4-5 / 4-5 changes    2nd diff 0.18 - 0.91
+       decoupled   0 / 0 on 5 of 6      2nd diff 0.06 - 0.22
+
+   The build must store `tau_switch` and `tau_phase` (or `tau_min` plus the
+   band's `w_min`, from which both derive) so the served gauge reproduces the
+   trained one exactly.
+
+   CAVEAT ON THIS MEASUREMENT, do not skip: those 6 sources were selected by
+   `|y| > 1.4` as a proxy for the tier-2 region. That is NOT the tier-2
+   definition, which is `|E|/|F| > 1e-3`. The one source that did not improve
+   has `|E| p50 = 4.4e-06` — it is a TIER 1 source whose smoothness never
+   matters. Before sizing tier 2's `w` axis, re-measure smoothness on sources
+   selected by the ACTUAL tier-2 criterion.
 
    NOTE the two tiers share ONE gauge rule, so there is no gauge
    discontinuity between them — the handover is only about whether the
