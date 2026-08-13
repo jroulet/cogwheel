@@ -42,35 +42,63 @@ section: Backlog
   ([[lensing_saddle_gap_is_a_routing_failure_not_coverage]]). They would stop
   needing a chart rather than needing a cheaper one.
 
-  ## THE BLOCKER: no working gate
+  ## The exception is a GAUGE artifact, and the fix is to re-gauge
 
-  1 of 40 draws at `w = 58` is envelope-DOMINATED at `|E|/|F| = 4.17e-01`,
-  five orders of magnitude off the median. Serving it from the analytic
-  channels alone would be catastrophically wrong.
+  1 of 40 draws at `w = 58` is envelope-DOMINATED (`|E|/|F| = 4.17e-01`). It
+  is cleanly separated by the EXISTING resolution criterion — measured over
+  180 (source, w) pairs:
 
-  `eta` does NOT discriminate it. Measured: the outlier sits at `eta = 0.509`
-  while the 39 good draws span `eta` 0.165 to 1.437 — good draws exist on
-  BOTH sides of it. Image count does not either (all 2). The outlier's other
-  coordinates are `gamma = 1.59` (near the prior edge, 1.6) and `|y| = 1.438`.
+      w*delta_min   n    |E|/|F| p50    p90       MAX
+          [0,4)     6      2.74e-02   5.93e-01   6.71e-01
+          [4,8)    12      4.78e-05   1.68e-04   2.38e-04
+         [8,16)    19      3.31e-05   1.50e-04   9.65e-03
+        [16,32)    45      1.30e-05   6.74e-05   1.11e-04
+        [32,64)    55      6.27e-06   2.49e-05   4.40e-05
+       [64,inf)    43      1.26e-06   3.14e-06   7.15e-06
 
-  A rung without a gate keyed on what actually degrades it is exactly the
-  `_airy_fold` failure mode: its `xi` self-certificate could not see distance
-  from the caustic and read 1.2e-2 where the true error was O(1) (F028,
-  confirmed against GLoW in F032; no amplitude refinement removes it, F033).
-  Do not ship this rung on a 97% success rate.
+  WHY, and it is not what it looks like. The excluded population is FARTHER
+  from the caustic than the served one (`eta` p50 **1.169** vs 0.992), with
+  **0.0%** inside the Airy fold fence, and `r(eta, delta_min) = -0.118` —
+  uncorrelated. These are not merging images.
 
-  ## Next measurement, before any build
+  `delta_min = |tau_a - tau_c|` measures a real image's delay against the
+  CRITICAL CARRIER, which for a far-from-caustic source is a VIRTUAL
+  reference: the delay at the nearest caustic point, where no image sits. A
+  real image's arrival time landing near it is a coincidence of geometry.
+  The SACR-C switch is `S_a = smootherstep(w*|tau_a - tau_c|, 0.5, 4)`, so a
+  small argument turns the switch OFF and hands that channel to the envelope
+  BY CONSTRUCTION. The failure threshold matching `RHO_END = 4.0` exactly is
+  the tell: this is the switch, not the physics.
 
-  Characterise the outlier population with a larger sample — but note the
-  instrument cost: sampling at `w > 60` enters the mpmath band and costs
-  ~100 s per draw, so a 40-draw sweep there is ~1 hour. Sample in the
-  double-double band (`w <= 58`) where the same physics is visible at
-  ~0.2 s/call, and spot-check above 60 with a handful.
+  ## Plan: re-gauge, do not re-chart
 
-  Specifically: is the outlier a `gamma -> 1.6` prior-edge effect, an
-  unresolved-image case that `w * delta_min` would catch, or something else?
-  `select_branch`'s resolution leg (`w * delta_min >= RHO_END = 4.0`) is the
-  obvious candidate and was NOT measured here.
+  SACR-C is an EXACT ALGEBRAIC GAUGE, not an asymptotic expansion — `E`
+  absorbs whatever the trials miss, and NOTHING requires `tau_c` to be the
+  critical-point delay. `F` is reproduced for any choice.
+
+  So for the far-from-caustic saddle region (`eta >= ETA_MIN_GEOMETRIC`,
+  where no fold arm is needed), choose `tau_c` to MAXIMISE the minimum switch
+  argument instead of parking it at the critical point. Worked example, the
+  outlier: real delays `[0, 0.9333]`, `tau_c = -0.0443` gives
+  `delta_min = 0.044` and `w*delta_min = 2.57`; placing `tau_c` between the
+  images (~0.4) gives `delta_min ~ 0.4`, hence `w*delta_min ~ 23` at `w = 58`
+  — comfortably above `RHO_END`, every switch on, envelope negligible.
+
+  The region is then served by the switched analytic channels with NO chart,
+  NO extrapolation and NO engine call, and nothing falls back to exact.
+
+  WHAT TO SETTLE BEFORE BUILDING:
+  - the `tau_c` choice must be a FUNCTION of the source, identical at train
+    and serve time, or the stored envelope is in a different gauge than the
+    one served (this is the train/serve skew class of bug already recorded
+    for the ghost gate);
+  - near the caustic the critical-point `tau_c` is the RIGHT choice — the
+    merging pair's delays converge to it and the envelope handles them
+    smoothly. So this is a REGIONAL gauge switch, and the handover between
+    the two conventions needs its own continuity check;
+  - confirm empirically that re-gauging actually drops `|E|/|F|` for the
+    outlier, rather than moving the weight to a different channel. That is a
+    direct measurement and must be made before any build.
 
   ## Process note
 
