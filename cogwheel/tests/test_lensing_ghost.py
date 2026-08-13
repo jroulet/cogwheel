@@ -1492,6 +1492,105 @@ class GhostSelfFalsificationTestCase(TestCase):
         probe._record()
         probe.tearDown()  # must not raise
 
+class GhostAbsenceIsNotUnavailabilityTestCase(GhostTestCase):
+    """`GhostAbsentError` licenses omitting the ghost; the base class does not.
+
+    `ghost_kernel` refuses for two opposite reasons.  Inside the caustic the
+    image quartic has four real roots, so no complex pair is left over and
+    omitting the ghost is EXACT.  Outside it, two roots are real and a ghost
+    necessarily exists -- if the reconstruction cannot produce it, the ghost
+    is unavailable, not zero.
+
+    The distinction is worth a test because it inverts exactly where it is
+    most dangerous: the reconstruction fails on the principal axes, and there
+    ``Im tau_c -> 0``, so the ghost is UNDECAYED and at its largest.  A
+    consumer that reads every refusal as "the ghost is zero" is therefore
+    wrongest precisely where the ghost dominates.
+    """
+
+    def _classify(self, gamma, radius, theta):
+        matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
+        source = np.array([radius * math.cos(theta),
+                           radius * math.sin(theta)])
+        try:
+            geometry.ghost_kernel([10.0], source, matrix)
+            served = 'ok'
+        except geometry.GhostAbsentError:
+            served = 'absent'
+        except geometry.GhostDomainError:
+            served = 'unavailable'
+        try:
+            n_real = len(geometry.find_images(source, matrix))
+        except geometry.LensDomainError:
+            n_real = None
+        return served, n_real
+
+    def test_absent_implies_four_real_images(self):
+        """The only sound reason to call the ghost zero is four real images.
+
+        Swept rather than pinned: any (gamma, radius, theta) reporting
+        `GhostAbsentError` must independently show four real images.
+        """
+        offenders = []
+        thetas = ([0.0, 1e-9, 1e-6, 1e-3]
+                  + list(np.linspace(0.02, math.pi / 2, 12))
+                  + [math.pi / 2])
+        for gamma in (0.2, 0.5, 0.9, 1.2):
+            for radius in np.linspace(0.05, 3.0, 16):
+                for theta in thetas:
+                    served, n_real = self._classify(gamma, radius, theta)
+                    if served == 'absent' and n_real != 4:
+                        offenders.append((gamma, radius, theta, n_real))
+        self.assertEqual(
+            offenders, [],
+            f'GhostAbsentError claims the ghost is zero at '
+            f'{len(offenders)} configuration(s) that do NOT have four real '
+            f'images, so a ghost must exist there: {offenders[:5]}')
+
+    def test_on_axis_refusal_is_unavailable_not_absent(self):
+        """On a principal axis the ghost exists and is UNDECAYED.
+
+        Exactly on the axis the conjugate pair collapses onto a removable
+        singularity and the generic reconstruction cannot produce ``x_c``.
+        Two real images prove a ghost is there, so the refusal must be the
+        base class, never `GhostAbsentError`.
+        """
+        checked = 0
+        for gamma in (0.2, 0.5, 0.9):
+            for radius in (1.0, 1.5, 2.5):
+                served, n_real = self._classify(gamma, radius, 0.0)
+                if served == 'ok' or n_real != 2:
+                    continue
+                checked += 1
+                self.assertEqual(
+                    served, 'unavailable',
+                    f'on-axis gamma={gamma} r={radius} has {n_real} real '
+                    f'images, so a ghost exists, but the refusal was '
+                    f'reported as absence -- a consumer would drop a term '
+                    f'whose Im(tau_c) -> 0 makes it undecayed and largest.')
+        self.assertGreater(
+            checked, 0,
+            'no on-axis exterior refusal was exercised, so this test proved '
+            'nothing; the sweep must reach the axis collapse.')
+
+    def test_absent_is_catchable_as_the_base_class(self):
+        """Existing `except GhostDomainError` handlers must be unaffected.
+
+        The separation is additive: it adds a narrower class consumers may
+        opt into, and must not change what a pre-existing handler catches.
+        """
+        self.assertTrue(issubclass(geometry.GhostAbsentError,
+                                   geometry.GhostDomainError))
+        self.assertTrue(issubclass(geometry.GhostAbsentError,
+                                   geometry.LensDomainError))
+        matrix = geometry.macro_matrix(0.5, 0.0, 0.0)
+        interior = np.array([0.02, 0.03])
+        self.assertEqual(len(geometry.find_images(interior, matrix)), 4,
+                         'fixture must be caustic interior for this check')
+        with self.assertRaises(geometry.GhostDomainError):
+            geometry.ghost_kernel([10.0], interior, matrix)
+
+
 
 if __name__ == '__main__':
     main()

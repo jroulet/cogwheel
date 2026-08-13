@@ -2057,6 +2057,28 @@ class GhostDomainError(LensDomainError):
 
     It subclasses `LensDomainError` so existing domain-refusal handlers
     catch it unchanged.
+
+    A caller that needs to know whether the ghost is ZERO (safe to omit)
+    or merely UNAVAILABLE (must refuse) catches `GhostAbsentError` first:
+    only that subclass licenses treating the ghost term as zero.
+    """
+
+
+class GhostAbsentError(GhostDomainError):
+    """There is genuinely no ghost: the source has four real images.
+
+    The image quartic has four roots.  Outside the caustic two are real
+    and two form the complex-conjugate ghost pair; inside, all four are
+    real and no ghost exists.  Only in the second case is omitting the
+    ghost EXACT, and only this subclass reports it.
+
+    The distinction matters because the bare `GhostDomainError` is also
+    raised when a ghost DOES exist but cannot be continued -- and that
+    happens on the principal axes, where ``Im tau_c -> 0`` means the
+    ghost has not decayed at all and is therefore at its LARGEST.  A
+    caller that reads any ghost refusal as "the ghost is zero" is
+    wrongest exactly where the ghost matters most, so the two cases are
+    separated here rather than at each call site.
     """
 
 
@@ -2433,12 +2455,28 @@ def ghost_kernel(w_dimensionless, source: np.ndarray, matrix: np.ndarray, *,
     candidates = _ghost_candidates(source, matrix,
                                    root_tolerance=root_tolerance)
     if not candidates:
+        # No complex root can mean two opposite things, and the real-image
+        # count tells them apart: the quartic has four roots, so four REAL
+        # images leave none over to be the ghost, while two real images
+        # require a conjugate pair that the reconstruction simply failed to
+        # produce (the on-axis collapse described in the Notes).
+        try:
+            n_real = len(find_images(source, matrix))
+        except LensDomainError:
+            n_real = 0
+        if n_real >= 4:
+            raise GhostAbsentError(
+                f'No ghost for source ({source[0]!r}, {source[1]!r}): the '
+                f'image quartic has four real roots, so the source lies '
+                f'inside the caustic and no complex-saddle pair exists. '
+                f'Omitting the ghost is exact here.')
         raise GhostDomainError(
-            f'No complex-saddle (ghost) pair for source '
-            f'({source[0]!r}, {source[1]!r}): the image quartic has no '
-            f'complex-conjugate root above the tolerance, so the source '
-            f'lies inside the caustic (four real images) or is centered; '
-            f'there is no ghost to continue.')
+            f'Cannot continue the ghost for source '
+            f'({source[0]!r}, {source[1]!r}): only {n_real} real image(s), '
+            f'so a complex-conjugate pair must exist, but no quartic root '
+            f'cleared root_tolerance = {root_tolerance!r}. The ghost is '
+            f'UNAVAILABLE, not absent -- on a principal axis Im(tau_c) -> 0, '
+            f'so it is also undecayed and must not be treated as zero.')
 
     delays = [_ghost_delay(x_c, source, matrix) for x_c in candidates]
     # The decaying member has the largest Im tau_c (> 0 off the cusp axis,
