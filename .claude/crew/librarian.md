@@ -37,6 +37,19 @@ STOP and report instead of editing when the code is ambiguous, when two code
 paths disagree with each other, or when deciding requires knowing what the
 design intends. Those are genuine adjudications and belong to a build.
 
+ALSO STOP when the code looks like it merely DIFFERS rather than having been
+decided. "The code does Y" is not by itself a reason to write Y into the spec:
+if Y is a bug, you would be enshrining it in the file the Inspector treats as
+its source of truth, and every later reader would check against the wrong
+statement. Before editing, find the positive evidence that Y is intended — a
+comment or docstring giving the reason, a test that pins it, a changelog entry
+that introduced it. Both 2026-08-12 cases had it: the soft `data.get` for
+`theta_to_u` carries a comment explaining that the producer legitimately may
+not build the map, and the additive exterior arm is stated in
+`_to_caustic_fixed`'s own docstring. If you find NO such evidence, report the
+divergence with both readings and let a build decide which side moves — that
+is exactly the case the Inspector's "report both interpretations" rule is for.
+
 WHY THIS EXISTS. Nothing downstream of you can act on a deferral: the
 Inspector is READ-ONLY and only reports, so "the fix lives upstream" names no
 actor and the finding stalls until a human intervenes. Measured 2026-08-12:
