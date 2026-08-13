@@ -59,10 +59,17 @@ the per-branch instrumentation in
    MEDIAN IMPROVEMENT IS 1x. Most of that population was already fine; what
    re-gauging fixes is the TAIL (p90 53x, max 70x, coverage 81% -> 97%).
 
-5. **A residual 2.67% is NOT a gauge problem — it needs a CHART, and it is
-   mostly chartable.** Over 300 (source, w) pairs, re-gauged `|E|/|F|` is
-   p50 6.11e-06, p90 1.22e-04, p99 1.45e-02, max 2.99e-02; **8 pairs (2.67%)**
-   exceed 1e-3. Since the re-gauged value is the gauge-independent floor,
+5. **The residual is NOT a gauge problem — it needs a CHART, and it is mostly
+   chartable.** Over 300 (source, w) pairs probed at `w in {24, 58}`,
+   re-gauged `|E|/|F|` is p50 6.11e-06, p90 1.22e-04, p99 1.45e-02,
+   max 2.99e-02; 8 pairs (2.67%) exceed 1e-3.
+
+   THAT 2.67% IS A PER-PROBE-FREQUENCY FIGURE, NOT THE TIER-2 SIZE. It shares
+   the sampling flaw corrected in fact 8: `w in {24, 58}` oversamples high
+   frequencies against the population's true `LogU(5, 148)`. The tier-2 size
+   over the real `w` distribution is **~23%** (fact 8). Use that number for
+   sizing; the distribution shape below is still valid, since it describes
+   WHICH sources fail, not how many. Since the re-gauged value is the gauge-independent floor,
    their analytic trials genuinely fail to reproduce `F`, so the envelope must
    be carried — i.e. splined, exactly as every other chart does.
 
