@@ -3781,3 +3781,62 @@ bothered to pin will have a test with the module in its name.
 Corollary for cross-site instructions: `_born.py`'s comment stated the rule
 without stating its scope, which is what made it look universal. A convention
 comment should name where it does NOT apply if any such place exists.
+
+## F069 — `F_op` stops being an independent oracle above w = 60, and the fold-ppGO certificate measures a quantity that is not the error (2026-08-13)
+
+Two defects found by a driver-commissioned investigation into why the
+fold-ppGO rung's served domain is unverifiable. They compound: the rung is
+wrong where it serves, and the tool most likely to be used to check it cannot.
+
+**1. `F_op` returns the ARM, not the engine, for 60 < w <= 150.**
+`operator._positive_parity_grid` offers `_uniform_arm_value` (fold arm, then
+cusp arm) BEFORE `f_schwinger`, and `continue`s on success. Its own docstring
+claimed those nodes "are evaluated SEQUENTIALLY through `f_schwinger` ...
+byte-identical to the serial evaluator". Driver-measured at gamma=0.5,
+rho=0.3:
+
+    w        |F_op - _uniform_arm_value|
+    40       2.2e-02      engine used
+    60       1.2e-02      engine used
+    70       0.0e+00      ARM used -- F_op is not an oracle
+    100      0.0e+00      ARM used
+    150      0.0e+00      ARM used
+
+So any test comparing an arm against `F_op` above w = 60 compares it against
+itself and CANNOT FAIL. The docstring is corrected; the affected tests still
+need triage (some `F_op == arm` assertions are deliberate priority checks and
+are fine -- the oracle uses are not). The practical independent-oracle ceiling
+is **60**, not 150; a direct `_schwinger.f_schwinger` call is the only oracle
+above it. This is the "oracles must be independent" rule failing not because a
+test author reused a formula, but because the SHIPPED DISPATCH quietly made
+the reference implementation return the thing under test.
+
+**2. `_uniform_error_estimate` decays as 1/w while the true error does not.**
+Driver-verified closed form: the estimate is EXACTLY
+``(4/3) * c_A / (w * delta_tau)`` (matched to 1e-6 at every w from 40 to 5e4,
+c_A = 1.000798). The `xi^{-3/2}` presentation hides a plain `1/(w*delta_tau)`.
+The measured true error at the canonical fixture is w-INDEPENDENT (~2e-1 flat
+from w=40 to w=2e5), so optimism grows LINEARLY in w without bound:
+
+    w          40     60    100    150    1e3    1e4    5e4     2e5
+    estimate  1.0e-1 6.8e-2 4.1e-2 2.7e-2 4.1e-3 4.1e-4 8.2e-5  2.0e-5
+    true      9.3e-2 1.4e-1 1.1e-1 2.1e-1 2.0e-1 2.2e-1 2.1e-1  1.9e-1
+    optimism   0.9    2.1    2.7    7.9     49    538   2581    9238
+
+The rung's gate demands estimate <= 1e-4, which it first meets near w ~ 5e4 --
+where it is wrong by ~21% while certifying 8.2e-5. The gate is INVERTED: in
+closed form it serves iff ``w*delta_tau >= 13344*c_A``, selecting
+well-separated pairs FAR from the caustic, which is exactly where the fold
+normal form is invalid. The correction beats raw ppGO only for rho >= 0.93
+(xi <~ 0.6), while production requires xi >= 4.
+
+**Rule.** A certificate must be a bound on the ERROR, not on a proxy that
+happens to shrink. Before trusting one, check what it is a function of: if the
+true error does not depend on the same variable, the certificate's optimism is
+unbounded in the direction the gate opens. The 2.3x optimism measured at w=45
+already contained this -- the missing step was asking whether the RATIO was
+constant, not whether it was small.
+
+Corollary: `fold_ppgo_correction`'s docstring claims it "cannot make things
+worse than raw ppGO". Measured at w=100 against the exact engine: raw ppGO
+errs 8.7e-6, the corrected value 2.1e-1 -- 24,000x WORSE than doing nothing.

@@ -1016,10 +1016,22 @@ def _positive_parity_grid(
 
       Nodes with ``w <= W_CEILING_SCHWINGER`` (= 60) go through the DD
       parallel batch (byte-identical to serial `f_schwinger`).  Nodes with
-      ``60 < w <= W_CEILING_SCHWINGER_QD`` (= 150) are evaluated
-      SEQUENTIALLY through `f_schwinger` (which dispatches internally to
-      the mpmath arbitrary-precision path).  Both are byte-identical to
-      the serial evaluator.
+      ``60 < w <= W_CEILING_SCHWINGER_QD`` (= 150) are offered the
+      UNIFORM-ASYMPTOTIC RUNG FIRST (`_uniform_arm_value`: fold arm, then
+      cusp arm); only nodes both arms decline fall through to
+      `f_schwinger`.
+
+      CONSEQUENCE FOR TESTS -- ``F_op`` IS NOT AN INDEPENDENT ORACLE ABOVE
+      ``w = 60``.  Where an arm serves, ``F_op`` RETURNS THAT ARM, so
+      comparing an arm against ``F_op`` there compares it against itself
+      and cannot fail.  Measured 2026-08-13 at gamma=0.5, rho=0.3:
+      ``|F_op - _uniform_arm_value|`` is 1.2e-2 at w=60 (engine used) and
+      EXACTLY 0.0 at w = 70, 100 and 150 (arm used).  Only a direct
+      `_schwinger.f_schwinger` call is an independent oracle above 60.
+      This docstring claimed both bands were "byte-identical to the serial
+      evaluator" until 2026-08-13; the arm-first branch below has been
+      there the whole time, and the claim silently licensed self-oracle
+      tests.  See FINDINGS F069.
 
     * ``gamma' == 0`` (the shear-free point lens; measure-zero in the
       prior but reachable in unit tests and by direct callers): the 1D
