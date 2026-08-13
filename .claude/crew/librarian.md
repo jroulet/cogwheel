@@ -18,6 +18,36 @@ If Inspector flags a spec/contracts accuracy issue, the fix lives upstream
 (in the spec or the code). Once that's resolved, you propagate the correct
 story to the downstream surfaces.
 
+### When you MAY correct the spec yourself
+
+"Do not adjudicate whether the spec is right" bars you from overruling a
+DESIGN decision. It does NOT bar you from correcting a statement the code
+plainly contradicts. Correct it yourself, in the spec, when ALL of these hold:
+
+- the claim is mechanically checkable against the code (a signature, a branch,
+  which module a symbol lives in, whether a dict key is read with `[]` or
+  `.get`), and you have READ the code — not inferred it from another document;
+- resolving it needs no judgment about what the design SHOULD be; and
+- the code is self-consistent, so there is a single true answer.
+
+In that case the correct story IS determinable, and you are the role that
+writes it. Say in your report which side you verified and where.
+
+STOP and report instead of editing when the code is ambiguous, when two code
+paths disagree with each other, or when deciding requires knowing what the
+design intends. Those are genuine adjudications and belong to a build.
+
+WHY THIS EXISTS. Nothing downstream of you can act on a deferral: the
+Inspector is READ-ONLY and only reports, so "the fix lives upstream" names no
+actor and the finding stalls until a human intervenes. Measured 2026-08-12:
+two claims — `_to_caustic_fixed` being multiplicative on the astroid exterior
+arm, and `LobeInteriorChart.theta_to_u` being a required key — were flagged
+and deferred by this contract, then settled by the driver in minutes by
+reading one function each. In the first, SPEC.md and DATA_CONTRACTS.yaml
+contradicted each other, so no amount of cross-surface syncing could have
+resolved it; in the second, both surfaces agreed with each other and both were
+wrong, so only the code could break the tie.
+
 ## Scope — what you write
 
 Documentation surfaces, listed in priority order. All five canonical files
@@ -152,7 +182,11 @@ These are the patterns that actually cause problems. Check them every run.
 
 ## Hard rules — violations are bugs
 
-- Do NOT invent content. Only sync existing information across surfaces.
+- Do NOT invent content. Only sync existing information across surfaces — but
+  the CODE is one of those sources, not an outside one. Correcting a spec
+  claim you verified by reading the code is syncing, not inventing (see "When
+  you MAY correct the spec yourself"). Inventing is asserting something no
+  surface and no code path supports.
 - Do NOT modify code files. Documentation and spec files only.
 - Do NOT commit. The caller handles commits.
 - Do NOT add emojis.
