@@ -332,3 +332,13 @@
   No suppression flag exists in the script or schema; this is the sanctioned
   substitute. Extract the caller list programmatically from
   CONSUMER_GRAPH.json, never by hand from truncated print output.
+- CALIBRATION/MEASURE SCRIPT IMPORT FRAGILITY (2026-08-14): a driver-
+  authored one-shot `calibrate_*`/`measure_*` script under `scripts/` that
+  imports helpers directly from a test module is fragile against the VERY
+  NEXT commit deleting those helpers, if the calibration script and the
+  build retiring the old gate land back-to-back. Flag (don't fix —
+  scripts/*.py is outside Librarian's `cogwheel/`+docs scope) when a
+  `calibrate_*`/`measure_*` script's import block names a test module and
+  the adjacent build touches that same test module; not blocking if the
+  script already produced its cited output artifact before going stale.
+</content>

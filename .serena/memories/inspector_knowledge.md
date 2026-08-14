@@ -477,3 +477,21 @@
   blocking the build. Bound the contaminated set exactly (parity x band x
   the w-nodes that actually enter the affected band); a producer whose grid
   tops out below the band is provably CLEAN.
+
+## 2026-08-14 (symmetry_tie_c3_admission, re-review PASS)
+
+- MANIFEST TRUST TRAP (reconfirmed): a task manifest can list files as
+  "changed" that are actually git-deleted, while a new untracked file it
+  never mentions is the real addition — always `git status` + a fresh run
+  to verify, never trust the manifest string. This session: manifest
+  listed 3 test files as changed; git showed them DELETED, with a 4th
+  untracked file (the real replacement suite) unmentioned.
+- A GATE-CONTRACT SWAP that also changes the gate's ARGUMENT SIGNATURE
+  (3-arg -> 4-arg here) requires verifying every call site by name
+  (`find_referencing_symbols` + a grep for the function name string) —
+  a stale caller on the old signature fails loudly (TypeError) at
+  collection/call time, unlike a same-signature semantic drift which can
+  fail silently; still worth the explicit pass since a partial re-key
+  (production fixed, census mirror left old-signature) is the recurring
+  laggard failure mode in this codebase.
+</content>

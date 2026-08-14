@@ -566,3 +566,33 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   SIGN only; the value-vs-oracle accuracy sweep (1e-2 arm bar over the
   serving band) is the expensive operator ship gate, reported not committed.
   Do not ask a fast suite to carry the accuracy certificate.
+
+## 2026-08-14 (symmetry_tie_c3_admission — saddle far-field c3 certificate, verdict PASS)
+
+- `_saddle_farfield_analytic_serves` (likelihood.py) re-keyed to a c3-led
+  certificate: `est=ppgo_error_estimate(real_images,source,matrix,w_lo)`;
+  `est is None` -> refuse; admit iff min pairwise image separation>=0.05
+  (defense-in-depth backstop) AND 20*est<=1e-3. Independently reproduced:
+  tied mirror pair (gamma=2, y=(1,0)) has delta_tau=0.0 EXACTLY (y->-y
+  mirror symmetry) yet sep=1.041>>0.05 and S*est=7.63e-4<bar -> SERVES
+  (HEAD's old `delta_taus>0` leg gave product 0<4 -> wrongly refused this
+  transverse-cone regression). Certificate log-log slope in w_lo =
+  -3.000000 exact (matches est=sum(sqrt|mu||c3|)/w_min**3 asymptotics).
+- MERGE CASE (gamma=1.6, rho=1.001): est is FINITE-but-astronomical
+  (1.57e15, S*est=3.1e16>>bar) — refuses via the CERTIFICATE, not the
+  separation backstop (sep=2.07 there, well clear). The literal ask
+  "ppgo_error_estimate is None at the physical near-fold" is NOT met
+  physically — the DD root finder keeps the merging image just off the
+  exact critical curve, so est stays finite; the None branch is only
+  reached via the degenerate w_min<=0 trigger. Intent (merging pair
+  refuses via the certificate) is satisfied; documented as an honest
+  handling gap, not a defect.
+- Gate matches the 2026-08-14 consult ruling verbatim: S=20, bar=1e-3 at
+  w_lo, c3-only (no ghost term), separation floor 0.05 purely as
+  defense-in-depth (never the active discriminator on the measured grid).
+  Census mirror confirmed calling the SAME `_saddle_farfield_analytic_
+  serves`; both sites build `real_images = np.asarray(geom.images)`
+  directly (the INS-1-001 double-mask bug — indexing an already-real-only
+  images array with the length-4 channel mask — fixed at both the live
+  rung and the census mirror).
+</content>

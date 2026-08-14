@@ -796,3 +796,27 @@
   exists. The repair is to re-derive the fixture from live geometry or
   invert the test to the new truth, and to fix every docstring asserting the
   dead premise.
+
+## 2026-08-14 builds (symmetry_tie_c3_admission)
+
+- DOUBLE-MASK BUG PATTERN: `geom.images` from `geometry.find_images` is
+  ALREADY the real-only array (length k, e.g. 2 for a saddle 2-image draw)
+  — re-indexing it with the length-4 channel `real_mask`
+  (`geom.images[real_mask]`) double-masks and raises IndexError on every
+  2-image draw. Use `np.asarray(geom.images)` directly; `real_mask` is
+  only for length-4 CHANNEL arrays (delays/etc from `_frame_delays`).
+- SADDLE FAR-FIELD GATE REPLACED (`_saddle_farfield_analytic_serves`,
+  likelihood.py): after an eta-floor (measured-boundary) attempt was tried
+  and reverted, the shipped gate is a c3-LED CERTIFICATE: `est =
+  ppgo_error_estimate(real_images, source, matrix, w_lo)`; `est is None ->
+  refuse` (primary merge discriminator); admit iff min pairwise image
+  separation >= `_SADDLE_FARFIELD_MIN_IMAGE_SEP`(0.05, defense-in-depth
+  backstop) AND `_SADDLE_FARFIELD_SAFETY`(20.0)*est <=
+  `_SADDLE_FARFIELD_CERT_BAR`(1e-3). Retired `_SADDLE_FARFIELD_RHO_FLOOR`
+  and the eta-floor mechanism entirely.
+- RETIRING A SUPERSEDED TEST SUITE (git rm, not deprecate-in-place): before
+  deleting, confirm (a) zero refs to the retired constant tree-wide, (b) no
+  module imports the file (leaf node), (c) any locally-scoped test helper
+  duplicated by the replacement suite is safe to lose. All three orphaned
+  old-gate suites here were `git rm` only after this check.
+</content>

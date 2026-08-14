@@ -508,7 +508,11 @@
   cause. Measured 2026-08-13: the tier-1 census block added
   `np.asarray(geom.delays)[real_mask]`, and
   `test_lensing_saddle_rho_guards.CensusBandSplitMirrorIntegrityTestCase`
-  crashed because its mock set `real_mask` but not `delays`.
+  crashed because its mock set `real_mask` but not `delays`. RECURRED
+  2026-08-14 with `geom.images` in place of `geom.delays` (same family) —
+  when auditing a mocked geometry object after any new production attribute
+  read, complete the mock with ALL attributes the new code touches, never
+  add a defensive length/shape check to the hot path.
   CORRECTED — an earlier version of this entry called that a
   "reused-vs-fresh partition" PRODUCTION hazard. It is not. Driver measured
   real `geometry_partition` across corridor, lobe-interior, far,
@@ -583,3 +587,30 @@
   happens to land on the same worker. Any suite installing a process global
   owes a save/restore at MODULE scope. A "new" failure that appears only
   under xdist after a count change is this, not a physics regression.
+
+## 2026-08-14 (saddle serve-gate: certificate/governance test patterns)
+
+- CERTIFICATE-GATE TEST PATTERN: for a gate admitting via
+  `safety*estimate<=bar`, (1) bracket the exact flip point by scanning the
+  gate's own continuous input (e.g. w_lo) for where
+  `safety*estimate==bar`, and confirm the flip matches within tol; (2) if
+  the estimate is an EXACT asymptotic power law (e.g.
+  sum(sqrt|mu||c3|)/w_min**3), assert the log-log slope pins to the exact
+  exponent (e.g. -3 to ~1e-6), not just "decreasing".
+- NON-REGRESSION GOVERNANCE PAIR PATTERN (for a monotone-only-tightens
+  constant, e.g. an admission floor that may only rise per the false-
+  admit/false-refuse asymmetry): pin a FROZEN anchor literal (deliberately
+  NOT re-reading the live module constant — else the comparison is
+  vacuous against itself) plus a second tripwire mirroring the "flips red
+  once fixed" pattern; add a self-falsification test that re-runs the
+  identical comparison against a synthetic regressed value inside
+  assertRaises, proving the check has teeth without ever mocking the
+  bound constant.
+- BOUNDARY-WITNESS SEARCH (generalizes to any admission gate): to find a
+  witness genuinely near a gate's admission boundary without a pinned
+  literal, step outward from a geometric anchor (e.g.
+  `nearest_caustic_point`) along the anchor-to-source ray and search for
+  the first offset the LIVE production gate admits; confirm boundary-
+  exactness by re-checking the immediately preceding offset is refused
+  by the same live gate (not a cached/reconstructed one).
+</content>

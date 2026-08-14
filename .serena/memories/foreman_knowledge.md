@@ -134,3 +134,8 @@
   processing and can produce a misleading AssertionError at a line that is a
   print statement; use a heredoc'd temp script (`cat > /tmp/... << 'PYEOF'`)
   for any inline-python verification containing backtick/`<` characters.
+- TOP-LEVEL BASH SANDBOX BLOCKS `cd`-CHAINED COMMANDS AND `grep` OUTRIGHT
+  (2026-08-14, error text: "USE SERENA for shell commands"): invoke git/ls/
+  stat/etc. directly with `-C <path>` (never a leading `cd`), and route all
+  content search through `mcp__serena__search_for_pattern` instead of grep.
+</content>

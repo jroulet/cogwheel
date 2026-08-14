@@ -222,8 +222,8 @@
   oracle.
 - INTERIOR WEDGE CHART DESIGN (Build interior_wedge_chart): caustic-relative
   (r, theta_wedge) coordinates for 4-image interior sources; D₂ symmetry
-  (Klein four-group); from_wedge_engine entry; kind='wedge' NPZ.
-  See coder_knowledge for full implementation checklist.
+  (Klein four-group); from_wedge_engine entry; kind='wedge' NPZ. See
+  coder_knowledge for full implementation checklist.
 - DD PRODUCT BOTTLENECK: far-field charts capped at w <= ~60 (double-double
   precision limit). Fix direction: r-dependent w ceiling; ppGO serves below
   w_cert. See coder_knowledge for cap formula.
@@ -361,10 +361,10 @@
   Professor: error ~1e-2 @150, ~1e-3 @500, decreasing trend; RHO_END=4.0;
   all-image serve; boundary-continuity is the primary gate.
 - Lobe normalized-radius disease (Professor, follow-on): r_deltoid->0 at
-  deltoid cusps by |dtheta|^(1/3) (same power law as astroid) — subdivision
-  alone does NOT fix the coordinate-level disease; the clean fix is a
-  cusp-adapted u=d**(2/3) coordinate (wedge pattern) — SHIPPED 2026-08-08
-  (98c4e7f). Design record: `mem:lobe_interior_chart`.
+  deltoid cusps by |dtheta|^(1/3), the SAME power law as astroid) —
+  subdivision alone does NOT fix the coordinate-level disease; the clean fix
+  is a cusp-adapted u=d**(2/3) coordinate (wedge pattern) — SHIPPED
+  2026-08-08 (98c4e7f). Design record: `mem:lobe_interior_chart`.
 
 ## Lobe cusp-adapted coordinate build (2026-08-08)
 
@@ -627,3 +627,18 @@
   mirrored the RETIRED xi gate for a whole build after `likelihood.py` moved
   to the c3 certificate. Plan the mirror re-gate inside the build that
   changes the production rung, or it lands a build late as a laggard finding.
+
+## 2026-08-14 builds (symmetry_tie_c3_admission)
+
+- SYMMETRY_TIE_C3_ADMISSION: the saddle far-field serve gate was re-keyed a
+  SECOND time in one day — first onto a directional eta floor (measured-
+  boundary rule), then that plan was fully reverted in favor of a direct
+  c3-certificate (S*ppgo_error_estimate(w_lo)<=bar, S=20, bar=1e-3) + image-
+  separation backstop (0.05), retiring `_SADDLE_FARFIELD_RHO_FLOOR` and the
+  eta floor entirely. Confirms the 2026-08-13 ruling "a gate must bound the
+  error of the object it admits" over a geometric proxy (eta) — direct error
+  estimation from the served object's own asymptotic series won out over a
+  second geometric-distance attempt. Both call sites + all saddle/ppgo test
+  files + the census mirror were re-keyed in the SAME build (mirror-
+  currency-with-production rule holds).
+</content>
