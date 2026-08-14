@@ -25,6 +25,12 @@ LOG="${1:-/tmp/full_suite_$(date +%Y%m%d_%H%M%S).log}"
 export COGWHEEL_BRUTE_ACCURACY="" COGWHEEL_TRAIN_TIER="" \
        COGWHEEL_STRICT_TIMING="" COGWHEEL_RUN_TIMING_SMOKE=""
 
+# Under a pty (background task wrappers) pytest colorizes, and ANSI codes
+# in front of "N tests collected" broke the collection grep below — the
+# gate then reported "collection errored" on a healthy 2267-test collect
+# (2026-08-14). Force plain output everywhere.
+export PY_COLORS=0
+
 if [[ -f "$REPO_ROOT/.env" ]] && [[ -z "${SDK_CONDA_ENV:-}" ]]; then
   SDK_CONDA_ENV="$(grep -E '^SDK_CONDA_ENV=' "$REPO_ROOT/.env" |
                    cut -d= -f2- | tr -d '"' | tr -d "'")"
