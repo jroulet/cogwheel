@@ -1369,7 +1369,8 @@ Tag conventions:
   matches a fresh engine evaluation to tolerance.
 
 
-- **FIX `_find_cusps` WRAP ARITHMETIC — BLOCKS THE TRAINING CAMPAIGN**
+- **NEXT-SESSION ORDER 3/7 — FIX `_find_cusps` WRAP ARITHMETIC — BLOCKS
+  THE TRAINING CAMPAIGN**
   `[→ spec]` — F079: periodic index wrap + linear angle arithmetic gives
   the theta = 0 cusp a 1.5-pi dip span, `_make_arc` returns None for both
   adjacent arcs, and half the astroid fold ring gets no tube chart,
@@ -1939,6 +1940,37 @@ Tag conventions:
   3. Fix the census sampler so `w` spans the real prior, not the training cap.
      Until then no census number is whole-prior coverage, and every one of
      them should say so.
+
+
+- **NEXT-SESSION ORDER 2/7 — SADDLE EXTERIOR ADMISSION VIA THE c3+GHOST
+  CERTIFICATE (subsumes the failed eta-floor build)** `[→ spec]` — build
+  saddle_admission_predicates DIED at `error_max_turns` (2026-08-14 03:19,
+  fix agent consumed its budget iterating the currency-corrected floor
+  scan); its uncommitted gate/census/test changes were REVERTED to the
+  green anchor. What survives: the currency-corrected
+  `scripts/measure_saddle_eta_floor.py` (in HEAD), the fix agent's last
+  script edits + plan + both escalations + full build log in
+  `.claude/handoff/saddle_eta_build_salvage/`, and the coder checkpoint
+  `refs/sdk/coder_checkpoint` (d5672fa6cd98) for cherry-picking.
+
+  DO NOT re-run the eta-floor approach. Launch from
+  `.claude/handoff/symmetry_tie_c3_admission.md`, which now carries BOTH
+  objectives: (a) certificate admission (c3 + ghost,
+  `geometry.ppgo_error_estimate` + `ghost_kernel` term) for ALL 2-image
+  saddle exteriors — transverse cone, connecting region, symmetry axes —
+  replacing the scalar-rho floor AND the eta proxy in one step; (b) the
+  tie-discipline separation discriminator. Rationale on record
+  (closed-form-before-estimator): eta was a scalar proxy for the two
+  closed-form remainder pieces; three escalations chased the proxy's
+  calibration currency, and the certificate computes the actual object
+  per-draw in ~6 ms. The scan data doubles as the exterior-certificate
+  calibration set — reuse, never re-scan.
+
+  Build-ops lesson for the plan: heavy in-build measurement killed the
+  last attempt at max_turns. Either raise the fix-agent turn budget for
+  measurement WPs, or pre-compute the calibration DRIVER-SIDE and hand it
+  in as a measured fact (preferred — briefs discipline already says
+  measured facts the agents cannot cheaply obtain belong in the brief).
 
 
 - **Born rung for the MACRO-SADDLE (`det A < 0`) — carrier, gate, and census
@@ -2885,6 +2917,27 @@ Tag conventions:
   restore them mid-redesign.
 
 
+- **NEXT-SESSION ORDER 6/7 (with 3/7 = lensing_find_cusps_wrap_bug) —
+  ENGINE-FREE TILING CENSUS + NODE-BUDGET PREDICTOR, REQUIRED GREEN BEFORE
+  TRAINING** `[housekeeping]` — the pre-explosion guard class that caught
+  the astroid-exterior log-scaling problem, re-instantiated for this
+  campaign. Engine-free (tiling + node allocation are pure geometry), fast
+  suite. Per (region x parity): n_arcs, n_tiles, n_nodes vs two-sided
+  expected bands (explosion above, silent-empty below — the low-mass
+  exterior once registered ZERO charts silently). Four specific questions:
+  (1) astroid tube census AFTER the F079 wrap fix (4 arcs, count ARCS not
+  cusps); (2) the DELTOID far-field tiling in the additive scalar-reach
+  gauge — the transverse cone's envelope varies with directional eta, not
+  the tile coordinate, the same trap as the old astroid exterior; likely
+  needs an eta-adapted per-lobe radial axis (the log(rho-1) fix's deltoid
+  analogue) — this is the one most likely to force a coordinate redesign,
+  find out BEFORE spending engine time; (3) near-cusp tiles under the
+  corrected F074 control coordinates (is the old cusp-ray spline kink
+  representable now?); (4) per-region w-bands against the new serve floors
+  (certificate floor ~49, farfield_w_floor, SADDLE_WALL=58). Output feeds
+  the campaign cost estimate (call count = sum tiles x nodes).
+
+
 - **THE TUBE MAP IS BUILT AT ONE GAMMA AND USED ACROSS A BAND** `[→ spec]` —
   measured 2026-07-30. `_build_tube_chart` builds `theta_to_s` once at
   `rep_gamma = float(np.median(gamma_grid))` and stores it on the chart;
@@ -3217,6 +3270,83 @@ Tag conventions:
   the re-run need above: these measurements used the old probes and predate it.
 
 
+- **NEXT-SESSION ORDER 4/7 — WIRE THE SERVING ARTIFACTS (F077: the chart
+  layer is dead code)** `[→ spec]` — `amplification_surrogate` and
+  `born_residual_chart` default to None and nothing auto-loads them;
+  `get_certified_ppgo_map()` reads a process global nothing sets.
+  Consequences (serve-path-traced): the SHIPPED `born_residual_chart.npz`
+  is unreachable; the c3 interior rung is one level deeper still;
+  the certified map's own cells are never consulted. Wire attach-at-
+  construction for the artifacts that EXIST (born chart, certified map —
+  the surrogate npz arrives with the training campaign), each behind its
+  existing content-hash/schema refusals. An artifact is not coverage until
+  a serve-path trace shows a production entry reaching it — the acceptance
+  is exactly such a trace per artifact, plus the F075 retroactive-label
+  advisory (32 contaminated map cells are served-conservative; retrain is
+  the campaign's job, not this one's).
+
+
+- **NEXT-SESSION ORDER 5/7 — RE-VALIDATE AND SELECTIVELY RELAX THE
+  CERTIFIED MAP'S SADDLE rho<1 GUARD** `[→ spec]` — the artifact HOLDS
+  certified saddle rho<0.5 cells (w_cert 27.7/19.2/15.9 by gamma band;
+  independently reproduced at 16-28) but `CertifiedPpgoMap.w_cert`
+  hard-refuses all saddle rho<1 as F073-era defense-in-depth. With the c3
+  admission serving the connecting region, decide by measurement whether
+  the guard can be narrowed to what the F073 blindness actually required
+  (the deltoid-straddling annulus), letting the map's own cells serve as
+  a second certification layer. Re-validate the cells against the saddle
+  oracle first (they were trained pre-F075; connecting-region labels drew
+  from w<=58 = the safe DD band, so contamination is not expected — verify,
+  do not assume). Cheap path priced 2026-08-14; "requires retraining" was
+  a corrected misstatement.
+
+
+- **NEXT-SESSION ORDER 7a/7 — THE TRAINING CAMPAIGN (cost estimate FIRST,
+  always)** `[→ spec]` — the low-w tables that close every remaining
+  chart-owned cell of the coverage map. Standing rule: NO engine-run launch
+  without a recorded cost estimate. Method: run the SMOKE config
+  (`scripts/train_lens_surrogate.py`, TrainingConfig defaults,
+  engine_budget=400/chart, minutes-scale) to a scratch outdir, read
+  training_report.json's engine-call counts, extrapolate to the production
+  config via the tiling-census numbers, RECORD the estimate, then launch
+  with a monitor + stale alarm (monitored-not-unattended).
+
+  Production config content, all measured 2026-08-13/14: regions must
+  include lobe_interior + lobe_exterior (the deltoid annulus rho 0.5-1.5
+  and lobe interiors are the genuine table needs) and the near-lobe /
+  near-cusp annuli; near-cusp tile axes per the tiling-census verdict
+  (F074 control coordinates are the candidate); labels ONLY from the safe
+  oracle band (w <= 60 DD; SADDLE_WALL = 58) — labels above 60 were the
+  F075 contamination vector, now fixed but the band cap stays as
+  defense-in-depth. Also in this campaign: (a) RETRAIN
+  certified_ppgo_map.npz (`train_ppgo_map.py --production`) — 32
+  positive-parity exterior cells were measured against the contaminated
+  fold-arm oracle (over-conservative direction; re-measure, re-hash);
+  (b) replace the saddle cusp-arm coverage placeholder 0.0
+  (`measure_saddle_cusp_arm_coverage.py` or the retirement path from the
+  coverage sweep — see FINDINGS F079 body: the angular-coverage concept
+  may be dead post-F074, decide from the same evidence); (c)
+  born_residual_chart.npz is CLEAN, no action. Post-training: attach the
+  new artifact (wiring already landed), run `post_build_sweeps.sh`
+  (driver-side, never in-build).
+
+
+- **NEXT-SESSION ORDER 7b/7 — FINAL ACCEPTANCE: THE NO-ENGINE-SERVE
+  CENSUS** `[→ spec]` — the owner's bar, verbatim: every region of
+  (y1, y2, w, reduced gamma) — astroid inside/outside, deltoid inside,
+  the origin-connecting exterior, the outward exterior, every cusp
+  neighborhood — served by a table or analytic rung, NEVER by live
+  quadrature or the exact engine at runtime (engine = offline oracle
+  only). Sweep both parities on a dense grid, classify every draw's
+  actual serve route (byte-equality against candidate serves identifies
+  the route; the F077 lesson — a trace, not an inventory), and report:
+  zero engine-served cells, or the exact list of survivors with owners.
+  Beware the dead census categories flagged 2026-08-14 (the cusp-window
+  fall-through category reports zero structurally — losses appear as
+  eta-floor/w-cap categories). This census is REPORTED acceptance
+  evidence; only invariants that survive refactors get pinned as tests.
+
+
 - **Zero-quadrature Pearcey hot path (expand table, remove live quadrature)**
   `[→ spec]` — identified 2026-08-10.
 
@@ -3545,7 +3675,12 @@ teja-force skill + gw with the rest of the hardening.
   unchanged.
 
 
-- **WIRE DAEMON HYGIENE INTO THE BUILD CHOKEPOINTS** `[housekeeping]` —
+- **NEXT-SESSION ORDER 1/7 — FIRST, BEFORE ANY BUILD LAUNCH: WIRE DAEMON
+  HYGIENE INTO THE BUILD CHOKEPOINTS** `[housekeeping]` — head of the
+  queue by driver directive (cheap, no physics, and every later item
+  spawns build crews that leak until the watchdog kill-shape is fixed;
+  the training campaign is the largest crew of the program). Also apply
+  the max_turns lesson recorded in [[lensing_saddle_admission_c3]]. —
   `.claude/sdk/reap_stale_serena.py` shipped 2026-08-14 (project-scoped,
   parent-liveness + age discrimination, dry-run default; born from the
   16-serena/16-pyright accumulation that pinned swap and read as "serena

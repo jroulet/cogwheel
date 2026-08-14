@@ -1,0 +1,1039 @@
+Log: /tmp/saddle_admission_predicates_20260813_235808.log
+Provider: claude
+Monitor: tail -f /home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/logs/latest.log
+AGENT: arm an event-driven Monitor now (do NOT timer-poll the log):
+  Monitor(persistent=true, timeout_ms=3600000, command='L=/tmp/saddle_admission_predicates_20260813_235808.log; G=/home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/logs/tree_gate.log; p=""; m=""; s=0; while :; do n=$(grep -av "Monitor(persistent" "$L" 2>/dev/null | grep -aiE "Inspector: (PASS|found issues)|Professor: (PASS|CONCERN|FAIL)|GATE FAILURE|Build (failed|complete)|Coder checkpoint|Phase [0-9]:|Traceback|TimeoutError|transport wedge|committed|KILLED|watchdog|Exit code|ESCALATION|escalation|plan_ready|Plan written|Waiting for a decision" | tail -1); [ -n "$n" ] && [ "$n" != "$p" ] && { echo "$n"; p="$n"; }; if grep -av "Monitor(persistent" "$L" 2>/dev/null | grep -qaE "^(\[[^]]*\])?[[:space:]]*(===[[:space:]]*)?(BUILD REPORT|Build failed|Build cancelled|KILLED BY WATCHDOG|GATE FAILURE|BUILD STRANDED)"; then grep -av "Monitor(persistent" "$L" | grep -aE "^(\[[^]]*\])?[[:space:]]*(===[[:space:]]*)?(BUILD REPORT|Build failed|Build cancelled|KILLED BY WATCHDOG|GATE FAILURE|BUILD STRANDED)" | tail -2; exit 0; fi; c="$(stat -c %Y "$L" 2>/dev/null)-$(stat -c %Y "$G" 2>/dev/null)"; if [ "$c" = "$m" ]; then s=$((s+1)); [ "$s" -eq 5 ] && echo "STALL: build AND tree-gate logs both frozen ~10min -- investigate, do not wait"; else s=0; fi; m="$c"; sleep 120; done')
+  It EXITS on a terminal marker, so a finished build stops the
+  monitor by itself and never reports a false stall.
+  Health = EITHER log advancing, NOT pgrep (the conda wrapper
+  survives a subtree kill and reads as alive); the build log
+  freezes legitimately while the tree gate writes to its own.
+
+[23:58:10] ────────────────────────────────────────────────────────
+[23:58:10]   Starting build pipeline
+[23:58:10] ────────────────────────────────────────────────────────
+[23:58:10] Task: Read the full task specification from the file: .claude/handoff/saddle_admission_predicates.md — Use mcp__serena__read_file or Read to load it, then follow its instructions exactly. Do NOT summarize — read the entire file.
+[23:58:10] Project: /home/tejaswi/Work/cogwheel-claude-dev
+[23:58:10]   Pre-existing dirt at start: 0 modified, 3 untracked — these will NOT be staged unless the build changes them further
+[23:58:10] Branch: claude-dev
+[23:58:10] Starting claude build Serena server...
+[23:58:13] Serena ready at http://localhost:8323/sse
+[23:58:13] Pre-reading spec files...
+[23:58:13] Indexed 1 task-referenced files (pointers only)
+
+[23:58:13] ────────────────────────────────────────────────────────
+[23:58:13]   Phase 0: Triage
+[23:58:13] ────────────────────────────────────────────────────────
+[23:58:23] Triage: complex
+
+[23:58:23] ────────────────────────────────────────────────────────
+[23:58:23]   Phase 1: Planning
+[23:58:23] ────────────────────────────────────────────────────────
+[23:58:24] Architect planning (with Professor + Simplifier subagents)
+[23:58:24] [architect-1] spawning (claude-opus-4-8)
+  [architect-1] mcp__serena__read_file: .claude/handoff/saddle_admission_predicates.md
+  [architect-1] mcp__serena__read_memory
+  [architect-1] mcp__serena__search_for_pattern
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/geometry.py
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing/chang_refsdal/geometry.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/geometry.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/surrogate_census.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] Agent: Pin saddle admission predicate design
+  [architect-1] mcp__serena__read_memory
+  [architect-1] mcp__serena__list_memories
+  [architect-1] mcp__serena__read_memory
+  [architect-1] mcp__serena__read_memory
+  [architect-1] mcp__serena__read_memory
+  [architect-1] mcp__serena__read_memory
+  [architect-1] Agent: Audit saddle admission complexity
+  [architect-1] mcp__serena__read_file: cogwheel/likelihood/marginalization/../../../cogwheel/likelihood.py
+  [architect-1] mcp__serena__find_file: .
+  [architect-1] mcp__serena__get_symbols_overview: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__get_symbols_overview: cogwheel/lensing/chang_refsdal/geometry.py
+  [architect-1] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__find_symbol
+  [architect-1] mcp__serena__find_symbol: cogwheel/lensing/chang_refsdal/geometry.py
+  [architect-1] mcp__serena__find_symbol: cogwheel/lensing/chang_refsdal/geometry.py
+  [architect-1] mcp__serena__find_symbol
+  [architect-1] mcp__serena__get_symbols_overview: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__find_symbol
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__get_symbols_overview: cogwheel/lensing/chang_refsdal/ppgo_map.py
+  [architect-1] mcp__serena__find_symbol
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__find_symbol: cogwheel/lensing/chang_refsdal/geometry.py
+  [architect-1] mcp__serena__find_file: .
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing/chang_refsdal
+  [architect-1] mcp__serena__find_symbol: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/surrogate_census.py
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/_airy_fold.py
+  [architect-1] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing
+  [architect-1] mcp__serena__read_file: /home/tejaswi/.claude/projects/-home-tejaswi-Work-cogwheel-claude-dev/1b0d522f-e85f-43f1-bb94-1392f56849ff/tool-results/mcp-serena-search_for_pattern-1786680173610.txt
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/_airy_fold.py
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing/surrogate_census.py
+  [architect-1] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/surrogate_census.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__read_file: /home/tejaswi/.claude/plans/whimsical-soaring-fountain-agent-af64ef1a05338f6fe.md
+  [architect-1] mcp__serena__write_memory
+  [architect-1] mcp__serena__list_dir: cogwheel/data
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__find_file: .claude/plans
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/operator.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/_airy_fold.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__get_symbols_overview: cogwheel/lensing/chang_refsdal/geometry.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/surrogate_census.py
+  [architect-1] mcp__serena__find_file: .
+  [architect-1] Agent: Lock de-scoped saddle plan
+  [architect-1] mcp__serena__read_memory
+  [architect-1] mcp__serena__read_memory
+  [architect-1] mcp__serena__find_symbol
+  [architect-1] mcp__serena__list_memories
+  [architect-1] mcp__serena__find_symbol: cogwheel/lensing/chang_refsdal/geometry.py
+  [architect-1] mcp__serena__read_memory
+  [architect-1] mcp__serena__find_referencing_symbols: cogwheel/lensing/chang_refsdal/geometry.py
+  [architect-1] mcp__serena__find_symbol: cogwheel/lensing/chang_refsdal/channels.py
+  [architect-1] mcp__serena__read_memory
+  [architect-1] mcp__serena__find_symbol: cogwheel/lensing/ppgo_map.py
+  [architect-1] mcp__serena__write_memory
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/surrogate_training.py
+  [architect-1] mcp__serena__read_file: .claude/plans/whimsical-soaring-fountain-agent-aa66dc618876467d9.md
+  [architect-1] mcp__serena__list_dir: .claude/plans
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/channels.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/surrogate_training.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/geometry.py
+  [architect-1] mcp__serena__read_file: cogwheel/lensing/surrogate_training.py
+  [architect-1] mcp__serena__read_file: .claude
+  [architect-1] mcp__serena__edit_memory
+[00:11:31] [architect-1] done ($18.1048)
+[00:11:31]   Plan received: 2 WPs
+[00:11:31]   WP1: max_turns=45
+[00:11:31]   WP2: max_turns=20
+
+======================================================================
+PLAN FOR APPROVAL
+======================================================================
+## Re-key the saddle-parity (gamma>1) far-field/ppGO admission predicate so the transverse (hard-axis) cone is served analytically instead of falling through to slow live quadrature. Root cause: the single-source-of-truth serve gate `_saddle_farfield_analytic_serves` (likelihood.py ~536-590) uses a scalar isotropic gauge `rho=|y|/caustic_reach >= _SADDLE_FARFIELD_RHO_FLOOR(2.0)` that underestimates distance to the TWO disconnected deltoid lobes, so a source far from both lobes (true nearest-caustic distance up to ~2.5) is wrongly refused. Fix: replace the rho accuracy term with a directional `eta = nearest_caustic_point(...).distance >= _SADDLE_ETA_FLOOR(0.15)` term (Leg A), and make the w-resolution leg (Leg B) treat symmetry-tied mirror pairs (delta_tau<=tie_eps) as non-resolving. Serve = (A AND B). SCOPE CORRECTION from Professor consultation: the CONNECTING region (origin->deltoid, rho<0.5, mirror pair with delta_tau==0) CANNOT be served in this build — the certified ppGO map is keyed on the same scalar rho and hard-refuses saddle rho<1 cells, so no certified cell exists; serving it requires net-new OFFLINE saddle rho<1 map training (out of scope). The proposed Leg C (certified w_cert) + construction-time auto-wire were TRIMMED as redundant on the in-scope rho>=1 saddle population and dormant for the connecting region. The connecting region instead gets a hard-assert refusal guard (correctly falls through to the exact engine) — a follow-up build to train the axial map is owed. The image_count==4 deltoid-interior fence is preserved. The census mirror (surrogate_census.py) is re-gated in the same build to keep served-set == counted-set. eta_floor=0.15, tie_eps=1e-12 absolute, and all test tolerances/oracle carry the Professor's authority. Any SPEC.md / DATA_CONTRACTS.yaml mention of the saddle rho floor is doc-staleness for the Librarian doc-sync phase, not a WP.
+
+### WP1: Re-key saddle serve gate onto directional eta + mirror-pair tie discipline
+  What: In cogwheel/lensing/likelihood.py, re-key the single-source-of-truth saddle serve gate to serve the transverse cone via a directional nearest-caustic-distance predicate and to treat symmetry-tied mirror pairs as non-resolving. Retire the scalar rho accuracy term from the saddle serve path ONLY. Do NOT touch positive-parity gates, charts, _ppgo_above_ceiling, or the certified-map (_ppgo_cell_coords/_ppgo_band_split) machinery — those are out of scope and stay byte-identical.
+  Where: cogwheel/lensing/likelihood.py: `_saddle_farfield_analytic_serves` (~536-590); the live rung `_saddle_farfield_analytic` (~2075-2160); the module constant `_SADDLE_FARFIELD_RHO_FLOOR` (~205); imports (~105-108).
+  How: 1) Add module constants `_SADDLE_ETA_FLOOR = 0.15` (Professor-pinned: inside the measured refuse-max 0.05 / admit-min 0.5 gap, ~3x above refuse, biased conservative because a false-admit is a silent lnL bias while a false-refuse only falls back to the exact engine) and `_SADDLE_TIE_EPS = 1e-12` (absolute; mirrors `_airy_fold._CUSP_TIE_EPS` — a symmetry-tied mirror pair has delta_tau at the ~1e-15 machine floor, which is >0 so the current `delta_taus[delta_taus>0]` filter does NOT catch it; absolute not spread-scaled so genuinely-resolvable tight pairs are not falsely swallowed). Document each constant's provenance in a comment. 2) Change the serve gate to accept the directional distance instead of rho. Recommended signature `_saddle_farfield_analytic_serves(real_delays, w_lo, eta)`: Leg A term becomes `if eta is None or not np.isfinite(eta) or eta < _SADDLE_ETA_FLOOR: return False`; Leg B keeps `real = np.sort(...); delta_taus = np.diff(real)` but the surviving gaps are `delta_taus[delta_taus > _SADDLE_TIE_EPS]` (was `> 0`) — if none survive the pair is non-resolving so return False, else `return w_lo * float(np.min(surviving)) >= RHO_END`. Composition is exactly `A AND B`. 3) In the live rung `_saddle_farfield_analytic`, replace the now-dead `rho = caustic_rho(...)` computation in the saddle serve path with `eta = geometry.nearest_caustic_point(lens['gamma'], np.hypot(y1,y2), source, kappa=lens['kappa']).distance` — note `nearest_caustic_point` is invoked ONCE per band-serve (not per w-sample) and the caustic object is already on the critical path (channels.evaluate ~L1977), so this is amortized. If the ChangRefsdalChannels/geometry_partition object already exposes the nearest-caustic result, reuse it rather than recomputing (query the partition first). Pass eta into the serve gate. The image_count==4 deltoid-interior fence must remain: verify the existing path still refuses 4-image interiors (do not weaken it). 4) Remove the now-unused `_SADDLE_FARFIELD_RHO_FLOOR` constant and its docstring IF nothing else in the saddle serve path references it (grep first; if positive-parity code references it, leave it and only stop USING it in the saddle gate). Confirm `caustic_rho` import is still needed elsewhere before removing it. Data-artifact note: this WP touches no registered producer/consumer artifact — the certified_ppgo_map/lens_amplification_surrogate paths are explicitly NOT modified (Leg C trimmed).
+  Who: Coder
+  Verification: `_saddle_farfield_analytic_serves` gates on directional eta (>= 0.15) for accuracy and on w-resolution with symmetry-tied mirror pairs (delta_tau <= 1e-12) excluded; serve condition is A AND B. The live saddle rung computes eta from nearest_caustic_point (once per band, reusing the partition's caustic object where available) and no longer computes/consults the scalar rho floor in the saddle serve path. The image_count==4 deltoid-interior fence still refuses. Positive-parity gates, the certified-map machinery, and _ppgo_above_ceiling are byte-identical. No new certified-map install or auto-wire logic was added.
+  Max turns: 45
+
+### WP2: Re-gate the saddle census mirror onto eta (served == counted)
+  What: Update the saddle far-field census classifier in cogwheel/lensing/surrogate_census.py so it computes the SAME directional eta and calls the re-keyed serve gate with identical inputs, preserving the served-set == counted-set invariant. This is a faithful mirror of WP1's live-rung caller — same predicate, same eta computation, same tie discipline.
+  Where: cogwheel/lensing/surrogate_census.py: the `if gamma > 1.0:` saddle-farfield mirror block (~490-530) that currently computes `rho = caustic_rho(gamma, np.hypot(y1,y2), kappa=0.0)` and calls `_saddle_farfield_analytic_serves(...)` setting `record.category = 'saddle-farfield-analytic'`.
+  How: Replace the census `rho` computation with `eta = geometry.nearest_caustic_point(gamma, np.hypot(y1,y2), source, kappa=<same kappa the live rung uses>).distance` and pass `eta` into the updated `_saddle_farfield_analytic_serves(real_delays, w_lo, eta)` (new signature from WP1). Use the exact same kappa convention as the live rung (WP1) — do NOT hardcode kappa=0.0 if the live rung uses lens['kappa']; mirror the live rung faithfully. Do not introduce a second copy of eta_floor/tie_eps — import/reference the WP1 module constants so there is one authoritative value. The category label and all other census bookkeeping stay unchanged. This is census-only offline classification, so the per-draw nearest_caustic_point call cost is acceptable.
+  Who: Foreman-Lite
+  Dependencies: WP1
+  Verification: The census saddle-farfield block computes eta via nearest_caustic_point (not scalar rho) and calls the re-keyed serve gate with the same signature, kappa convention, and shared eta_floor/tie_eps constants as the live rung; census admit/refuse decisions match the live serve on every witness (served == counted). No duplicated threshold literals.
+  Max turns: 20
+
+### Professor Inputs
+  - eta_floor = 0.15 (Einstein units): inside the measured refuse-max 0.05 / admit-min 0.5 gap, ~3x above refuse, biased conservative because a false-admit is a silent lnL bias whereas a false-refuse only falls back to the exact engine. Do NOT scale with gamma — nearest-caustic distance is already absolute.
+  - Composition is (A AND B) for the serve; the certified-map Leg C is trimmed. §0 finding: the certified ppGO map is keyed on the SAME scalar rho (caustic_rho) and hard-refuses saddle rho<1 cells, so the connecting region (rho<0.5) has NO certified cell — serving it needs offline saddle rho<1 axial-map training and is OUT OF SCOPE. The connecting region ships as a refusal guard; a follow-up build is owed.
+  - nearest_caustic_point(...) is invoked ONCE per band-serve (channels.evaluate ~L1977 / geometry_partition ~L2095), NOT per w-sample, and the caustic object is already on the critical path — so directional eta is amortized and the Simplifier's per-sample-cost premise is wrong. The wedge-membership predicate |sin 2(theta-beta)| <= (1-kappa)/|gamma| is REJECTED: it bounds the caustic's angular support (necessary, not sufficient for proximity) and would false-admit angularly-aligned but radially-distant sources — a silent lnL bias. eta (true Euclidean distance) stays.
+  - tie_eps = 1e-12, ABSOLUTE (mirror _CUSP_TIE_EPS): symmetry-tied mirror pairs are 0 to machine precision (Fermat-potential x->-x reflection); a spread-relative tolerance would falsely swallow small-but-real resolvable gaps.
+  - eta REPLACES rho in the accuracy leg; rho survives only as the certified-map cell coordinate — which is not used in this build since Leg C is trimmed. image_count==4 is the exact interior/exterior fence on both parities (no radius/rho/eta test is equivalent) and must refuse regardless of any other leg.
+  - Oracle & bar: validate the analytic serve against f_schwinger reached through the mass-sheet identity, anchored at 2-3 witness points by the independent 2D rotated-contour lens-plane oracle (validated to ~2e-15 on saddles) so the primary oracle is not self-referential; numerical bar is 1e-4 relative on |F| across w<=60 (below the DD_PRODUCT_CEILING of 60). Connecting-region ppGO is ~1e-5..1e-6 at w>=25, giving ~10x headroom IF it were served (it is not this build).
+
+### Domain Test Descriptions
+  - T1 — Transverse-cone witness is SERVED (Leg A AND B). Setup: a macro-saddle config (gamma=1.2, kappa=0) with the source on the hard-axis (transverse) cone such that nearest_caustic_point(...).distance (eta) lies in [1.0, 2.5] and the geometry yields exactly 2 real images with a resolvable non-mirror pair (w_lo * min positive delta_tau >= RHO_END=4.0). Operation: call the re-keyed serve gate (must ADMIT — this config was refused under the old rho<2.0 floor), then serve F(w) via the analytic FARFIELD_KERNEL_SUM rung and compare to the saddle oracle (f_schwinger reached through the mass-sheet identity F_{kappa,gamma}=(1/lambda)exp[iw(ln lambda/2 - kappa|y|^2/(2lambda))]F_{0,gamma/lambda}, anchored at 2-3 witness w-values against the independent 2D rotated-contour lens-plane oracle so the primary oracle is not self-referential). Expected: admitted; pointwise |F_served - F_oracle|/|F_oracle| < 1e-4 for every w in [w_lo, 60]. Diagnostic: a rel-error-vs-w curve crossing 1e-4 reveals an eta_floor set too low or a stationary-phase envelope failure near the cusp.
+  - T2 — Connecting-region REFUSAL guard (this build does NOT serve it). Setup: a macro-saddle config (gamma>1) with the source on the origin->deltoid symmetry axis at rho<0.5 whose image pair is a symmetry-tied mirror pair (delta_tau <= tie_eps=1e-12) and image_count==2, at w>=25. Operation: call the re-keyed serve gate. Expected: it REFUSES (returns False) — Leg B excludes the tied pair as non-resolving and there is no certified saddle rho<1 cell to admit it — so the config correctly falls through to the exact engine. This is the honest current state; the test documents that the connecting region is deferred to a future offline-map build. Diagnostic: if the gate ever ADMITS this config, an eta or resolution leg has been mis-composed and would emit a wrong (unserved) value.
+  - T3 — Deltoid-lobe interior REFUSES (image_count==4 fence). Setup: a macro-saddle source placed strictly inside a deltoid lobe so the geometry yields exactly 4 real images (geom.real_mask.sum()==4), the genuine diffractive caustic interior. Operation: call the re-keyed serve gate (and, if reachable, the live rung dispatch). Expected: refuses on all legs regardless of eta or w — real-image count 4 is the exact interior discriminator and FARFIELD_KERNEL_SUM is O(1)-wrong there. Diagnostic: an admit here would inject a grossly wrong |F|; assert refusal explicitly.
+  - T4 — Mirror-pair non-resolving has teeth (tie_eps discipline). Setup: (a) an on-axis saddle source whose only pair is symmetry-tied (delta_tau <= tie_eps) with no other resolvable positive gap -> Leg B must return False even at large w; (b) perturb the SAME source slightly off the symmetry axis so delta_tau > tie_eps and the pair becomes genuinely resolvable at the band floor -> Leg B flips to True (only the tie changes; eta held above floor and w fixed). Expected: (a) refuse, (b) admit. Diagnostic: if (a) admits, the delta_taus filter is still using `>0` instead of `> tie_eps`; if (b) refuses, tie_eps is too large and is swallowing real gaps.
+  - T5 — eta-floor boundary bite (variable isolation). Setup: two saddle sources differing only in their nearest-caustic distance, one at eta = _SADDLE_ETA_FLOOR - epsilon and one at eta = _SADDLE_ETA_FLOOR + epsilon, both with an otherwise-resolvable non-mirror pair at a fixed w. Operation: call the serve gate on each. Expected: eta below floor REFUSES, eta above floor ADMITS — same w, same delays, only eta varies. Diagnostic: a boundary that does not bite (both admit or both refuse) means the eta term is not actually gating or the floor constant is not wired.
+  - T6 — Single-source-of-truth: census admit/refuse == live serve. Setup: reuse the T1 (admit), T2 (refuse), T3 (refuse), and T4 (refuse/admit) witnesses. Operation: evaluate BOTH the live serve gate (likelihood.py) and the re-gated census classifier (surrogate_census.py) on each witness. Expected: identical admit/refuse verdicts on every witness (served set == counted set), using the shared eta_floor/tie_eps constants. Diagnostic: any divergence means the census mirror drifted from the live predicate (different kappa convention, duplicated threshold, or stale rho path).
+  - PORT — Existing saddle serve-gate tests to the eta signature. The serve gate signature changes from `_saddle_farfield_analytic_serves(real_delays, w_lo, rho)` to the eta form. Port every existing test that constructs or asserts against the old 3-arg rho signature or the retired `_SADDLE_FARFIELD_RHO_FLOOR` — in test_lensing_saddle_tier1_accuracy.py, test_lensing_saddle_tier1_refusal.py, test_lensing_saddle_rho_guards.py, and test_lensing_saddle_gauge.py — to compute/pass eta and to assert against `_SADDLE_ETA_FLOOR`/`_SADDLE_TIE_EPS` instead. Preserve the intent of each ported assertion (accuracy p90, refusal boundaries) re-expressed in the eta gauge; where a test pinned a rho boundary that no longer exists, re-derive the equivalent eta boundary from live geometry (do not invent a literal). Keep the test bodies value-asserting with reachable-red self-falsification.
+
+Test-only compatibility port: no
+Domain tests: yes
+Domain changes: yes
+New public API: no
+Spec update: no
+Files affected: 2
+======================================================================
+Depth: 2 WP(s), plan 15.0 KB.
+
+[file-based] Plan written to /tmp/saddle_admission_predicates_approval/plan.json
+[file-based] Waiting for approval signal in /tmp/saddle_admission_predicates_approval ...
+[file-based] Plan rejected. Feedback: REJECTED on one required change plus one factual correction. Everything else
+is approved as written: the eta re-key, the mirror-pair tie discipline
+(absolute 1e-12, matching _CUSP_TIE_EPS), the trimmed Leg C, the connecting-
+region deferral with a refusal guard, the census mirror WP2, the T1-T6 test
+program, and the independent-oracle anchoring.
+
+REQUIRED CHANGE - eta_floor must be MEASURED, not pinned at 0.15.
+
+The measurement basis is: ppGO <= 1e-4 at every audited point with
+eta >= 0.5, over-bar at every point with eta <= 0.05. NOTHING was measured
+in (0.05, 0.5). A floor of 0.15 therefore ADMITS the entire unmeasured
+[0.15, 0.5) band -- and the Professor's own stated failure asymmetry (a
+false-admit is a silent lnL bias; a false-refuse only costs engine time)
+argues the OPPOSITE default: refuse the unmeasured band until measured.
+The handoff brief was explicit: "do not pin 0.5 blind; re-measure the
+boundary on a denser eta grid and state the margin." Do that: add to WP1's
+verification (or a small pre-WP1 measurement step) a dense eta scan --
+eta in [0.05, 1.0] at ~10 log-spaced values x gamma in {1.2, 1.5, 2.0} x
+the served w band (w <= 60, vs the saddle oracle) -- find the worst eta at
+which ppGO still clears 1e-4 with the band max, and set
+_SADDLE_ETA_FLOOR = (measured boundary) x a stated safety factor >= 2 on
+the refuse side. If the measured boundary lands above 0.4, the floor is
+0.5 and the transverse-cone win survives (the audited transverse points sit
+at eta 1.0-2.5, far above). Record the scan numbers in the constant's
+provenance comment and the completion record.
+
+FACTUAL CORRECTION - do not let the plan text mis-price the follow-up.
+
+"the certified ppGO map ... hard-refuses saddle rho<1 cells, so no
+certified cell exists" conflates the API with the artifact. The 2026-08-13
+audit read the shipped npz directly: saddle rows at rho in [0, 0.5) hold
+STATUS_CERTIFIED cells with w_cert 27.7 / 19.2 / 15.9 (gamma bands
+1.10-1.55), and an independent same-day measurement reproduced w_cert 16-28
+for rho <= 0.4. What refuses is CertifiedPpgoMap.w_cert's saddle rho<1
+defense-in-depth guard (SPEC, PARITY-GATED paragraph). The connecting-region
+deferral itself STANDS (the mirror-pair tie makes Leg B refuse the axis
+regardless, and relaxing a defense-in-depth guard deserves its own build) --
+but state the follow-up correctly: "re-validate the existing certified
+rho<0.5 saddle cells and selectively relax the API guard, or retrain" --
+NOT "requires net-new offline map training". The cheap path may well
+suffice and the record should not bury it.
+[00:13:41] Plan rejected (attempt 1/3).
+[00:13:41]   User feedback: REJECTED on one required change plus one factual correction. Everything else
+is approved as written: the eta re-key, the mirror-pair tie discipline
+(absolute 1e-12, matching _CUSP_TIE_EPS), the trimmed Leg C, the connecting-
+region deferral with a refusal guard, the census mirror WP2, the T1-T6 test
+program, and the independent-oracle anchoring.
+
+REQUIRED CHANGE - eta_floor must be MEASURED, not pinned at 0.15.
+
+The measurement basis is: ppGO <= 1e-4 at every audited point with
+eta >= 0.5, over-bar at every point with eta <= 0.05. NOTHING was measured
+in (0.05, 0.5). A floor of 0.15 therefore ADMITS the entire unmeasured
+[0.15, 0.5) band -- and the Professor's own stated failure asymmetry (a
+false-admit is a silent lnL bias; a false-refuse only costs engine time)
+argues the OPPOSITE default: refuse the unmeasured band until measured.
+The handoff brief was explicit: "do not pin 0.5 blind; re-measure the
+boundary on a denser eta grid and state the margin." Do that: add to WP1's
+verification (or a small pre-WP1 measurement step) a dense eta scan --
+eta in [0.05, 1.0] at ~10 log-spaced values x gamma in {1.2, 1.5, 2.0} x
+the served w band (w <= 60, vs the saddle oracle) -- find the worst eta at
+which ppGO still clears 1e-4 with the band max, and set
+_SADDLE_ETA_FLOOR = (measured boundary) x a stated safety factor >= 2 on
+the refuse side. If the measured boundary lands above 0.4, the floor is
+0.5 and the transverse-cone win survives (the audited transverse points sit
+at eta 1.0-2.5, far above). Record the scan numbers in the constant's
+provenance comment and the completion record.
+
+FACTUAL CORRECTION - do not let the plan text mis-price the follow-up.
+
+"the certified ppGO map ... hard-refuses saddle rho<1 cells, so no
+certified cell exists" conflates the API with the artifact. The 2026-08-13
+audit read the shipped npz directly: saddle rows at rho in [0, 0.5) hold
+STATUS_CERTIFIED cells with w_cert 27.7 / 19.2 / 15.9 (gamma bands
+1.10-1.55), and an independent same-day measurement reproduced w_cert 16-28
+for rho <= 0.4. What refuses is CertifiedPpgoMap.w_cert's saddle rho<1
+defense-in-depth guard (SPEC, PARITY-GATED paragraph). The connecting-region
+deferral itself STANDS (the mirror-pair tie makes Leg B refuse the axis
+regardless, and relaxing a defense-in-depth guard deserves its own build) --
+but state the follow-up correctly: "re-validate the existing certified
+rho<0.5 saddle cells and selectively relax the API guard, or retrain" --
+NOT "requires net-new offline map training". The cheap path may well
+suffice and the record should not bury it.
+[00:13:41] [architect-2] resuming session 1b0d522f-e85... (edit mode)
+[00:16:56] [architect-2] done ($2.6958)
+[00:16:56]   Revised plan received: 2 WPs
+[00:16:56]   WP1: max_turns=75
+[00:16:56]   WP2: max_turns=20
+
+======================================================================
+PLAN FOR APPROVAL
+======================================================================
+## Changes from v1: (1) REQUIRED — eta_floor is no longer pinned blind at 0.15; WP1 now MEASURES it via a tracked dense-eta scan and sets _SADDLE_ETA_FLOOR by a deterministic rule (min(0.5, measured_boundary×2)), defaulting to 0.5 so the unmeasured (0.05,0.5) band is REFUSED per the false-admit-is-a-silent-lnL-bias asymmetry; scan numbers recorded in the provenance comment and completion record; scripts/measure_saddle_eta_floor.py added to files_affected and WP1 max_turns raised to 75. (2) FACTUAL — the connecting-region follow-up is re-priced correctly (see below): the shipped npz DOES hold certified saddle rho<0.5 cells; what refuses is an API defense-in-depth guard, so the follow-up is 're-validate/relax the guard or retrain', NOT net-new training. All else unchanged.
+
+Re-key the saddle-parity (gamma>1) far-field/ppGO admission predicate so the transverse (hard-axis) cone is served analytically instead of falling through to slow live quadrature. Root cause: the single-source-of-truth serve gate `_saddle_farfield_analytic_serves` (likelihood.py ~536-590) uses a scalar isotropic gauge `rho=|y|/caustic_reach >= _SADDLE_FARFIELD_RHO_FLOOR(2.0)` that underestimates distance to the TWO disconnected deltoid lobes, so a source far from both lobes (true nearest-caustic distance up to ~2.5) is wrongly refused. Fix: replace the rho accuracy term with a directional `eta = nearest_caustic_point(...).distance >= _SADDLE_ETA_FLOOR` term (Leg A, floor MEASURED in WP1), and make the w-resolution leg (Leg B) treat symmetry-tied mirror pairs (delta_tau<=tie_eps) as non-resolving. Serve = (A AND B). The CONNECTING region (origin->deltoid, rho<0.5, mirror pair with delta_tau==0) is NOT served this build — Leg B's mirror-pair tie refuses the symmetry axis regardless, and the certified-map path that could serve it is gated behind an API defense-in-depth guard whose relaxation deserves its own build (follow-up owed, priced correctly below). The proposed Leg C (certified w_cert) + construction-time auto-wire were TRIMMED as redundant on the in-scope rho>=1 saddle population and dormant for the connecting region. The connecting region gets a hard-assert refusal guard (correctly falls through to the exact engine). The image_count==4 deltoid-interior fence is preserved. The census mirror (surrogate_census.py) is re-gated in the same build to keep served-set == counted-set. tie_eps=1e-12 absolute, and all test tolerances/oracle carry the Professor's authority. Any SPEC.md / DATA_CONTRACTS.yaml mention of the saddle rho floor is doc-staleness for the Librarian doc-sync phase, not a WP.
+
+### WP1: Re-key saddle serve gate onto directional eta (measured floor) + mirror-pair tie discipline
+  What: In cogwheel/lensing/likelihood.py, re-key the single-source-of-truth saddle serve gate to serve the transverse cone via a directional nearest-caustic-distance predicate with a MEASURED accuracy floor, and to treat symmetry-tied mirror pairs as non-resolving. Retire the scalar rho accuracy term from the saddle serve path ONLY. Do NOT touch positive-parity gates, charts, _ppgo_above_ceiling, or the certified-map (_ppgo_cell_coords/_ppgo_band_split) machinery — those are out of scope and stay byte-identical.
+  Where: cogwheel/lensing/likelihood.py: `_saddle_farfield_analytic_serves` (~536-590); the live rung `_saddle_farfield_analytic` (~2075-2160); the module constant `_SADDLE_FARFIELD_RHO_FLOOR` (~205); imports (~105-108). New tracked script scripts/measure_saddle_eta_floor.py.
+  How: 0) MEASURE the eta floor before pinning it — do NOT hardcode 0.15. Write a TRACKED script `scripts/measure_saddle_eta_floor.py` that scans eta in [0.05, 1.0] at ~10 log-spaced values x gamma in {1.2, 1.5, 2.0} x the served w band (a few w-values up to 60), evaluating the analytic ppGO/FARFIELD_KERNEL_SUM serve against the saddle oracle (f_schwinger reached through the mass-sheet identity, same recipe the domain tests use). For each gamma find the worst (smallest) eta at which ppGO still clears the 1e-4 relative-|F| bar at the band max; take the max over gamma as the measured boundary. Apply this DETERMINISTIC rule (no open-ended judgement): `_SADDLE_ETA_FLOOR = min(0.5, measured_boundary * 2.0)`; if the scan cannot establish a clean boundary at or below 0.25 (so x2 would exceed 0.5) DEFAULT to 0.5 — refuse the entire unmeasured (0.05,0.5) band, because a false-admit is a silent lnL bias while a false-refuse only costs engine time (Professor asymmetry). Run the script, and paste the per-gamma boundary numbers and the chosen floor into the constant's provenance comment AND the completion record (.claude/spec/completed.d/). The transverse-cone win is preserved even at 0.5 (audited transverse points sit at eta 1.0-2.5). 1) Add module constants `_SADDLE_ETA_FLOOR = <measured value from step 0>` (with the scan provenance comment) and `_SADDLE_TIE_EPS = 1e-12` (absolute; mirrors `_airy_fold._CUSP_TIE_EPS` — a symmetry-tied mirror pair has delta_tau at the ~1e-15 machine floor, which is >0 so the current `delta_taus[delta_taus>0]` filter does NOT catch it; absolute not spread-scaled so genuinely-resolvable tight pairs are not falsely swallowed). 2) Change the serve gate to accept the directional distance instead of rho. Recommended signature `_saddle_farfield_analytic_serves(real_delays, w_lo, eta)`: Leg A term becomes `if eta is None or not np.isfinite(eta) or eta < _SADDLE_ETA_FLOOR: return False`; Leg B keeps `real = np.sort(...); delta_taus = np.diff(real)` but the surviving gaps are `delta_taus[delta_taus > _SADDLE_TIE_EPS]` (was `> 0`) — if none survive the pair is non-resolving so return False, else `return w_lo * float(np.min(surviving)) >= RHO_END`. Composition is exactly `A AND B`. 3) In the live rung `_saddle_farfield_analytic`, replace the now-dead `rho = caustic_rho(...)` computation in the saddle serve path with `eta = geometry.nearest_caustic_point(lens['gamma'], np.hypot(y1,y2), source, kappa=lens['kappa']).distance` — note `nearest_caustic_point` is invoked ONCE per band-serve (not per w-sample) and the caustic object is already on the critical path (channels.evaluate ~L1977), so this is amortized; if the ChangRefsdalChannels/geometry_partition object already exposes the nearest-caustic result, reuse it rather than recomputing. Pass eta into the serve gate. The image_count==4 deltoid-interior fence must remain: verify the existing path still refuses 4-image interiors (do not weaken it). 4) Remove the now-unused `_SADDLE_FARFIELD_RHO_FLOOR` constant and its docstring IF nothing else in the saddle serve path references it (grep first; if positive-parity code references it, leave it and only stop USING it in the saddle gate). Confirm `caustic_rho` is still needed elsewhere before removing its import. This WP touches no registered producer/consumer artifact — the certified_ppgo_map/lens_amplification_surrogate paths are explicitly NOT modified (Leg C trimmed).
+  Who: Coder
+  Verification: _SADDLE_ETA_FLOOR is set from the recorded dense-eta scan (tracked scripts/measure_saddle_eta_floor.py), NOT a blind 0.15; its provenance comment and the completion record quote the per-gamma measured boundary and the applied floor = min(0.5, boundary*2), with the unmeasured (0.05,0.5) band refused unless the scan clears it. `_saddle_farfield_analytic_serves` gates on directional eta for accuracy and on w-resolution with symmetry-tied mirror pairs (delta_tau <= 1e-12) excluded; serve condition is A AND B. The live saddle rung computes eta from nearest_caustic_point (once per band, reusing the partition's caustic object where available) and no longer computes/consults the scalar rho floor in the saddle serve path. The image_count==4 deltoid-interior fence still refuses. Positive-parity gates, the certified-map machinery, and _ppgo_above_ceiling are byte-identical. No new certified-map install or auto-wire logic was added.
+  Max turns: 75
+
+### WP2: Re-gate the saddle census mirror onto eta (served == counted)
+  What: Update the saddle far-field census classifier in cogwheel/lensing/surrogate_census.py so it computes the SAME directional eta and calls the re-keyed serve gate with identical inputs, preserving the served-set == counted-set invariant. This is a faithful mirror of WP1's live-rung caller — same predicate, same eta computation, same tie discipline.
+  Where: cogwheel/lensing/surrogate_census.py: the `if gamma > 1.0:` saddle-farfield mirror block (~490-530) that currently computes `rho = caustic_rho(gamma, np.hypot(y1,y2), kappa=0.0)` and calls `_saddle_farfield_analytic_serves(...)` setting `record.category = 'saddle-farfield-analytic'`.
+  How: Replace the census `rho` computation with `eta = geometry.nearest_caustic_point(gamma, np.hypot(y1,y2), source, kappa=<same kappa the live rung uses>).distance` and pass `eta` into the updated `_saddle_farfield_analytic_serves(real_delays, w_lo, eta)` (new signature from WP1). Use the exact same kappa convention as the live rung (WP1) — do NOT hardcode kappa=0.0 if the live rung uses lens['kappa']; mirror the live rung faithfully. Do not introduce a second copy of eta_floor/tie_eps — import/reference the WP1 module constants so there is one authoritative value. The category label and all other census bookkeeping stay unchanged. This is census-only offline classification, so the per-draw nearest_caustic_point call cost is acceptable.
+  Who: Foreman-Lite
+  Dependencies: WP1
+  Verification: The census saddle-farfield block computes eta via nearest_caustic_point (not scalar rho) and calls the re-keyed serve gate with the same signature, kappa convention, and shared eta_floor/tie_eps constants as the live rung; census admit/refuse decisions match the live serve on every witness (served == counted). No duplicated threshold literals.
+  Max turns: 20
+
+### Professor Inputs
+  - eta_floor is MEASURED, not pinned. Current basis: ppGO clears 1e-4 for eta>=0.5, over-bar for eta<=0.05, and (0.05,0.5) is UNMEASURED — so the conservative default is 0.5, refusing the unmeasured band because a false-admit is a silent lnL bias while a false-refuse only costs engine time. WP1 runs a dense eta scan (eta in [0.05,1.0] ~10 log-spaced x gamma in {1.2,1.5,2.0} x w<=60 vs the saddle oracle) and sets _SADDLE_ETA_FLOOR = min(0.5, measured_boundary*2.0), defaulting to 0.5 if no clean boundary is established at/below 0.25. Do NOT scale with gamma — nearest-caustic distance is already absolute. The transverse-cone win survives at 0.5 (audited transverse points sit at eta 1.0-2.5).
+  - Composition is (A AND B) for the serve; the certified-map Leg C is trimmed. Connecting-region deferral STANDS but for the correct reason: Leg B's mirror-pair tie makes the symmetry axis refuse regardless of any map. FACTUAL: the shipped certified_ppgo_map.npz DOES hold STATUS_CERTIFIED saddle cells at rho in [0,0.5) (w_cert ~27.7/19.2/15.9 for gamma bands 1.10-1.55, independently reproduced ~16-28 for rho<=0.4); what refuses is CertifiedPpgoMap.w_cert's saddle rho<1 defense-in-depth API guard (SPEC parity-gated paragraph), NOT a missing cell. The follow-up build is therefore 're-validate the existing certified rho<0.5 saddle cells and selectively relax the API guard, or retrain' — NOT net-new offline training; relaxing a defense-in-depth guard deserves its own build, hence the deferral.
+  - nearest_caustic_point(...) is invoked ONCE per band-serve (channels.evaluate ~L1977 / geometry_partition ~L2095), NOT per w-sample, and the caustic object is already on the critical path — so directional eta is amortized and the Simplifier's per-sample-cost premise is wrong. The wedge-membership predicate |sin 2(theta-beta)| <= (1-kappa)/|gamma| is REJECTED: it bounds the caustic's angular support (necessary, not sufficient for proximity) and would false-admit angularly-aligned but radially-distant sources — a silent lnL bias. eta (true Euclidean distance) stays.
+  - tie_eps = 1e-12, ABSOLUTE (mirror _CUSP_TIE_EPS): symmetry-tied mirror pairs are 0 to machine precision (Fermat-potential x->-x reflection); a spread-relative tolerance would falsely swallow small-but-real resolvable gaps.
+  - eta REPLACES rho in the accuracy leg; rho survives only as the certified-map cell coordinate — not used in this build since Leg C is trimmed. image_count==4 is the exact interior/exterior fence on both parities (no radius/rho/eta test is equivalent) and must refuse regardless of any other leg.
+  - Oracle & bar: validate the analytic serve against f_schwinger reached through the mass-sheet identity, anchored at 2-3 witness points by the independent 2D rotated-contour lens-plane oracle (validated to ~2e-15 on saddles) so the primary oracle is not self-referential; numerical bar is 1e-4 relative on |F| across w<=60 (below the DD_PRODUCT_CEILING of 60). This same recipe drives the WP1 eta-floor measurement scan.
+
+### Domain Test Descriptions
+  - T1 — Transverse-cone witness is SERVED (Leg A AND B). Setup: a macro-saddle config (gamma=1.2, kappa=0) with the source on the hard-axis (transverse) cone such that nearest_caustic_point(...).distance (eta) lies in [1.0, 2.5] and the geometry yields exactly 2 real images with a resolvable non-mirror pair (w_lo * min positive delta_tau >= RHO_END=4.0). Operation: call the re-keyed serve gate (must ADMIT — this config was refused under the old rho<2.0 floor), then serve F(w) via the analytic FARFIELD_KERNEL_SUM rung and compare to the saddle oracle (f_schwinger reached through the mass-sheet identity F_{kappa,gamma}=(1/lambda)exp[iw(ln lambda/2 - kappa|y|^2/(2lambda))]F_{0,gamma/lambda}, anchored at 2-3 witness w-values against the independent 2D rotated-contour lens-plane oracle so the primary oracle is not self-referential). Expected: admitted; pointwise |F_served - F_oracle|/|F_oracle| < 1e-4 for every w in [w_lo, 60]. Diagnostic: a rel-error-vs-w curve crossing 1e-4 reveals an eta_floor set too low or a stationary-phase envelope failure near the cusp.
+  - T2 — Connecting-region REFUSAL guard (this build does NOT serve it). Setup: a macro-saddle config (gamma>1) with the source on the origin->deltoid symmetry axis at rho<0.5 whose image pair is a symmetry-tied mirror pair (delta_tau <= tie_eps=1e-12) and image_count==2, at w>=25. Operation: call the re-keyed serve gate. Expected: it REFUSES (returns False) — Leg B excludes the tied pair as non-resolving — so the config correctly falls through to the exact engine. This is the honest current state; the test documents that the connecting region is deferred to a future build that re-validates the existing certified rho<0.5 saddle cells and relaxes the API defense-in-depth guard (or retrains). Diagnostic: if the gate ever ADMITS this config, an eta or resolution leg has been mis-composed and would emit a wrong (unserved) value.
+  - T3 — Deltoid-lobe interior REFUSES (image_count==4 fence). Setup: a macro-saddle source placed strictly inside a deltoid lobe so the geometry yields exactly 4 real images (geom.real_mask.sum()==4), the genuine diffractive caustic interior. Operation: call the re-keyed serve gate (and, if reachable, the live rung dispatch). Expected: refuses on all legs regardless of eta or w — real-image count 4 is the exact interior discriminator and FARFIELD_KERNEL_SUM is O(1)-wrong there. Diagnostic: an admit here would inject a grossly wrong |F|; assert refusal explicitly.
+  - T4 — Mirror-pair non-resolving has teeth (tie_eps discipline). Setup: (a) an on-axis saddle source whose only pair is symmetry-tied (delta_tau <= tie_eps) with no other resolvable positive gap -> Leg B must return False even at large w; (b) perturb the SAME source slightly off the symmetry axis so delta_tau > tie_eps and the pair becomes genuinely resolvable at the band floor -> Leg B flips to True (only the tie changes; eta held above floor and w fixed). Expected: (a) refuse, (b) admit. Diagnostic: if (a) admits, the delta_taus filter is still using `>0` instead of `> tie_eps`; if (b) refuses, tie_eps is too large and is swallowing real gaps.
+  - T5 — eta-floor boundary bite (variable isolation). Setup: two saddle sources differing only in their nearest-caustic distance, one at eta = _SADDLE_ETA_FLOOR - epsilon and one at eta = _SADDLE_ETA_FLOOR + epsilon, both with an otherwise-resolvable non-mirror pair at a fixed w. Operation: call the serve gate on each. Expected: eta below floor REFUSES, eta above floor ADMITS — same w, same delays, only eta varies. Diagnostic: a boundary that does not bite (both admit or both refuse) means the eta term is not actually gating or the floor constant is not wired.
+  - T6 — Single-source-of-truth: census admit/refuse == live serve. Setup: reuse the T1 (admit), T2 (refuse), T3 (refuse), and T4 (refuse/admit) witnesses. Operation: evaluate BOTH the live serve gate (likelihood.py) and the re-gated census classifier (surrogate_census.py) on each witness. Expected: identical admit/refuse verdicts on every witness (served set == counted set), using the shared eta_floor/tie_eps constants. Diagnostic: any divergence means the census mirror drifted from the live predicate (different kappa convention, duplicated threshold, or stale rho path).
+  - PORT — Existing saddle serve-gate tests to the eta signature. The serve gate signature changes from `_saddle_farfield_analytic_serves(real_delays, w_lo, rho)` to the eta form. Port every existing test that constructs or asserts against the old 3-arg rho signature or the retired `_SADDLE_FARFIELD_RHO_FLOOR` — in test_lensing_saddle_tier1_accuracy.py, test_lensing_saddle_tier1_refusal.py, test_lensing_saddle_rho_guards.py, and test_lensing_saddle_gauge.py — to compute/pass eta and to assert against `_SADDLE_ETA_FLOOR`/`_SADDLE_TIE_EPS` instead. Preserve the intent of each ported assertion (accuracy p90, refusal boundaries) re-expressed in the eta gauge; where a test pinned a rho boundary that no longer exists, re-derive the equivalent eta boundary from live geometry (do not invent a literal). Keep the test bodies value-asserting with reachable-red self-falsification.
+
+Test-only compatibility port: no
+Domain tests: yes
+Domain changes: yes
+New public API: no
+Spec update: no
+Files affected: 3
+======================================================================
+Depth: 2 WP(s), plan 17.8 KB.
+
+[file-based] Plan written to /tmp/saddle_admission_predicates_approval/plan.json
+[file-based] Waiting for approval signal in /tmp/saddle_admission_predicates_approval ...
+[file-based] Plan approved.
+[00:19:07] Plan saved to /tmp/saddle_admission_predicates_approval/plan.json
+
+[00:19:07] ────────────────────────────────────────────────────────
+[00:19:07]   Phase 2: Execution
+[00:19:07] ────────────────────────────────────────────────────────
+[00:19:07] Step 1: Coder executing work packages
+[00:19:07]   Batch 1/2: ['WP1']
+[00:19:07] [coder-3] spawning (claude-opus-4-8)
+[00:19:07] [coder-3] max_turns=75
+  [coder-3] mcp__serena__read_file: .claude/handoff/saddle_admission_predicates.md
+  [coder-3] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel/lensing
+  [coder-3] mcp__serena__find_referencing_symbols: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel/lensing/geometry.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel
+  [coder-3] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/geometry.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel/lensing/chang_refsdal/geometry.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel/lensing/chang_refsdal/channels.py
+  [coder-3] mcp__serena__find_symbol: cogwheel/lensing/surrogate_census.py
+  [coder-3] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/channels.py
+  [coder-3] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel/tests
+  [coder-3] mcp__serena__read_file: cogwheel/tests/test_lensing_airy_fold.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_airy_fold.py
+  [coder-3] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__replace_content: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__replace_symbol_body: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__replace_content: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__find_symbol: cogwheel/lensing/surrogate_census.py
+  [coder-3] mcp__serena__replace_content: cogwheel/lensing/surrogate_census.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel/lensing/surrogate_census.py
+  [coder-3] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__replace_content: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__search_for_pattern
+  [coder-3] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [coder-3] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [coder-3] mcp__serena__find_symbol: cogwheel/lensing/chang_refsdal/geometry.py
+  [coder-3] mcp__serena__create_text_file: scripts/measure_saddle_eta_floor.py
+  [coder-3] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python scripts/measure_saddle_e
+  [coder-3] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python scripts/measure_saddle_e
+  [coder-3] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__replace_content: cogwheel/lensing/likelihood.py
+  [coder-3] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "import cogwheel.lens
+  [coder-3] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import numpy as np
+
+  [coder-3] mcp__serena__read_memory
+  [coder-3] mcp__serena__edit_memory
+  [coder-3] mcp__serena__edit_memory
+  [coder-3] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && git status --short && echo "---DIFF
+  [coder-3] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && git diff cogwheel/lensing/likelihoo
+  [coder-3] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && git diff cogwheel/lensing/surrogate
+[00:35:35] [coder-3] done ($19.2607)
+[00:35:36]   Batch 2/2: ['WP2']
+[00:35:36]   WP2: stale-line warning for ['cogwheel/lensing/surrogate_census.py'] (modified by earlier WPs)
+[00:35:36] [coder-4] spawning (claude-opus-4-8)
+[00:35:36] [coder-4] max_turns=75
+  [coder-4] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [coder-4] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [coder-4] mcp__serena__search_for_pattern: cogwheel/lensing/surrogate_census.py
+  [coder-4] mcp__serena__read_file: cogwheel/lensing/surrogate_census.py
+  [coder-4] mcp__serena__search_for_pattern: cogwheel/lensing/surrogate_census.py
+  [coder-4] mcp__serena__search_for_pattern: cogwheel/lensing/surrogate_census.py
+  [coder-4] mcp__serena__edit_memory
+[00:37:36] [coder-4] done ($2.6595)
+[00:37:38] Coder checkpoint d5672fa6cd98 → refs/sdk/coder_checkpoint (recover: git checkout refs/sdk/coder_checkpoint -- <path>)
+[00:37:38]   DAG: running sequentially — ['tidier', 'test_dev']
+[00:37:39] Step 2: mechanical style pass — all clean
+[00:37:39] Step 2: Tidier SKIPPED — SDK_SKIP_TIDIER set
+[00:37:39] Step 3: Test Developer writing tests — 1 suite(s): ['test_lensing_saddle_tier1_accuracy.py']
+[00:37:39]   Suite test_lensing_saddle_tier1_accuracy.py: 7 spec(s) in 3 shard(s) (cap 3/agent)
+[00:37:39]     Shard 1/3: 3 spec(s), max_turns=120
+[00:37:39] [test_dev-5] spawning (claude-opus-4-8)
+[00:37:39] [test_dev-5] max_turns=120
+  [test_dev-5] mcp__serena__read_memory
+  [test_dev-5] mcp__serena__find_file: cogwheel/tests
+  [test_dev-5] mcp__serena__find_file: cogwheel/tests
+  [test_dev-5] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-5] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [test_dev-5] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [test_dev-5] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [test_dev-5] mcp__serena__search_for_pattern: cogwheel/lensing/chang_refsdal
+  [test_dev-5] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/geometry.py
+  [test_dev-5] mcp__serena__search_for_pattern: cogwheel/lensing
+  [test_dev-5] mcp__serena__read_file: cogwheel/lensing/ppgo_map.py
+  [test_dev-5] mcp__serena__read_file: cogwheel/lensing/chang_refsdal/channels.py
+  [test_dev-5] mcp__serena__search_for_pattern: cogwheel/lensing/chang_refsdal/channels.py
+  [test_dev-5] mcp__serena__create_text_file: cogwheel/tests/_probe_saddle_tier1.py
+  [test_dev-5] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel && /home/tejaswi/anaconda3/envs/cogwheel-newlal/b
+  [test_dev-5] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && /home/tejaswi/anaconda3/envs/cogwhe
+  [test_dev-5] mcp__serena__create_text_file: cogwheel/tests/_probe_saddle_tier1b.py
+  [test_dev-5] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && /home/tejaswi/anaconda3/envs/cogwhe
+  [test_dev-5] mcp__serena__create_text_file: cogwheel/tests/_probe_saddle_tier1c.py
+  [test_dev-5] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && /home/tejaswi/anaconda3/envs/cogwhe
+  [test_dev-5] mcp__serena__create_text_file: cogwheel/tests/_probe_saddle_tier1d.py
+  [test_dev-5] Bash: List and inspect probe files
+  [test_dev-5] Bash: Run probe4
+  [test_dev-5] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python cogwheel/tests/_probe_sa
+  [test_dev-5] mcp__serena__create_text_file: cogwheel/tests/_probe_saddle_tier1e.py
+  [test_dev-5] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python cogwheel/tests/_probe_sa
+  [test_dev-5] mcp__serena__execute_shell_command: Find exact oracle path used in earlier probes
+  [test_dev-5] mcp__serena__search_for_pattern: cogwheel/tests/_probe_saddle_tier1.py
+  [test_dev-5] mcp__serena__read_file: cogwheel/tests/_probe_saddle_tier1.py
+  [test_dev-5] mcp__serena__read_file: cogwheel/tests/_probe_saddle_tier1b.py
+  [test_dev-5] mcp__serena__replace_content: cogwheel/tests/_probe_saddle_tier1e.py
+  [test_dev-5] mcp__serena__replace_content: cogwheel/tests/_probe_saddle_tier1e.py
+  [test_dev-5] mcp__serena__replace_content: cogwheel/tests/_probe_saddle_tier1e.py
+  [test_dev-5] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python cogwheel/tests/_probe_sa
+  [test_dev-5] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-5] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [test_dev-5] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [test_dev-5] mcp__serena__search_for_pattern: cogwheel/lensing/chang_refsdal/channels.py
+  [test_dev-5] mcp__serena__create_text_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-5] mcp__serena__execute_shell_command: cat >> cogwheel/tests/test_lensing_saddle_tier1_accuracy.py <<'PYEOF'
+
+
+# ======
+  [test_dev-5] mcp__serena__execute_shell_command: cat >> cogwheel/tests/test_lensing_saddle_tier1_accuracy.py <<'PYEOF'
+
+
+# ======
+  [test_dev-5] mcp__serena__execute_shell_command: cat >> cogwheel/tests/test_lensing_saddle_tier1_accuracy.py <<'PYEOF'
+
+
+# ======
+  [test_dev-5] mcp__serena__execute_shell_command: cat >> cogwheel/tests/test_lensing_saddle_tier1_accuracy.py <<'PYEOF'
+
+
+# ======
+  [test_dev-5] mcp__serena__replace_content: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-5] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [test_dev-5] mcp__serena__execute_shell_command: rm -f cogwheel/tests/_probe_saddle_tier1.py cogwheel/tests/_probe_saddle_tier1b.
+  [test_dev-5] mcp__serena__edit_memory
+  [test_dev-5] mcp__serena__edit_memory
+  [test_dev-5] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [test_dev-5] mcp__serena__find_file: cogwheel/tests
+  [test_dev-5] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+[00:57:45] [test_dev-5] done ($19.5647)
+[00:57:45]     Shard 2/3: 3 spec(s), max_turns=120
+[00:57:45] [test_dev-6] spawning (claude-opus-4-8)
+[00:57:45] [test_dev-6] max_turns=120
+  [test_dev-6] mcp__serena__read_memory
+  [test_dev-6] mcp__serena__find_file: cogwheel/tests
+  [test_dev-6] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-6] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [test_dev-6] mcp__serena__get_symbols_overview: cogwheel/lensing/chang_refsdal/geometry.py
+  [test_dev-6] mcp__serena__find_symbol: cogwheel/lensing/chang_refsdal/geometry.py
+  [test_dev-6] TodoWrite
+  [test_dev-6] mcp__serena__create_text_file: cogwheel/tests/_probe_saddle_t345.py
+  [test_dev-6] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel && /home/tejaswi/anaconda3/envs/cogwheel-newlal/b
+  [test_dev-6] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && /home/tejaswi/anaconda3/envs/cogwhe
+  [test_dev-6] mcp__serena__create_text_file: cogwheel/tests/_probe_saddle_t345b.py
+  [test_dev-6] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && /home/tejaswi/anaconda3/envs/cogwhe
+  [test_dev-6] mcp__serena__replace_content: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-6] mcp__serena__replace_content: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-6] TodoWrite
+  [test_dev-6] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-6] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-6] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-6] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-6] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-6] mcp__serena__create_text_file: cogwheel/tests/_probe_saddle_t345.py
+  [test_dev-6] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python cogwheel/tests/_probe_sa
+  [test_dev-6] mcp__serena__replace_content: cogwheel/tests/_probe_saddle_t345.py
+  [test_dev-6] mcp__serena__replace_content: cogwheel/tests/_probe_saddle_t345.py
+  [test_dev-6] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python cogwheel/tests/_probe_sa
+  [test_dev-6] mcp__serena__replace_content: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-6] mcp__serena__replace_content: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-6] mcp__serena__execute_shell_command: rm -f cogwheel/tests/_probe_saddle_t345.py cogwheel/tests/_probe_saddle_t345b.py
+  [test_dev-6] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [test_dev-6] mcp__serena__edit_memory
+  [test_dev-6] mcp__serena__edit_memory
+  [test_dev-6] TodoWrite
+[01:07:43] [test_dev-6] done ($12.6491)
+[01:07:43]     Shard 3/3: 1 spec(s), max_turns=80
+[01:07:43] [test_dev-7] spawning (claude-opus-4-8)
+[01:07:43] [test_dev-7] max_turns=80
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__list_memories
+  [test_dev-7] mcp__serena__get_symbols_overview: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [test_dev-7] mcp__serena__search_for_pattern: cogwheel/lensing/surrogate_census.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/lensing/surrogate_census.py
+  [test_dev-7] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [test_dev-7] mcp__serena__find_symbol: cogwheel/lensing/surrogate_census.py
+  [test_dev-7] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_surrogate_census.py
+  [test_dev-7] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_surrogate_census.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/lensing/surrogate_census.py
+  [test_dev-7] mcp__serena__find_symbol: cogwheel/lensing/surrogate_census.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_surrogate_census.py
+  [test_dev-7] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_surrogate_census.py
+  [test_dev-7] mcp__serena__find_symbol: cogwheel/lensing/surrogate.py
+  [test_dev-7] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_surrogate_census.py
+  [test_dev-7] mcp__serena__get_symbols_overview: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__search_for_pattern: cogwheel/lensing/surrogate.py
+  [test_dev-7] mcp__serena__find_symbol: cogwheel/lensing/surrogate.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/lensing/surrogate.py
+  [test_dev-7] mcp__serena__read_file: cogwheel/tests/test_lensing_surrogate_census.py
+  [test_dev-7] Edit: /home/tejaswi/Work/cogwheel-claude-dev/cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__replace_content: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__insert_before_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__insert_after_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [test_dev-7] mcp__serena__replace_content: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-7] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [test_dev-7] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [test_dev-7] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [test_dev-7] mcp__serena__search_for_pattern: cogwheel/tests
+  [test_dev-7] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [test_dev-7] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && /home/tejaswi/anaconda3/envs/cogwhe
+  [test_dev-7] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && /home/tejaswi/anaconda3/envs/cogwhe
+  [test_dev-7] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && grep -n "_SADDLE_FARFIELD_RHO_FLOOR
+  [test_dev-7] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [test_dev-7] mcp__serena__edit_memory
+  [test_dev-7] mcp__serena__edit_memory
+[01:22:06] [test_dev-7] done ($17.2081)
+[01:22:07] Step 4: Inspector review
+[01:22:07] [inspector-8] spawning (claude-opus-4-8)
+[01:22:07] [inspector-8] max_turns=159
+  [inspector-8] Bash: Show working tree and diff stat
+  [inspector-8] mcp__serena__list_memories
+  [inspector-8] Bash: Show diff stat
+  [inspector-8] mcp__serena__list_memories
+  [inspector-8] Bash: Show diff stat
+  [inspector-8] mcp__serena__execute_shell_command: pwd && git rev-parse --show-toplevel && git diff --stat
+  [inspector-8] mcp__serena__list_memories
+  [inspector-8] mcp__serena__execute_shell_command: git diff -- cogwheel/lensing/likelihood.py cogwheel/lensing/surrogate_census.py
+  [inspector-8] mcp__serena__find_symbol: cogwheel/lensing/surrogate_census.py
+  [inspector-8] mcp__serena__search_for_pattern: cogwheel/lensing/chang_refsdal
+  [inspector-8] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [inspector-8] mcp__serena__execute_shell_command: git diff -- scripts/measure_saddle_eta_floor.py | head -250
+  [inspector-8] mcp__serena__execute_shell_command: git status --short && echo "---untracked check---" && git status --short scripts
+  [inspector-8] mcp__serena__read_file: scripts/measure_saddle_eta_floor.py
+  [inspector-8] mcp__serena__get_symbols_overview: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-8] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-8] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-8] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-8] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-8] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-8] mcp__serena__search_for_pattern: cogwheel/lensing/chang_refsdal/_airy_fold.py
+  [inspector-8] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-8] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && timeout 300 /home/tejaswi/anaconda3
+  [inspector-8] mcp__serena__search_for_pattern: cogwheel/lensing/surrogate_census.py
+  [inspector-8] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && git diff -- cogwheel/lensing/surrog
+  [inspector-8] mcp__serena__read_file: cogwheel/lensing/surrogate_census.py
+  [inspector-8] mcp__serena__search_for_pattern: cogwheel/lensing/surrogate_census.py
+  [inspector-8] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && git diff -- cogwheel/lensing/likeli
+  [inspector-8] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [inspector-8] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && git status --porcelain -- scripts/m
+  [inspector-8] mcp__serena__write_memory
+[01:28:53] [inspector-8] done ($9.5329)
+[01:28:53]   Inspector issues — revision 1/2 (1 trivial, 0 impl, 1 design)
+[01:28:53]       [EscalationLevel.DESIGN] INS-1-001 cogwheel/lensing/likelihood.py: The applied _SADDLE_ETA_FLOOR = 0.5 sits BELOW the measurement script's own worst failing edge (eta=0.784 at gamma=2.0) at the tight 1e-4-at
+[01:28:53]       [EscalationLevel.TRIVIAL] INS-1-002 scripts/measure_saddle_eta_floor.py: The new measurement script is UNTRACKED (git status '??') even though the _SADDLE_ETA_FLOOR docstring in likelihood.py cites it by path as t
+[01:28:53]   Architect triaging design findings
+[01:28:53] [architect-9] spawning (claude-sonnet-5)
+  [architect-9] mcp__serena__edit_memory
+  [architect-9] mcp__serena__edit_memory
+[01:29:44] [architect-9] done ($0.9062)
+[01:29:44]     Architect: INS-1-001 → coder fix
+[01:29:44] [foreman_lite-10] spawning (claude-sonnet-5)
+  [foreman_lite-10] Bash: Check git status and file existence for the script
+  [foreman_lite-10] Bash: Check git status for the saddle eta floor script
+  [foreman_lite-10] Bash: List Work directory to find cogwheel repo path
+  [foreman_lite-10] Bash: Check git status for the saddle eta floor script in cogwheel-claude-dev
+  [foreman_lite-10] mcp__serena__list_dir: scripts
+  [foreman_lite-10] Bash: Confirm likelihood.py cites the script by path
+  [foreman_lite-10] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [foreman_lite-10] Bash: Stage the untracked calibration script
+  [foreman_lite-10] mcp__serena__get_symbols_overview: scripts/measure_saddle_eta_floor.py
+  [foreman_lite-10] Bash: Syntax-check the script with ast.parse
+  [foreman_lite-10] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "import ast; ast.pars
+  [foreman_lite-10] mcp__serena__write_memory
+[01:30:30] [foreman_lite-10] done ($1.3827)
+[01:30:30] [test_dev-11] spawning (claude-sonnet-5)
+[01:30:30] [test_dev-11] max_turns=75
+  [test_dev-11] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [test_dev-11] mcp__serena__list_dir: cogwheel/tests
+  [test_dev-11] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__get_symbols_overview: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/lensing/chang_refsdal/geometry.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/lensing/ppgo_map.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python - <<'EOF'
+import time
+im
+  [test_dev-11] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python - <<'EOF'
+import time
+im
+  [test_dev-11] mcp__serena__search_for_pattern: cogwheel/tests
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__execute_shell_command: cat << 'PYEOF' > /tmp/near_floor_probe.py
+import numpy as np
+from cogwheel.lensi
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && sed -i \
+  -e "s/ChangRefsdalChanne
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] TodoWrite
+  [test_dev-11] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && python - << 'PYEOF' > /tmp/fix.py
+P
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__execute_shell_command: cat >> /tmp/near_floor_probe2.py << 'PYEOF'
+
+print("\nBoundary check: previous o
+  [test_dev-11] mcp__serena__replace_content: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__replace_content: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__insert_after_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] mcp__serena__insert_after_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-11] TodoWrite
+  [test_dev-11] Bash: time /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/
+  [test_dev-11] mcp__serena__execute_shell_command: time /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/
+  [test_dev-11] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [test_dev-11] TodoWrite
+  [test_dev-11] mcp__serena__edit_memory
+  [test_dev-11] TodoWrite
+[01:46:28] [test_dev-11] done ($6.1098)
+[01:46:29] [inspector-12] spawning (claude-opus-4-8)
+[01:46:29] [inspector-12] max_turns=120
+  [inspector-12] Bash: Git status and diff stat for changed code files
+  [inspector-12] Bash: Git status short
+  [inspector-12] Bash: Diff of likelihood.py
+  [inspector-12] Bash: Git status short
+  [inspector-12] Bash: Find git worktree top
+  [inspector-12] Bash: List repo dir
+  [inspector-12] Bash: pwd
+  [inspector-12] Bash: Check .git
+  [inspector-12] Bash: Git status short
+  [inspector-12] Bash: Diff likelihood.py
+  [inspector-12] Bash: Diff census
+  [inspector-12] Bash: Diff test file
+  [inspector-12] Bash: Test diff stat
+  [inspector-12] Bash: Find eta in census
+  [inspector-12] mcp__serena__search_for_pattern: cogwheel/lensing/surrogate_census.py
+  [inspector-12] mcp__serena__get_symbols_overview: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-12] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-12] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-12] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-12] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-12] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-12] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-12] Bash: Run near-floor accuracy test class
+  [inspector-12] mcp__serena__execute_shell_command: timeout 280 /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest co
+  [inspector-12] mcp__serena__search_for_pattern: cogwheel/lensing/surrogate_census.py
+  [inspector-12] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [inspector-12] mcp__serena__write_memory
+[01:50:26] [inspector-12] done ($7.2211)
+[01:50:26]   Inspector issues — revision 2/2 (0 trivial, 1 impl, 0 design)
+[01:50:26]       [EscalationLevel.IMPLEMENTATION] INS-2-001 cogwheel/lensing/likelihood.py: _SADDLE_ETA_FLOOR = 0.5 is under-protective and was documented rather than fixed (open finding INS-1-001 is NOT resolved). This diff re-keys
+[01:50:26] [test_dev-13] spawning (claude-sonnet-5)
+[01:50:26] [test_dev-13] max_turns=75
+  [test_dev-13] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [test_dev-13] mcp__serena__list_dir: cogwheel/tests
+  [test_dev-13] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [test_dev-13] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-13] mcp__serena__get_symbols_overview: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-13] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-13] Bash: git status --short | head -50 && echo --- && git log --oneline -5
+  [test_dev-13] Bash: git diff cogwheel/lensing/likelihood.py | head -100
+  [test_dev-13] Bash: grep -n "INS-2-001\|INS-1-001\|SADDLE_ETA_FLOOR" .claude/spec/FINDINGS.md .claud
+  [test_dev-13] mcp__serena__execute_shell_command: grep -n "INS-2-001\|INS-1-001\|SADDLE_ETA_FLOOR" .claude/spec/FINDINGS.md .claud
+  [test_dev-13] mcp__serena__execute_shell_command: grep -n -i "eta.floor\|under-protective\|_SADDLE_ETA_FLOOR\|INS-2-001" .claude/s
+  [test_dev-13] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-13] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-13] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [test_dev-13] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-13] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-13] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-13] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-13] mcp__serena__insert_after_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [test_dev-13] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [test_dev-13] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [test_dev-13] mcp__serena__edit_memory
+[01:54:31] [test_dev-13] done ($2.1793)
+[01:54:31] [inspector-14] spawning (claude-opus-4-8)
+[01:54:31] [inspector-14] max_turns=120
+  [inspector-14] Bash: Diff stat and status of changed code files
+  [inspector-14] Bash: Diff of likelihood.py
+  [inspector-14] mcp__serena__execute_shell_command: git --no-pager diff HEAD -- cogwheel/lensing/likelihood.py | head -500
+  [inspector-14] mcp__serena__execute_shell_command: git --no-pager diff HEAD -- cogwheel/lensing/surrogate_census.py
+  [inspector-14] mcp__serena__find_symbol: cogwheel/lensing/surrogate_census.py
+  [inspector-14] mcp__serena__execute_shell_command: git --no-pager diff HEAD -- cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-14] mcp__serena__execute_shell_command: git --no-pager diff HEAD -- cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-14] mcp__serena__execute_shell_command: git --no-pager diff HEAD -- cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-14] mcp__serena__execute_shell_command: cd /home/tejaswi/Work/cogwheel-claude-dev && timeout 200 /home/tejaswi/anaconda3
+  [inspector-14] mcp__serena__write_memory
+[01:58:04] [inspector-14] done ($5.3139)
+
+[file-based] ESCALATION written to /tmp/saddle_admission_predicates_approval/escalation.json
+[file-based] Waiting for a decision file in /tmp/saddle_admission_predicates_approval (escalation_accept / escalation_fix / escalation_abort) ...
+[file-based] Escalation -> fix. Instructions: INS-3-001: the Inspector is CORRECT on every count. Apply the suggested fix
+exactly, with these clarifications:
+
+1. The min(0.5, boundary*2) cap traces to the DRIVER'S rejection feedback
+   ("if the measured boundary lands above 0.4, the floor is 0.5") -- that
+   instruction was written assuming the coarse audit's eta>=0.5 admit
+   evidence generalized. The dense scan refuted it. The driver's instruction
+   is WITHDRAWN: the rule is now "floor = measured worst-failing edge x a
+   safety factor >= 1.15, NEVER capped below any measured-failing point".
+   With boundary 0.784, set _SADDLE_ETA_FLOOR = 0.9 and record the per-gamma
+   edges (0.601 / 0.705 / 0.784) plus the rule in the provenance comment.
+
+2. Promote both @expectedFailure accuracy tests to plain assertions after
+   re-verifying the near-floor band at the new floor (p90 <= 1e-3, max <=
+   1e-2 on gate-admitted witnesses just above 0.9). An @expectedFailure on
+   a production-reachable accuracy claim is a masked red -- never ship that
+   pattern; if a bar cannot be met, the GATE moves, not the test.
+
+3. test_reports_worst_near_floor_locus: re-derive against the corrected
+   floor (witnesses just above 0.9), not the current-broken state.
+
+4. The transverse-cone win survives (T1 witness eta~1.994, audited
+   real-use points 1.0-2.5) -- verify T1 still admits and serves under bar.
+
+5. WP2 census mirror: no change beyond the shared constant, as suggested.
+[01:59:44]   User: one more revision with instructions: INS-3-001: the Inspector is CORRECT on every count. Apply the suggested fix
+exac
+[01:59:44]   Inspector issues — revision 2/2 (0 trivial, 1 impl, 0 design)
+[01:59:44]       [EscalationLevel.IMPLEMENTATION] INS-3-001 cogwheel/lensing/likelihood.py: _SADDLE_ETA_FLOOR = 0.5 is still under-protective — INS-1-001/INS-2-001 are NOT resolved. The Coder MEASURED the boundary (new scripts/measu
+[01:59:47] [coder-15] resuming (claude-opus-4-8)
+[01:59:47] [coder-15] max_turns=75
+  [coder-15] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [coder-15] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [coder-15] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [coder-15] mcp__serena__replace_content: cogwheel/lensing/likelihood.py
+  [coder-15] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [coder-15] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "import ast; ast.pars
+  [coder-15] Bash: grep -rln "SaddleTier1NearFloorEta\|_SADDLE_ETA_FLOOR\|test_reports_worst_near_f
+  [coder-15] mcp__serena__search_for_pattern: cogwheel/tests
+  [coder-15] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [coder-15] mcp__serena__edit_memory
+[02:02:16] [coder-15] done ($4.3533)
+[02:02:17] [inspector-16] spawning (claude-opus-4-8)
+[02:02:17] [inspector-16] max_turns=120
+  [inspector-16] Bash: Check diff stat and cwd
+  [inspector-16] Bash: Check diff stat
+  [inspector-16] mcp__serena__execute_shell_command: git diff --stat HEAD -- cogwheel/lensing/likelihood.py cogwheel/lensing/surrogat
+  [inspector-16] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [inspector-16] mcp__serena__search_for_pattern
+  [inspector-16] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-16] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-16] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [inspector-16] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest "cogwheel/test
+  [inspector-16] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [inspector-16] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import numpy as np
+
+  [inspector-16] mcp__serena__read_file: cogwheel/lensing/surrogate_census.py
+  [inspector-16] mcp__serena__write_memory
+[02:08:05] [inspector-16] done ($5.9431)
+
+[file-based] ESCALATION written to /tmp/saddle_admission_predicates_approval/escalation.json
+[file-based] Waiting for a decision file in /tmp/saddle_admission_predicates_approval (escalation_accept / escalation_fix / escalation_abort) ...
+[file-based] Escalation -> fix. Instructions: All four findings accepted. Required path is INS-4-001 option (b) -- fix the
+MEASUREMENT CURRENCY, not the symptom:
+
+1. Re-derive scripts/measure_saddle_eta_floor.py against the ACTUAL
+   production contract, exactly as the accuracy tests enforce it:
+   per-witness p90(err) <= 1e-3 AND max(err) <= 1e-2 over
+   w in [8, W_CEILING_SCHWINGER], on the gate-admitted 2-image population
+   (mirror the test class's witness-location methodology so script and test
+   measure the SAME thing). boundary = worst eta at which that contract
+   fails; _SADDLE_ETA_FLOOR = boundary * safety >= 1.15, NO CAP of any
+   kind. Print and document THIS rule. Record in the provenance comment,
+   one line: "metric = the production p90/max contract itself -- a floor
+   measured in any other currency is the F069 defect class" (this is the
+   session's fifth instance; the comment is the immunization).
+
+   The Professor-adjudication tension in option (a) dissolves under (b):
+   the false-admit asymmetry is absolute, so the floor lands wherever the
+   true measurement puts it. Per your own empirical hint that is ~1.0-1.15;
+   the audited transverse real-use band is eta 1.0-2.5 and T1's witness
+   sits at 1.994, so the win survives; any clipped sliver [1.0, floor)
+   falls to the engine today and to charts after training, like every
+   other sub-floor band. Report the final floor and the size of the
+   clipped sliver in the completion record. If the measured floor lands
+   ABOVE ~1.3, still ship it (never under-protect), but flag loudly in the
+   report: that would say the zero-envelope serve is wrong-shaped for the
+   near band and the region belongs to charts entirely.
+
+2. INS-4-002: replace the below-edge invariant with the monotone
+   non-regression guard ONLY (floor >= frozen anchor = the final measured
+   floor; may only rise). A governance test must never assert the floor is
+   BELOW anything.
+
+3. INS-4-003: promote the two @expectedFailure tests to plain assertions
+   ONLY once they genuinely pass at the final floor; refresh the class
+   docstring eta ranges to the final population. The suite must ship GREEN
+   with the assertions LIVE -- green-by-xfail on a reachable breach is a
+   masked red (standing rule from INS-3-001).
+
+4. INS-4-004: fix the script's printed/documented rule and the two stale
+   (0.5) annotations.
+
+WP2 census mirror: shared constant only, as before.
+[02:09:55]   User: one more revision with instructions: All four findings accepted. Required path is INS-4-001 option (b) -- fix the
+MEA
+[02:09:55]   Inspector issues — revision 2/2 (1 trivial, 2 impl, 1 design)
+[02:09:55]       [EscalationLevel.IMPLEMENTATION] INS-4-001 cogwheel/lensing/likelihood.py: _SADDLE_ETA_FLOOR raised 0.5 -> 0.9 but is STILL under-protective: gate-admitted near-floor macro-saddle witnesses at eta in [0.90, 0.97] br
+[02:09:55]       [EscalationLevel.IMPLEMENTATION] INS-4-002 cogwheel/tests/test_lensing_saddle_tier1_accuracy.py: The floor raise to 0.9 makes SaddleTier1EtaFloorNonRegressionTestCase.test_floor_still_below_inspector_flagged_edge fail deterministically: 
+[02:09:55]       [EscalationLevel.IMPLEMENTATION] INS-4-003 cogwheel/tests/test_lensing_saddle_tier1_accuracy.py: SaddleTier1NearFloorEtaAccuracyTestCase.test_p90_within_production_tolerance and test_max_within_outlier_guard are still @expectedFailure an
+[02:09:55]       [EscalationLevel.IMPLEMENTATION] INS-4-004 scripts/measure_saddle_eta_floor.py: The tracked measurement script still documents (L24-25) and PRINTS (L230) the WITHDRAWN rule '_SADDLE_ETA_FLOOR = min(0.5, boundary*2)'; the
+[02:09:55]   Architect triaging design findings
+[02:09:55] [architect-17] spawning (claude-sonnet-5)
+  [architect-17] mcp__serena__edit_memory
+  [architect-17] mcp__serena__read_memory
+  [architect-17] mcp__serena__edit_memory
+[02:10:45] [architect-17] done ($0.5991)
+[02:10:45]     Architect: INS-4-003 → coder fix
+[02:10:45] [foreman_lite-18] spawning (claude-sonnet-5)
+  [foreman_lite-18] Bash: Verify repo worktree exists
+  [foreman_lite-18] mcp__serena__list_dir: .
+  [foreman_lite-18] mcp__serena__list_dir: .
+  [foreman_lite-18] mcp__serena__read_file: scripts/measure_saddle_eta_floor.py
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel
+  [foreman_lite-18] mcp__serena__get_symbols_overview: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel/lensing/chang_refsdal/_schwinger.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__find_symbol: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -m pytest cogwheel/tests
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] Write: /home/tejaswi/Work/cogwheel-claude-dev/scripts/measure_saddle_eta_floor.py
+  [foreman_lite-18] mcp__serena__create_text_file: scripts/measure_saddle_eta_floor.py
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__find_symbol: cogwheel/lensing/likelihood.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__create_text_file: scripts/measure_saddle_eta_floor.py
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "import ast; ast.pars
+  [foreman_lite-18] TodoWrite
+  [foreman_lite-18] mcp__serena__execute_shell_command: timeout 100 /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python scripts/meas
+  [foreman_lite-18] mcp__serena__execute_shell_command: time /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python scripts/measure_sad
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__execute_shell_command: cat > /tmp/debug_eta_scan.py << 'PYEOF'
+import sys
+sys.path.insert(0, '.')
+impor
+  [foreman_lite-18] mcp__serena__execute_shell_command: cat > /tmp/debug_eta_scan2.py << 'PYEOF'
+import sys
+sys.path.insert(0, '.')
+impo
+  [foreman_lite-18] mcp__serena__execute_shell_command: cat > /tmp/debug_eta_scan3.py << 'PYEOF'
+import sys, time
+sys.path.insert(0, '.'
+  [foreman_lite-18] mcp__serena__find_symbol: cogwheel/lensing/chang_refsdal/geometry.py
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import numpy as np,
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import numpy as np,
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import numpy as np,
+  [foreman_lite-18] mcp__serena__execute_shell_command: timeout 200 /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import 
+  [foreman_lite-18] mcp__serena__execute_shell_command: timeout 200 /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import 
+  [foreman_lite-18] mcp__serena__execute_shell_command: timeout 200 /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import 
+  [foreman_lite-18] mcp__serena__execute_shell_command: timeout 200 /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import 
+  [foreman_lite-18] mcp__serena__execute_shell_command: timeout 230 /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import 
+  [foreman_lite-18] mcp__serena__execute_shell_command: timeout 200 /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import 
+  [foreman_lite-18] mcp__serena__execute_shell_command: timeout 200 /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import 
+  [foreman_lite-18] mcp__serena__execute_shell_command: timeout 200 /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import 
+  [foreman_lite-18] TodoWrite
+  [foreman_lite-18] mcp__serena__read_file: scripts/measure_saddle_eta_floor.py
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import time
+t0=time
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import time, math
+i
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import time, math
+i
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import time, math
+i
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import math
+import 
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import math
+import 
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import math
+import 
+  [foreman_lite-18] mcp__serena__create_text_file: scripts/measure_saddle_eta_floor.py
+  [foreman_lite-18] TodoWrite
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python scripts/measure_saddle_e
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python scripts/measure_saddle_e
+  [foreman_lite-18] mcp__serena__replace_content: scripts/measure_saddle_eta_floor.py
+  [foreman_lite-18] mcp__serena__replace_content: scripts/measure_saddle_eta_floor.py
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python scripts/measure_saddle_e
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel/lensing/likelihood.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/lensing/likelihood.py
+  [foreman_lite-18] mcp__serena__replace_content: cogwheel/lensing/likelihood.py
+  [foreman_lite-18] mcp__serena__replace_content: cogwheel/lensing/likelihood.py
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "import ast; ast.pars
+  [foreman_lite-18] TodoWrite
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__get_symbols_overview: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__search_for_pattern: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__read_file: cogwheel/tests/test_lensing_saddle_tier1_accuracy.py
+  [foreman_lite-18] mcp__serena__create_text_file: /tmp/probe_t1_witness.py
+  [foreman_lite-18] mcp__serena__create_text_file: _scratch_probe_t1.py
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python _scratch_probe_t1.py
+  [foreman_lite-18] mcp__serena__execute_shell_command: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python -c "
+import numpy as np
+
+[03:19:48] [foreman_lite-18] FAILED: error_max_turns (partial output: 0 chars)
+[03:19:48] Skipping Phase 3: build raised RuntimeError. Memory consolidation against incomplete state risks silent wedges — skipping to preserve the failure signal.
+[03:19:48] Stopping Serena server...
+
+Build failed: Agent foreman_lite-18 ended with status 'error_max_turns'.
+Traceback (most recent call last):
+  File "/home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/../sdk/cli.py", line 318, in _run_build
+    report = asyncio.run(orchestrator.run())
+  File "/home/tejaswi/anaconda3/envs/cogwheel-newlal/lib/python3.10/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/home/tejaswi/anaconda3/envs/cogwheel-newlal/lib/python3.10/asyncio/base_events.py", line 649, in run_until_complete
+    return future.result()
+  File "/home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/../sdk/orchestrator.py", line 959, in run
+    self.build_report = await self._run_phase_2()
+  File "/home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/../sdk/orchestrator.py", line 1324, in _run_phase_2
+    return await self._run_full_pipeline()
+  File "/home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/../sdk/orchestrator.py", line 1428, in _run_full_pipeline
+    await self._run_dag(dag)
+  File "/home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/../sdk/orchestrator.py", line 1733, in _run_dag
+    completed[node.name] = await node.run()
+  File "/home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/../sdk/orchestrator.py", line 1644, in run_inspector
+    await self._run_inspector_with_loop(report)
+  File "/home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/../sdk/orchestrator.py", line 2564, in _run_inspector_with_loop
+    trivial_result, _ = await self._run_agent("foreman_lite", trivial_task)
+  File "/home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/../sdk/orchestrator.py", line 3524, in _run_agent
+    return await self._run_agent_attempt(
+  File "/home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/../sdk/orchestrator.py", line 3620, in _run_agent_attempt
+    result_text, session_id = self._handle_message(
+  File "/home/tejaswi/Work/cogwheel-claude-dev/.claude/sdk/../sdk/orchestrator.py", line 3849, in _handle_message
+    raise RuntimeError(
+RuntimeError: Agent foreman_lite-18 ended with status 'error_max_turns'.

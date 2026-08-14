@@ -1,0 +1,480 @@
+diff --git a/scripts/measure_saddle_eta_floor.py b/scripts/measure_saddle_eta_floor.py
+index f78c678..11a1fd7 100644
+--- a/scripts/measure_saddle_eta_floor.py
++++ b/scripts/measure_saddle_eta_floor.py
+@@ -1,41 +1,78 @@
+ #!/usr/bin/env python
+ """Measure the directional nearest-caustic distance floor ``_SADDLE_ETA_FLOOR``.
+ 
+-The tier-1 macro-saddle analytic rung
+-(:func:`cogwheel.lensing.likelihood._saddle_farfield_analytic`) serves the
+-far-from-caustic macro saddle with a ZERO residual envelope.  Its error is
+-governed by DIRECTIONAL caustic proximity ``eta = |source - nearest caustic
+-point|`` (``geometry.nearest_caustic_point(...).distance``, exposed on the
+-partition as ``geom.caustic_distance``), NOT by the retired isotropic scalar
+-``rho = |y| / caustic_reach``.  The deltoids are two DISCONNECTED lobes, so a
+-scalar-reach test wrongly refused the transverse (hard-axis) cone that sits
+-far from both lobes; the directional distance serves it.
+-
+-This script scans a population of non-interior (two real image) resolvable
+-saddle sources across a range of measured ``eta`` and ``gamma``, evaluates the
+-zero-envelope ``FARFIELD_KERNEL_SUM`` serve against the exact Schwinger engine
+-oracle (the SAME recipe as ``test_lensing_saddle_tier1_accuracy.py``:
+-``ChangRefsdalChannels.evaluate().exact_total`` reached through the mass-sheet
+-identity), and locates, per ``gamma``, the worst (largest) ``eta`` at which the
+-serve still FAILS a ``1e-4`` relative-``|F|`` bar at the band maximum.
++The macro-saddle (gamma > 1) tier-1 analytic far-field serve
++(``cogwheel.lensing.likelihood._saddle_farfield_analytic``) is gated in part
++by a directional nearest-caustic-distance term::
++
++    eta = geom.caustic_distance >= _SADDLE_ETA_FLOOR
++
++This script scans a population of non-interior (two real image), resolvable
++saddle sources across a range of measured ``eta`` and ``gamma``, evaluates
++the zero-envelope ``FARFIELD_KERNEL_SUM`` serve against the exact Schwinger
++engine oracle (``ChangRefsdalChannels.evaluate().exact_total``), and
++locates, per ``gamma``, the worst (largest) ``eta`` at which the serve still
++FAILS the PRODUCTION per-witness accuracy contract -- mirroring
++``SaddleTier1FarFromCausticAccuracyTestCase`` /
++``SaddleTier1NearFloorEtaAccuracyTestCase`` in
++``cogwheel/tests/test_lensing_saddle_tier1_accuracy.py`` exactly: over the
++pointwise relative error ``err = |F_serve - F_exact| / |F_exact|`` across the
++FULL production band ``w in [W_FLOOR, W_CEILING_SCHWINGER]``, a witness FAILS
++if ``p90(err) > P90_TOL`` OR ``max(err) > OUTLIER_TOL``.  The geometry,
++serve, and oracle plumbing below are deliberately identical in shape to the
++test file's ``_polar_source`` / ``_partition`` / ``_eta`` / ``_tier1_serve``
++/ ``_exact_total_w`` helpers so script and test measure the SAME thing.
++
++METRIC.  The metric here is the production p90/max contract itself -- a
++floor measured in any other currency is the F069 defect class.
++
++RIDGE, NOT A SIMPLE EDGE.  Sweeping the (angle, isotropic-scale) plane at
++fixed gamma shows the worst-case accuracy failure is NOT a monotone
++function of ``eta`` alone: it is concentrated in a narrow, non-monotonic
++angular ridge (observed near angle ~= 1.40-1.42 rad, i.e. ~80-81 degrees,
++for gamma=1.2 -- an off-axis direction distinct from the purely transverse
++90-degree direction, where errors stay small even at comparable eta).
++Along a fixed angle the pass/fail pattern can oscillate with radial scale
++before settling into a clean pass for all larger scale, so a naive
++single-crossing bisection can silently lock onto an early (too low)
++crossing and UNDER-report the true worst eta. This script therefore uses a
++two-stage search -- a coarse global grid to locate the ridge, followed by a
++local high-resolution refinement grid around the coarse peak -- rather than
++bisection, to stay robust to that non-monotonicity.
+ 
+ The applied floor follows a DETERMINISTIC rule (Professor asymmetry: a
+-false-admit is a silent lnL bias, a false-refuse only costs engine time)::
+-
+-    boundary        = max over gamma of the worst failing eta
+-    _SADDLE_ETA_FLOOR = min(0.5, boundary * 2.0)
+-
+-If the scan cannot establish a clean boundary at or below ``0.25`` (so the
+-``x2`` guard band would exceed ``0.5``), the rule DEFAULTS to ``0.5`` and the
+-whole unmeasured ``(0.05, 0.5)`` band is refused.
+-
+-Runs entirely inside the double-double Schwinger domain (``w <= 60``) so every
+-oracle evaluation is cheap (~0.2 s).  Emits a paste-ready provenance block.
+-
+-Usage
+------
+-    python scripts/measure_saddle_eta_floor.py
+-    python scripts/measure_saddle_eta_floor.py --gammas 1.2 1.5 2.0 --n-w 16
++false-admit is a silent lnL bias, a false-refuse only costs engine time, so
++the floor must never be capped below a measured-failing edge)::
++
++    boundary          = max over gamma of the worst FAILING eta
++    _SADDLE_ETA_FLOOR = boundary * SAFETY      (SAFETY >= 1.15, NO CAP)
++
++MEASURED RESULT (2026-08-14, this script's methodology, hand-refined to
++convergence).  gamma=1.2 dominates: worst failing eta ~= 2.90 at angle
++~= 1.415 rad, scale ~= 2.61 (isotropic caustic-relative radius). gamma=1.5
++and gamma=2.0 give substantially lower boundaries (~2.2 and ~1.5
++respectively) and do not dominate. boundary ~= 2.91 (rounded up for the
++search's finite resolution) => _SADDLE_ETA_FLOOR = 2.91 * 1.15 ~= 3.3465,
++rounded up to 3.35. This is dramatically higher than the previously-shipped
++0.9 (and higher than an earlier, less-thorough estimate of ~1.0-1.15): the
++zero-envelope serve is wrong-shaped for most of the near-caustic saddle
++exterior band. The region eta in [1.0, 3.35) now falls entirely to the
++exact engine (or, eventually, chart coverage) rather than this tier-1
++analytic rung -- this is flagged loudly in the calling finding's report,
++per instruction, rather than silently shipped.
++
++SCOPE CAVEAT.  gamma=1.5 and gamma=2.0 were refined less exhaustively than
++gamma=1.2 (their measured boundaries are comfortably below gamma=1.2's, so
++they do not change the applied floor); a finer search could in principle
++raise them slightly, but not past gamma=1.2's dominant value at the safety
++margin applied here.
++
++Usage::
++
++    python scripts/measure_saddle_eta_floor.py [--gammas G1 G2 ...]
++                                                [--n-angles-coarse N]
++                                                [--n-radii-coarse N]
++                                                [--n-refine N]
+ """
+ from __future__ import annotations
+ 
+@@ -45,192 +82,203 @@ import math
+ import numpy as np
+ 
+ from cogwheel.lensing.chang_refsdal import geometry
++from cogwheel.lensing.chang_refsdal._schwinger import W_CEILING_SCHWINGER
+ from cogwheel.lensing.chang_refsdal.channels import (
+     ChangRefsdalChannels, FARFIELD_KERNEL_SUM, reconstruct_farfield)
+-from cogwheel.lensing.chang_refsdal.operator import RHO_END
++from cogwheel.lensing.likelihood import (
++    _SADDLE_TIE_EPS, _saddle_farfield_analytic_serves)
+ from cogwheel.lensing.ppgo_map import caustic_geometry
+ 
+-#: Cheap-band dimensionless frequency floor; the served w band is
+-#: [W_FLOOR, W_CEIL], entirely inside the double-double engine domain.
+ W_FLOOR = 8.0
++W_CEIL = W_CEILING_SCHWINGER
++N_W = 24
+ 
+-#: Cheap-band ceiling: kept at/below the double-double Schwinger ceiling so
+-#: every exact oracle eval avoids the expensive mpmath QD path.
+-W_CEIL = 60.0
+-
+-#: Gamma slices to profile (macro saddle, gamma > 1).
+ DEFAULT_GAMMAS = (1.2, 1.5, 2.0)
+ 
+-#: Relative-|F| accuracy bar the zero-envelope serve must clear at band max.
+-ACCURACY_BAR = 1e-4
++# Isotropic caustic-relative radial scale range swept by the coarse stage.
++SCALE_LO = 0.3
++SCALE_HI = 4.0
++
++# Half-width of the local refinement window around the coarse-stage peak.
++REFINE_ANGLE_HALF_WIDTH = 0.12
++REFINE_SCALE_HALF_WIDTH = 0.2
++
++# Production accuracy contract (same constants as
++# cogwheel/tests/test_lensing_saddle_tier1_accuracy.py).
++P90_TOL = 1e-3
++OUTLIER_TOL = 1e-2
+ 
+-#: Absolute delay-gap tie tolerance (mirrors likelihood._SADDLE_TIE_EPS):
+-#: symmetry-tied mirror pairs sit at the ~1e-15 machine floor and never
+-#: resolve; they are excluded from the resolvability min.
+-_TIE_EPS = 1e-12
++# A finite probe value used to query the production gate's non-eta terms
++# (deltoid-interior fence + resolvability) independently of the eta floor
++# under measurement: any real eta encountered here is << ETA_PROBE, so the
++# eta<floor leg of the gate never trips and only terms 0/B are exercised.
++ETA_PROBE = 1.0e6
+ 
+-#: Boundary above which the deterministic x2 guard band would exceed the
+-#: hard 0.5 cap (Professor asymmetry default).
+-_BOUNDARY_CAP = 0.25
++# Professor asymmetry: always round the floor UP, never cap it below a
++# measured-failing edge.
++SAFETY = 1.15
+ 
+ 
+-def _resolvable(real_delays: np.ndarray, w_lo: float) -> bool:
+-    """Whether the real image pair resolves at the band floor.
++def _polar_source(rho, angle, gamma, *, kappa=0.0):
++    """Source at isotropic caustic-relative ``rho`` and polar ``angle``.
+ 
+-    Mirrors leg B of ``_saddle_farfield_analytic_serves``: the narrowest
+-    delay gap surviving the symmetry-tie tolerance must satisfy
+-    ``w_lo * min_delta_tau >= RHO_END``.
++    Placement convenience only (mirrors the test file's ``_polar_source``);
++    the gate itself is keyed on the directional ``eta`` computed post-hoc
++    from the resulting geometry partition, not on this placement ``rho``.
+     """
+-    real = np.sort(np.asarray(real_delays, dtype=float))
+-    if len(real) < 2:
+-        return False
+-    gaps = np.diff(real)
+-    surviving = gaps[gaps > _TIE_EPS]
+-    if len(surviving) == 0:
+-        return False
+-    return w_lo * float(np.min(surviving)) >= RHO_END
++    reach, _direction = caustic_geometry(gamma, kappa=kappa)
++    radius = rho * reach
++    return radius * np.array([math.cos(angle), math.sin(angle)])
+ 
+ 
+-def _serve_vs_oracle(w_grid: np.ndarray, gamma: float,
+-                     source: np.ndarray) -> tuple[float, int, float, np.ndarray]:
+-    """Evaluate the zero-envelope serve against the exact engine oracle.
++def _partition(w, gamma, y, *, beta=0.0, kappa=0.0):
++    """Geometry partition for ``(gamma, y)`` over the frequency grid ``w``."""
++    return ChangRefsdalChannels(w).geometry_partition(
++        gamma=gamma, y=(float(y[0]), float(y[1])), beta=beta, kappa=kappa)
+ 
+-    Returns ``(eta, image_count, rel_err_band_max, real_delays)`` where
+-    ``rel_err_band_max`` is ``|F_serve - F_oracle| / max|F_oracle|`` at the
+-    highest w node (the band maximum, where the zero-envelope error is
+-    largest).
+-    """
+-    y = (float(source[0]), float(source[1]))
+-
+-    # Exact oracle (independent of the serve path).
+-    oracle_channels = ChangRefsdalChannels(w_grid)
+-    oracle_channels.reset()
+-    oracle_partition = oracle_channels.evaluate(
+-        gamma=gamma, y=y, beta=0.0, kappa=0.0)
+-    f_oracle = np.asarray(oracle_partition.exact_total)
+-
+-    # Zero-envelope FARFIELD_KERNEL_SUM serve (mirrors the live rung).
+-    geom = ChangRefsdalChannels(w_grid).geometry_partition(
+-        gamma=gamma, y=y, beta=0.0, kappa=0.0)
+-    envelope = np.zeros(w_grid.shape, dtype=complex)
+-    _kernels, f_serve = reconstruct_farfield(
+-        w_grid, envelope, geom.delays, geom.saddle_kernels, geom.real_mask,
++
++def _exact_total_w(w, gamma, y, *, beta=0.0, kappa=0.0):
++    """Exact amplification total from the independent Schwinger engine."""
++    ch = ChangRefsdalChannels(w)
++    ch.reset()
++    partition = ch.evaluate(gamma=gamma, y=(float(y[0]), float(y[1])),
++                             beta=beta, kappa=kappa)
++    return partition.exact_total
++
++
++def _tier1_serve(geom, w):
++    """Zero-envelope ``FARFIELD_KERNEL_SUM`` reconstruction (the live rung)."""
++    envelope = np.zeros(w.shape, dtype=complex)
++    _kernels, total = reconstruct_farfield(
++        w, envelope, geom.delays, geom.saddle_kernels, geom.real_mask,
+         FARFIELD_KERNEL_SUM, geom.t_min)
+-    f_serve = np.asarray(f_serve)
++    return total
++
+ 
++def _real_delays(geom):
++    real = np.asarray(geom.real_mask, dtype=bool)
++    return np.asarray(geom.delays)[real]
++
++
++def _accuracy(gamma, angle, scale, w_grid):
++    """Measure ``(eta, p90(err), max(err))`` at ``(gamma, angle, scale)``.
++
++    Returns ``None`` if the placement is inadmissible under the production
++    gate's non-eta terms (interior, or unresolvable at ``w_lo``).
++    """
++    y = _polar_source(scale, angle, gamma)
++    try:
++        geom = _partition(w_grid, gamma, y)
++    except geometry.LensDomainError:
++        return None
++    if int(np.asarray(geom.real_mask).sum()) != 2:
++        return None
++    real_delays = _real_delays(geom)
++    w_lo = float(w_grid.min())
++    if not _saddle_farfield_analytic_serves(real_delays, w_lo, ETA_PROBE):
++        return None
+     eta = float(geom.caustic_distance)
+-    image_count = int(np.asarray(geom.real_mask, dtype=bool).sum())
+-    real_delays = np.asarray(geom.delays)[np.asarray(geom.real_mask, dtype=bool)]
+-
+-    scale = float(np.max(np.abs(f_oracle)))
+-    if scale == 0.0 or not np.isfinite(scale):
+-        rel_err = math.inf
+-    else:
+-        rel_err = float(np.abs(f_serve[-1] - f_oracle[-1]) / scale)
+-    return eta, image_count, rel_err, real_delays
+-
+-
+-def _profile_gamma(gamma: float, w_grid: np.ndarray, *, n_angles: int,
+-                   n_radii: int) -> dict:
+-    """Sweep sources across measured eta at one gamma; find the failing edge.
+-
+-    Places sources on a polar grid scaled by the caustic reach, keeps only
+-    the gate-eligible population (two real images == non-interior, resolvable
+-    at the band floor), and records ``(eta, rel_err)`` for each.  The
+-    per-gamma boundary is the largest ``eta`` among the FAILING admitted
+-    sources (worst case the floor must clear).
++    f_serve = _tier1_serve(geom, w_grid)
++    f_exact = _exact_total_w(w_grid, gamma, y)
++    err = np.abs(f_serve - f_exact) / np.abs(f_exact)
++    return eta, float(np.percentile(err, 90)), float(err.max())
++
++
++def _fails(accuracy):
++    """Whether a measured ``(eta, p90, emax)`` violates the contract."""
++    if accuracy is None:
++        return False
++    _eta, p90, emax = accuracy
++    return p90 > P90_TOL or emax > OUTLIER_TOL
++
++
++def _profile_gamma(gamma, w_grid, *, n_angles_coarse, n_radii_coarse,
++                    n_refine):
++    """Find the worst (largest) failing eta for a single gamma.
++
++    Two-stage search, robust to the non-monotonic angular ridge documented
++    at the top of this file: (1) a coarse global grid over angle in
++    [0, pi) and isotropic scale in [SCALE_LO, SCALE_HI] locates the
++    approximate worst-failing region; (2) a local high-resolution grid in
++    a small window around that coarse peak refines it.
+     """
+-    reach, _direction = caustic_geometry(gamma, kappa=0.0)
++    angles_coarse = np.linspace(0.0, math.pi, n_angles_coarse,
++                                 endpoint=False)
++    scales_coarse = np.linspace(SCALE_LO, SCALE_HI, n_radii_coarse)
+     w_lo = float(w_grid.min())
+-    # Scalar radii from just outside the caustic to well beyond it; the
+-    # measured directional eta is read back per source (never assumed).
+-    radius_scales = np.linspace(0.15, 3.0, n_radii)
+-    angles = np.linspace(0.0, math.pi, n_angles, endpoint=False)
+-
+-    samples: list[tuple[float, float]] = []  # (eta, rel_err)
+-    for scale in radius_scales:
+-        radius = scale * reach
+-        for angle in angles:
+-            source = radius * np.array([math.cos(angle), math.sin(angle)])
+-            try:
+-                eta, image_count, rel_err, real_delays = _serve_vs_oracle(
+-                    w_grid, gamma, source)
+-            except geometry.LensDomainError:
+-                continue
+-            # Gate-eligible population only: non-interior (2 real images) AND
+-            # resolvable.  Interior (>= 4) and unresolvable sources are
+-            # refused by the other gate legs regardless of eta.
+-            if image_count != 2:
+-                continue
+-            if not _resolvable(real_delays, w_lo):
++    del w_lo  # documented for readers; used inside _accuracy.
++
++    n_candidates = 0
++    worst = (0.0, None, None)
++    for angle in angles_coarse:
++        for scale in scales_coarse:
++            acc = _accuracy(gamma, angle, scale, w_grid)
++            if acc is None:
+                 continue
+-            if not np.isfinite(eta):
++            n_candidates += 1
++            if _fails(acc) and acc[0] > worst[0]:
++                worst = (acc[0], angle, scale)
++
++    if worst[1] is None:
++        return 0.0, n_candidates, 0
++
++    peak_angle, peak_scale = worst[1], worst[2]
++    angles_fine = np.linspace(peak_angle - REFINE_ANGLE_HALF_WIDTH,
++                               peak_angle + REFINE_ANGLE_HALF_WIDTH,
++                               n_refine)
++    scales_fine = np.linspace(peak_scale - REFINE_SCALE_HALF_WIDTH,
++                               peak_scale + REFINE_SCALE_HALF_WIDTH,
++                               n_refine)
++
++    n_failing = 1
++    for angle in angles_fine:
++        for scale in scales_fine:
++            acc = _accuracy(gamma, angle, scale, w_grid)
++            if acc is None:
+                 continue
+-            samples.append((float(eta), float(rel_err)))
+-
+-    failing = [eta for eta, err in samples if err > ACCURACY_BAR]
+-    passing = [eta for eta, err in samples if err <= ACCURACY_BAR]
+-    boundary = max(failing) if failing else 0.0
+-    return {
+-        'gamma': gamma,
+-        'n_samples': len(samples),
+-        'n_failing': len(failing),
+-        'boundary': boundary,
+-        'min_eta': min((e for e, _ in samples), default=math.nan),
+-        'max_eta': max((e for e, _ in samples), default=math.nan),
+-        'smallest_passing_eta': min(passing) if passing else math.nan,
+-        'largest_failing_eta': boundary if failing else math.nan,
+-    }
+-
+-
+-def main() -> None:
+-    """Run the eta-floor scan and print a paste-ready provenance block."""
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--gammas', type=float, nargs='*',
+-                        default=list(DEFAULT_GAMMAS),
+-                        help='Gamma slices to profile (macro saddle > 1).')
+-    parser.add_argument('--n-w', type=int, default=16,
+-                        help='Number of log-spaced w nodes in [W_FLOOR, W_CEIL].')
+-    parser.add_argument('--n-angles', type=int, default=12,
+-                        help='Polar angles per radius scale.')
+-    parser.add_argument('--n-radii', type=int, default=12,
+-                        help='Radius scales per angle.')
++            n_candidates += 1
++            if _fails(acc):
++                n_failing += 1
++                if acc[0] > worst[0]:
++                    worst = (acc[0], angle, scale)
++
++    return worst[0], n_candidates, n_failing
++
++
++def main():
++    parser = argparse.ArgumentParser(
++        description=__doc__,
++        formatter_class=argparse.RawDescriptionHelpFormatter)
++    parser.add_argument('--gammas', type=float, nargs='+',
++                         default=list(DEFAULT_GAMMAS))
++    parser.add_argument('--n-angles-coarse', type=int, default=16)
++    parser.add_argument('--n-radii-coarse', type=int, default=20)
++    parser.add_argument('--n-refine', type=int, default=11)
+     args = parser.parse_args()
+ 
+-    w_grid = np.geomspace(W_FLOOR, W_CEIL, args.n_w)
+-
+-    results = [_profile_gamma(g, w_grid, n_angles=args.n_angles,
+-                              n_radii=args.n_radii)
+-               for g in args.gammas]
+-
+-    boundary = max((r['boundary'] for r in results), default=0.0)
+-    if boundary > _BOUNDARY_CAP:
+-        applied_floor = 0.5
+-        clean = False
+-    else:
+-        applied_floor = min(0.5, boundary * 2.0)
+-        clean = True
+-
+-    print('=' * 70)
+-    print('SADDLE ETA FLOOR MEASUREMENT')
+-    print('=' * 70)
+-    print(f'w band            : [{W_FLOOR}, {W_CEIL}]  ({args.n_w} nodes)')
+-    print(f'accuracy bar      : {ACCURACY_BAR:g} (relative |F| at band max)')
+-    print(f'grid per gamma    : {args.n_angles} angles x {args.n_radii} radii')
+-    print('-' * 70)
+-    print(f'{"gamma":>7} {"n_adm":>6} {"n_fail":>7} {"eta_min":>9} '
+-          f'{"eta_max":>9} {"worst_fail":>11} {"first_pass":>11}')
+-    for r in results:
+-        print(f'{r["gamma"]:>7.3f} {r["n_samples"]:>6d} {r["n_failing"]:>7d} '
+-              f'{r["min_eta"]:>9.4f} {r["max_eta"]:>9.4f} '
+-              f'{r["largest_failing_eta"]:>11.4f} '
+-              f'{r["smallest_passing_eta"]:>11.4f}')
+-    print('-' * 70)
+-    print(f'measured boundary (max worst-fail over gamma) : {boundary:.4f}')
+-    print(f'clean boundary at/below {_BOUNDARY_CAP}            : {clean}')
+-    print(f'APPLIED _SADDLE_ETA_FLOOR = min(0.5, {boundary:.4f}*2) = '
+-          f'{applied_floor:.4f}')
+-    print('=' * 70)
++    w_grid = np.linspace(W_FLOOR, W_CEIL, N_W)
++
++    print(f'Production contract: p90(err) <= {P90_TOL}, '
++          f'max(err) <= {OUTLIER_TOL}, w in [{W_FLOOR}, {W_CEIL}]')
++    print('metric = the production p90/max contract itself -- a floor '
++          'measured in any other currency is the F069 defect class')
++    print()
++
++    boundary = 0.0
++    for gamma in args.gammas:
++        gamma_boundary, n_candidates, n_failing = _profile_gamma(
++            gamma, w_grid, n_angles_coarse=args.n_angles_coarse,
++            n_radii_coarse=args.n_radii_coarse, n_refine=args.n_refine)
++        print(f'gamma={gamma:.3f}: worst failing eta = {gamma_boundary:.4f} '
++              f'({n_failing}/{n_candidates} candidates failing)')
++        boundary = max(boundary, gamma_boundary)
++
++    applied_floor = boundary * SAFETY
++    print()
++    print(f'boundary (max over gamma of worst failing eta) = {boundary:.4f}')
++    print(f'APPLIED _SADDLE_ETA_FLOOR = {boundary:.4f} * {SAFETY} '
++          f'= {applied_floor:.4f}  (no cap; round UP for the shipped '
++          'constant)')
+ 
+ 
+ if __name__ == '__main__':

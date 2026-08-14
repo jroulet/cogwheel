@@ -4332,3 +4332,36 @@ cusp_amplification serves" — F074 falsified that derivation (measured
 minimum over 50 served near-cusp sources: 0.0). The constant still shrinks
 the tube cusp-exclusion window at surrogate.py:2891 on the stale number.
 Tracked in todo.d/lensing_cusp_arm_coverage_constant_stale.
+
+## F079 — `_find_cusps` mixes periodic index wrap with linear angle arithmetic: HALF the astroid fold ring is silently never tiled with tube charts (2026-08-14)
+
+At the wrap point the theta = 0 cusp's dip span computes as
+delta_theta = 4.7124 rad (1.5 pi — the detector's whole window) instead of
+the ~0.106-0.130 the same detector measures when 0 is window-interior: a
+36-44x overestimate at every gamma tested (0.2, 0.5, 0.7, 0.9).
+`_make_arc` then gets a NEGATIVE inner span for both arcs bounded by that
+cusp and returns None, so `_astroid_arcs` yields 2 of 4 arcs — the entire
+theta in (-pi/2, pi/2) half of the fold ring has no tube chart. Silent: the
+topology cross-check counts detected cusps (4 = 4, passes), not surviving
+arcs. TubeChart serving is not D2-folded, so the loss is live at serve time
+and would ship in any training run. Discovered 2026-08-14 by the
+`_CUSP_ARM_COVERAGE` re-measurement (probe 4's arc construction).
+
+The same sweep retired the constant it set out to measure:
+`_CUSP_ARM_COVERAGE = 0.07` was in the WRONG UNITS for its consumer
+(image-plane polar offset vs the critical-curve parameter angle the
+cusp-window gate subtracts it from — 40x apart, non-monotonically related),
+and is INERT: 0 differing serve decisions over 64 production cusp windows
+at coverage 0.0 vs 0.07 (the arc margin + theta-grid bounds already exclude
+the window; no reachable in-band interior query comes within 0.33 rad of
+one). Post-F074 there is no angular serve boundary at all (serving
+DECREASES with offset; the real structure is the w-floor 49 and a
+gamma-dependent serve fraction). Retire the constant, its saddle sibling,
+its three measurement scripts, and the consumer shrink; the census
+`cusp-window` fall-through category is dead for the same reason and will
+read "no cusp losses" when the real losses are eta-floor and w-cap losses.
+
+Genuine (speed-only) gap mapped by the same probe: gamma >= ~0.45,
+w in [tube DD cap (33.1 at 0.5 / 18.3 at 0.7), 49): no chart, cusp arm
+serves 2-10%, draws fall to the exact engine — correct but slow; a table
+target for the campaign.

@@ -1,0 +1,33 @@
+{
+  "architect_rationale": "Revision loops exhausted (3/2); 4 finding(s) remain.",
+  "findings": [
+    {
+      "finding_id": "INS-4-001",
+      "severity": "implementation",
+      "file": "cogwheel/lensing/likelihood.py",
+      "description": "_SADDLE_ETA_FLOOR raised 0.5 -> 0.9 but is STILL under-protective: gate-admitted near-floor macro-saddle witnesses at eta in [0.90, 0.97] breach the production accuracy contract. Measured over the class's own population (floor=0.9): p90(err)=3.70e-3 (3.7x over P90_TOL=1e-3) and max(err)=1.02e-2 (> OUTLIER_TOL=1e-2, at gamma=1.793 eta=0.9562). Only the eta=1.2868 witness passes. This is a production-reachable silent lnL bias (false-admit). The floor was derived as boundary(0.784)*1.15, but boundary was measured by scripts/measure_saddle_eta_floor.py against a 1e-4-rel-|F|-at-band-max metric over w in [8,60], which is NOT the production p90<=1e-3/max<=1e-2 contract over w in [8, W_CEILING_SCHWINGER] that the accuracy tests and the far-from-caustic certification enforce. The eta>=0.9 term does not bound the served zero-envelope error at the production bar in [0.9, ~1.0). INS-1-001/INS-2-001/INS-3-001 remain open.",
+      "suggested_fix": "Per the Professor asymmetry (false-admit unacceptable), either (a) raise _SADDLE_ETA_FLOOR further until the gate-admitted near-floor population satisfies p90<=1e-3 AND max<=1e-2 \u2014 empirically eta must exceed ~0.97 (likely ~1.0+), which begins eroding the transverse-cone win (audited real-use eta 1.0-2.5), so Professor must adjudicate the tension; OR (b) re-derive measure_saddle_eta_floor.py against the ACTUAL production p90<=1e-3/max<=1e-2 bar (not the 1e-4-at-band-max metric) and set the floor = that boundary * safety. Do not lower the floor. WP2 census mirror needs no change beyond the shared constant."
+    },
+    {
+      "finding_id": "INS-4-002",
+      "severity": "implementation",
+      "file": "cogwheel/tests/test_lensing_saddle_tier1_accuracy.py",
+      "description": "The floor raise to 0.9 makes SaddleTier1EtaFloorNonRegressionTestCase.test_floor_still_below_inspector_flagged_edge fail deterministically: it asserts assertLess(_SADDLE_ETA_FLOOR, _INSPECTOR_FLAGGED_WORST_EDGE=0.784), i.e. assertLess(0.9, 0.784) -> AssertionError (confirmed by direct run: 1 failed, 1 passed, 22s). The suite ships RED. The governance test was written to 'flip to failing' when the floor clears 0.784, conflating 'clears the script edge' with 'resolves the breach' \u2014 but these are decoupled (see INS-4-001: floor cleared 0.784 yet the breach persists).",
+      "suggested_fix": "Reconcile this class and the frozen-anchor logic (L1810-1874) with the new floor so the suite is green. The 'below the inspector edge' invariant is now false and should be removed or re-expressed; keep only the monotone non-regression guard (floor may only rise, >= a frozen anchor). Coordinate the anchor value with the eventual INS-4-001 floor decision."
+    },
+    {
+      "finding_id": "INS-4-003",
+      "severity": "design",
+      "file": "cogwheel/tests/test_lensing_saddle_tier1_accuracy.py",
+      "description": "SaddleTier1NearFloorEtaAccuracyTestCase.test_p90_within_production_tolerance and test_max_within_outlier_guard are still @expectedFailure and still xfail at floor=0.9 (ran: 4 passed, 2 xfailed), keeping the live near-floor production-accuracy breach GREEN so the commit gate cannot catch INS-4-001. INS-3-001 item-2 explicitly forbade shipping an @expectedFailure on a production-reachable accuracy claim ('the GATE moves, not the test'). The class docstring is also stale: 'Measured eta range [0.5035, 0.5339]', 'the 0.5 floor is under-protective', 'until a Coder raises _SADDLE_ETA_FLOOR past it' \u2014 floor is now 0.9 and the live measured range is [0.90, 1.29].",
+      "suggested_fix": "This is coupled to INS-4-001. Do NOT promote while they still fail. Once the floor is raised (or the bar re-derived) so the near-floor gate-admitted band genuinely meets p90<=1e-3 and max<=1e-2, remove the @expectedFailure decorators (Test Developer scope) and update the class/test docstrings to the corrected eta range and floor. Until then the breach must not be masked as a passing xfail \u2014 treat the floor as unfinished."
+    },
+    {
+      "finding_id": "INS-4-004",
+      "severity": "trivial",
+      "file": "scripts/measure_saddle_eta_floor.py",
+      "description": "The tracked measurement script still documents (L24-25) and PRINTS (L230) the WITHDRAWN rule '_SADDLE_ETA_FLOOR = min(0.5, boundary*2)'; the script's own output would announce a floor of 0.5 while the shipped constant is 0.9 \u2014 a direct spec/artifact inconsistency. Additionally the test file carries stale '(0.5)' annotations at L19 (`>= _SADDLE_ETA_FLOOR`` (0.5)`) and L973 (`eta < _SADDLE_ETA_FLOOR (0.5)`).",
+      "suggested_fix": "Update measure_saddle_eta_floor.py's docstring and printed rule to the shipped 'floor = boundary * safety (>=1.15), never capped below a measured-failing point' rule (and, per INS-4-001, ideally re-derive against the production p90/max bar). Fix the two '(0.5)' annotations in the test file to '(0.9)'."
+    }
+  ]
+}

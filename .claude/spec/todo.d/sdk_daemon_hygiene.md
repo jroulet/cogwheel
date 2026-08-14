@@ -2,7 +2,12 @@
 section: Backlog
 ---
 
-- **WIRE DAEMON HYGIENE INTO THE BUILD CHOKEPOINTS** `[housekeeping]` —
+- **NEXT-SESSION ORDER 1/7 — FIRST, BEFORE ANY BUILD LAUNCH: WIRE DAEMON
+  HYGIENE INTO THE BUILD CHOKEPOINTS** `[housekeeping]` — head of the
+  queue by driver directive (cheap, no physics, and every later item
+  spawns build crews that leak until the watchdog kill-shape is fixed;
+  the training campaign is the largest crew of the program). Also apply
+  the max_turns lesson recorded in [[lensing_saddle_admission_c3]]. —
   `.claude/sdk/reap_stale_serena.py` shipped 2026-08-14 (project-scoped,
   parent-liveness + age discrimination, dry-run default; born from the
   16-serena/16-pyright accumulation that pinned swap and read as "serena
