@@ -1,62 +1,71 @@
 # Inspector Short-Term Observations
 
-## 2026-08-13 — Build ppgo_interior_certificate (v2 re-review, working-tree diff)
+## 2026-08-13 — Build F075 fold_exterior_ghost (FINAL re-review, working tree) — VERDICT: PASS
 
-Scope: uncommitted working-tree diff, worktree cogwheel-claude-dev / branch
-claude-dev. Code files changed: chang_refsdal/geometry.py (+218: poly-algebra
-Isserlis/Wick c3 series `_series_coefficients`, `_c3_coefficient`, public
-`ppgo_error_estimate`), chang_refsdal/__init__.py (+1 export, import first, no
-cycle), likelihood.py (interior handoff rung re-gated), ppgo_map.py
-(docstring-only, rho-is-not-a-predicate clarification). New test file
-test_lensing_ppgo_certificate.py.
+Scope: uncommitted working tree, worktree cogwheel-claude-dev / branch claude-dev.
+Re-check of carried finding INS-1-001 + full re-audit of WP-1..WP-5.
 
-### Re-gate summary (likelihood.py ~1785-1865)
-OLD 3-leg fold gate (rho<=1 + _merging_fold_pair/xi_min>=_XI_FOLD_THRESHOLD +
-_uniform_error_estimate<=BAR) REPLACED by exact `int(geom.real_mask.sum())==4`
-predicate + c3 certificate `est*_PPGO_INTERIOR_SAFETY(=2.0) <=
-CERTIFICATION_BAR(1e-4)`. Serves raw ppGO via geometric_amplification ->
-reconstruct_farfield(FARFIELD_KERNEL_SUM). except
-(LensDomainError,ValueError,ZeroDivisionError): pass. _XI_FOLD_THRESHOLD=4.0
-RETAINED (still imported by surrogate_census + test_lensing_fold_ppgo_handoff).
+### INS-1-001 RESOLVED (was the sole blocker)
+- cogwheel/tests/test_lensing_airy_fold.py IS modified this pass (` M`; prior
+  passes it was untouched -> the written-but-not-applied handoff was finally
+  executed). Full run: 128 passed, 7 skipped, 2 xfailed, 0 FAILED (was 3 failed).
+- Three tests fixed exactly as prescribed: (a) `_CUSP_TIE_SOURCE_OFF_AXIS`
+  swapped [0.7,0.05] (2-image exterior) -> [0.15,0.14] (verified 4-image
+  interior; docstring documents find_images==4, gap 0.255, serves @ w=500);
+  (b) `OnAxisServingLadderDeterminismTestCase` renamed/inverted to
+  fold-refuses/cusp-serves contract (assertIsNone(fold), ladder==cusp bytes,
+  order==['fold','cusp']); (c) 'interior' docstrings corrected to 'exterior
+  (2-image)'. The [0.15,0.14] pinned literal is self-guarding: its own
+  test_fold_amplification_serves_off_axis goes RED if it ever leaves the
+  4-image domain (fold refuses -> assertIsNotNone fails), so check-#9
+  silent-strand risk does not apply (domain boundary is the caustic = physics,
+  not a movable constant). Not flagged.
 
-### Verification (all GREEN)
-- test_lensing_ppgo_certificate.py: 16 pass (11s). c1/c2 vs saddle_coefficients
-  1e-12; c3 purely imaginary; exact w**-3 ratio; conservativeness vs
-  f_schwinger true_err<=cert; near-caustic self-refusal; self-falsification.
-- test_lensing_fold_ppgo_handoff + test_lensing_likelihood: 31 pass / 15 skip /
-  1 xfail (27s). Handoff tests exercise the RETAINED _airy_fold helpers
-  directly (not the removed production leg) — NOT stale. TRAIN_TIER classes
-  skipped test fold helper properties, unaffected by the re-gate.
-- Import chain clean; ppgo_error_estimate exported; likelihood +
-  surrogate_census import OK.
-- INS-1-002 (empty real_images -> 0.0) RESOLVED: guard
-  `if w_min <= 0.0 or len(real_images) == 0: return None` present at top of
-  ppgo_error_estimate; test_none_for_nonpositive_w_min green.
-- Behavioral equivalence for non-served interior: 4-image ⟹ interior ⟹ rho<=1
-  (scalar reach is max), so the removed `rho<=1` outer guard cannot admit a
-  new config; rho>1 & 4-image only at the boundary where cert self-refuses.
-  != 4 images falls through to the same terminal `return None` as before.
+### WP audit (all faithful)
+- WP-1: `len(images) != 4` refusal added at 3 sites — _airy_fold.fold_amplification
+  (~L470), _airy_fold.fold_ppgo_correction (~L618, falls back to raw ppGO),
+  channels.born_carrier_from_partition (~L1611, pair=None). Correct.
+- WP-2: operator._ghost_ppgo_amplification new rung inserted in _uniform_arm_value
+  BETWEEN fold and cusp. Contract-faithful vs geometry.ghost_kernel([w],src,mtx)
+  -> GhostContribution(kernel,delay,position): uses delay.imag decay gate,
+  min complex-Euclid separation, cmath.exp(1j*w*delay) carrier (+ sign,
+  non-conjugated), np.atleast_1d(kernel)[0]. Catches GhostAbsentError(4-image
+  interior)->None (interior serve byte-identical), GhostDomainError(undecayed/
+  on-axis)->None (refuse, never zero), LensDomainError->None. INS-1-002
+  empty-guard `if len(real_images)==0: return None` present BEFORE min(). Gates
+  single-sourced from geometry (_GHOST_DECAY_IM_THRESHOLD=0.4,
+  _GHOST_SEPARATION_MIN=0.7).
+- geometry: two new module constants (0.4, 0.7) are the authoritative home;
+  channels re-references them (value-preserving, byte-identical to old 0.7 and
+  _FARFIELD_WINDOW_RADIANS/5.0=0.4). DRY, correct.
+- WP-3: surrogate_census.characterize_sample interior rung re-gated from the
+  RETIRED xi-fold+uniform-error gate to the c3-certificate rung. Now a FAITHFUL
+  MIRROR of production likelihood.py L1815 rung: image_count==int(geom.real_mask
+  .sum())==4, real_images=geom.images[real_mask], ppgo_error_estimate(real_images,
+  source,matrix,w_min), est*_PPGO_INTERIOR_SAFETY(=2.0)<=CERTIFICATION_BAR.
+  _PPGO_INTERIOR_SAFETY bound from likelihood (not re-typed). Old machinery
+  (_merging_fold_pair,_uniform_error_estimate,_XI_FOLD_THRESHOLD) fully removed
+  from census (0 dangling refs). Note: census uses macro_matrix(gamma,0,0)
+  consistent with its own geom built at beta=kappa=0. likelihood.py NOT changed
+  this build (re-gate shipped in prior ppgo_interior_certificate build); census
+  was the laggard now synced. surrogate_training.py + train_lens_surrogate.py
+  planned in WP-3 but correctly NOT changed — they carry NO exterior fold gate
+  (only dataclass image_count fields). Not a finding.
+- WP-4 (report only): certified_ppgo_map.npz CONTAMINATED at 32 exterior
+  positive-parity cells @ w in {66,80,97,117,141} but OVER-conservative
+  direction (coverage/perf loss, never over-certifies) -> DRIVER RETRAINING
+  ADVISORY, not a correctness defect. born_residual_chart.npz CLEAN (w-grid
+  tops at 60.0, below the 60<w band). No code/artifact edits.
+- WP-5 (report only): probe P2 + ghost-rung error sweep handoff present.
 
-### Findings
-- INS-2-001 (design, REPORT-ONLY per approved plan; = carried prior INS-1-001):
-  surrogate_census.py characterize_sample (~L468-505) STILL uses the OLD
-  xi-based fold gate (_merging_fold_pair / xi_min>=_XI_FOLD_THRESHOLD /
-  _uniform_error_estimate) to classify `ppgo_fold`, with a comment claiming to
-  "Mirror _surrogate_coefficients". The likelihood rung it mirrored is now the
-  exact-4-image + c3 certificate -> census ppgo_fold counts skew vs what
-  likelihood serves. Plan scoped this consumer report-only (do NOT re-gate this
-  build). Non-crash classification skew.
+### Suites run green
+- test_lensing_airy_fold: 128p/7s/2xf. test_lensing_fold_ghost_exterior: 17p.
+- ghost_gate+operator+surrogate_census: 67p/13s. channels: 16p. imports OK.
 
-### Resolved
-- INS-1-002 (empty real_images -> 0.0 read as admit-zero) resolved by the
-  explicit len==0 guard.
-
-### Patterns (carried)
-- MIRROR-BREAK BY RE-GATE: swapping a serve gate in likelihood.py silently
-  diverges any census "dry-run" that claims to MIRROR it, even though the
-  census file is untouched. grep census for OLD gate symbols after any
-  likelihood serve re-gate.
-- CERTIFICATE SOUNDNESS: sum_a sqrt|mu_a||c3_a|/w^3 is a triangle-inequality
-  UPPER bound (conservative) ONLY where every image is real + ghost==0 = the
-  4-real-image interior. The exact image-count predicate makes the ghost-free
-  certificate valid; the rho<=1 scalar gauge does not.
+### Carry-forward (NOT code defects, for driver/Librarian)
+- DRIVER: retrain certified_ppgo_map.npz post-commit (WP-4 32-cell advisory).
+- LIBRARIAN lineage (doc-staleness, unchanged from prior passes): SPEC.md +
+  DATA_CONTRACTS.yaml still cite exterior_polar_rho_log_carrier_v1 "ONLY tag"
+  since V5 2D carrier; region vocabulary (lobe_exterior etc.). Arm-ladder order
+  change (fold->ghost->cusp) is internal to operator.py; SPEC.md does not
+  document the ladder order, so no spec-divergence finding.

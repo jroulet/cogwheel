@@ -462,6 +462,14 @@ def fold_amplification(w: float, source, gamma: float, *,
     except geometry.LensDomainError:
         return None
 
+    # Exterior censuses (fewer than four real images) have no real merging
+    # fold pair: outside the caustic, positive parity has exactly two real
+    # images (a Morse-0 minimum and a Morse-1 saddle), and `_merging_fold_pair`
+    # would still return that FAR pair, yielding a spurious Airy value.  Only
+    # the four-image caustic interior has a genuine merging pair.  See F075.
+    if len(images) != 4:
+        return None
+
     # Caustic-relative admission: the ``q = 0`` symmetric-fold assumption
     # fails away from the caustic, and the ``xi`` certificate cannot see it
     # (F028, F032).
@@ -603,6 +611,14 @@ def fold_ppgo_correction(w, source, gamma: float, *,
         matrix = geometry.macro_matrix(gamma, beta, kappa)
         images = geometry.find_images(source, matrix)
     except geometry.LensDomainError:
+        result = _fallback()
+        return result[0] if w_scalar else result
+
+    # Exterior censuses (fewer than four real images) have no real merging
+    # fold pair; fall back to raw ppGO (byte-identical to the uncorrected
+    # path) rather than applying a spurious Airy correction to the far
+    # (min, saddle) pair `_merging_fold_pair` would still return.  See F075.
+    if len(images) != 4:
         result = _fallback()
         return result[0] if w_scalar else result
 

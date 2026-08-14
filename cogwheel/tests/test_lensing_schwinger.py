@@ -459,13 +459,61 @@ SADDLE_BOUNDARY_WS = (W_CEILING_SCHWINGER_QD + 0.5,
 #: Post-WP1: the arm/refuse routing lives at w > W_CEILING_SCHWINGER_QD
 #: (= 150); below that the wave branch (mpmath) serves directly.
 #: Use w=151 so that select_branch routing is exercised.
-#: RE-BASELINE (cusp-arm extension): the 0.47/0.5 configs that previously
-#: exercised these outcomes are now all cusp-served; replaced with weak-shear
-#: (gamma=0.1/0.2) configs where the arm decisions are still distinct.
+#: RE-DERIVED (F074 + F075, 2026-08-13).  Both serving fixtures were
+#: EXTERIOR two-image configs, and the ladder moved underneath them:
+#:   * F075 makes `_airy_fold.fold_amplification` REFUSE unless the real-
+#:     image census is exactly 4, so an exterior node can no longer
+#:     fold-serve at all;
+#:   * F074 re-gated the cusp arm on the error of what it SERVES, and the
+#:     old deep-interior "cusp" fixture no longer certifies;
+#:   * a ppGO+ghost rung (`operator._ghost_ppgo_amplification`) now sits
+#:     BETWEEN the fold and cusp arms in `operator._uniform_arm_value`.
+#: Measured at this build: at w = 151 all three old fixtures are refused by
+#: every arm, so two of the three outcomes had become unreachable.
+#:
+#: The replacements are derived from live `geometry` (never pinned as
+#: literals) and are chosen so each outcome is reached by an UNAMBIGUOUS
+#: rung -- the arm identity is the point of these tests, so the middle rung
+#: must be shown to decline rather than merely be assumed absent:
+#:   FOLD   -- interior (4-image) node at 40% of the caustic reach along the
+#:             pi/4 ray, gamma = 0.5.  The fold arm serves; the ghost rung
+#:             declines because an interior node has no ghost.
+#:   CUSP   -- interior node 2% inward from the gamma = 0.5 cusp vertex.
+#:             The fold arm refuses, and the ghost rung declines BY
+#:             CONSTRUCTION: a four-image interior node raises
+#:             `geometry.GhostAbsentError`, which the rung turns into a
+#:             decline.  So the cusp arm is genuinely the next rung, not
+#:             merely the one that happened to answer first.
+#:   REFUSE -- unchanged, and still refused by all three arms (measured).
+
+
+def _interior_ray_source(gamma, theta, rho, kappa=0.0):
+    """Source on the ``theta`` ray at ``rho`` times the live caustic reach.
+
+    ``rho < 1`` places the source INSIDE the caustic, i.e. the four-image
+    census `fold_amplification` requires post-F075.  Derived from
+    `geometry.r_caustic` so the fixture tracks the caustic if the geometry
+    moves, rather than pinning a hand-tuned position.
+    """
+    r_caustic = geometry.r_caustic(gamma, theta, kappa=kappa)
+    return rho * r_caustic * np.array([math.cos(theta), math.sin(theta)])
+
+
+def _near_cusp_source(gamma, phase=0.5 * math.pi, dp=0.02, beta=0.0,
+                      kappa=0.0, branch=1):
+    """Source ``dp`` inward from a cusp vertex, as a fraction of the vertex
+    distance -- the near-cusp Pearcey arm's home neighbourhood (F074)."""
+    cusp = geometry.critical_point(gamma, phase + beta, beta, kappa, branch)
+    return (1.0 - dp) * np.asarray(cusp.source, dtype=float)
+
+
 THREE_OUTCOME_W = W_CEILING_SCHWINGER_QD + 1.0
-THREE_OUTCOME_FOLD = (0.1, (0.1, 0.1))       # fold certifies, cusp does not
-THREE_OUTCOME_CUSP = (0.2, (0.1, 0.1))       # cusp certifies, fold does not
-THREE_OUTCOME_REFUSE = (0.1, (0.3, 0.2))     # neither arm certifies
+#: fold certifies; ghost rung declines (interior); cusp refuses.
+THREE_OUTCOME_FOLD = (0.5, _interior_ray_source(0.5, 0.25 * math.pi, 0.4))
+#: cusp certifies; fold refuses; ghost rung declines (ghost provably absent).
+THREE_OUTCOME_CUSP = (0.5, _near_cusp_source(0.5))
+#: neither arm certifies.
+THREE_OUTCOME_REFUSE = (0.1, (0.3, 0.2))
 
 
 # ---------------------------------------------------------------------
@@ -1868,23 +1916,35 @@ class AboveCeilingWaveThreeOutcomeTestCase(SchwingerTestCase):
     already covered by `RefusalAboveCeilingTestCase`; this only pins that
     the third outcome is reachable and named.
 
-    RE-BASELINE (cusp-arm extension): the original ``gamma in (0.47, 0.5)``
-    fixtures are now all cusp-served; replaced with weak-shear
-    ``gamma = 0.1 / 0.2`` configs where the three outcomes are still
-    distinct (fold, cusp, refuse) at ``w = 151``.
+    RE-DERIVED (F074 + F075, 2026-08-13): the serving ladder now has THREE
+    uniform rungs -- fold Airy, then the ppGO+ghost rung, then cusp Pearcey
+    -- and the fold arm refuses any census that is not four real images.
+    The previous fixtures were exterior two-image configs and became
+    all-refusing; see the derivation note on `THREE_OUTCOME_FOLD`.  Because
+    each outcome names the ARM that serves it, every test below also pins
+    that the rungs ahead of the named one decline, so "the cusp arm served"
+    cannot silently become "the ghost rung served".
     """
 
     def _arms(self, w, y, gamma):
+        """The three uniform rungs, in the order `operator._uniform_arm_value`
+        offers them: fold Airy, then ppGO+ghost (F075), then cusp Pearcey."""
         source = np.asarray(y, dtype=float)
         fold = _airy_fold.fold_amplification(w, source, gamma)
+        ghost = operator._ghost_ppgo_amplification(w, source, gamma)
         cusp = _pearcey_cusp.cusp_amplification(w, source, gamma)
-        return fold, cusp
+        return fold, ghost, cusp
 
     def test_fold_airy_arm_serves(self):
         gamma, y = THREE_OUTCOME_FOLD
         source = np.asarray(y, dtype=float)
-        fold, cusp = self._arms(THREE_OUTCOME_W, y, gamma)
+        fold, ghost, cusp = self._arms(THREE_OUTCOME_W, y, gamma)
         self.assertIsNotNone(fold, 'fold fixture no longer fold-served')
+        self.assertIsNone(
+            ghost,
+            'fold fixture now serves the ppGO+ghost rung too; the fold arm '
+            'is offered first so the served value is still the fold value, '
+            'but the fixture no longer isolates the fold outcome')
         served = complex(F_op(THREE_OUTCOME_W, source, gamma)[0])
         self.n_checks += 1
         self.assertEqual(
@@ -1895,8 +1955,14 @@ class AboveCeilingWaveThreeOutcomeTestCase(SchwingerTestCase):
     def test_cusp_pearcey_arm_serves_when_fold_refuses(self):
         gamma, y = THREE_OUTCOME_CUSP
         source = np.asarray(y, dtype=float)
-        fold, cusp = self._arms(THREE_OUTCOME_W, y, gamma)
+        fold, ghost, cusp = self._arms(THREE_OUTCOME_W, y, gamma)
         self.assertIsNone(fold, 'cusp fixture is now fold-served, not cusp')
+        self.assertIsNone(
+            ghost,
+            'cusp fixture is now served by the ppGO+ghost rung, which is '
+            'offered BEFORE the cusp arm: an interior four-image node must '
+            'decline it via GhostAbsentError, so this fixture no longer '
+            'proves the cusp arm is what serves')
         self.assertIsNotNone(cusp, 'cusp fixture no longer cusp-served')
         served = complex(F_op(THREE_OUTCOME_W, source, gamma)[0])
         self.n_checks += 1
@@ -1908,8 +1974,9 @@ class AboveCeilingWaveThreeOutcomeTestCase(SchwingerTestCase):
     def test_both_arms_refuse_raises_named_authentic_message(self):
         gamma, y = THREE_OUTCOME_REFUSE
         source = np.asarray(y, dtype=float)
-        fold, cusp = self._arms(THREE_OUTCOME_W, y, gamma)
+        fold, ghost, cusp = self._arms(THREE_OUTCOME_W, y, gamma)
         self.assertIsNone(fold, 'refuse fixture is now fold-served')
+        self.assertIsNone(ghost, 'refuse fixture is now ghost-rung-served')
         self.assertIsNone(cusp, 'refuse fixture is now cusp-served')
         # Independent oracle for the authentic message: f_schwinger's
         # ceiling guard fires before any y-dependent work, so a direct

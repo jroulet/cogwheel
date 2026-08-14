@@ -154,6 +154,7 @@ geometric branch obtains convergence directly from
 """
 from __future__ import annotations
 
+import cmath
 import math
 from dataclasses import dataclass
 
@@ -409,17 +410,22 @@ def _uniform_arm_value(w: float, y: np.ndarray, gamma: float, *,
     geometric-resolved -- BEFORE the existing named
     `_schwinger.SchwingerCertificationError` refusal fires.  Tries the
     near-fold uniform Airy arm (`_airy_fold.fold_amplification`) first,
-    then the near-cusp uniform Pearcey arm
+    then the exterior ppGO+ghost arm (`_ghost_ppgo_amplification`), then
+    the near-cusp uniform Pearcey arm
     (`_pearcey_cusp.cusp_amplification`), and returns the FIRST that
-    certifies a finite value; if neither certifies it returns ``None`` so
+    certifies a finite value; if none certifies it returns ``None`` so
     the caller lets the existing NAMED refusal stand (refusal-conservative
     -- no swallowing, no new exception class).
 
-    The order (fold then cusp) is a pure, deterministic function of the
-    node, so the serving ladder is reproducible.  Each arm runs its own
-    local caustic classification and returns ``None`` when the node is not
-    of its type, so trying both in a fixed order is safe: a fold-type node
-    is served by the fold arm (the cusp arm refuses it) and vice versa.
+    The order (fold, then ppGO+ghost, then cusp) is a pure, deterministic
+    function of the node, so the serving ladder is reproducible.  Each arm
+    runs its own local caustic classification and returns ``None`` when the
+    node is not of its type, so trying them in a fixed order is safe.  The
+    fold arm stays FIRST so the interior four-image fold serve is unchanged;
+    the ppGO+ghost arm serves the EXTERIOR two-image band the fold arm now
+    refuses -- and declines on the interior via `geometry.GhostAbsentError`,
+    so it never changes the interior return value (F075); the cusp arm stays
+    LAST as the catch-all.
 
     Parameters
     ----------
@@ -438,10 +444,13 @@ def _uniform_arm_value(w: float, y: np.ndarray, gamma: float, *,
     Returns
     -------
     complex or None
-        The first certified uniform amplification, or ``None`` if neither
-        arm certifies.
+        The first certified uniform amplification, or ``None`` if no arm
+        certifies.
     """
     value = _airy_fold.fold_amplification(w, y, gamma, beta=beta, kappa=kappa)
+    if value is not None:
+        return complex(value)
+    value = _ghost_ppgo_amplification(w, y, gamma, beta=beta, kappa=kappa)
     if value is not None:
         return complex(value)
     value = _pearcey_cusp.cusp_amplification(w, y, gamma, beta=beta,
@@ -1569,6 +1578,113 @@ def geometric_amplification(w, y: np.ndarray, gamma: float, *,
         total = total + (np.exp(1j * np.asarray(w, dtype=float) * tau)
                          * geometry.image_kernel(w, image, matrix))
     return total[()] if total.ndim == 0 else total
+
+
+def _ghost_ppgo_amplification(w: float, y: np.ndarray, gamma: float, *,
+                              beta: float = 0.0, kappa: float = 0.0
+                              ) -> complex | None:
+    """Exterior ppGO+ghost rung of the serving ladder, or ``None``.
+
+    Serves an EXTERIOR (two-real-image) node as the stationary-phase image
+    sum PLUS the decaying complex-saddle ('ghost') contribution the bare
+    arm ladder omits::
+
+        geometric_amplification(w, y, gamma, beta=beta, kappa=kappa)
+            + ghost.kernel * exp(1j * w * tau_c)
+
+    with ``ghost = geometry.ghost_kernel(...)`` carrying the standalone
+    ABSOLUTE-frame carrier ``exp(1j * w * tau_c)`` (non-conjugated
+    ``tau_c``; the ``+`` sign is validated, F075 fact 3).  This is NOT
+    `channels.farfield_ghost_term`, which returns the min-subtracted
+    ``t_min``-frame carrier ``exp(1j w (tau_c - t_min))`` -- wrong for this
+    standalone serve.
+
+    Admission reuses the SAME two frequency-independent configuration gates
+    as the mid-band chart wrapper (`channels.farfield_ghost_term`),
+    single-sourced in `geometry`: the ghost must have decayed
+    (``Im tau_c >= geometry._GHOST_DECAY_IM_THRESHOLD``) AND be resolved
+    from every real image
+    (``min_a |x_a - x_c| >= geometry._GHOST_SEPARATION_MIN``).  The
+    near-caustic caveat band (``w * Im tau_c`` small) fails the decay gate
+    and is declined, so the caller falls through to the exact engine (F075
+    fact 4).  No ``w``-dependent floor is introduced: the gates read only
+    the configuration, so this rung -- a residual-tabulation LABEL ORACLE --
+    reaches an identical decision at train and serve (no ``w``-array skew).
+
+    Interior four-image nodes raise `geometry.GhostAbsentError` from
+    `geometry.ghost_kernel` (the ghost is provably absent, omitting it is
+    exact); the rung does not apply and declines with ``None`` so the
+    interior fold serve upstream stays byte-identical.  A bare
+    `geometry.GhostDomainError` means the ghost exists but cannot be
+    continued (on a principal axis it is undecayed and largest); the rung
+    REFUSES with ``None`` and never treats it as zero.
+
+    Parameters
+    ----------
+    w : float
+        Dimensionless frequency of the refusing node (``w > 60``).
+    y : np.ndarray
+        Shape ``(2,)`` source position in the physical (un-rotated) frame.
+    gamma : float
+        External shear magnitude.
+    beta : float, optional
+        External shear orientation, radians.
+    kappa : float, optional
+        External convergence.
+
+    Returns
+    -------
+    complex or None
+        ``geometric_amplification + ghost`` when both gates admit and the
+        result is finite, else ``None`` (decline / refuse -- the caller lets
+        the next rung or the existing named refusal stand).
+    """
+    w = float(w)
+    source = np.asarray(y, dtype=float)
+    if not (w > 0.0 and source.shape == (2,)
+            and np.all(np.isfinite(source))):
+        return None
+
+    try:
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        real_images = geometry.find_images(source, matrix)
+        ghost = geometry.ghost_kernel([w], source, matrix)
+    except geometry.GhostAbsentError:
+        # Interior (four real images): the ghost is provably absent, so this
+        # rung does not apply.  Decline; the interior serve stays unchanged.
+        return None
+    except geometry.GhostDomainError:
+        # Ghost exists but is unavailable (e.g. on a principal axis, where it
+        # is undecayed and largest): refuse, never serve a zero ghost.
+        return None
+    except geometry.LensDomainError:
+        return None
+
+    # Frequency-independent admission gates, single-sourced in `geometry`
+    # and shared with `channels.farfield_ghost_term` (F075).  Decay gate
+    # first: the near-caustic caveat band (Im tau_c -> 0) refuses here.
+    if not float(ghost.delay.imag) >= geometry._GHOST_DECAY_IM_THRESHOLD:
+        return None
+    if len(real_images) == 0:
+        return None
+    x_c = ghost.position
+    separation = min(
+        float(np.sqrt(np.sum(np.abs(x_a - x_c) ** 2)))
+        for x_a in real_images)
+    if not separation >= geometry._GHOST_SEPARATION_MIN:
+        return None
+
+    try:
+        carrier = geometric_amplification(w, source, gamma,
+                                          beta=beta, kappa=kappa)
+    except geometry.LensDomainError:
+        return None
+    ghost_term = (complex(np.atleast_1d(ghost.kernel)[0])
+                  * cmath.exp(1j * w * complex(ghost.delay)))
+    value = complex(carrier) + ghost_term
+    if not np.isfinite(abs(value)):
+        return None
+    return value
 
 
 def cancellation_exponent(w: float, y: np.ndarray, gamma: float = 0.0,

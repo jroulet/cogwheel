@@ -2305,6 +2305,33 @@ class GhostAbsentError(GhostDomainError):
 #: ``(1 + ||A||_F)**2`` so it tracks the macro-matrix magnitude.
 _GHOST_DET_FLOOR = 1e-8
 
+#: Minimum lens-plane separation ``min_a |x_a - x_c|`` between the decaying
+#: complex-saddle ('ghost') image and its nearest REAL image (the bare
+#: complex Euclidean distance, in Einstein-radius units) below which the
+#: ghost must NOT be consumed: near a cusp the ghost coalesces with a real
+#: image and the single-saddle stationary-phase expansion the ghost kernel
+#: relies on breaks down.  The gate is frequency-independent (it reads only
+#: the configuration), so a training label and its serve mirror reach an
+#: identical admit/refuse decision -- no ``w``-array skew.  This is the ONE
+#: authoritative home for the constant that both
+#: `channels.farfield_ghost_term` and `operator._ghost_ppgo_amplification`
+#: gate on (F075); `channels` documents the measured refuse/admit gap.
+_GHOST_SEPARATION_MIN = 0.7
+
+#: Minimum imaginary-delay decay ``Im(tau_c) >= _GHOST_DECAY_IM_THRESHOLD``
+#: required before the ghost is a small correction worth consuming.  Near a
+#: principal axis ``Im tau_c -> 0`` is pure oscillation with no decay (F027),
+#: so the ghost is at its LARGEST exactly where it must be refused.  The
+#: value is the frequency-INDEPENDENT form of the retired
+#: ``w_min * Im tau_c`` condition: ``RHO_END / 2 / 5 = 4.0 / 2 / 5 = 0.4``,
+#: where ``RHO_END`` is the SACR-C resolution scale defined in `operator`.
+#: The numeric literal is kept HERE rather than derived from ``RHO_END``
+#: because `geometry` is imported BY `operator` and cannot import back
+#: without a cycle; `channels` re-derives ``_FARFIELD_WINDOW_RADIANS / 5.0``
+#: for the same value.  Authoritative home shared by
+#: `channels.farfield_ghost_term` and `operator._ghost_ppgo_amplification`.
+_GHOST_DECAY_IM_THRESHOLD = 0.4
+
 
 class GhostContribution(NamedTuple):
     """The decaying ghost image's carrier-free kernel and complex delay.

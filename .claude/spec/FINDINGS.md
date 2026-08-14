@@ -4257,7 +4257,7 @@ Cross-check that earlier numbers were contaminated: the same probe's
 raw-ppGO column (1.295 at a resolved exterior config) was a demodulation
 PHANTOM of `channels.evaluate().exact_total` vs undemodulated arms; the
 validated pairing gives 4.3e-4. The fold column survives the correct
-pairing; the ppGO column does not. See [[pair-frames-before-scoring]].
+pairing; the ppGO column does not. See the driver memory pair-frames-before-scoring (pairing-gate discipline).
 
 Related: [[FINDINGS F073]] (same real-pair blindness in xi_min),
 [[FINDINGS F074]] (cusp control map), F069 (arm-before-oracle routing).
@@ -4307,3 +4307,28 @@ Saddle-parity oracle note (audit 2026-08-13): `_saddle_mass_sheet_map` +
 1.2/1.5/2.0, kappa 0 and 0.2, w 5-30), so the F069-safe oracle pattern
 extends to the macro saddle by swapping the map function; no t_min
 demodulation needed (all objects share the absolute Fermat frame).
+
+
+## F078 — a test-count change reshuffles xdist loadfile scheduling and can EXPOSE latent cross-file state leaks; the leak is not caused by the edit that reveals it (2026-08-13)
+
+`_pearcey_cusp` holds the Pearcey table in a module global. One suite
+installed a table in `setUpClass` and never restored it; the airy_fold
+byte-identity goldens are frozen against the DIRECT QUADRATURE, so on a
+shared worker the leaked table shifted them by exactly the table-vs-
+quadrature difference (6.4e-7, restored bit-for-bit by
+`set_pearcey_table(None)`). The leak predated today; it stayed invisible
+because `--dist loadfile` had never co-scheduled the two files — deleting 5
+tests in an unrelated file moved them onto the same worker for the first
+time. Fixed with `setUpModule`/`tearDownModule` save-restore.
+
+Triage rule: when a gate goes red on a byte-identity test after TEST-ONLY
+edits elsewhere, suspect worker co-scheduling + module-global state before
+suspecting the edit. Any suite that installs a process-global (tables,
+maps, thread counts) owes a save-restore at module scope.
+
+Also recorded by the same sweep: `_CUSP_ARM_COVERAGE = 0.07` in
+`surrogate.py` documents a "minimum image-theta offset at which
+cusp_amplification serves" — F074 falsified that derivation (measured
+minimum over 50 served near-cusp sources: 0.0). The constant still shrinks
+the tube cusp-exclusion window at surrogate.py:2891 on the stale number.
+Tracked in todo.d/lensing_cusp_arm_coverage_constant_stale.

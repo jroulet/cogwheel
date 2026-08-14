@@ -866,6 +866,12 @@ a fold correction would help. Re-deriving it for small `xi` / small `eta`,
 where the correction is valid AND lives inside the engine's checkable domain,
 is tracked in `todo.d/lensing_fold_ppgo_rung_serves_wrong`.
 
+- `0.12.2` ():
+
+Registered `test_lensing_fold_ghost_exterior.py` (build fold_exterior_ghost:
+fold census refusal, ppGO+ghost rung gates, ghost sign pin). Full F075
+narrative re-sync deferred to the Librarian pass.
+
 - `0.12.1` ():
 
 Doc sync: the F070 low-end `w`-floor clamp paragraph described the serve-side

@@ -58,7 +58,7 @@ from cogwheel.lensing.chang_refsdal import (ChangRefsdalChannels,
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.likelihood import (
     _saddle_farfield_analytic_serves,
-    _XI_FOLD_THRESHOLD as _likelihood_xi_fold_threshold)
+    _PPGO_INTERIOR_SAFETY)
 from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
                                        CERTIFICATION_BAR, caustic_rho,
                                        get_certified_ppgo_map)
@@ -124,15 +124,15 @@ _FALLTHROUGH_CATEGORIES = ('gamma-guard', 'dropped-sliver', 'born',
 # the exact-engine bucket to the rung that claimed it, not just a total delta.
 _SERVED_CATEGORIES = ('chart', 'ppgo_fold', 'saddle-farfield-analytic')
 
-#: Minimum Airy parameter xi for the fold-ppGO interior handoff gate.
-#: BOUND from `likelihood`, not re-typed.  This file's whole job is to
-#: report what production WOULD serve, so any gate constant it copies can
-#: drift and make the census report a served set production does not serve.
-#: It already imports `_saddle_farfield_analytic_serves` from `likelihood`
-#: for exactly that reason -- this constant was the one place the same file
-#: still carried its own copy, with a comment claiming it "mirrors the
-#: canonical definition" and nothing enforcing that (found 2026-08-13).
-_XI_FOLD_THRESHOLD = _likelihood_xi_fold_threshold
+#: Raw-ppGO interior handoff safety factor, BOUND from `likelihood`, not
+#: re-typed.  This file's whole job is to report what production WOULD
+#: serve, so any gate constant it copies can drift and make the census
+#: report a served set production does not serve.  It already imports
+#: `_saddle_farfield_analytic_serves` from `likelihood` for exactly that
+#: reason; the interior fold-ppGO mirror below single-sources this factor
+#: (plus `CERTIFICATION_BAR` and `geometry.ppgo_error_estimate`) so the
+#: census tracks the current c3-certificate rung, not the retired
+#: xi-resolution gate (Build fold_exterior_ghost WP-3, 2026-08-13).
 
 
 class CensusError(RuntimeError):
@@ -467,42 +467,32 @@ def characterize_sample(
         record.band_edge = _is_band_edge(chart, log_w_min, chart_log_w_max)
         return record
 
-    # --- Fold-ppGO interior handoff (Build ppgo_interior_handoff) ---
-    # Mirrors _surrogate_coefficients: interior draws (4 images, rho <= 1.0)
-    # above the wedge chart's w-ceiling are served when the merging fold
-    # pair is well-resolved (xi_min >= _XI_FOLD_THRESHOLD) AND the uniform
-    # error estimate is below CERTIFICATION_BAR.  Census evaluates only the
-    # GATE (no expensive fold_ppgo_correction call).
-    if image_count == 4:  # interior positive parity
+    # --- Raw-ppGO interior handoff (Build ppgo_interior_certificate) ---
+    # Mirrors the re-gated interior rung in _surrogate_coefficients: the
+    # EXACT interior predicate is exactly four real images (rho <= 1.0 is
+    # necessary but not sufficient -- F073), and admission uses the raw-ppGO
+    # leading-omitted-term (c3, w**-3) certificate at the band floor times a
+    # modest safety factor _PPGO_INTERIOR_SAFETY, not the retired fold
+    # xi-resolution + uniform-error gate.  The predicate is SINGLE-SOURCED:
+    # image_count == 4 (already computed above), geometry.ppgo_error_estimate,
+    # _PPGO_INTERIOR_SAFETY and CERTIFICATION_BAR are all bound from the
+    # canonical modules -- no re-transcribed thresholds.  Census evaluates
+    # only the GATE (no serve/reconstruction).
+    if image_count == 4:  # interior positive parity (exact caustic interior)
         try:
-            from cogwheel.lensing.chang_refsdal._airy_fold import (
-                _merging_fold_pair, _uniform_error_estimate, _image_at_delay)
-            from cogwheel.lensing.chang_refsdal import geometry as _geom_mod
+            from cogwheel.lensing.chang_refsdal.geometry import (
+                macro_matrix, ppgo_error_estimate)
             source_arr = np.array([y1, y2], dtype=float)
-            matrix = _geom_mod.macro_matrix(gamma, 0.0, 0.0)
-            images_raw = _geom_mod.find_images(source_arr, matrix)
-            images_list = list(images_raw)
-            pair = _merging_fold_pair(images_list, source_arr, matrix)
-            if pair is not None:
-                tau_plus, tau_minus = pair
-                delta_tau = tau_minus - tau_plus
-                if delta_tau > 0.0:
-                    xi_min = (3.0 * float(w_grid.min()) * delta_tau
-                              / 4.0) ** (2.0 / 3.0)
-                    if xi_min >= _XI_FOLD_THRESHOLD:
-                        image_plus = _image_at_delay(
-                            images_list, source_arr, matrix, tau_plus)
-                        image_minus = _image_at_delay(
-                            images_list, source_arr, matrix, tau_minus)
-                        if (image_plus is not None
-                                and image_minus is not None):
-                            error_est = _uniform_error_estimate(
-                                image_plus, image_minus, matrix, xi_min)
-                            if (error_est is not None
-                                    and error_est <= CERTIFICATION_BAR):
-                                record.served = True
-                                record.category = 'ppgo_fold'
-                                return record
+            matrix = macro_matrix(gamma, 0.0, 0.0)
+            real = np.asarray(geom.real_mask, dtype=bool)
+            real_images = np.asarray(geom.images)[real]
+            w_min = float(w_grid.min())
+            est = ppgo_error_estimate(real_images, source_arr, matrix, w_min)
+            if (est is not None
+                    and est * _PPGO_INTERIOR_SAFETY <= CERTIFICATION_BAR):
+                record.served = True
+                record.category = 'ppgo_fold'
+                return record
         except (ValueError, ZeroDivisionError, LensDomainError):
             pass
 

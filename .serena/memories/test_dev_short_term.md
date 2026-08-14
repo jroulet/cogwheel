@@ -2,6 +2,43 @@
 
 (empty — last consolidated by Dreamer on 2026-08-13)
 
+## 2026-08-13 fold-refusal + ghost-rung exterior suite (WP-1 len!=4 guard, WP-2 _ghost_ppgo_amplification)
+- New suite test_lensing_fold_ghost_exterior.py (17 tests, 3.88s, all green):
+  Q4a FoldExteriorRefusalTestCase (2-image gamma=0.5 rho=1.40 w=70:
+  fold_amplification->None; fold_ppgo_correction==geometric_amplification
+  EXACT; born_carrier==no-fold reference via np.array_equal) +
+  FoldInteriorByteIdentityTestCase (4-image rho=0.90: fold ACTIVE, all three
+  differ from raw). Q4b GhostRungGateTestCase (serve/caveat/interior premises
+  asserted via independent _ghost_im_and_sep; boundary-flip teeth by
+  monkeypatching geometry._GHOST_DECAY_IM_THRESHOLD / _GHOST_SEPARATION_MIN
+  individually to flip serve<->decline, isolating each gate). Q4c
+  GhostSignConventionTestCase (served == geometric + ghost.kernel*exp(1j*w*
+  ghost.delay) to 1e-12; negated + conjugated variants must fail).
+  FoldGuardSelfFalsificationTestCase (teeth).
+- KEY GOTCHAS: (1) ChangRefsdalChannels REQUIRES a >=2-point strictly-
+  increasing freq grid — build np.array([w, 2*w]) not [w]; per-node fold
+  decisions are w-independent so the comparison stays valid. (2) The naive
+  4-image-SPOOF shim (2 real + 2 decoy images) to prove the guard is
+  load-bearing DIES on geometric_amplification's Morse census guard
+  (operator.py:1517: signed-magnification-sum != sign(detA)-1 ->
+  LensDomainError). REPLACED with _merging_fold_pair returning non-None on
+  the genuine 2-image exterior census (guard load-bearing, no census fight)
+  + a 1e-9-perturbation teeth test on the exact-equality assertion.
+  (3) Ghost sign teeth (minus vs plus) only resolvable at LOW w: ghost
+  decays as exp(-w*Im tau_c), so at serve-band w~90 the term is ~1e-23 and
+  minus teeth are INERT — run Q4c at w=12 (term ~4e-4). Conjugate teeth
+  resolve at any w (conjugation flips decay->growth).
+- ORACLE INDEPENDENCE: no-fold reference via monkeypatch _airy_fold.
+  _merging_fold_pair = lambda: None (restore in finally) forces raw ppGO
+  through the SAME shipping code — git-independent HEAD surrogate. Q4c is an
+  algebraic identity between the rung and ghost_kernel (no external oracle).
+- BACKWARD-COMPAT AUDIT (WP-1 len!=4 guard is monotone-toward-refusal):
+  existing "fires" tests use 4-image configs (guard is a no-op there);
+  existing "refuses" tests already had _merging_fold_pair=None (guard cannot
+  flip None->non-None). No existing test breaks. Confirmed empirically:
+  test_lensing_fold_ppgo_correction.py + test_lensing_fold_ppgo_handoff.py
+  -> 37 passed, 3 skipped, no regression.
+
 ## 2026-08-13 ppGO certificate consistency shard (WP1 ppgo_error_estimate + WP2 leg-2 drop)
 - Extended test_lensing_ppgo_certificate.py (now 16 tests, all green in
   6.8s): added InteriorCertificateConservativeTestCase (Spec B: 5 strict-

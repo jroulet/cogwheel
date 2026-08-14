@@ -5226,9 +5226,14 @@ _CUSP_TIE_GAMMA = 0.5
 _CUSP_TIE_SOURCE = np.array([0.7, 0.0])
 _CUSP_TIE_KAPPA = 0.0
 
-#: Off-axis interior source (same gamma, slight perpendicular shift)
-#: where the merging fold pair is valid (no tied saddles).
-_CUSP_TIE_SOURCE_OFF_AXIS = np.array([0.7, 0.05])
+#: Off-axis interior (4-real-image) source at the same gamma where the
+#: merging fold pair is valid (no tied saddles).  Verified with
+#: geometry.find_images == 4; merging pair gap tau_minus - tau_plus = 0.255
+#: (> 0); fold_amplification serves finite at w = 500.  A perpendicular
+#: shift off the on-axis tie source [0.7, 0.0] cannot be used: [0.7, <=0.03]
+#: stays 4-image but the fold error gate refuses, and [0.7, >=0.04] is
+#: already 2-image exterior.
+_CUSP_TIE_SOURCE_OFF_AXIS = np.array([0.15, 0.14])
 
 #: Frequencies at which `fold_amplification` is tested for serving.
 _CUSP_TIE_SERVE_WS = (500.0,)
@@ -5589,35 +5594,37 @@ class CuspOnAxisSelfFalsificationTestCase(_FoldArmTestCase):
 
 
 # ----------------------------------------------------------------------
-# TD-4: SERVING-LADDER DETERMINISM ON-AXIS (fold tie + cusp overlap).
+# TD-4: SERVING-LADDER DETERMINISM ON-AXIS-CUSP (fold refuses, cusp serves).
 #
-# For the on-axis (dperp = 0, c4 > 0) interior cusp config at w >= 50,
-# BOTH the fold arm and the cusp arm serve finite complex values.  The
-# serving ladder `_uniform_arm_value` tries fold first, so the served
-# answer is the fold arm's value — this is a deterministic, fixed-priority
-# function of the node.  Repeating the same node twice returns the
-# SAME value byte-for-byte.
+# The on-axis (dperp = 0, c4 > 0) cusp source at gamma=0.5, cusp[1], dp=0.20
+# is EXTERIOR (2 real images) -- verified geometry.find_images == 2.  Under
+# the F075 fold guard (`len(images) != 4` -> refuse) the fold arm correctly
+# refuses here, so the serving ladder `_uniform_arm_value` falls through to
+# the cusp arm.  The served answer is the CUSP arm's value, byte-for-byte,
+# and the spy order is ['fold', 'cusp'] (fold consulted first, refuses, then
+# cusp).  Repeating the same node twice returns the SAME value.
 #
-# If fold arm were to refuse, the cusp arm steps in — tested via mocking
-# fold_amplification to return None.  The self-falsification proves both
-# the byte-identity and the fallback have teeth by corrupting values.
+# The self-falsification case forces fold to None (a no-op here, since fold
+# already refuses) and corrupts values to prove the byte-identity and the
+# fallback have teeth.
 # ----------------------------------------------------------------------
 
-#: On-axis (dperp=0) interior cusp source at gamma=0.5, cusp[1],
-#: dp=0.20.  c4=0.03125 > 0.  Both fold and cusp arms serve at w >= 50.
+#: On-axis (dperp=0) cusp source at gamma=0.5, cusp[1], dp=0.20.  This is
+#: EXTERIOR (2 real images): the fold arm refuses (F075) and the cusp arm
+#: serves at w >= 50.
 _ON_AXIS_CUSP_GAMMA = 0.5
 _ON_AXIS_CUSP_INDEX = 1
 _ON_AXIS_CUSP_DP = 0.20
 _ON_AXIS_CUSP_W = 200.0
-#: Measured at this build (F074 controls): both arms serve this node at
+#: Measured at this build (F074 controls): the cusp arm serves this node at
 #: w in {50, 100, 200}; at w = 500 the cusp arm's calibration certificate
-#: refuses, so the overlap band -- the only band where a fold-vs-cusp
-#: PRIORITY claim has content -- ends there.
+#: refuses, so the served band ends there.
 _ON_AXIS_CUSP_CHECK_WS = (50.0, 100.0, 200.0)
 
 
 def _on_axis_cusp_source():
-    """Return the on-axis (dperp=0, c4>0) interior source for TD-4."""
+    """Return the on-axis (dperp=0, c4>0) exterior (2-image) cusp source
+    for TD-4.  The fold arm refuses here (F075) and the cusp arm serves."""
     cusp = geometry.critical_point(
         _ON_AXIS_CUSP_GAMMA,
         _ASTROID_CUSP_PHASES[_ON_AXIS_CUSP_INDEX],
@@ -5626,19 +5633,22 @@ def _on_axis_cusp_source():
 
 
 class OnAxisServingLadderDeterminismTestCase(_FoldArmTestCase):
-    """Serving-ladder determinism for on-axis interior sources (TD-4).
+    """Serving-ladder determinism for the on-axis-cusp EXTERIOR source
+    (TD-4).
 
-    The on-axis (dperp=0, c4>0) config at gamma=0.5 has BOTH the fold
-    and cusp arms serving finite values at w >= 50.  The serving ladder
-    `_uniform_arm_value` deterministically returns the fold arm's value
-    (fold-before-cusp priority), and the same node yields the same
-    answer on every call.  If fold refused (proven by mocking), the cusp
-    arm steps in and the ladder remains functional.
+    The on-axis (dperp=0, c4>0) cusp config at gamma=0.5 is exterior
+    (2 real images), so under the F075 fold guard the fold arm refuses
+    and the serving ladder `_uniform_arm_value` falls through to the
+    cusp arm.  The ladder deterministically returns the CUSP arm's value
+    (fold consulted first, refuses, then cusp), and the same node yields
+    the same answer on every call.  A self-falsification case forces
+    both arms to refuse to prove the ladder still declines cleanly.
     """
 
-    def test_both_arms_serve_and_ladder_uses_fold_priority(self):
-        """At w >= 50 both fold and cusp serve; ladder returns fold's
-        value byte-identically (fold tried first)."""
+    def test_fold_refuses_and_ladder_falls_to_cusp(self):
+        """At w >= 50 the fold arm refuses (exterior 2-image, F075) and
+        the cusp arm serves; the ladder returns the cusp value
+        byte-identically."""
         source = _on_axis_cusp_source()
         for w in _ON_AXIS_CUSP_CHECK_WS:
             with self.subTest(w=w):
@@ -5649,23 +5659,23 @@ class OnAxisServingLadderDeterminismTestCase(_FoldArmTestCase):
                 ladder = operator._uniform_arm_value(
                     w, source, _ON_AXIS_CUSP_GAMMA)
                 self.n_checks += 1
-                self.assertIsNotNone(
+                self.assertIsNone(
                     fold,
-                    f'fold arm must serve at w={w} (precondition)')
+                    f'fold arm must refuse at w={w} (exterior 2-image)')
                 self.n_checks += 1
                 self.assertIsNotNone(
                     cusp_val,
-                    f'cusp arm must serve at w={w} (overlap band)')
+                    f'cusp arm must serve at w={w}')
                 self.n_checks += 1
                 self.assertIsNotNone(
                     ladder,
                     f'ladder must return a value at w={w}')
                 self.n_checks += 1
                 self.assertEqual(
-                    np.complex128(fold).tobytes(),
+                    np.complex128(cusp_val).tobytes(),
                     np.complex128(ladder).tobytes(),
-                    f'at w={w} ladder must return fold value '
-                    f'(fold priority)')
+                    f'at w={w} ladder must return the cusp value '
+                    f'(fold refused, cusp serves)')
 
     def test_ladder_is_reproducible_same_node_twice(self):
         """The same node produces the SAME answer on every call (pure
@@ -5690,11 +5700,9 @@ class OnAxisServingLadderDeterminismTestCase(_FoldArmTestCase):
                     f'ladder is not reproducible at w={w}')
 
     def test_fold_arm_tried_first_at_on_axis_node(self):
-        """Spy confirms the fold arm is called and the cusp arm is
-        NOT called (short-circuit — fold serves so cusp is skipped).
-        The fixed priority is only observable when fold refuses;
-        `ServingLadderDeterminismTestCase.test_fixed_priority_fold_tried_
-        before_cusp` already covers the refused-fold scenario."""
+        """Spy confirms the fold arm is consulted FIRST and, because it
+        refuses on this exterior (2-image) node (F075), the cusp arm is
+        then called — the spy order is ['fold', 'cusp']."""
         source = _on_axis_cusp_source()
         order: list[str] = []
         real_fold = _airy_fold.fold_amplification
@@ -5716,9 +5724,12 @@ class OnAxisServingLadderDeterminismTestCase(_FoldArmTestCase):
                 _ON_AXIS_CUSP_W, source, _ON_AXIS_CUSP_GAMMA)
         self.n_checks += 1
         self.assertIn('fold', order, 'fold arm must be consulted')
-        self.assertNotIn('cusp', order,
-                         'cusp arm must NOT be called when fold '
-                         'serves (short-circuit)')
+        self.assertIn('cusp', order,
+                      'cusp arm must be called after the fold arm '
+                      'refuses on this exterior 2-image node')
+        self.assertEqual(
+            order, ['fold', 'cusp'],
+            'fold must be tried before cusp (fold refuses, cusp serves)')
 
 
 class OnAxisServingLadderSelfFalsificationTestCase(_FoldArmTestCase):

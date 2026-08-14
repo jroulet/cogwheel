@@ -1,31 +1,40 @@
-# Professor short-term
+# Professor short-term (F075 fold_exterior_ghost REVIEW verdict, 2026-08-13)
 
-## 2026-08-13 — fold-ppGO interior certificate BUILD review (Phase 2) — PASS
+## Verdict: PASS on the fast domain tests for the F075 build.
 
-Reviewed `test_lensing_ppgo_certificate.py` (16 tests, all pass, 9.6s) against
-the 5 specs. Independent numeric probe (shipping funcs, cogwheel-newlal python):
-- Leg-1: interior rho=0.5 -> 4 real images, exterior rho=1.5 -> 2, census flip
-  bisects to rho=1 within ~1e-13 (bar 1e-3). Predicate == closed-form caustic.
-- c1 relerr 1.6e-15, c2 relerr 2.2e-14 vs saddle_coefficients (bar 1e-12; matches
-  Fact 6 memory 2.4e-15/5.8e-14). c3 |Re|/|Im| = 7e-15 => purely imaginary. OK.
-- ppgo_error_estimate w^-3 ratio err 1.3e-16 (exact cube). None on w<=0 and
-  non-finite mu. OK.
-- Interior conservativeness (rho=0.5, 5 configs x w{20,40,60}): max true_err/cert
-  = 0.885 < 1.0 — never optimistic (consistent with earlier 0.980 consult figure;
-  config-set dependent, both safe).
-- Near-caustic (rho 0.90-0.95, 9 pts): certs 0.5-2772, ALL self-refuse (cert*2 >
-  CERTIFICATION_BAR=1e-4); AND even so true_err/cert 0.03-0.38 all <1. The
-  forbidden ADMIT-AND-OPTIMISTIC state never occurs. c3 diverges -> cert blows up
-  -> refuse, exactly the invariant that makes dropping leg 2 sound.
-Self-falsification class has teeth (wrong reach, real-c3, w^-2 exponent, shrunk
-cert all caught). Verdict PASS. Heavy full-sampling validation operator-deferred
-(not run; not in scope for fast gate).
-Note: no image-render tool this session — plots verified via numeric probe that
-reproduces each plot's encoded quantity.
+New test file `cogwheel/tests/test_lensing_fold_ghost_exterior.py`: 17/17 pass
+(3.2s). Full `test_lensing_airy_fold.py` 145 pass/7 skip/2 xfail (33s).
+`test_lensing_ghost_gate.py` + `test_lensing_channels.py` 34 pass (21s) — the
+constant single-sourcing into `geometry` did NOT break channels consumers.
 
-## (prior) 2026-08-13 — design consult on ppgo_interior_certificate.md
-Rulings issued (drop leg 2 on interior; weight sqrt|mu_a|, exponent w^-3; eval at
-w_min; refuse None on non-finite; safety factor 2.0; 4-real-image predicate is the
-sound cheap guard; absolute-vs-bar conservative since interior max|F|>=sqrt(mu_macro)>=1).
-The c3 term is the eps^6 stationary-phase term; purely imaginary by Gaussian-moment
-parity — imaginary-purity is a derivation invariant worth the cheap test.
+### Q4a fold refusal — CORRECT.
+Guards `len(images)!=4 -> refuse` landed at the THREE census-known entry points
+I recommended in the Q1 consult: `fold_amplification` (L470), `fold_ppgo_correction`
+(L614), `born_carrier_from_partition` (L1608). NOT inside `_merging_fold_pair`
+(avoids the _pearcey_cusp first-disjunct flip risk). Physics sound: exterior
+positive-parity = 2 real (Morse0 min + Morse1 saddle), no genuine merging pair;
+`_merging_fold_pair` returns the FAR pair -> Airy correction spurious. Exterior:
+fold None, ppGO==geometric to machine precision, carrier bit-identical to no-fold.
+Interior 4-image: guard is a no-op, fold stays active. Teeth prove guard is
+load-bearing.
+
+### Q4b ghost gate — CORRECT and refusal-conservative.
+Two FREQUENCY-INDEPENDENT gates single-sourced in geometry: Im(tau_c)>=0.4,
+min|x_a-x_c|>=0.7. They did NOT adopt the w-dependent floor the handoff floated
+(the train/serve-skew tension I flagged in Q2) — good. serve/decline/refuse all
+correct; boundary-flip teeth confirm BOTH gates live. GhostAbsentError (interior
+-> decline None, interior serve byte-identical) vs GhostDomainError (on-axis
+undecayed -> refuse None) correctly separated.
+
+### Q4c sign pin — CORRECT, physically discriminating.
+served = geometric_amplification + ghost.kernel*exp(1j w tau_c). Non-conjugated
+tau_c with Im>=0.4>0 gives |carrier|=exp(-w Im tau_c) DECAY; conjugate would be
+exp(+w Im) BLOW-UP (physically wrong). '+' and non-conj pinned to 1e-12 at low
+w=12 (ghost term ~4e-4, resolvable); minus/conj mutants provably fail. Internal-
+consistency pin by design (no oracle) — locks sign against refactor.
+
+### Operator-deferred (as expected, per Q4 consult):
+The 1e-2 arm bar value-vs-f_schwinger sweep over |y|/rc>=1.15, w in (60,150] is
+the EXPENSIVE acceptance REPORT, not a fast test. Fast tests pin
+structure/decision/sign only — appropriate. Heavy accuracy validation is the
+operator ship gate.

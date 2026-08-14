@@ -216,7 +216,11 @@ _FARFIELD_WINDOW_RADIANS = RHO_END / 2.0
 #: and SEP_ADMIT_MIN=1.0 in test_lensing_ghost_gate.py.  NOT a prior-box-derived
 #: constant; NOT subsumed by the decay gate (_GHOST_DECAY_IM_THRESHOLD, which
 #: guards the orthogonal near-axis non-decaying failure mode).
-_GHOST_SEPARATION_MIN = 0.7
+#:
+#: Single-sourced in `geometry` (the shared authoritative home) so that this
+#: mid-band chart gate and the arm-ladder rung `operator._ghost_ppgo_amplification`
+#: reference ONE definition with no duplicated literal (F075).
+_GHOST_SEPARATION_MIN = geometry._GHOST_SEPARATION_MIN
 
 #: Minimum imaginary-delay decay required for the ghost to be subtracted:
 #: ``Im(tau_c) >= _GHOST_DECAY_IM_THRESHOLD``.  This is the frequency-
@@ -231,7 +235,12 @@ _GHOST_SEPARATION_MIN = 0.7
 #: typical admitted test configs; on-axis near-cusp configs have
 #: ``Im tau_c ~ 0.001``).  Being a FIXED constant it is identical at train
 #: and serve — no ``w``-array skew is possible.
-_GHOST_DECAY_IM_THRESHOLD = _FARFIELD_WINDOW_RADIANS / 5.0
+#:
+#: Single-sourced in `geometry` (the shared authoritative home) so that this
+#: mid-band chart gate and the arm-ladder rung `operator._ghost_ppgo_amplification`
+#: reference ONE definition with no duplicated literal (F075).  The historical
+#: derivation ``_FARFIELD_WINDOW_RADIANS / 5.0 = 0.4`` is the same value.
+_GHOST_DECAY_IM_THRESHOLD = geometry._GHOST_DECAY_IM_THRESHOLD
 
 #: Floor added to every channel's envelope weight ``1 - S_a`` so that a
 #: fully resolved channel (``S_a = 1``) still carries a small, non-zero
@@ -1599,7 +1608,16 @@ def born_carrier_from_partition(
             try:
                 matrix = partition.matrix
                 images = partition.images
-                pair = _merging_fold_pair(images, source, matrix)
+                # Exterior censuses (fewer than four real images) have no real
+                # merging fold pair: outside the caustic the two real images
+                # are a far (min, saddle) pair `_merging_fold_pair` still
+                # returns, yielding a spurious correction on the label path.
+                # Refuse -- carrier stays byte-identical to the no-correction
+                # path.  See FINDINGS F075.
+                if len(images) != 4:
+                    pair = None
+                else:
+                    pair = _merging_fold_pair(images, source, matrix)
                 if pair is not None:
                     tau_plus, tau_minus = pair
                     fold_delta_tau = tau_minus - tau_plus

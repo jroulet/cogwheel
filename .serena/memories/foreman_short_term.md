@@ -1,13 +1,15 @@
 # Foreman-Lite Short-Term Observations
 
-- INS-1-002 (ppgo_error_estimate empty-input guard, geometry.py): the
-  existing degenerate-input branch was `if w_min <= 0.0: return None`,
-  so the fix was a one-line widen to `if w_min <= 0.0 or
-  len(real_images) == 0: return None` (kept as a single OR-combined
-  guard rather than two branches, to match the existing early-return
-  style). Docstring's "Returns" section already listed the other
-  degenerate cases (w_min<=0, non-finite mu/c3) — added the empty-array
-  case to the same sentence rather than as a new paragraph, since it's
-  the same "gate reads None as refuse" contract. Verified empirically
-  (not just ast.parse) that `ppgo_error_estimate(np.empty((0,2)), ...)`
-  now returns None instead of the old silent 0.0.
+- INS-1-002 (operator.py `_ghost_ppgo_amplification`, 2026-08-13): added
+  `if len(real_images) == 0: return None` immediately after the decay-gate
+  check and before the `min(... for x_a in real_images)` separation-gate
+  computation, exactly per the finding's suggested fix — a defensive-only
+  guard since an admitted continuable ghost currently always has >=2 real
+  images. Verified placement via search_for_pattern (guard sits right
+  before `x_c = ghost.position` / `separation = min(...)`) and ast.parse
+  for syntax. Note: mcp__serena__execute_shell_command silently used a
+  different cwd (cogwheel-claude-dev worktree) than the project path
+  quoted in the task file path — omitting the `cwd` param let it default
+  correctly and find the file by relative path; passing an explicit
+  absolute cwd guess failed with FileNotFoundError. Prefer omitting cwd
+  and using relative paths matching find_file's output.
