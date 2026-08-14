@@ -1369,6 +1369,25 @@ Tag conventions:
   matches a fresh engine evaluation to tolerance.
 
 
+- **FIX `_find_cusps` WRAP ARITHMETIC — BLOCKS THE TRAINING CAMPAIGN**
+  `[→ spec]` — F079: periodic index wrap + linear angle arithmetic gives
+  the theta = 0 cusp a 1.5-pi dip span, `_make_arc` returns None for both
+  adjacent arcs, and half the astroid fold ring gets no tube chart,
+  silently. Fix the wrap (angle differences mod 2 pi), add an
+  arcs-survive-the-tiler pin (4 cusps -> 4 arcs on the astroid; the
+  topology check must count ARCS, not just cusps), and re-measure the
+  theta = 0 window against a window-interior baseline (~0.11-0.13 rad at
+  the tested gammas). In the same change: retire `_CUSP_ARM_COVERAGE`,
+  `_SADDLE_CUSP_ARM_COVERAGE`, the three measure_* scripts, and the
+  `_tube_serves` shrink (measured inert, wrong units — F079 body); update
+  the census `cusp-window` category note; test debt enumerated in the
+  measurement report (test_lensing_surrogate ~5127-5295, surrogate_training
+  D2a/D2b ~6001-6260, cusp_arm_coverage suite, census_dry_run.py:28,
+  calibrate_ppgo_rung.py:48,160,222). MUST land before
+  train_lens_surrogate.py runs, else the artifact ships with the
+  half-ring hole.
+
+
 - **Tighten the fold arm's caustic fence; the `b4` route is CLOSED
   [→ spec].** F028 defect 2. Defect 1 (admission routing) closed by the
   authoritative-gate work; the arm is now fenced to `eta < _ETA_MAX_FOLD`
@@ -3524,6 +3543,33 @@ teja-force skill + gw with the rest of the hardening.
   ACCEPTANCE: replay the three builds' WPs through the new formula and show it
   would have budgeted above the observed call counts; a single-file WP is
   unchanged.
+
+
+- **WIRE DAEMON HYGIENE INTO THE BUILD CHOKEPOINTS** `[housekeeping]` —
+  `.claude/sdk/reap_stale_serena.py` shipped 2026-08-14 (project-scoped,
+  parent-liveness + age discrimination, dry-run default; born from the
+  16-serena/16-pyright accumulation that pinned swap and read as "serena
+  hit a complexity threshold"). Remaining wiring, deferred because both
+  target scripts were LIVE under a running build:
+
+  1. `launch_build.sh`: pre-launch sweep — run the reap script (`--apply`,
+     this project only) and print a loud warning when live same-project
+     servers exceed ~3 (the daemon-count analogue of the chart cell-count
+     guard: count cheaply at the entry point, never discover as mystery
+     latency).
+  2. `watchdog.sh` + launcher: the ACTUAL leak — a killed build's crew
+     agents orphan their `uv -> serena -> pyright` chains because the
+     subtree kill misses grandchildren and SIGKILL reparents them to init
+     (measured: yesterday's killed build left a 21-hour 5-server quintet).
+     Launch the orchestrator in its own process group (`setsid`) and have
+     the watchdog kill the GROUP. MANDATORY after touching either script:
+     run `.claude/sdk/verify_watchdog.sh` (~12 s probe), per CLAUDE.md.
+  3. CLAUDE.md ops line: run the reap script (dry-run first) before heavy
+     work / at session start.
+
+  Multi-project fence is load-bearing: the box also runs
+  gw_detection_ias_claude builds with their own serena — the script's
+  project discrimination must never widen.
 
 
 - **A DRIVER DECISION AND AN OWNER DECISION ARE INDISTINGUISHABLE IN THE BUILD
