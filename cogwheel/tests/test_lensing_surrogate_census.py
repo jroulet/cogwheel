@@ -690,14 +690,23 @@ class ArcProjectionOutOfBoxTestCase(CensusTestCase):
         super().setUp()
         self.sur = _synthetic_surrogate()
 
-    def test_neighbouring_arc_theta_is_out_of_box(self):
-        """theta on the adjacent arc (2.5, outside the chart's [0.2, 1.2]) and
-        eta in the tube band, image_count matched: neither the tube (theta out
-        of range even with cusps relaxed) nor the far-field (eta below its
-        caustic floor) serves -> out-of-box."""
+    def test_gap_theta_is_out_of_box(self):
+        """theta with NO D2 gauge image inside the chart's arc frame (1.5:
+        images {1.5, pi-1.5, -1.5, pi+1.5} all miss [0.2, 1.2]) and eta in
+        the tube band, image_count matched: neither the tube (no image in
+        frame even with cusps relaxed) nor the far-field (eta below its
+        caustic floor) serves -> out-of-box.
+
+        Re-pointed 2026-08-14 for the D2 gauge-image fold (build
+        tube_d2_fold): the previous witness theta=2.5 projects onto a
+        neighbouring arc whose image pi-2.5 lands INSIDE the frame, so the
+        tube now serves it BY DESIGN — arc-locality became fold-locality,
+        and out-of-box for tube theta means "no D2 image in frame" (the
+        inter-arc cusp gap). The Professor-Q7 refusal-conservatism this
+        class pins is unchanged; only the frameless witness moved."""
         category = census.classify_fallthrough(
             self.sur, gamma=0.4, log_w_min=SYN_LWMIN, log_w_max=SYN_LWMAX,
-            eta=0.03, theta=2.5, image_count=2, y1_eig=0.6, y2_eig=0.3,
+            eta=0.03, theta=1.5, image_count=2, y1_eig=0.6, y2_eig=0.3,
             dropped_slivers=())
         self.n_checks += 1
         self.assertEqual(category, 'out-of-box')

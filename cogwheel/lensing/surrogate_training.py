@@ -304,6 +304,10 @@ class TrainingConfig:
     gamma_band_halfwidth: float = 0.1
     min_gamma_band: float = 1e-6
     engine_budget: int = 400
+    # Governs SADDLE tube training only (`_tube_training_arcs` slices the
+    # deltoid arcs by it, and the band's ``max_eta_max`` -- which feeds the
+    # lobe admissions -- follows).  The astroid always trains its one
+    # canonical arc; the D2 gauge-image serve match covers the mirrors.
     max_tube_arcs: int = 1
     # ``None`` = no cap (the production default: the tiling itself bounds the
     # count); an int caps admitted tiles with a loud truncation record.
@@ -4776,6 +4780,65 @@ def _subdivide_lobe_tile(
             'max_achieved_depth': summary['max_achieved_depth']}
 
 
+def _tube_training_arcs(structure: CausticStructure, parity: int,
+                        max_tube_arcs: int) -> list[FoldArc]:
+    """Select the fold arcs to charge with tube charts for one gamma band.
+
+    The amplification is exactly D2-symmetric and the serve path matches a
+    tube query's gauge angle against a chart's trained arc through all four
+    D2 gauge images (`surrogate._tube_theta_inframe`), so a chart trained
+    on ANY single astroid arc serves all four mirror copies at zero
+    accuracy cost (closes the F079 half-ring hole).
+
+    Positive parity (astroid): ONE arc suffices.  The four astroid arcs
+    are exact D2 gauge images of each other (cusps at gauge angles
+    ``{0, pi/2, pi, 3pi/2}``; arcs centred on the diagonals), so which one
+    is trained is a pure convention.  The canonical choice is the arc
+    whose ``[theta_lo, theta_hi]`` brackets ``pi/4`` -- the first arc
+    counter-clockwise from gauge zero, matching the incumbent
+    ``structure.arcs[0]`` and every existing fixture -- picked by an
+    explicit theta-interval predicate, never by slice position.
+
+    (Frame note: the gauge<->source map is ORIENTATION-REVERSING -- the
+    caustic point at gauge angle ``theta`` sits at source angle
+    ``~ pi - theta``, so gauge cusps on the axes map to source cusps at
+    ``{pi, pi/2, 0, -pi/2}`` and the ``pi/4`` gauge arc serves sources
+    with ``y1_eig < 0``.  MEASURED 2026-08-14.  Under the gauge-image
+    serve match this is irrelevant to coverage; it is fatal to any scheme
+    that keys the fold on source-coordinate signs.)
+
+    Saddle parity (macro-saddle deltoid): the incumbent
+    ``arcs[:max_tube_arcs]`` slice is kept.  The deltoid's arcs are NOT
+    all D2 copies of one another (lobe-edge vs outer arcs differ, with
+    minimum curvature radii ~0.28 vs ~3.5 at gamma ~1.3), and the band's
+    ``max_eta_max = f_max * max(arc r_min)`` feeds the lobe admissions and
+    the interior-skip predicate: sizing it over ALL arcs balloons the tube
+    shell (0.11 -> 1.40 measured at gamma 1.3) and starves the lobe
+    charts.  The knob therefore still governs saddle tube training.
+
+    Parameters
+    ----------
+    structure : CausticStructure
+        The topology-stable band's detected cusps and fold arcs.
+    parity : int
+        ``+1`` for the positive-parity astroid, ``-1`` for the macro-saddle
+        deltoid.
+    max_tube_arcs : int
+        ``TrainingConfig.max_tube_arcs``; consumed by the saddle branch
+        only (the astroid branch always selects its one canonical arc).
+
+    Returns
+    -------
+    list of FoldArc
+        The arc(s) to charge with tube charts.
+    """
+    if parity == 1:
+        quarter_pi = 0.25 * math.pi
+        return [arc for arc in structure.arcs
+                if arc.theta_lo <= quarter_pi <= arc.theta_hi]
+    return list(structure.arcs[:max_tube_arcs])
+
+
 def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                        rng: np.random.Generator, outdir: Path, parity: int,
                        label: str, band: tuple[float, float],
@@ -4790,10 +4853,18 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     gamma_grid = _log_reach_gamma_axis(band, config.n_gamma, f'gamma_{label}')
 
     # -- Tube charts (per fold arc, resumable) --
+    # The serve path matches a tube query against a chart through all four
+    # exact D2 gauge images (`surrogate._tube_theta_inframe`), so the astroid
+    # trains ONE canonical arc (the gauge arc bracketing pi/4) and serves all
+    # four mirror copies from it (closes F079).  The saddle keeps the
+    # incumbent ``arcs[:max_tube_arcs]`` slice: its arcs are not D2 copies of
+    # one another, and ``max_eta_max`` below feeds the lobe admissions and
+    # interior-skip predicate (see `_tube_training_arcs`).
+    tube_arcs = _tube_training_arcs(structure, parity, config.max_tube_arcs)
     # Pre-compute per-arc minimum curvature radii (worst over gamma band).
     # The absolute tube band [eta_floor, eta_max] is f * R_c per arc.
     arc_r_min = [_min_curvature_radius(band, arc, config.n_caustic_samples)
-                 for arc in structure.arcs[:config.max_tube_arcs]]
+                 for arc in tube_arcs]
     max_eta_max = (config.f_max * max(arc_r_min)
                    if arc_r_min else config.f_max * 0.05)
     # Cap the tube w grid by the largest source magnitude it samples
@@ -4804,8 +4875,7 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             box, parity, structure.caustic_reach + max_eta_max)
     else:
         tube_w_range = (0.0, 0.0)
-    for idx, arc in enumerate(structure.arcs[:config.max_tube_arcs]
-                               if 'tube' in regions else ()):
+    for idx, arc in enumerate(tube_arcs if 'tube' in regions else ()):
         # Per-arc curvature-relative tube shell sizing.
         r_min = arc_r_min[idx]
         assert config.f_max < 0.5, (

@@ -1,5 +1,44 @@
 # Test Dev Short-Term Observations
 
+## 2026-08-14 WP1 D2 serve-fold + astroid fundamental-arc reduction (test_lensing_tube_d2_fold.py, NEW, 14 tests green 4.1s)
+
+- Suite pins WP1's three durable invariants against `surrogate._fold_caustic_theta`,
+  `surrogate._tube_serves` (via `serve`), and `surrogate_training._tube_training_arcs`.
+- SPEC-1 "np.array_equal across ALL FOUR octants" DOES NOT HOLD as written — measured:
+  negation-only octant pair (+,+)/(+,-) folds to EXACTLY theta0 (negation is bit-exact
+  in IEEE-754) so served arrays are BIT-IDENTICAL (np.array_equal, maxabs 0.0); but the
+  pi-reflection octants (-,+)/(-,-) fold through `math.pi - theta`, a subtraction that
+  rounds by <=1 ULP (~2.2e-16 rad), so served arrays differ ~2.5e-16 (saddle) to
+  ~6.7e-16 (astroid). Split the assertion: `np.array_equal` for NEGATION_ONLY_OCTANTS,
+  `np.allclose(rtol=1e-9,atol=1e-11)` + documented 1-ULP reason for PI_REFLECTION_OCTANTS.
+  This matches the handoff acceptance ("exact bit-equality if fold precedes all arithmetic,
+  else a stated near-machine bound with the reason"). Do NOT weaken to a blanket allclose —
+  the negation pair genuinely IS bit-exact and that is the stronger teeth.
+- OCTANT->PHYSICAL-THETA INVERSE FOLD (so all 4 octants fold back to the same fundamental
+  theta0): (+,+)->theta0, (+,-)->-theta0, (-,+)->pi-theta0, (-,-)->pi+theta0. Pick theta0
+  generic (astroid 0.6, saddle -0.24) — NON-cusp-window, NON-diagonal — and eta inside the
+  tube band (QUERY_ETA=0.02 in [0.005,0.05]); eta is D2-invariant so it passes unfolded.
+- SPEC-3 CAUSTIC-GAUGE CORRECTION (coder-confirmed): astroid cusps sit on the AXES
+  {0,pi/2,pi,3pi/2} in caustic gauge, so the fundamental tube arc brackets pi/4, NOT the
+  source-plane pi/2 (pi/2 is a CUSP). At gamma=0.4 the 4 detected arcs give exactly one
+  bracketing pi/4 ([0.137,1.478]); 1.478<pi/2 so a pi/2 selector returns ZERO — asserted
+  as an extra guard. Saddle path: `_tube_training_arcs(structure,-1)` returns ALL arcs
+  unchanged (reduction is astroid-only).
+- SELF-FALSIFICATION teeth: (Spec1) module-level `_fold_without_s2_branch` mutant dropping
+  the y2_eig<0 leg, applied via `mock.patch.object(surrogate_module,'_fold_caustic_theta',...)`
+  -> (+,-)/(-,-) octants fold to wrong theta, `_theta_into_frame` maps out of arc range,
+  not served (zeros) -> diverge. (Spec2) `_swapped_fold` applying y2 reflection under y1
+  sign breaks >=1 octant. (Spec3) SimpleNamespace(arcs=survivors) with pi/4-arc removed ->
+  selector returns EMPTY (never picks a neighbor). Every self-falsification test still calls
+  self._count() to satisfy the `_TubeD2TestCase` anti-vacuity tearDown.
+- BACKWARD-COMPAT AUDIT (step 7) CLEAN: grepped ALL of cogwheel/tests for both WP1 symbols
+  (`_tube_training_arcs`, `_fold_caustic_theta`) — ONLY the new file references either.
+  `test_lensing_caustic_cusps.py` ASTROID_EXPECTED_ARCS=4 asserts `detect_caustic_structure`
+  DETECTION count (unchanged by WP1; my own suite re-confirms 4 detected arcs pass); WP1's
+  `_tube_training_arcs` is a downstream SELECTION (astroid 4->1 for tube TRAINING only) that
+  does not touch detection. `test_lensing_surrogate_training.py` has NO max_tube_arcs
+  assertion (only a docstring tube-name mention). No signature/constant/domain break.
+
 ## 2026-08-14 WP2 cusp-arm-coverage retirement (test_lensing_surrogate_training.py)
 
 - Deleted the two dead D2 monkeypatch classes

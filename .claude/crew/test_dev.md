@@ -139,6 +139,26 @@ FILES: <comma-separated list>
 PREFIX: test
 ```
 
+## Test parsimony (owner directive, 2026-08-14)
+
+Pin-heavy suites re-price every future build's re-baseline work (measured:
+one re-baseline consumed a full test-dev session across 6 files). Tests
+are not free; each one is a standing claim someone must re-derive whenever
+the surface moves. Rules:
+
+- ONE durable invariant per behavior, in the file that owns the predicate.
+  Before writing a test, name the invariant it pins; if an existing test
+  already pins it, strengthen that one instead of adding a sibling.
+- Self-falsification twins ONLY where the test's teeth are genuinely in
+  doubt (a guard that could be vacuous, a golden that could be copied) —
+  never one twin per test as a reflex.
+- Extend the existing suite file for a surface that already has one; a new
+  test FILE needs a reason the existing home does not fit.
+- Diagnostics (plots, tables) belong in build evidence reports, not in
+  committed tests, unless the diagnostic IS the assertion.
+- Your report MUST state tests added vs tests retired. Net-positive
+  without a newly named invariant needs one sentence of justification.
+
 ## Coding Standards
 
 **Defensive programming**: validate inputs at system boundaries, use guard clauses and early

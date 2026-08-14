@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -4267,9 +4268,34 @@ class BuildOrchestrator:
                 stream = None
             try:
                 if stream is not None:
-                    proc = subprocess.run(
+                    # Popen + heartbeat, NOT subprocess.run: the gate's
+                    # output goes to the sidecar gate_log, so the BUILD log
+                    # (whose mtime the watchdog watches) is silent for the
+                    # gate's whole duration — 22-25 min under shared-box
+                    # load vs the 1200 s staleness threshold. That killed
+                    # two healthy builds on 2026-08-14, both at
+                    # Professor-PASS + ~1201 s. Emit gate-log growth into
+                    # the build log every 60 s so a live gate reads as live.
+                    proc = subprocess.Popen(
                         cmd, stdout=stream, stderr=subprocess.STDOUT,
-                        text=True, cwd=self.project_root, timeout=3600)
+                        text=True, cwd=self.project_root)
+                    t0 = time.monotonic()
+                    while True:
+                        try:
+                            proc.wait(timeout=60)
+                            break
+                        except subprocess.TimeoutExpired:
+                            elapsed = int(time.monotonic() - t0)
+                            if elapsed > 3600:
+                                proc.kill()
+                                proc.wait()
+                                raise subprocess.TimeoutExpired(cmd, 3600)
+                            try:
+                                size = gate_log.stat().st_size
+                            except OSError:
+                                size = -1
+                            self._log(f"  Tree gate running ({elapsed}s, "
+                                      f"gate log {size} bytes)")
                     stdout_txt = gate_log.read_text(
                         encoding="utf-8", errors="replace")
                 else:

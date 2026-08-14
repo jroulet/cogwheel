@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "1805bfd009c468a72a4d2b44e495cc7e13a2f28e",
-  "timestamp": "2026-08-14T03:32:32Z",
+  "commit": "a258f084d70451c136da06d6ece7abb7b9752937",
+  "timestamp": "2026-08-14T13:27:39Z",
   "touched_files": [
     "cogwheel/lensing/born_residual_chart.py",
     "cogwheel/lensing/chang_refsdal/__init__.py",
@@ -15,8 +15,10 @@
     "cogwheel/lensing/ppgo_map.py",
     "cogwheel/lensing/surrogate.py",
     "cogwheel/lensing/surrogate_census.py",
+    "cogwheel/lensing/surrogate_training.py",
     "cogwheel/tests/test_lensing_airy_fold.py",
     "cogwheel/tests/test_lensing_batched_operator.py",
+    "cogwheel/tests/test_lensing_caustic_cusps.py",
     "cogwheel/tests/test_lensing_chang_refsdal_ghost_frame.py",
     "cogwheel/tests/test_lensing_cusp_arm_coverage.py",
     "cogwheel/tests/test_lensing_exterior_windows.py",

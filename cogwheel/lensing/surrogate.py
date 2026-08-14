@@ -2821,6 +2821,49 @@ def _log_w_band_serveable(chart, log_w_min: float, log_w_max: float) -> bool:
     return log_w_max <= chart.log_w_grid[-1]
 
 
+def _tube_theta_inframe(chart: 'TubeChart', theta: float) -> float | None:
+    """Map a caustic gauge angle onto a tube chart's trained theta frame.
+
+    The amplification is exactly D2-symmetric --
+    ``F(w; y1, y2) = F(w; +/-y1, +/-y2)`` -- and the gauge-angle images of
+    the four source reflections are exactly ``theta``, ``pi - theta``
+    (``y1_eig -> -y1_eig``), ``-theta`` (``y2_eig -> -y2_eig``) and
+    ``pi + theta`` (both).  A tube chart's spline axes are ``gamma``,
+    ``log w``, ``u = sqrt(eta)`` and arc length ``s(theta)`` -- the first
+    three are D2-invariant -- so the chart serves a query EXACTLY iff any
+    of the four gauge images lands on its trained arc.  This helper
+    returns the first such image, unwrapped into the chart's frame by
+    `_theta_into_frame`, or ``None`` when none lands inside
+    ``theta_grid`` (the chart declines; `select_chart` falls through).
+
+    The identity image is tried FIRST, so any query the pre-fold
+    incumbent served is served from the same spline coordinate,
+    bit-identically.  The mirror images close the F079 half-ring hole:
+    a chart trained on one fold arc serves all four D2 copies.
+
+    WHY not a sign-keyed fold (do not re-attempt): a previous version
+    reflected ``theta`` from the SIGNS of ``(y1_eig, y2_eig)``, assuming
+    the first-quadrant sources live on a single "fundamental" arc.  Both
+    premises fail.  (1) The caustic gauge map is orientation-reversing
+    (source angle ~ ``pi - theta``): the arc bracketing ``pi/4`` in gauge
+    angle serves ``y1_eig < 0`` sources, so a sign-keyed fold reflects a
+    chart's OWN queries off its trained arc and the chart serves nothing
+    (measured 2026-08-14: 0/10 held-out served, eps NaN).  (2) The
+    fixed-sign source region is NOT one arc: near-cusp queries at caustic
+    distance eta sit slightly across the source axes, so first-quadrant
+    sources span gauge slivers of THREE arcs.  Matching gauge images
+    against the chart's own frame needs neither assumption -- nor the
+    source signs at all.
+    """
+    frame_lo = float(chart.theta_grid[0])
+    frame_hi = float(chart.theta_grid[-1])
+    for image in (theta, math.pi - theta, -theta, math.pi + theta):
+        image_inframe = _theta_into_frame(image, frame_lo)
+        if frame_lo <= image_inframe <= frame_hi:
+            return image_inframe
+    return None
+
+
 def _theta_into_frame(theta: float, frame_lo: float) -> float:
     """Unwrap a ``[0, 2*pi)`` caustic angle into a chart's theta frame.
 
@@ -2837,7 +2880,13 @@ def _theta_into_frame(theta: float, frame_lo: float) -> float:
 def _tube_serves(chart: TubeChart, gamma: float, log_w_min: float,
                  log_w_max: float, eta: float, theta: float,
                  image_count: int) -> bool:
-    """Whether a tube chart serves this candidate (guard-stack steps 1,5,6)."""
+    """Whether a tube chart serves this candidate (guard-stack steps 1,5,6).
+
+    The gauge angle is matched against the trained arc through the exact
+    D2 gauge-image search `_tube_theta_inframe` (identity image first),
+    so a mirror-image source serves from the same chart while every
+    incumbent-served query keeps its exact spline coordinate.
+    """
     # (1) certified-box containment on gamma and log w.
     if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
         return False
@@ -2852,9 +2901,12 @@ def _tube_serves(chart: TubeChart, gamma: float, log_w_min: float,
     u = float(np.sqrt(eta))
     if not (chart.u_grid[0] <= u <= chart.u_grid[-1]):
         return False
-    theta = _theta_into_frame(theta, float(chart.theta_grid[0]))
-    if not (chart.theta_grid[0] <= theta <= chart.theta_grid[-1]):
+    # Match the query's gauge angle (or one of its exact D2 images) against
+    # the trained arc; eta (D2-invariant) passes through untouched.
+    theta_inframe = _tube_theta_inframe(chart, theta)
+    if theta_inframe is None:
         return False
+    theta = theta_inframe
     two_pi = 2.0 * np.pi
     for theta_cusp, delta_theta in chart.cusp_windows:
         # Exclude the tube over the FULL 8c cusp-exclusion window, where the
@@ -3278,9 +3330,15 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
     if isinstance(chart, TubeChart):
         v1 = float(np.sqrt(eta))
         # The tube spline's fourth axis is ARC LENGTH s, so map the query
-        # theta (already gated inside the arc) into the chart frame and then
-        # onto s via the stored theta_to_s map before contracting.
-        theta_inframe = _theta_into_frame(theta, float(chart.theta_grid[0]))
+        # theta into the chart frame via the SAME D2 gauge-image search as
+        # the `_tube_serves` gate that selected this chart, then onto s via
+        # the stored theta_to_s map before contracting.  eta (D2-invariant)
+        # is used as-is.  The identity fallback is unreachable after the
+        # gate but keeps the evaluator total.
+        theta_inframe = _tube_theta_inframe(chart, theta)
+        if theta_inframe is None:
+            theta_inframe = _theta_into_frame(theta,
+                                              float(chart.theta_grid[0]))
         v2 = float(np.interp(theta_inframe, chart.theta_to_s[0],
                              chart.theta_to_s[1]))
     elif isinstance(chart, (LobeInteriorChart, LobeExteriorChart)):

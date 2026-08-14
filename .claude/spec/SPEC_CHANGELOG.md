@@ -6,6 +6,17 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
+- `0.41.0` (2026-08-14):
+
+Tube-chart serving folds the caustic gauge angle through the four exact D2
+images (`surrogate._tube_theta_inframe`, identity first) so one trained
+arc serves its three mirrors on both parities; astroid tube training
+builds only the pi/4-bracketing fundamental arc (4 -> 1). Out-of-box for
+tube theta now means "no D2 image in the chart frame". The sign-keyed
+single-arc fold is recorded UNSOUND (orientation-reversing gauge<->source
+map). New suite `test_lensing_tube_d2_fold.py`; census witness re-pointed
+to a gap theta. Build `tube_d2_fold` + driver fix-forward.
+
 - `0.40.0` (2026-08-14):
 
 Tier-1 macro-saddle far-field rung re-gated: the scalar
