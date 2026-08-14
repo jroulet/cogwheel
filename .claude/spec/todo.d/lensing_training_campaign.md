@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [lensing_find_cusps_wrap_bug, lensing_tiling_census_node_budget, lensing_wire_serving_artifacts, lensing_saddle_admission_c3]
+depends_on: [lensing_find_cusps_wrap_bug, lensing_tiling_census_node_budget, lensing_wire_serving_artifacts]
 ---
 
 - **NEXT-SESSION ORDER 7a/7 — THE TRAINING CAMPAIGN (cost estimate FIRST,

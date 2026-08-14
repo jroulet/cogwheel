@@ -1,6 +1,5 @@
 ---
 section: Backlog
-depends_on: [lensing_saddle_admission_c3]
 ---
 
 - **NEXT-SESSION ORDER 4/7 — WIRE THE SERVING ARTIFACTS (F077: the chart
