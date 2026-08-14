@@ -1064,8 +1064,6 @@ def _measure_cell(parity: str, gamma: float, rho_center: float, kappa: float,
     """
     from cogwheel.lensing.chang_refsdal import geometry
     from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
-    from cogwheel.lensing.chang_refsdal.operator import (
-        geometric_amplification)
     from cogwheel.lensing.chang_refsdal._schwinger import (
         SchwingerCertificationError)
 

@@ -826,7 +826,6 @@ def cusp_amplification(w: float, source, gamma: float, *,
     handoff_radius = math.hypot(
         delta_parallel * math.sqrt(w) / math.sqrt(abs_c4),
         delta_perp * w ** 0.75 / abs_c4 ** 0.25)
-    radius = math.hypot(x, y)
 
     # The ppGO fast rung serves the fold-region fold_ppgo_correction,
     # which is only valid OUTSIDE the fold arm's serving band.  Inside

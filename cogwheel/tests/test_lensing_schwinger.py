@@ -2042,8 +2042,6 @@ class SelectBranchSelfFalsificationTestCase(_SelectBranchRoutingTestCase):
     # `test_thresholds_have_one_home`).
 
 
-
-
 # ──────────────────────────────────────────────────────────────────────
 # WP1/WP2 BUILD (2026-07-29): mpmath Schwinger evaluator extension +
 # raised saddle ceiling.  Tests certify:
@@ -2714,8 +2712,6 @@ class SaddleWCeilingWiringTestCase(SchwingerTestCase):
             reverted_result, EXPECTED_SADDLE_W_CEILING,
             'reverted ceiling gives same result as raised ceiling (no teeth)')
         self.n_checks += 1
-
-
 
 
 # =====================================================================

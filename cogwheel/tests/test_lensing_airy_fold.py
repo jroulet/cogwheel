@@ -5800,7 +5800,6 @@ class OnAxisServingLadderSelfFalsificationTestCase(_FoldArmTestCase):
             'answer -- the reproducibility gate cannot be silent')
 
 
-
 # ----------------------------------------------------------------------
 # TD-5: CUSP-ARM OFF-AXIS REGRESSION — BYTE-IDENTITY.
 #
@@ -5844,7 +5843,6 @@ _CUSP_OFF_AXIS_GOLDEN = {
     'int_g05_w200':        (0.4484680331134214 - 1.351266180833183j),
     'int_g05_d02_w500':    (0.4822304694166015 + 1.4263566651534003j),
 }
-
 
 
 # ── Saddle deltoid interior cusp sources (TD-1, TD-2) ────────────────
@@ -5900,8 +5898,6 @@ def _off_axis_cusp_source(gamma, beta, kappa, cusp_index, dp, dperp):
     return (np.asarray(cusp.source)
             + dp * cusp.soft_axis
             + dperp * cusp.hard_axis)
-
-
 
 
 # ------------------------------------------------------------------
@@ -6354,7 +6350,6 @@ class SaddleDeltoidInteriorCensusPinSelfFalsificationTestCase(
                     f'images, got {len(images)}')
 
 
-
 class OriginRayMissRegressionTestCase(_FoldArmTestCase):
     """Geometry pin (TD-3): ``r_caustic`` is NOT a usable interior /
     exterior discriminator at gamma=1.3, beta=0.37, and the image census
@@ -6470,7 +6465,6 @@ class OriginRayMissRegressionSelfFalsificationTestCase(
                     geometry.r_caustic(gamma, angle, kappa=kappa)
 
 
-
 class SaddleExteriorNotBypassedTestCase(_FoldArmTestCase):
     """Domain Test (TD-4): a saddle exterior source (2 images) is served
     or refused by the same certified path as everything else.
@@ -6522,6 +6516,3 @@ class SaddleExteriorNotBypassedTestCase(_FoldArmTestCase):
             len(images), 2,
             f'saddle exterior source has {len(images)} images, '
             f'expected 2')
-
-
-
