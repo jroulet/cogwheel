@@ -341,4 +341,3 @@
   `calibrate_*`/`measure_*` script's import block names a test module and
   the adjacent build touches that same test module; not blocking if the
   script already produced its cited output artifact before going stale.
-</content>

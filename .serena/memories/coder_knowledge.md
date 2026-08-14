@@ -819,4 +819,26 @@
   module imports the file (leaf node), (c) any locally-scoped test helper
   duplicated by the replacement suite is safe to lose. All three orphaned
   old-gate suites here were `git rm` only after this check.
-</content>
+
+## 2026-08-14 build (born_residual_wiring first-class intercept, WP-F/WP-G/WP3)
+
+- MIRROR-REUSE CHECK BEFORE WRITING A NEW MIRROR: when lifting a buried rung
+  to a first-class intercept that reuses the SAME shared helper methods
+  (_ppgo_cell_coords/_ppgo_band_split/_ppgo_cell_ceiling here), the existing
+  census/training mirror that already inlines those same methods needs NO
+  arithmetic change — verify equivalence logically (De Morgan on the
+  boundary conditions), then add WHY comments instead of a second mirror.
+  Confirms 2026-08-13's MIRROR FIDELITY rule from the other direction: a
+  mirror can already be current even across a reachability-lifting build.
+- SENTINEL AUTO-ATTACH PATTERN: an optional collaborator (BornResidualChart)
+  attached at construction via a private sentinel default
+  (`_AUTO_BORN_CHART`) — load() raising refuses loudly, but a load ANOMALY
+  falls back to None + RuntimeWarning (pure-engine behavior preserved);
+  explicit `chart=None` opts out cleanly. Distinguishes "never configured"
+  (silent None, by design) from "configured but broken" (loud warning).
+- BAND-SPLIT ZERO-ABOVE-w_trust IDENTITY: below_mask=(dense_w<=w_trust) or
+  all-True when w_trust is None; chart_w=dense_w[below_mask] carries
+  IDENTICAL float64 values to the unsplit call, so a served/unsplit
+  byte-identity pin can be built purely from the mask logic without an
+  engine call — reusable whenever validating a new band-split consumer.
+

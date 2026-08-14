@@ -138,4 +138,3 @@
   (2026-08-14, error text: "USE SERENA for shell commands"): invoke git/ls/
   stat/etc. directly with `-C <path>` (never a leading `cd`), and route all
   content search through `mcp__serena__search_for_pattern` instead of grep.
-</content>

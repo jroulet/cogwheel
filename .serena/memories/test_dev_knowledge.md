@@ -613,4 +613,19 @@
   the first offset the LIVE production gate admits; confirm boundary-
   exactness by re-checking the immediately preceding offset is refused
   by the same live gate (not a cached/reconstructed one).
-</content>
+
+## 2026-08-14 (born_residual_wiring reachability suite)
+
+- DECISIVE SUBSTITUTION VIA SOLE-DEPENDENT-BRANCH: when a spec asks for an
+  engine-heavy A==B identity that can't be cheaply reproduced, and exactly
+  ONE branch of the served function depends on the new collaborator (here
+  `_born_residual_analytic` is the ONLY chart-dependent branch of
+  `_amplification_coefficients`), proving "chart-attached with a None-chart
+  input" reproduces the no-chart route byte-for-byte is a legitimate
+  engine-free substitute for the full A==B pin — document why the
+  substitution is decisive, not just convenient.
+- CROSS-AGENT INDEPENDENT DISCOVERY: Test Dev independently reproduced the
+  same band-split ValueError defect Coder's INS-2-001 fixed, via a
+  from-scratch battery rather than reading the fix — corroborating
+  evidence a fix's regression coverage is real, not just self-reported.
+

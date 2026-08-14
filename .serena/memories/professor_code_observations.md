@@ -595,4 +595,29 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   directly (the INS-1-001 double-mask bug — indexing an already-real-only
   images array with the length-4 channel mask — fixed at both the live
   rung and the census mirror).
-</content>
+
+## Born residual — first-class intercept (2026-08-14, distinct from the older buried rung)
+
+- NEW rung `_born_residual_analytic` in `_amplification_coefficients`
+  (likelihood.py) is a FIRST-CLASS intercept: gated kappa==0 AND beta==0
+  AND caustic-frame rho>2.0 (both parities per spec), band-split against
+  the certified ppGO map, consulting `born_chart.covers(gamma, rho,
+  chart_w)`. DISTINCT from the OLDER buried `_surrogate_coefficients` Born
+  rung (rho>1, still present, still consulted — not retired). The buried
+  rung is a strict SUPERSET of the new intercept's served domain, so
+  census's chartless 'born' fallthrough bucket (rho>1) over-attributes
+  conservatively and cannot distinguish the two — confirmed correct
+  behavior (WP-F), not a gap.
+- TRAINED ARTIFACT IS ASTROID-ONLY IN PRACTICE (INS-3-001): despite the
+  gate accepting both parities, the shipped BornResidualChart npz has
+  gamma_grid all <1.0 (no saddle node) — a saddle draw always falls
+  through to the exact engine via `covers()` refusing gamma>0.9. Doc says
+  "both parities"; artifact says astroid-only. Code is safe either way
+  (covers() gate protects); this is a doc/artifact currency gap, not a
+  serving bug.
+- Auto-attach: `_AUTO_BORN_CHART` sentinel loads at construction for both
+  LensedRelativeBinningLikelihood and LensedMarginalizedExtrinsicLikelihood
+  (the latter's internal engine builds at this same default); load
+  anomaly -> None + RuntimeWarning (engine stays pure), never a raise past
+  construction.
+

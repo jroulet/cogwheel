@@ -494,4 +494,16 @@
   fail silently; still worth the explicit pass since a partial re-key
   (production fixed, census mirror left old-signature) is the recurring
   laggard failure mode in this codebase.
-</content>
+
+## 2026-08-14 (born_residual_wiring, INS-3-001)
+
+- ARTIFACT-VS-SPEC COVERAGE CLAIM: verify a doc's coverage claim (e.g.
+  "covering the far exterior on both parities") against the ACTUAL trained
+  artifact's grid axes (gamma_grid/rho_grid/log_w_grid), not just the
+  prose describing intent — a rewritten doc entry can still assert
+  coverage the shipped npz's grid never included (here: astroid-only,
+  gamma_grid all <1.0, no saddle node, despite the doc saying "both
+  parities"). Bidirectional finding: retrain to match spec OR narrow the
+  spec to match the artifact — direction is a triage call, not an
+  Inspector call.
+

@@ -641,4 +641,37 @@
   second geometric-distance attempt. Both call sites + all saddle/ppgo test
   files + the census mirror were re-keyed in the SAME build (mirror-
   currency-with-production rule holds).
-</content>
+
+## 2026-08-14 build (tube_d2_fold)
+
+- TUBE D2-FOLD: reflection is parity-agnostic (same astroid+saddle formula;
+  saddle interpretation = lobe-swap 0<->pi for s1, branch-swap for s2).
+  CORRECTION to an earlier same-day claim: fold is NOT bit-exact across all
+  4 sign octants uniformly — only the negation-only octant pairs are
+  bit-exact (IEEE-754 sign flip is exact); the pi-theta reflection octant
+  pairs differ by ~1 ULP (the `pi - theta` subtraction rounds). Fundamental-
+  domain query (s1=s2=+) vs unfolded incumbent stays bit-exact (fold is
+  identity there); folded-arc vs the OLD reflected-arc serve is rtol 1e-6
+  only (independently integrated theta_to_s) — transitional test, not a
+  durable pin.
+- Professor CORRECTED handoff fact: select_chart runs tube FIRST, so saddle
+  tube is live+unfolded (6 arcs reachable) — the half-ring hole (F079)
+  exists on saddle too, not just astroid. Decision: SERVE-fold both
+  parities (closes F079 both, enables equality pin both); TRAINING reduces
+  astroid arcs 4->1 only (fundamental arc = caustic_theta in (pi/4,3pi/4),
+  the arc bracketing pi/2); saddle training stays at 6 arcs (F079 closes
+  via serve fold alone).
+- Simplifier: fold implemented tube-local via the production functions the
+  census already reuses -> census stays auto-current, no census code
+  change needed. _EXPECTED_ARCS {1:4,-1:6} left UNCHANGED (topology guard
+  in detect_caustic_structure is a separate gate from the training-slice
+  reduction).
+- ONE Coder WP owned both surrogate.py serve fold and surrogate_training.py
+  fundamental-arc selection — single head for "which arc is fundamental"
+  convention avoids a two-owner split-brain.
+- TRIAGE INS-1-001 (coder_fix): classify_fallthrough's tube branch had TWO
+  `_tube_serves` call sites; only one (the exterior-polar sibling) had been
+  threaded with the new y1_eig/y2_eig fold args — an internal miss, not a
+  design ambiguity. Generalizes: when a design adds args to a shared call,
+  grep ALL call sites of that function name, not just the one the brief
+  names.
