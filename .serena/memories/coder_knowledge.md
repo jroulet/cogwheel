@@ -734,3 +734,65 @@
   (71a7f73); the underlying off-axis interior-cusp gap this was meant to
   close is still open and needs a narrower, correctly-gated redesign, not
   a revival of this fallback.
+
+## 2026-08-13 builds (ppgo_interior_certificate, fold_exterior_ghost)
+
+- SERIES-COEFFICIENT PORT: when porting a reference derivation into the
+  shipping layer, reuse the module's existing primitives (`hessian()`,
+  `magnification()`) instead of transcribing the reference's own
+  constructions, then validate the port against the ALREADY-SHIPPED closed
+  form (`_series_coefficients` c1/c2 vs `saddle_coefficients`, agreed to
+  ~1e-14 over 46 images). Two shipped derivations of the same quantity are
+  a legitimate cross-check gate; a re-typed formula is not.
+- A CERTIFICATE MUST SELF-REFUSE WHERE ITS SERIES DIES:
+  `ppgo_error_estimate` returns None on `w_min <= 0` or any non-finite
+  mu/c3, so near-critical images (|mu| -> inf as rho -> 1) refuse by
+  construction instead of returning a small number. Measured cert ~5.7e6 at
+  rho=0.99 — it explodes long before c3 goes optimistic, which is why the
+  separate near-caustic leg could be dropped.
+- REFUSAL GUARDS GO AT THE ENTRY POINTS, NOT IN THE SHARED PRIMITIVE:
+  `len(images) != 4 -> refuse` landed at `fold_amplification`,
+  `fold_ppgo_correction` (falls back to raw ppGO) and
+  `channels.born_carrier_from_partition`; `_merging_fold_pair` was left
+  alone because its 5 consumers include a `_pearcey_cusp` disjunct that
+  tightening would silently flip. Generalizes the earlier
+  `_is_interior = len(images) >= 4` fix: REAL-IMAGE COUNT is the exact
+  interior/exterior discriminator for both parities. Exterior positive
+  parity = 2 real images and the merging pair there is COMPLEX, so
+  `_merging_fold_pair` returns the FAR pair and the Airy correction is
+  spurious. Interior 4-image paths stay byte-identical — a count guard is a
+  strict no-op where the count already matches.
+- BREAK AN IMPORT CYCLE BY HOISTING THE CONSTANT DOWNWARD: `operator`
+  cannot import `channels` (channels imports operator), so the shared ghost
+  gates `_GHOST_SEPARATION_MIN`=0.7 and `_GHOST_DECAY_IM_THRESHOLD`=0.4
+  were hoisted into `geometry` (foundational: stdlib + numba/numpy/scipy
+  only) and BOTH consumers bind from there. Preserve and assert any
+  derivation invariant the old site encoded (0.4 == _FARFIELD_WINDOW_RADIANS
+  / 5.0).
+- ABSOLUTE-FRAME vs t_min-FRAME CARRIER: an arm-ladder rung serves in the
+  ABSOLUTE frame — call `geometry.ghost_kernel` directly and add
+  `kernel * cmath.exp(1j*w*delay)` with a `+` sign and a NON-conjugated
+  tau_c. `channels.farfield_ghost_term` is the min-subtracted t_min-frame
+  variant and must never be reused for absolute-frame serving. Sign check:
+  Im(tau_c) > 0 non-conjugated gives |carrier| = exp(-w Im tau_c) DECAY;
+  the conjugate blows up.
+- EXCEPT ORDER ENCODES DECLINE vs REFUSE: catch specific-first —
+  `GhostAbsentError` (interior 4-image) is a DECLINE (fall through; interior
+  serve stays byte-identical), bare `GhostDomainError` is a REFUSE (return
+  None, never a zero ghost), `LensDomainError` last. The hierarchy is
+  GhostAbsentError < GhostDomainError < LensDomainError, so a reversed order
+  silently collapses three meanings into one.
+- A HANDOFF IS NOT A FIX: when the Inspector re-raises the SAME finding
+  because a routed fix was written to a handoff file but never applied,
+  break the loop by executing it yourself — permissible when the target is
+  PRE-EXISTING tests asserting already-landed physics (not certification of
+  your own new code) and the Inspector explicitly directs execution. Ground
+  every fixture edit in FRESH execution (image counts, pair gaps, ladder
+  values), never in the handoff's prose.
+- A GUARD THAT LANDS NEW PHYSICS INVALIDATES FIXTURE PREMISES, NOT ONLY
+  ASSERTIONS: after the fold refusal, fixtures labelled "off-axis interior"
+  measured 2-image EXTERIOR, and one class's premise (an interior on-axis
+  cusp source at gamma=0.5) was physically unsalvageable — no such source
+  exists. The repair is to re-derive the fixture from live geometry or
+  invert the test to the new truth, and to fix every docstring asserting the
+  dead premise.

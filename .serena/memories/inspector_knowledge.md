@@ -437,3 +437,43 @@
   acceptance-gate files directly (don't just diff-stat them); never trust
   the manifest, or an agent's claim that a signature/fixture skew was
   fixed, without a fresh pytest run reproducing green.
+
+## 2026-08-13 (ppgo_interior_certificate, fold_exterior_ghost — both PASS)
+
+- FIRST QUESTION FOR ANY GATE: *which object's error does this estimate
+  bound?* Four defects in one day were all the same shape — a check that
+  measures something other than the error it claims to bound (F069 the
+  estimate decayed while the true error stayed flat; F070 the clamp licence
+  keyed on the label; F074 the radius gate bounded the error of the object
+  the rung REPLACED; F076 the resolution gate read the wrong image pair).
+  A gate is only reviewable against the SERVED object's own asymptotics
+  plus a calibration run against an F069-safe oracle; "it never
+  over-certified on our grid" is not an answer.
+- REAL-PAIR BLINDNESS: any gate computing min-gap / xi / resolution /
+  delta_tau over REAL images is structurally blind exterior to a caustic,
+  where the merging pair is COMPLEX (and saddle mirror pairs give
+  delta_tau exactly 0). Flag it on sight; the exact discriminator is the
+  real-image COUNT (4 interior / 2 exterior, both parities).
+- MIRROR FIDELITY: a census / training mirror of a production rung must be
+  a FAITHFUL mirror — same predicate, same estimate call, and the safety
+  constant BOUND from the production module rather than re-typed — and the
+  superseded machinery must be gone with zero dangling refs. Check the
+  mirror in the same review as the rung; it is the classic laggard.
+- HANDOFF-ONLY ROUTING SILENTLY NO-OPS: a finding routed to another agent
+  can come back unfixed with the file untouched. Confirm the target file is
+  actually modified (` M` in status) as well as green; when the same
+  finding survives a second pass, direct execution explicitly rather than
+  re-routing a third time.
+- A PINNED FIXTURE LITERAL AT A PHYSICS BOUNDARY IS SELF-GUARDING: a pinned
+  source that must stay 4-image is not a silent-strand risk when its OWN
+  test goes red the moment it leaves that domain (the fold refuses ->
+  assertIsNotNone fails). Domain boundaries are physics, not movable
+  constants — don't flag them alongside genuine stale pins.
+- CONTAMINATED-BUT-CONSERVATIVE TRAINING ARTIFACTS ARE A DRIVER RETRAINING
+  ADVISORY, NOT A CORRECTNESS DEFECT: when a physics fix retroactively
+  invalidates labels drawn through the defective path, decide the DIRECTION
+  first — if the contamination can only cost coverage/perf and can never
+  over-certify, carry it to the driver as a retraining advisory instead of
+  blocking the build. Bound the contaminated set exactly (parity x band x
+  the w-nodes that actually enter the affected band); a producer whose grid
+  tops out below the band is provably CLEAN.

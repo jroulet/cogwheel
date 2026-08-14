@@ -533,3 +533,36 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   switch-saturation delay from a phase/demod delay, compute `switch` from
   one delay value but pass a DIFFERENT `critical_delay` to this function
   for the demod carrier — the two roles are independently steerable.
+
+## 2026-08-13 (fold_exterior_ghost review + ppGO interior certificate)
+
+- EXTERIOR POSITIVE PARITY HAS EXACTLY 2 REAL IMAGES (a Morse-0 minimum and
+  a Morse-1 saddle) and NO genuine merging pair — the pair that merges at
+  the caustic has gone COMPLEX. `_merging_fold_pair` therefore returns the
+  FAR pair there and the Airy fold correction is spurious; the correct
+  contract is refuse. Interior (4 real images) is unaffected. This makes the
+  REAL-IMAGE COUNT the exact interior/exterior discriminator for both
+  parities — no radius, rho or gap test is equivalent.
+- GHOST CARRIER SIGN IS PHYSICALLY DISCRIMINATING: served =
+  `geometric_amplification + ghost.kernel * exp(1j*w*tau_c)` with tau_c NOT
+  conjugated. With Im(tau_c) >= 0.4 > 0 that gives |carrier| =
+  exp(-w Im tau_c), a decay; the conjugate would give exp(+w Im tau_c), a
+  blow-up. The sign pin is an internal-consistency identity (no external
+  oracle needed) and it locks the convention against refactors.
+- ADMISSION GATES FOR A RUNG WHOSE VALUES BECOME TRAINING LABELS MUST BE
+  FREQUENCY-INDEPENDENT (ruling, 2026-08-13): a w-dependent floor re-opens
+  the train/serve skew that build 8h-d1 retired, because the trainer and the
+  server see the rung at different w. Two config-geometry gates
+  (Im(tau_c) >= 0.4 decay, min|x_a - x_c| >= 0.7 separation) partitioned the
+  domain with zero overshoot, so no floor was needed. NOTE: on the measured
+  grid the separation gate never bound (2.0-3.6 >> 0.7) — the decay gate was
+  the sole active discriminator, and admission tracked Im(tau_c), not the
+  |y|/r_caustic band it correlates with.
+- ON A TRUE CAUSTIC INTERIOR THE GHOST IS EXACTLY ZERO (`GhostAbsentError`)
+  — an interior rung must carry no ghost term, and an interior config is the
+  right place to assert that the ghost machinery declines rather than
+  returning a small number.
+- REVIEW SCOPE FOR A NEW ARM RUNG: fast tests pin STRUCTURE, DECISION and
+  SIGN only; the value-vs-oracle accuracy sweep (1e-2 arm bar over the
+  serving band) is the expensive operator ship gate, reported not committed.
+  Do not ask a fast suite to carry the accuracy certificate.

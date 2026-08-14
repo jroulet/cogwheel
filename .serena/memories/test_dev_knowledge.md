@@ -534,3 +534,52 @@
   i.e. the reconstruction is gauge-independent bit-exactly) — pick a
   different mutation (e.g. a wrong switch/kernel term) to give the
   self-falsification teeth on such rungs.
+
+## 2026-08-13 (ppgo_interior_certificate, fold_exterior_ghost)
+
+- PAIR THE FRAMES BEFORE SCORING ANYTHING (standing ritual; two phantom
+  errors on one day — a 6e-2 and a 130%, both fake, both from comparing
+  across demodulation frames). Before ANY relative-error claim from a new
+  harness, run a PAIRING GATE: score `operator.geometric_amplification`
+  against the oracle at a KNOWN-RESOLVED config (e.g. gamma=0.5,
+  y=(1.8,0.9), w=40) and require < 1e-2. Only then trust the harness.
+- F069-SAFE ORACLE RECIPES: positive parity — the mass-sheet/eigenframe
+  reconstruction (`operator._mass_sheet_map`) fed to `_schwinger
+  .f_schwinger`; at kappa=0, beta=0 that collapses to `f_schwinger(w,
+  source, gamma)` DIRECTLY. Saddle parity — `_saddle_mass_sheet_map` +
+  `f_schwinger` (validated to 0.0e0 including kappa=0.2). NEVER use
+  `F_op` above w=60 (self-oracle), and NEVER use
+  `channels.evaluate().exact_total` as a reference for arm outputs without
+  first proving the t_min pairing — it lives in the min-subtracted frame.
+  Keep oracle points at w <= 60 to stay on the exact DD path (>60 is
+  mpmath, >150 hard-refuses).
+- A MUTATION TEST NEEDS A REGIME WHERE THE MUTATED TERM IS ABOVE TOLERANCE:
+  ghost sign teeth (minus vs plus) are INERT at the serve band because the
+  term decays as exp(-w Im tau_c) (~1e-23 at w~90) — run them at w=12 where
+  the term is ~4e-4. Conjugation teeth resolve at any w (they flip decay
+  into growth). Check the magnitude of what you are mutating before
+  believing a passing teeth test.
+- PROVE A GUARD LOAD-BEARING WITHOUT FABRICATING PHYSICS: a "4-image spoof"
+  (2 real + 2 decoy images) dies on the Morse census guard in
+  `geometric_amplification` (signed-magnification sum != sign(detA)-1 ->
+  LensDomainError). Instead monkeypatch the PRIMITIVE the guard consumes
+  (`_merging_fold_pair` returning non-None on a genuine exterior census) so
+  the shipping code path stays intact and the input stays physical.
+- DERIVE DOMAIN FIXTURES FROM THE LIVE CLOSED FORM: place sources as
+  `rho * r_caustic(gamma, theta) * [cos, sin]` (rho<1 interior/4-image,
+  rho in [0.9,0.99] near-caustic, rho>1 exterior/2-image) — a hand-picked
+  (gamma, y) that "looks interior" is routinely 2-image exterior and
+  surfaces as a confusing shape mismatch, not a clear failure.
+- MONOTONE-TOWARD-REFUSAL GUARDS ARE BACKWARD-COMPATIBLE BY ARGUMENT:
+  a new `count != 4 -> refuse` guard cannot flip None -> non-None, and
+  existing "fires" tests all use 4-image configs where it is a no-op — so
+  the audit is a grep for the fixture domain plus one confirming run, not a
+  full re-derivation. Still run the neighbour suites: the argument covers
+  assertions, not fixture premises.
+- TEST-COUNT CHANGES RESHUFFLE XDIST `--dist loadfile` SCHEDULING AND CAN
+  EXPOSE LATENT MODULE-GLOBAL LEAKS (F078, measured): adding/removing tests
+  changes which files share a worker, and a suite that installs a PROCESS
+  GLOBAL (e.g. the Pearcey table) then leaks it into an unrelated file that
+  happens to land on the same worker. Any suite installing a process global
+  owes a save/restore at MODULE scope. A "new" failure that appears only
+  under xdist after a count change is this, not a physics regression.

@@ -1,7 +1,5 @@
 {
-  "last_commit": "084ab7fe16ff5632be796c489f01a79c581458b3",
-  "last_run": "2026-08-13T09:32:50+00:00",
-  "status": "skipped_in_dag",
-  "skip_reason": "SDK_SKIP_TIDIER set",
-  "style_handled_by": "post-commit advisory; run /tidy"
+  "last_commit": "55373b262e9bb1d188e4f112f36a1bc6230d8b0c",
+  "last_run": "2026-08-14T03:53:56+00:00",
+  "status": "completed"
 }

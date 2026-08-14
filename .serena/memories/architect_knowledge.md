@@ -290,6 +290,36 @@
   core routine parameterized by ordinate name so sibling fields keeping the
   old semantics (e.g. Tube/Lobe/FarField's genuine arc-length `theta_to_s`)
   are provably unaffected.
+- A GATE MUST BOUND THE ERROR OF THE OBJECT IT ADMITS (dominant defect class
+  — four instances in one day, 2026-08-13: F069 the estimate decayed while
+  the true error stayed flat; F070 the clamp licence keyed on the LABEL, not
+  the served value; F074 the radius gate bounded the error of the object the
+  rung REPLACED; F076 the resolution gate read the wrong image pair). When
+  planning any admission gate, name the served quantity whose error it
+  bounds, DERIVE the estimate from that object's own asymptotics (e.g. the
+  c3 series term for a ppGO serve), and calibrate it against an F069-safe
+  oracle. "Conservative in practice" is not evidence — a gate keyed on a
+  different object is wrong even where it happens to pass.
+- REAL-IMAGE COUNT IS THE ONLY CAUSTIC DISCRIMINATOR THAT SURVIVES THE
+  EXTERIOR: outside a caustic the merging pair is COMPLEX, so any gate
+  computing min-gap / xi / resolution / delta_tau over REAL images is
+  structurally blind there (F073 xi_min, F075 fold pair, F076 delta_tau,
+  saddle mirror pairs whose delta_tau is exactly 0). Use
+  `real_mask.sum() == 4` (interior) vs `== 2` (exterior) — exact for BOTH
+  parities, free (already on the partition), 0/2400 disagreements vs the
+  closed-form caustic. Never plan a rho<=1 or origin-radius interior test.
+- FREQUENCY-INDEPENDENT ADMISSION GATES FOR ANY RUNG WHOSE VALUES BECOME
+  LABELS (Professor ruling 2026-08-13, confirmed by measurement): a
+  w-dependent floor on a rung that trains tables re-opens the train/serve
+  skew build 8h-d1 retired. Gate on configuration geometry only (e.g.
+  Im(tau_c)>=0.4 and min|x_a-x_c|>=0.7 for the ghost rung); if accuracy
+  still seems to need a w floor, the rung is mis-scoped, not under-gated.
+- A PHYSICS FIX'S CONSUMER-SUITE SWEEP MUST BE COMPLETE BEFORE THE NEXT
+  LAUNCH (2026-08-13, cost: two builds stranded at the tree gate): the F072
+  guard fix missed 1 of 5 consumer suites; the F074 fix had fallout in
+  suites outside the eight swept. The full tree gate IS the sweep — run it
+  BEFORE launching the next build whenever production semantics changed,
+  never as a post-plan discovery.
 
 
 ## Polar re-chart (2026-08-07)
@@ -564,3 +594,36 @@
   ladder-served gap — NEVER route a ghost-gate refusal into
   `_subdivide_farfield_tile`, since the refusal is a GEOMETRIC boundary
   (near-cusp), not a resolution problem that subdivision could cure.
+
+## 2026-08-13 builds (ppgo_interior_certificate, fold_exterior_ghost)
+
+- PPGO_INTERIOR_CERTIFICATE: re-gated the interior fold-ppGO rung in
+  `likelihood.py` onto TWO legs — (1) exact interior predicate
+  `int(geom.real_mask.sum()) == 4` for both parities, replacing the rho<=1
+  leg AND the saddle-only `!=4` guard; (2) a new
+  `geometry.ppgo_error_estimate(real_images, source, matrix, w_min)` =
+  `sum_a sqrt|mu_a| * |c3_a| / w_min**3`, admitted at
+  `est * _PPGO_INTERIOR_SAFETY(=2.0) <= CERTIFICATION_BAR`. The xi/fold-pair
+  leg was DROPPED BY MEASUREMENT (all 78 interior configs failed it while
+  the certificate admitted 230 band rows at max true err 4.8e-5). Design
+  lesson: when a rung's own asymptotic series is available, the certificate
+  is a series term — not a geometric proxy. On true interior the ghost is
+  exactly zero (GhostAbsentError), so the rung carries NO ghost term.
+- FOLD_EXTERIOR_GHOST: two-sided. (A) fold refusal `len(images) != 4` placed
+  at the three ENTRY POINTS (`fold_amplification`, `fold_ppgo_correction`,
+  `channels.born_carrier_from_partition`), NEVER inside the shared
+  `_merging_fold_pair` primitive — it has 5 consumers and tightening it
+  would flip an unrelated `_pearcey_cusp` disjunct. GUARD PLACEMENT RULE:
+  put a new refusal at the consumers you intend to change, not in the shared
+  primitive they happen to share. (B) new `_ghost_ppgo_amplification` rung
+  in `_uniform_arm_value`, ordered fold -> ghost+ppGO -> cusp (interior fold
+  first, cusp catch-all last). Measured acceptance (45 oracle points): gates
+  partition cleanly, max admitted rel_err 1.98e-6 against a 1e-2 arm bar,
+  zero overshoot, so no w-floor was needed. The DECAY gate was the sole
+  active discriminator on that grid; admit/refuse tracked Im(tau_c), NOT the
+  |y|/rc label — never describe such a gate by the label band it correlates
+  with.
+- DEFERRED-TRAINING MIRRORS ARE PART OF THE SAME FIX: `surrogate_census`
+  mirrored the RETIRED xi gate for a whole build after `likelihood.py` moved
+  to the c3 certificate. Plan the mirror re-gate inside the build that
+  changes the production rung, or it lands a build late as a laggard finding.
