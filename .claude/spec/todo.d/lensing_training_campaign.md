@@ -24,6 +24,13 @@ depends_on: [lensing_find_cusps_wrap_bug, lensing_tiling_census_node_budget, len
   certified_ppgo_map.npz (`train_ppgo_map.py --production`) — 32
   positive-parity exterior cells were measured against the contaminated
   fold-arm oracle (over-conservative direction; re-measure, re-hash);
+  BINDING (F080, measured 2026-08-14): the retrain MUST replace the
+  one-center-config-per-cell certification with edge-biased,
+  worst-over-cell sampling (gamma near band lo, rho near the caustic
+  side, transverse angles) — a shipped CERTIFIED saddle cell was 3.5
+  orders over the bar at its band-edge corner while its center passed;
+  and the F080 fan asymmetry (mirrored fan angles 2.4x apart under exact
+  D2) must be resolved before the retrain trusts the fan;
   (b) replace the saddle cusp-arm coverage placeholder 0.0
   (`measure_saddle_cusp_arm_coverage.py` or the retirement path from the
   coverage sweep — see FINDINGS F079 body: the angular-coverage concept

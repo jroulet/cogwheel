@@ -276,29 +276,6 @@ Tag conventions:
   that requirement becomes checkable instead of aspirational.
 
 
-- **`scripts/calibrate_saddle_exterior_certificate.py` no longer imports —
-  its module docstring's "at HEAD" claim is now false** `[housekeeping]` —
-  the script (added in the `a4ba536` driver calibration commit) imports
-  `W_FLOOR, _exact_total_w, _min_delta_tau, _polar_source, _tier1_serve`
-  from `cogwheel.tests.test_lensing_saddle_tier1_accuracy`; that test module
-  was deleted by the very next commit (`1c90b3a`, build
-  `symmetry_tie_c3_admission`), which retired the rho-floor gate the script
-  was calibrating and shipped `test_lensing_saddle_serve_gate.py` in its
-  place. The script's own docstring (lines ~24-33) still asserts it is
-  reusing "pairing-validated production-shaped plumbing... at HEAD" and
-  that the (also since-deleted) `scripts/measure_saddle_eta_floor.py` is
-  the one that's stale — both claims are now backwards. The script already
-  did its job once (it produced the committed
-  `scripts/calibration_pilot_followup.json`, cited as calibration
-  provenance in SPEC.md's tier-1 saddle row), so this is not blocking
-  anything today, but the script cannot be re-run as committed. Librarian
-  scope excludes code edits (this is a `scripts/*.py` import, not a doc/spec
-  surface) — flagging for whoever next touches saddle calibration: repoint
-  the import to `test_lensing_saddle_serve_gate.py`'s equivalent helpers
-  (names likely changed along with the gate) or inline the needed helpers,
-  and correct the docstring's stale HEAD-state claims.
-
-
 - **CAUSTIC-RELATIVE COORDINATES — retire every prior-box length from the
   serving design** `[→ spec]` — the coverage map's regions are carved by
   `ANNULUS_INNER_RADIUS = 3.0`, inherited from the PRIOR BOX half-width. F036
@@ -3334,15 +3311,30 @@ Tag conventions:
   CERTIFIED MAP'S SADDLE rho<1 GUARD** `[→ spec]` — the artifact HOLDS
   certified saddle rho<0.5 cells (w_cert 27.7/19.2/15.9 by gamma band;
   independently reproduced at 16-28) but `CertifiedPpgoMap.w_cert`
-  hard-refuses all saddle rho<1 as F073-era defense-in-depth. With the c3
-  admission serving the connecting region, decide by measurement whether
-  the guard can be narrowed to what the F073 blindness actually required
-  (the deltoid-straddling annulus), letting the map's own cells serve as
-  a second certification layer. Re-validate the cells against the saddle
-  oracle first (they were trained pre-F075; connecting-region labels drew
-  from w<=58 = the safe DD band, so contamination is not expected — verify,
-  do not assume). Cheap path priced 2026-08-14; "requires retraining" was
-  a corrected misstatement.
+  hard-refuses all saddle rho<1 as F073-era defense-in-depth.
+
+  RE-VALIDATED 2026-08-14 (driver pilot, F080 — "verify, do not assume"
+  was the right call): the three certified cells are NOT equal.
+  - gamma [1.157, 1.339]: CLEAN (5/5 configs, sup 8.7e-5) — eligible for
+    per-cell relaxation now.
+  - gamma [1.339, 1.550]: MARGINAL (1.0-1.4e-4 at the w_cert node only,
+    under bar by w=27.7) — relax only with a small w_cert raise or after
+    re-measurement; decide from a denser scan of that node.
+  - gamma [1.100, 1.157]: CONTAMINATED — sup err 4.49e-1 (3.5 orders over
+    bar) at the lower-gamma-edge x transverse-angle corner; would not
+    re-certify at its own center today (fan-worst 1.21e-4). STAYS REFUSED
+    until the 7a retrain re-measures it with edge-biased, worst-over-cell
+    sampling (the F080 sampling-blindness fix).
+
+  Scope of the build therefore: per-cell relaxation keyed on re-validation
+  evidence (a stored or asserted re-validation stamp, not a blanket parity
+  x rho predicate), serving the clean cell(s) as the second certification
+  layer; the F073 deltoid-straddling-annulus reasoning stays in force for
+  everything unvalidated. The F080 fan-asymmetry question (mirrored fan
+  angles disagree 2.4x under exact D2 symmetry) must be answered before
+  the retrain trusts the fan — route it to the Professor in this build or
+  the 7a brief, whichever runs first. Full re-validation is cheap (~60 s
+  training fidelity, ~10 min corner-refinement, measured).
 
 
 - **NEXT-SESSION ORDER 7a/7 — THE TRAINING CAMPAIGN (cost estimate FIRST,
@@ -3366,6 +3358,13 @@ Tag conventions:
   certified_ppgo_map.npz (`train_ppgo_map.py --production`) — 32
   positive-parity exterior cells were measured against the contaminated
   fold-arm oracle (over-conservative direction; re-measure, re-hash);
+  BINDING (F080, measured 2026-08-14): the retrain MUST replace the
+  one-center-config-per-cell certification with edge-biased,
+  worst-over-cell sampling (gamma near band lo, rho near the caustic
+  side, transverse angles) — a shipped CERTIFIED saddle cell was 3.5
+  orders over the bar at its band-edge corner while its center passed;
+  and the F080 fan asymmetry (mirrored fan angles 2.4x apart under exact
+  D2) must be resolved before the retrain trusts the fan;
   (b) replace the saddle cusp-arm coverage placeholder 0.0
   (`measure_saddle_cusp_arm_coverage.py` or the retirement path from the
   coverage sweep — see FINDINGS F079 body: the angular-coverage concept

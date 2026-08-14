@@ -23,10 +23,14 @@ optimistic).  Here ``ratio < 1`` means the certificate is OPTIMISTIC
 fraction to 0%.
 
 ORACLE / SERVE PLUMBING (repo rule: oracles must call shipping code).
-The serve, oracle, and geometry helpers are REUSED by import from
-``cogwheel/tests/test_lensing_saddle_tier1_accuracy.py`` (``_polar_source`` /
-``_tier1_serve`` / ``_exact_total_w`` / ``_min_delta_tau``) -- the
-pairing-validated production-shaped plumbing.  The eta-floor scan script
+The serve, oracle, and geometry helpers (``_polar_source`` /
+``_tier1_serve`` / ``_exact_total_w`` / ``_min_delta_tau``) are INLINED
+below as thin callers of production code (``caustic_geometry``,
+``ChangRefsdalChannels.evaluate().exact_total``, ``reconstruct_farfield``)
+-- copied verbatim from the pairing-validated tier-1 accuracy suite
+(``test_lensing_saddle_tier1_accuracy.py``, deleted at HEAD; its successor
+``test_lensing_saddle_serve_gate.py`` does not expose them).  The eta-floor
+scan script
 ``scripts/measure_saddle_eta_floor.py`` mirrors the same helpers but is NOT
 importable at HEAD: it imports ``_SADDLE_TIE_EPS`` from
 ``cogwheel.lensing.likelihood``, which does not exist there (the eta build
@@ -71,15 +75,92 @@ import time
 import numpy as np
 
 from cogwheel.lensing.chang_refsdal import geometry
+from cogwheel.lensing.chang_refsdal.channels import (
+    ChangRefsdalChannels, FARFIELD_KERNEL_SUM, reconstruct_farfield)
 from cogwheel.lensing.chang_refsdal.operator import RHO_END
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
 from cogwheel.lensing.likelihood import _saddle_farfield_analytic_serves
-from cogwheel.lensing.ppgo_map import caustic_rho
-# Production-shaped serve/oracle helpers (see module docstring for why the
-# eta-floor scan script cannot be the import source at HEAD).
-from cogwheel.tests.test_lensing_saddle_tier1_accuracy import (
-    W_FLOOR, _exact_total_w, _min_delta_tau, _polar_source, _tier1_serve)
+from cogwheel.lensing.ppgo_map import caustic_geometry, caustic_rho
+
+#: Cheap-band dimensionless frequency floor for the certified population
+#: (matches the deleted tier-1 accuracy suite): the whole band
+#: [W_FLOOR, w_ceil <= 60] stays inside the double-double Schwinger engine
+#: domain, so every exact oracle eval is ~0.2 s.
+W_FLOOR = 8.0
+
+
+# ----------------------------------------------------------------------
+# Production-shaped serve/oracle helpers, inlined verbatim from the
+# deleted ``cogwheel/tests/test_lensing_saddle_tier1_accuracy.py`` (thin
+# callers of shipping code; see module docstring for provenance and for
+# why the eta-floor scan script cannot be the import source at HEAD).
+# ----------------------------------------------------------------------
+
+def _polar_source(rho: float, angle: float, gamma: float,
+                  *, kappa: float = 0.0) -> np.ndarray:
+    """Build a source position from caustic-relative rho and polar angle.
+
+    Uses the ISOTROPIC max-reach gauge (``ppgo_map.caustic_geometry``) --
+    the SAME gauge the production ``caustic_rho`` converter uses to
+    compute the gate's rho argument -- so a source built at ``rho=R``
+    satisfies ``caustic_rho(gamma, |y|, kappa) == R`` by construction (up
+    to floating point).
+
+    Raises ``geometry.LensDomainError`` if ``caustic_geometry`` cannot
+    place a caustic reach for ``gamma``/``kappa``.
+    """
+    reach, _direction = caustic_geometry(gamma, kappa=kappa)
+    radius = rho * reach
+    return radius * np.array([math.cos(angle), math.sin(angle)])
+
+
+def _exact_total_w(w: np.ndarray, gamma: float, y,
+                   *, beta: float = 0.0, kappa: float = 0.0) -> np.ndarray:
+    """Exact amplification total in the min-relative frame (engine oracle).
+
+    Independent of the analytic serve path: drives the exact Schwinger
+    engine via ``ChangRefsdalChannels.evaluate``.
+    """
+    ch = ChangRefsdalChannels(w)
+    ch.reset()
+    partition = ch.evaluate(gamma=gamma, y=(float(y[0]), float(y[1])),
+                            beta=beta, kappa=kappa)
+    return partition.exact_total
+
+
+def _tier1_serve(w: np.ndarray, gamma: float, y,
+                 *, beta: float = 0.0, kappa: float = 0.0):
+    """Tier-1 zero-envelope FARFIELD_KERNEL_SUM reconstruction.
+
+    Mirrors ``_saddle_farfield_analytic`` EXACTLY: builds the geometry
+    partition, then reconstructs with an all-zero residual envelope under
+    the ``FARFIELD_KERNEL_SUM`` tag.  Returns ``(geom, F_serve)`` where
+    ``F_serve`` is the served amplification total across ``w``.
+    """
+    geom = ChangRefsdalChannels(w).geometry_partition(
+        gamma=gamma, y=(float(y[0]), float(y[1])), beta=beta, kappa=kappa)
+    envelope = np.zeros(w.shape, dtype=complex)
+    _kernels, total = reconstruct_farfield(
+        w, envelope, geom.delays, geom.saddle_kernels, geom.real_mask,
+        FARFIELD_KERNEL_SUM, geom.t_min)
+    return geom, total
+
+
+def _real_delays(geom) -> np.ndarray:
+    """Fermat delays of the REAL images (masked by ``geom.real_mask``)."""
+    real = np.asarray(geom.real_mask, dtype=bool)
+    return np.asarray(geom.delays)[real]
+
+
+def _min_delta_tau(geom) -> float:
+    """Narrowest positive pairwise gap between REAL image delays."""
+    real = np.sort(_real_delays(geom))
+    if len(real) < 2:
+        return 0.0
+    gaps = np.diff(real)
+    positive = gaps[gaps > 0]
+    return float(np.min(positive)) if len(positive) else 0.0
 
 #: Delay gaps at or below this are symmetry ties (mirror pair, delta_tau == 0
 #: exactly up to roundoff), not resolvable separations.  Defined locally: the

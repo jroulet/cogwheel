@@ -4365,3 +4365,47 @@ Genuine (speed-only) gap mapped by the same probe: gamma >= ~0.45,
 w in [tube DD cap (33.1 at 0.5 / 18.3 at 0.7), 49): no chart, cusp arm
 serves 2-10%, draws fall to the exact engine — correct but slow; a table
 target for the campaign.
+
+## F080
+**The certified ppGO map certifies each cell from ONE center config — and a
+band-edge corner of a shipped CERTIFIED saddle cell is 3.5 orders over the
+bar (2026-08-14, driver pilot, HEAD 3bca34a).**
+
+`ppgo_map.build_map -> _measure_cell` samples a single config per cell
+(gamma_center = sqrt(lo*hi), rho_center, 9-angle pi/8 fan) and stamps
+`w_cert` from that alone. Pilot re-validation of the three CERTIFIED saddle
+`rho < 0.5` cells (5 uniform in-box 2-image configs/cell, training-recipe
+ppGO vs exact Schwinger oracle, pairing gate 1.15e-7 green first, 8 nodes
+on [w_cert, 58]):
+
+- gamma [1.100, 1.157] x rho [0, 0.5], shipped w_cert 27.721: sup err
+  **4.49e-1** at (gamma 1.1112, rho 0.301, angle +1.366) — 3.5 orders over
+  the 1e-4 bar, still 4.6e-2 at w = 58. Localized to the lower-gamma-edge x
+  transverse-angle x rho~0.3-0.5 corner; err falls 4.6e-1 -> 6e-3 -> 8e-5
+  as gamma moves 1.1112 -> center -> 1.155. Physics: the deltoid lobes
+  swell as gamma -> 1.1+ (the adjacent [1.0, 1.1] band is BEYOND_WALL), so
+  the corner sits near a lobe — the exact F073 ghost-blind regime. The cell
+  would not even re-certify at center today: the training's own fan gives
+  worst 1.21e-4 > bar at HEAD.
+- gamma [1.157, 1.339]: clean, 5/5 configs, sup 8.7e-5.
+- gamma [1.339, 1.550]: marginal, 2/5 configs 1.0-1.4e-4 at the w_cert node
+  only, under bar by w = 27.7.
+
+TWO defects, distinct from F075's label contamination: (1) SAMPLING
+BLINDNESS — one center sample cannot bound a cell whose physics varies
+across it; certification must be worst-over-cell (edge-biased: gamma near
+band lo, rho near the caustic side, transverse angles), or the retrained
+map re-ships the same hole. Binding on 7a's `train_ppgo_map.py
+--production` retrain. (2) FAN ASYMMETRY — the center fan's mirrored
+angles disagree (+1.178: 1.21e-4 vs mirror: 4.99e-5, 2.4x) despite exact
+D2 symmetry of the amplification; either the fan construction or the
+training gauge breaks the symmetry. An equality pin across fold images
+(the owner's symmetry directive, todo `lensing_tube_d2_fold`) would have
+caught this at authoring time. Investigate before the retrain trusts the
+fan.
+
+Guard consequence (todo 5/7): do NOT relax the `w_cert` saddle `rho < 1`
+hard-refusal wholesale. Relax per-cell on re-validation evidence — today
+that is [1.157, 1.339] only; [1.100, 1.157] stays refused until the
+edge-biased retrain re-measures it. Full re-validation is cheap (~60 s at
+training fidelity; corner-refinement ~10 min single-process).
