@@ -211,6 +211,20 @@ if [[ ! -x "$PYBIN" ]]; then
   exit 1
 fi
 
+# Overlap guard (2026-08-14): a failed build can legitimately keep running
+# its Phase-3 memory consolidation for minutes after its terminal event
+# fires, holding the project's SSE serena port. Launching a second build
+# then SHARES the old build's serena, and the old build's teardown kills
+# it under the new one. Detect and warn loudly (not fatal: the new build
+# falls back to built-in tools and its SerenaManager can restart, but the
+# operator should know the race exists).
+_LIVE_ORCH="$(pgrep -f "${REPO_ROOT}/\.claude/sdk/build\.py build" 2>/dev/null | head -3 | tr '\n' ' ')"
+if [[ -n "${_LIVE_ORCH// /}" ]]; then
+  echo "WARNING: a same-repo orchestrator is STILL RUNNING (PID(s) ${_LIVE_ORCH}) —" \
+       "likely post-failure Phase 3. The new build will share (and may lose)" \
+       "its serena. Prefer waiting for it to exit." >&2
+fi
+
 # Daemon hygiene: reap THIS project's stale serena/pyright chains before
 # spawning a new crew — every non-graceful client death leaves a stdio pair
 # re-indexing the repo forever (16 serena + 16 pyright had accumulated by
