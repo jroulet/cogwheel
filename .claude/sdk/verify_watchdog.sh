@@ -109,6 +109,28 @@ ok "quiet build survives a DISABLED staleness check" "alive" \
    "$(kill -0 "$FAKE" 2>/dev/null && echo alive || echo dead)"
 kill -9 "$WD7" "$FAKE" 2>/dev/null; wait "$WD7" "$FAKE" 2>/dev/null
 
+echo "=== 8. GROUP KILL: a setsid-launched build's GRANDCHILD must die ==="
+# The leak this guards (2026-08-13): a killed build's crew agents orphan
+# their uv -> serena -> pyright chains because a parent-walk kill misses
+# grandchildren and SIGKILL reparents them to init. launch_build.sh now
+# starts the orchestrator under setsid; the watchdog must kill the GROUP.
+L="$W/t8.log"; : > "$L"
+setsid bash -c "bash -c 'sleep 300' & echo \$! > '$W/t8.gc'; \
+  exec -a '$_ORCH_ARGV $L' sleep 300" &
+sleep 1
+PO=$(pgrep -f -- "$_ORCH_ARGV $L" | head -1)
+GC=$(cat "$W/t8.gc" 2>/dev/null || echo "")
+ok "probe setup (orchestrator + grandchild exist)" "yes" \
+   "$([ -n "$PO" ] && [ -n "$GC" ] && kill -0 "$GC" 2>/dev/null \
+      && echo yes || echo no)"
+bash "$WD" "$L" 3 "$PO" >/dev/null 2>&1; WRC=$?
+ok "watchdog exit code (2=killed)" 2 "$WRC"
+ok "orchestrator dead" "dead" \
+   "$(kill -0 "$PO" 2>/dev/null && echo alive || echo dead)"
+ok "GRANDCHILD dead (the 2026-08-13 leak)" "dead" \
+   "$(kill -0 "$GC" 2>/dev/null && echo alive || echo dead)"
+kill -9 "$PO" "$GC" 2>/dev/null
+
 echo
 echo "  $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

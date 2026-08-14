@@ -141,7 +141,14 @@ byte-identical-repeat bug and will "pass" against a fix that does nothing.
 - `launch_build.sh <slug> <prompt_file>` — ONLY sanctioned build launch.
   Attaches watchdog; prints log path + post-build sequence.
 - `watchdog.sh <log> [stale_s] [pid]` — auto-attached by launcher; kills
-  orchestrator subtree on stall. Do NOT invoke by hand.
+  the orchestrator's process GROUP on stall (setsid launch). Do NOT
+  invoke by hand.
+- `reap_stale_serena.py` — kill THIS project's orphaned serena/pyright
+  chains (dry-run default; `--apply` to kill; `--count-live` prints the
+  live same-project instance count). Run the dry-run at session start and
+  before heavy work; `launch_build.sh` runs `--apply` pre-launch itself.
+  Never widen its project discrimination — the box runs other projects'
+  builds with their own serena.
 - `stale_alarm.sh <log> [stale_s]` — alert on silence, no kill.
 - `verify_watchdog.sh` — ~12 s probe after touching watchdog/launcher code.
 - `run_full_suite.sh [log]` — fast gate: collect-count, xdist (`-n 8

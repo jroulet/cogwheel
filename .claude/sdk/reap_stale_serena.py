@@ -9,11 +9,18 @@ every commit. The accumulation pinned swap and read as "serena suddenly
 became unreasonably slow" / mystery 240s timeouts. A 21-hour-stale quintet
 traced to one killed build's five crew agents.
 
-Discrimination (ALL must hold to reap):
-  * process cwd or --project arg matches THIS project root;
-  * the process is ORPHANED (ppid == 1) or its parent is dead;
-  * older than --min-age-hours (default 10);
-  * not in the explicit --protect list.
+Discrimination (ALL must hold to reap; judged per wrapper->server CHAIN at
+its root, and chains are reaped whole):
+  * root cwd or --project arg matches THIS project root;
+  * the root is ORPHANED (ppid == 1) or its parent is dead;
+  * root older than --min-age-hours (default 10);
+  * no chain member in the explicit --protect list;
+  * no chain member holds an ESTABLISHED TCP connection — an SSE server a
+    live client is attached to is serving, whatever its parentage.
+Chain-level verdicts replace the 2026-08-14 live-child rule: judging
+members separately made an orphaned pair immortal (wrapper kept for its
+live child, child kept for its live parent), which was exactly the leak
+shape this script was born to clear.
 Servers of OTHER projects are never touched (multi-project box: e.g. a gw
 build's serena must survive a cogwheel reap).
 
@@ -66,6 +73,14 @@ def _alive(pid):
         return True
 
 
+def _established(pid):
+    """True if the process holds any ESTABLISHED TCP connection."""
+    out = subprocess.run(['lsof', '-a', '-p', str(pid), '-iTCP',
+                          '-sTCP:ESTABLISHED', '-t'],
+                         capture_output=True, text=True).stdout
+    return bool(out.strip())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--project', default=None,
@@ -75,6 +90,11 @@ def main():
     parser.add_argument('--protect', type=int, nargs='*', default=[])
     parser.add_argument('--apply', action='store_true',
                         help='Actually kill (default: dry-run).')
+    parser.add_argument('--count-live', action='store_true',
+                        help='Print the number of live serena server '
+                             'instances for THIS project and exit (one '
+                             'instance = one wrapper/server chain, counted '
+                             'by its root process).')
     args = parser.parse_args()
 
     project = args.project or os.path.abspath(
@@ -83,34 +103,68 @@ def main():
     min_age = args.min_age_hours * 3600
 
     rows = _ps_rows('serena start-mcp-server')
+
+    def _project_of(pid, argv):
+        m = re.search(r'--project (\S+)', argv)
+        return m.group(1) if m else _cwd(pid)
+
+    if args.count_live:
+        # One logical instance = one wrapper->server chain; count roots
+        # (rows whose parent is not itself a serena row), so a healthy
+        # uv-wrapper pair and an orphaned bare server each count once.
+        pids = {pid for pid, _, _, _ in rows}
+        print(sum(1 for pid, ppid, _age, argv in rows
+                  if ppid not in pids and _project_of(pid, argv) == project))
+        return 0
+
     children = {}
     for pid, ppid, _age, _argv in rows:
         children.setdefault(ppid, []).append(pid)
 
+    # Judge per CHAIN at its root, and reap chains whole. Judging members
+    # separately made an orphaned wrapper/server pair immortal (found
+    # 2026-08-14): the wrapper was kept for its live child, the child for
+    # its live parent. The wrapper/server pair is ONE unit.
+    info = {pid: (ppid, age, argv) for pid, ppid, age, argv in rows}
+    roots = [pid for pid, (ppid, _, _) in info.items() if ppid not in info]
+
+    def _chain(root):
+        out, stack = [], [root]
+        while stack:
+            pid = stack.pop()
+            out.append(pid)
+            stack.extend(children.get(pid, []))
+        return out
+
     victims = []
     kept = []
-    for pid, ppid, age, argv in rows:
-        cwd = _cwd(pid)
-        m = re.search(r'--project (\S+)', argv)
-        proc_project = m.group(1) if m else cwd
+    for root in roots:
+        ppid, age, argv = info[root]
+        members = _chain(root)
         reasons = []
+        proc_project = _project_of(root, argv)
         if proc_project != project:
             reasons.append(f'other project ({proc_project})')
-        if pid in protect:
-            reasons.append('protected')
+        hit = protect.intersection(members)
+        if hit:
+            reasons.append(f'protected ({sorted(hit)})')
         if age < min_age:
             reasons.append(f'young ({age // 3600}h)')
         if ppid != 1 and _alive(ppid):
             reasons.append(f'parent {ppid} alive')
-        live_kids = [k for k in children.get(pid, []) if _alive(k)]
-        if live_kids:
-            # A wrapper whose server child is alive IS the live pair's
-            # anchor -- reaping it would take the serving child down.
-            reasons.append(f'live child {live_kids[0]}')
+        if not reasons:
+            # Only now pay for lsof: a chain that survives the cheap checks
+            # is kept anyway. An ESTABLISHED TCP peer means a live client is
+            # attached (SSE) — serving, whatever the parentage. This is the
+            # real signal the old live-child proxy stood in for.
+            serving = [p for p in members if _established(p)]
+            if serving:
+                reasons.append(f'actively serving (pid {serving[0]} has an '
+                               f'ESTABLISHED TCP peer)')
         if reasons:
-            kept.append((pid, age, '; '.join(reasons)))
+            kept.append((root, age, '; '.join(reasons)))
         else:
-            victims.append((pid, age))
+            victims.extend((pid, info[pid][1]) for pid in members)
 
     for pid, age, why in kept:
         print(f'KEEP {pid:>8}  age {age // 3600:>3}h  {why}')

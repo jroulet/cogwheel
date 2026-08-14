@@ -211,6 +211,21 @@ if [[ ! -x "$PYBIN" ]]; then
   exit 1
 fi
 
+# Daemon hygiene: reap THIS project's stale serena/pyright chains before
+# spawning a new crew — every non-graceful client death leaves a stdio pair
+# re-indexing the repo forever (16 serena + 16 pyright had accumulated by
+# 2026-08-14 and pinned swap). Project-discriminated: another project's
+# serena (e.g. a gw build's) is never touched. Then count what is still
+# live — the daemon-count analogue of the chart cell-count guard: count
+# cheaply at the entry point, never discover as mystery latency.
+"$PYBIN" "$REPO_ROOT/.claude/sdk/reap_stale_serena.py" --apply || true
+_N_SERENA=$("$PYBIN" "$REPO_ROOT/.claude/sdk/reap_stale_serena.py" --count-live 2>/dev/null || echo "?")
+if [[ "$_N_SERENA" =~ ^[0-9]+$ ]] && (( _N_SERENA > 3 )); then
+  echo "WARNING: $_N_SERENA live serena servers already serve THIS project" \
+       "(threshold 3) and the build will add its own. If unexpected, inspect:" \
+       "  $PYBIN $REPO_ROOT/.claude/sdk/reap_stale_serena.py   (dry-run)" >&2
+fi
+
 # Sync .opencode/agents/*.md frontmatter models from the env-selected role
 # maps so interactive subagents match the build provider.  Single source of
 # truth: runtime_opencode.py; no manual frontmatter edits ever needed.
@@ -229,7 +244,13 @@ if [[ "$AGENT_PROVIDER" == "codex" ]]; then
   # stderr kept for the same reason as the OpenCode sync above.
   "$PYBIN" "$REPO_ROOT/scripts/sync_codex_agents.py" || true
 fi
-"$PYBIN" "$REPO_ROOT/.claude/sdk/build.py" build --provider "$AGENT_PROVIDER" \
+# setsid: the orchestrator gets its OWN process group so the watchdog can
+# kill the GROUP on a stall — a parent-walk kill misses grandchildren
+# (crew agents' uv -> serena -> pyright chains) and SIGKILL reparents them
+# to init; a killed build left a 21-hour five-server serena quintet
+# (2026-08-13). Non-interactive bash runs & jobs in the script's own
+# group, so setsid execs in place and $! below IS the orchestrator PID.
+setsid "$PYBIN" "$REPO_ROOT/.claude/sdk/build.py" build --provider "$AGENT_PROVIDER" \
   "${APPROVE_ARGS[@]}" --log "$LOG" "@$PROMPT" > /dev/null 2>&1 &
 BUILD_PID=$!
 # Hand the watchdog the PID we already know. It used to rediscover the

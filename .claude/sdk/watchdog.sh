@@ -121,14 +121,32 @@ while true; do
         printf '\n[%s] === KILLED BY WATCHDOG (log stale for %ss, threshold %ss) ===\n' \
             "$TS" "$STALE_FOR" "$STALE_SECONDS" >> "$LOG_PATH" 2>/dev/null || true
 
-        CHILDREN=$(pgrep -P "$ORCH_PID" 2>/dev/null || true)
-        if [ -n "$CHILDREN" ]; then
-            log "Killing children: $CHILDREN"
-            kill -9 $CHILDREN 2>/dev/null || true
+        # Kill the whole GROUP when the orchestrator leads its own process
+        # group (launch_build.sh starts it under setsid). A parent-walk
+        # misses grandchildren — crew agents' uv -> serena -> pyright
+        # chains — and SIGKILL reparents them to init (measured 2026-08-13:
+        # a killed build left a 21-hour five-server serena quintet). Group
+        # kill ONLY when the orchestrator is the leader: a hand-launched
+        # build shares the launching shell's group, and killing that group
+        # would take the shell (and possibly this watchdog) with it.
+        ORCH_PGID=$(ps -o pgid= -p "$ORCH_PID" 2>/dev/null | tr -d ' ')
+        WD_PGID=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
+        if [ -n "$ORCH_PGID" ] && [ "$ORCH_PGID" = "$ORCH_PID" ] && \
+           [ "$ORCH_PGID" != "$WD_PGID" ]; then
+            log "Killing process group $ORCH_PGID (orchestrator is leader)"
+            kill -9 -- "-$ORCH_PGID" 2>/dev/null || true
+        else
+            log "Orchestrator $ORCH_PID is not a group leader (pgid" \
+                "${ORCH_PGID:-unknown}); parent-walk kill — grandchildren" \
+                "may survive (hand launch without setsid)."
+            CHILDREN=$(pgrep -P "$ORCH_PID" 2>/dev/null || true)
+            if [ -n "$CHILDREN" ]; then
+                log "Killing children: $CHILDREN"
+                kill -9 $CHILDREN 2>/dev/null || true
+            fi
+            log "Killing orchestrator: $ORCH_PID"
+            kill -9 "$ORCH_PID" 2>/dev/null || true
         fi
-
-        log "Killing orchestrator: $ORCH_PID"
-        kill -9 "$ORCH_PID" 2>/dev/null || true
 
         if [ "${AGENT_PROVIDER:-claude}" = "codex" ]; then
             SERENA_PORT="${CODEX_SERENA_PORT:-8324}"
