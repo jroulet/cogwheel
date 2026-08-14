@@ -21,9 +21,10 @@ section: Lensing
   certificate at S=2.0 admits 230 evidence-band points with MAX true error
   4.8e-5 against the 1e-4 bar and none over — the leg only suppressed
   certifiable service. No ghost term: four real roots prove the ghost is
-  exactly zero (`GhostAbsentError`). Census-mirror staleness deferred to
-  [[lensing_census_mirror_regate]]; SPEC gate-description staleness deferred
-  to the Librarian (INS-1-001).
+  exactly zero (`GhostAbsentError`). Census-mirror staleness resolved by
+  build `fold_exterior_ghost` WP-3, see
+  [[2026-08-13_lensing_census_mirror_regate]]; SPEC gate-description
+  staleness resolved by the Librarian post-commit sync (INS-1-001).
 
   Closes BOTH backlog items on this rung: the gate-inversion item (the
   fold correction never certifies on the interior — measured best 2.15e-3
