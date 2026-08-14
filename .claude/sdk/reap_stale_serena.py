@@ -82,9 +82,14 @@ def main():
     protect = set(args.protect)
     min_age = args.min_age_hours * 3600
 
+    rows = _ps_rows('serena start-mcp-server')
+    children = {}
+    for pid, ppid, _age, _argv in rows:
+        children.setdefault(ppid, []).append(pid)
+
     victims = []
     kept = []
-    for pid, ppid, age, argv in _ps_rows('serena start-mcp-server'):
+    for pid, ppid, age, argv in rows:
         cwd = _cwd(pid)
         m = re.search(r'--project (\S+)', argv)
         proc_project = m.group(1) if m else cwd
@@ -97,6 +102,11 @@ def main():
             reasons.append(f'young ({age // 3600}h)')
         if ppid != 1 and _alive(ppid):
             reasons.append(f'parent {ppid} alive')
+        live_kids = [k for k in children.get(pid, []) if _alive(k)]
+        if live_kids:
+            # A wrapper whose server child is alive IS the live pair's
+            # anchor -- reaping it would take the serving child down.
+            reasons.append(f'live child {live_kids[0]}')
         if reasons:
             kept.append((pid, age, '; '.join(reasons)))
         else:
