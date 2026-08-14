@@ -3303,10 +3303,12 @@ Tag conventions:
   orders over the bar at its band-edge corner while its center passed;
   and the F080 fan asymmetry (mirrored fan angles 2.4x apart under exact
   D2) must be resolved before the retrain trusts the fan;
-  (b) replace the saddle cusp-arm coverage placeholder 0.0
-  (`measure_saddle_cusp_arm_coverage.py` or the retirement path from the
-  coverage sweep — see FINDINGS F079 body: the angular-coverage concept
-  may be dead post-F074, decide from the same evidence); (c)
+  (b) DONE via retirement, not measurement — F079 (2026-08-14,
+  `find_cusps_wrap_fix` build) measured `_SADDLE_CUSP_ARM_COVERAGE` INERT
+  (0 differing serve decisions over 64 production windows) and retired it
+  (`retired_concepts.json`); the saddle cusp-arm coverage placeholder no
+  longer exists to replace — the tube gate excludes on the full cusp
+  window, real structure is the F074/F075 w-floor 49; (c)
   born_residual_chart.npz is CLEAN, no action. Post-training: attach the
   new artifact (wiring already landed), run `post_build_sweeps.sh`
   (driver-side, never in-build).
