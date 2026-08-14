@@ -5054,253 +5054,113 @@ class ExteriorPolarRhoLogAxisSerializationTestCase(SurrogateTestCase):
         self.n_checks += 1
 
 
-class TubeCuspWindowParityGatingTestCase(SurrogateTestCase):
-    """Parity-gated cusp-window constant: saddle uses full *delta_theta*,
-    positive parity uses the ``_CUSP_ARM_COVERAGE = 0.07`` shrink.
+class TubeCuspWindowExclusionTestCase(SurrogateTestCase):
+    """Full-window cusp exclusion in ``_tube_serves`` (``residual = delta_theta``).
 
-    The ``_tube_serves`` gate applies ``coverage = _SADDLE_CUSP_ARM_COVERAGE
-    (=0.0)`` for parity=-1 and ``_CUSP_ARM_COVERAGE (=0.07)`` for parity=1,
-    shrinking the exclusion window to ``residual = max(0, delta_theta - coverage)``.
-    A query inside ``residual`` of a cusp falls through to the Pearcey arm;
-    a query inside the original ``delta_theta`` but outside ``residual``
-    is ADMITTED for positive parity (the shrink gap) and REFUSED for saddle
-    parity (full window).
+    Post-F074 the tube cusp exclusion uses the *entire* schema window
+    ``(theta_cusp, delta_theta)`` directly: a query whose wrapped angular
+    distance to a cusp is ``< delta_theta`` is refused and falls through to
+    the serving ladder (Pearcey arm, then the exact engine).  There is no
+    angular arm-coverage subtraction and no parity dispatch -- the retired
+    ``_CUSP_ARM_COVERAGE`` / ``_SADDLE_CUSP_ARM_COVERAGE`` constants and the
+    ``residual = max(0, delta_theta - coverage)`` shrink no longer exist.
+    The exclusion test uses a strict ``<``, so the refuse/admit flip sits at
+    exactly ``delta_theta`` from the cusp.
 
-    Fixture: the pre-built positive (parity=1, theta_cusp=0.2, delta_theta=0.1)
-    and saddle (parity=-1, theta_cusp=-0.39, delta_theta=0.05) TubeCharts from
-    ``_multichart_fixture()``.
+    Fixture: the pre-built positive tube (parity=1, image_count=2,
+    ``cusp_windows=[(0.2, 0.1)]``) from ``_multichart_fixture()``.  The window
+    edges are DERIVED from ``chart.cusp_windows`` so the witnesses follow the
+    schema if it ever moves.  ``gamma=0.35``, ``eta=0.01`` clear the box / eta
+    / u / image-count gates so the cusp loop is actually reached.
     """
 
     def setUp(self):
         super().setUp()
-        sur = _multichart_fixture()
-        self.pos_tube = sur.charts[0]   # parity=1, cusp_windows=[(0.2, 0.1)]
-        self.sad_tube = sur.charts[2]   # parity=-1, cusp_windows=[(-0.39, 0.05)]
+        self.pos_tube = _multichart_fixture().charts[0]  # parity=+1 tube
         self.log_w_min = float(MC_LOG_W_GRID[0])
         self.log_w_max = float(MC_LOG_W_GRID[-1])
-
-    # ------------------------------------------------------------------
-    # Saddle parity: full delta_theta window always refuses.
-    # ------------------------------------------------------------------
-
-    def test_saddle_refuses_at_mid_window(self):
-        """theta = theta_cusp + 0.5*delta_theta -> False (saddle, full window)."""
-        theta_cusp, delta_theta = self.sad_tube.cusp_windows[0]
-        theta_q = theta_cusp + 0.5 * delta_theta
-        served = surrogate_module._tube_serves(
-            self.sad_tube, 1.25, self.log_w_min, self.log_w_max,
-            0.01, theta_q, 4)
+        theta_cusp, delta_theta = self.pos_tube.cusp_windows[0]
+        self.theta_cusp = float(theta_cusp)
+        self.delta_theta = float(delta_theta)
+        # Premise: both witnesses must lie inside the theta grid so the cusp
+        # loop is reached rather than short-circuited by the theta-range gate.
+        lo = float(self.pos_tube.theta_grid[0])
+        hi = float(self.pos_tube.theta_grid[-1])
+        self.assertLessEqual(lo, self.theta_cusp + 0.5 * self.delta_theta,
+                             'premise lost: in-window witness left theta grid')
+        self.assertLessEqual(self.theta_cusp + self.delta_theta + 0.02, hi,
+                             'premise lost: out-of-window witness left grid')
         self.n_checks += 1
-        self.assertFalse(served,
-                         f'saddle parity should refuse at mid-window '
-                         f'theta_q={theta_q:.6f}')
 
-    def test_saddle_refuses_near_cusp(self):
-        """theta = theta_cusp + 0.1*delta_theta -> False (saddle, near cusp)."""
-        theta_cusp, delta_theta = self.sad_tube.cusp_windows[0]
-        theta_q = theta_cusp + 0.1 * delta_theta
-        served = surrogate_module._tube_serves(
-            self.sad_tube, 1.25, self.log_w_min, self.log_w_max,
-            0.01, theta_q, 4)
+    def _serves(self, theta_q: float) -> bool:
+        return surrogate_module._tube_serves(
+            self.pos_tube, 0.35, self.log_w_min, self.log_w_max,
+            0.01, float(theta_q), 2)
+
+    def test_inside_full_window_refuses(self):
+        """theta within ``delta_theta`` of the cusp -> refused (full window)."""
+        theta_q = self.theta_cusp + 0.5 * self.delta_theta
         self.n_checks += 1
-        self.assertFalse(served)
+        self.assertFalse(self._serves(theta_q),
+                         f'in-window query theta={theta_q:.6f} must refuse')
 
-    def test_saddle_admits_outside_window(self):
-        """theta = theta_cusp + 1.5*delta_theta -> True (saddle, outside window)."""
-        theta_cusp, delta_theta = self.sad_tube.cusp_windows[0]
-        theta_q = theta_cusp + 1.5 * delta_theta
-        served = surrogate_module._tube_serves(
-            self.sad_tube, 1.25, self.log_w_min, self.log_w_max,
-            0.01, theta_q, 4)
+    def test_just_beyond_full_window_admits(self):
+        """theta beyond ``delta_theta`` of the cusp -> admitted."""
+        theta_q = self.theta_cusp + self.delta_theta + 0.02
         self.n_checks += 1
-        self.assertTrue(served,
-                        f'saddle parity should admit outside full window '
-                        f'theta_q={theta_q:.6f}')
+        self.assertTrue(self._serves(theta_q),
+                        f'out-of-window query theta={theta_q:.6f} must admit')
 
-    # ------------------------------------------------------------------
-    # Positive parity: 0.07 shrink gap admits.
-    # ------------------------------------------------------------------
+    def test_window_edge_is_delta_theta_not_shrunk(self):
+        """The refuse/admit flip sits at exactly ``delta_theta`` from the cusp.
 
-    def test_positive_admits_in_shrink_margin(self):
-        """theta = theta_cusp + 0.04 -> True (positive, inside shrink margin).
-
-        The positive tube's cusp window is (0.2, 0.1).  With
-        _CUSP_ARM_COVERAGE=0.07, the residual exclusion window is
-        max(0, 0.1-0.07) = 0.03, so a query at theta_cusp + 0.04
-        (outside residual, inside original window) is ADMITTED.
+        A shrunk window (any positive coverage subtraction) would ADMIT a
+        query a hair inside ``delta_theta``; the full-window gate refuses it.
         """
-        theta_cusp, delta_theta = self.pos_tube.cusp_windows[0]
-        theta_q = theta_cusp + 0.04
-        served = surrogate_module._tube_serves(
-            self.pos_tube, 0.35, self.log_w_min, self.log_w_max,
-            0.01, theta_q, 2)
+        theta_refuse = self.theta_cusp + self.delta_theta - 1e-3
+        theta_admit = self.theta_cusp + self.delta_theta + 1e-3
         self.n_checks += 1
-        self.assertTrue(served,
-                        f'positive parity should admit at shrink margin '
-                        f'theta_q={theta_q:.6f}')
-
-    def test_positive_admits_just_beyond_residual(self):
-        """theta = theta_cusp + residual + epsilon -> True (positive)."""
-        theta_cusp, delta_theta = self.pos_tube.cusp_windows[0]
-        residual = max(0.0, delta_theta - surrogate_module._CUSP_ARM_COVERAGE)
-        theta_q = theta_cusp + residual + 0.005
-        served = surrogate_module._tube_serves(
-            self.pos_tube, 0.35, self.log_w_min, self.log_w_max,
-            0.01, theta_q, 2)
+        self.assertFalse(self._serves(theta_refuse),
+                         'just inside delta_theta must refuse (full window)')
         self.n_checks += 1
-        self.assertTrue(served,
-                        f'positive parity should admit beyond residual '
-                        f'theta_q={theta_q:.6f} residual={residual:.6f}')
-
-    def test_positive_refuses_inside_residual(self):
-        """theta = theta_cusp + 0.01 -> False (positive, inside residual window)."""
-        theta_cusp, delta_theta = self.pos_tube.cusp_windows[0]
-        theta_q = theta_cusp + 0.01
-        served = surrogate_module._tube_serves(
-            self.pos_tube, 0.35, self.log_w_min, self.log_w_max,
-            0.01, theta_q, 2)
-        self.n_checks += 1
-        self.assertFalse(served,
-                         f'positive parity should refuse inside residual '
-                         f'theta_q={theta_q:.6f}')
-
-    def test_positive_admits_outside_full_window(self):
-        """theta = theta_cusp + 1.2*delta_theta -> True (positive, outside all)."""
-        theta_cusp, delta_theta = self.pos_tube.cusp_windows[0]
-        theta_q = theta_cusp + 1.2 * delta_theta
-        served = surrogate_module._tube_serves(
-            self.pos_tube, 0.35, self.log_w_min, self.log_w_max,
-            0.01, theta_q, 2)
-        self.n_checks += 1
-        self.assertTrue(served)
-
-    # ------------------------------------------------------------------
-    # Parity gate constants are load-bearing.
-    # ------------------------------------------------------------------
-
-    def test_saddle_coverage_is_zero(self):
-        """_SADDLE_CUSP_ARM_COVERAGE == 0.0 — the gate depends on it."""
-        self.n_checks += 1
-        self.assertEqual(surrogate_module._SADDLE_CUSP_ARM_COVERAGE, 0.0)
-
-    def test_positive_coverage_is_007(self):
-        """_CUSP_ARM_COVERAGE == 0.07 — the gate depends on it."""
-        self.n_checks += 1
-        self.assertEqual(surrogate_module._CUSP_ARM_COVERAGE, 0.07)
-
-    # ------------------------------------------------------------------
-    # Diagnostic plot.
-    # ------------------------------------------------------------------
-
-    def test_parity_gating_diagnostic_plot(self):
-        """Boolean served/refused plot vs theta, two rows (positive then
-        saddle), shaded grey cusp window band, hatched green shrink
-        margin (absent for saddle row)."""
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-        pos_tc, pos_dt = self.pos_tube.cusp_windows[0]
-        sad_tc, sad_dt = self.sad_tube.cusp_windows[0]
-        pos_residual = max(
-            0.0, pos_dt - surrogate_module._CUSP_ARM_COVERAGE)
-        sad_residual = max(
-            0.0, sad_dt - surrogate_module._SADDLE_CUSP_ARM_COVERAGE)
-
-        n_pts = 200
-        pos_thetas = np.linspace(
-            pos_tc - 0.5 * pos_dt, pos_tc + 1.5 * pos_dt, n_pts)
-        sad_thetas = np.linspace(
-            sad_tc - 1.5 * sad_dt, sad_tc + 1.5 * sad_dt, n_pts)
-
-        pos_served = np.array([
-            surrogate_module._tube_serves(
-                self.pos_tube, 0.35, self.log_w_min, self.log_w_max,
-                0.01, float(t), 2)
-            for t in pos_thetas])
-        sad_served = np.array([
-            surrogate_module._tube_serves(
-                self.sad_tube, 1.25, self.log_w_min, self.log_w_max,
-                0.01, float(t), 4)
-            for t in sad_thetas])
-
-        fig, (ax0, ax1) = plt.subplots(2, 1, figsize=(8, 6), sharex=False)
-        # Positive row.
-        ax0.step(pos_thetas, pos_served.astype(float), where='mid',
-                 color='C0', linewidth=2, label='served (parity=+1)')
-        ax0.axvspan(pos_tc - pos_dt, pos_tc + pos_dt, color='grey', alpha=0.3,
-                    label=r'cusp window ($\pm\Delta\theta$)')
-        ax0.axvspan(pos_tc - pos_dt + pos_residual,
-                    pos_tc + pos_dt - pos_residual,
-                    color='green', alpha=0.3, hatch='///',
-                    label=r'residual ($\Delta\theta-0.07$)')
-        ax0.set_ylabel('served')
-        ax0.set_title('positive parity (+1)')
-        ax0.legend(fontsize='small', loc='lower right')
-        ax0.set_ylim(-0.1, 1.1)
-
-        # Saddle row — no green hatch (shrink is zero).
-        ax1.step(sad_thetas, sad_served.astype(float), where='mid',
-                 color='C1', linewidth=2, label='served (parity=-1)')
-        ax1.axvspan(sad_tc - sad_dt, sad_tc + sad_dt, color='grey', alpha=0.3,
-                    label=r'cusp window ($\pm\Delta\theta$)')
-        ax1.set_ylabel('served')
-        ax1.set_xlabel(r'$\theta$ [rad]')
-        ax1.set_title('saddle parity (-1)')
-        ax1.legend(fontsize='small', loc='lower right')
-        ax1.set_ylim(-0.1, 1.1)
-
-        fig.tight_layout()
-        path = OUTPUT_DIR / 'test_parity_gating_cusp_window.png'
-        fig.savefig(path, dpi=150)
-        plt.close(fig)
-        self.n_checks += 1
-        self.assertTrue(path.exists(),
-                        f'diagnostic plot not saved at {path}')
+        self.assertTrue(self._serves(theta_admit),
+                        'just outside delta_theta must admit')
 
 
-class TubeCuspWindowParityGatingSelfFalsificationTestCase(SurrogateTestCase):
-    """Prove the parity-gating tests can go red.
+class TubeCuspWindowExclusionSelfFalsificationTestCase(SurrogateTestCase):
+    """Prove the full-window exclusion branch is load-bearing.
 
-    If the parity constant were swapped — saddle coverage set to 0.07 and
-    positive coverage set to 0.0 — the behaviour inverts and the assertions
-    above fail.
+    With the chart's ``cusp_windows`` emptied (via ``dataclasses.replace`` --
+    ``TubeChart`` is frozen), the in-window query that
+    ``TubeCuspWindowExclusionTestCase`` refuses is instead ADMITTED, so the
+    refusal there is caused by the cusp loop, not by an unrelated gate.
     """
 
     def setUp(self):
         super().setUp()
-        sur = _multichart_fixture()
-        self.pos_tube = sur.charts[0]
-        self.sad_tube = sur.charts[2]
+        self.pos_tube = _multichart_fixture().charts[0]
         self.log_w_min = float(MC_LOG_W_GRID[0])
         self.log_w_max = float(MC_LOG_W_GRID[-1])
 
-    def test_saddle_would_admit_if_coverage_were_007(self):
-        """With saddle coverage forced to 0.07, mid-window admits."""
-        theta_cusp, delta_theta = self.sad_tube.cusp_windows[0]
-        theta_q = theta_cusp + 0.5 * delta_theta
-
-        with mock.patch.object(surrogate_module,
-                               '_SADDLE_CUSP_ARM_COVERAGE', 0.07):
-            served = surrogate_module._tube_serves(
-                self.sad_tube, 1.25, self.log_w_min, self.log_w_max,
-                0.01, theta_q, 4)
+    def test_empty_cusp_windows_admits_in_window_query(self):
+        theta_cusp, delta_theta = self.pos_tube.cusp_windows[0]
+        theta_q = float(theta_cusp) + 0.5 * float(delta_theta)
+        # Sanity: the unmodified chart refuses this in-window query.
+        self.assertFalse(
+            surrogate_module._tube_serves(
+                self.pos_tube, 0.35, self.log_w_min, self.log_w_max,
+                0.01, theta_q, 2),
+            'fixture broken: in-window query already admitted')
+        self.n_checks += 1
+        bare = dataclasses.replace(self.pos_tube, cusp_windows=())
+        served = surrogate_module._tube_serves(
+            bare, 0.35, self.log_w_min, self.log_w_max, 0.01, theta_q, 2)
         self.n_checks += 1
         self.assertTrue(served,
-                        'saddle with coverage=0.07 should ADMIT at mid-window '
-                        '(original was REFUSE)')
+                        'with no cusp windows the in-window query must serve '
+                        '-- proves the exclusion branch has teeth')
 
-    def test_positive_would_refuse_if_coverage_were_zero(self):
-        """With positive coverage forced to 0, shrink-margin query refuses."""
-        theta_cusp, delta_theta = self.pos_tube.cusp_windows[0]
-        theta_q = theta_cusp + 0.04  # in shrink margin, admitted normally
 
-        with mock.patch.object(surrogate_module, '_CUSP_ARM_COVERAGE', 0.0):
-            served = surrogate_module._tube_serves(
-                self.pos_tube, 0.35, self.log_w_min, self.log_w_max,
-                0.01, theta_q, 2)
-        self.n_checks += 1
-        self.assertFalse(served,
-                         'positive with coverage=0.0 should REFUSE at shrink '
-                         'margin (original was ADMIT)')
 # ==========================================================================
 # SHARD B -- macro-saddle LobeExteriorChart coverage + astroid byte-identity
 # (Build lobe_exterior; WP1 add LobeExteriorChart + serve/select/NPZ wiring,

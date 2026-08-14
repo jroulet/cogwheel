@@ -26,14 +26,19 @@ from cogwheel.lensing import surrogate_training as _st
 # ---- Architecture constants (mirrored from surrogate.py) ----
 _DD_PRODUCT_MARGIN = 58.0
 _XI_FOLD_THRESHOLD = 4.0
-_CUSP_ARM_COVERAGE = 0.07  # rad, from surrogate.py
+# Post-F074 the Pearcey cusp arm has no angular serve boundary; a near-cusp
+# source is served iff it clears the w-floor (serving DECREASES with angular
+# offset, so the real structure is this frequency floor, not an angular
+# reach).  Mirrors the F074 w-floor; there is no importable production
+# constant, so it is defined here.
+_CUSP_ARM_W_FLOOR = 49.0
 
 # Astroid cusp angles (eigenframe, positive parity).
 _ASTROID_CUSP_ANGLES = (0.0, math.pi / 2, -math.pi / 2, math.pi)
 
 # Cusp exclusion half-width (from typical tube charts): the tube chart's
-# cusp window is ~0.25 rad; after subtracting _CUSP_ARM_COVERAGE the
-# residual is ~0.18, but the full window defines what the arm can cover.
+# cusp window is ~0.25 rad; post-F074 the tube excludes the full window
+# (there is no angular arm serve boundary that would carve it back).
 _TYPICAL_CUSP_HALF_WINDOW = 0.25  # rad, approximate tube cusp window
 
 # ---- Macro-saddle lobe coverage (mirrored from surrogate_training.py) ----
@@ -327,12 +332,12 @@ def classify_draw(gamma: float, y_abs: float, theta: float, w: float
         return 'exact_engine'
     eta = (1.0 - rho) * reach  # approximate source-plane distance to caustic
 
-    # (d) Cusp arm: covers near-cusp sources with delta_theta > COVERAGE.
+    # (d) Cusp arm: covers near-cusp sources that clear the F074 w-floor.
     if gamma < 1.0:
-        is_near, delta_cusp = _is_near_cusp(gamma, theta)
-        if is_near and delta_cusp > _CUSP_ARM_COVERAGE:
-            # The Pearcey arm serves the outer shell of the cusp window:
-            # delta > _CUSP_ARM_COVERAGE.
+        is_near, _ = _is_near_cusp(gamma, theta)
+        if is_near and w >= _CUSP_ARM_W_FLOOR:
+            # The Pearcey arm serves near-cusp sources above the w-floor;
+            # post-F074 there is no angular serve boundary.
             return 'cusp_arm'
 
     # (e) Tube chart: serves sources near the caustic, away from cusps.
@@ -355,8 +360,9 @@ def classify_draw(gamma: float, y_abs: float, theta: float, w: float
         if np.isfinite(R_c) and eta < f_max_typical * R_c:
             # Check cusp exclusion (residual window blocks the tube).
             is_near, delta_cusp = _is_near_cusp(gamma, theta)
-            residual = max(0.0, _TYPICAL_CUSP_HALF_WINDOW - _CUSP_ARM_COVERAGE)
-            if not (is_near and delta_cusp < residual):
+            # Post-F074 the tube excludes the full cusp window (no angular
+            # arm serve boundary carves it back).
+            if not (is_near and delta_cusp < _TYPICAL_CUSP_HALF_WINDOW):
                 return 'chart_tube'
 
     # (f) Far-field exterior: rho > rho_exterior_min (sources outside the
@@ -398,7 +404,7 @@ def main() -> None:
     print("    w     ~ LogU(5, 148)")
     print(f"  DD product margin: {_DD_PRODUCT_MARGIN}")
     print(f"  Xi fold threshold: {_XI_FOLD_THRESHOLD}")
-    print(f"  Cusp arm coverage: {_CUSP_ARM_COVERAGE} rad")
+    print(f"  Cusp arm w-floor:  {_CUSP_ARM_W_FLOOR}")
     print()
 
     t0 = time.time()

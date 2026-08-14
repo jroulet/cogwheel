@@ -4366,6 +4366,11 @@ w in [tube DD cap (33.1 at 0.5 / 18.3 at 0.7), 49): no chart, cusp arm
 serves 2-10%, draws fall to the exact engine — correct but slow; a table
 target for the campaign.
 
+RESOLVED 2026-08-14 by build `find_cusps_wrap_fix` — wrap-aware span,
+`_EXPECTED_ARCS` arc-count guard, coverage constants retired (see
+`completed.d/2026-08-14_lensing_find_cusps_wrap_bug.md`). The speed-only
+gap in the last paragraph remains a campaign table target.
+
 ## F080
 **The certified ppGO map certifies each cell from ONE center config — and a
 band-edge corner of a shipped CERTIFIED saddle cell is 3.5 orders over the

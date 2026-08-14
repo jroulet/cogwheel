@@ -267,10 +267,18 @@ def classify_fallthrough(
        (no fences); the caustic-relative coordinate is the sole spatial gate.
     4. ``cusp-window``  -- some TUBE chart would serve but for its cusp
        exclusion (detected by relaxing ``cusp_windows`` to empty and
-       re-calling `surrogate._tube_serves`).  Per Professor Q7 a near-cusp
-       source projecting onto a neighbouring arc with out-of-range ``theta``
-       still fails the theta-range gate with cusps relaxed, so it correctly
-       falls to ``out-of-box``.
+       re-calling `surrogate._tube_serves`).  The category is KEPT because
+       the tube's cusp-window exclusion is a real, unchanged structural gate:
+       ``_tube_serves`` still refuses over the full ``(theta_cusp,
+       delta_theta)`` window where the sqrt(eta) fold model is invalid near a
+       vertex, so a sample blocked ONLY by that window is genuinely a
+       cusp-window fall-through.  Per F074/F079 there is no longer any
+       angular arm-coverage boundary within the window; measured cusp-region
+       serving losses now surface as the eta-floor / w-cap categories rather
+       than as an angular arm boundary.  Per Professor Q7 a near-cusp source
+       projecting onto a neighbouring arc with out-of-range ``theta`` still
+       fails the theta-range gate with cusps relaxed, so it correctly falls
+       to ``out-of-box``.
     5. ``refusal-ball`` -- some FAR-FIELD chart would serve but for its
        engine-refusal exclusion ball (detected by relaxing ``refused_points``
        to empty and re-calling `surrogate._exterior_polar_serves`).

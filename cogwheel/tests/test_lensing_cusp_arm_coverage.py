@@ -6,9 +6,11 @@ Before F074 the cusp arm was gated on ``radius >= (c_P/bar)^(2/3)``, a
 bound on the error of ``pearcey_asymptotic`` -- the object the uniform
 form REPLACES.  That gate refused the near-vertex neighbourhood, which
 made a purely angular statement true by accident: every served source sat
-at least ``_CUSP_ARM_COVERAGE`` (0.07 rad) away from the cusp vertex in
-image-theta.  This file pinned that bound, its transition, and a
-self-falsification of it.
+at least a fixed angular coverage margin (0.07 rad) away from the cusp
+vertex in image-theta.  This file pinned that bound, its transition, and a
+self-falsification of it.  (That margin -- a module constant in
+``surrogate.py`` -- has since been retired outright; see the RETIRED block
+at the bottom of this file for the F079 record.)
 
 F074 replaced the gate with a bound on the error of what is actually
 SERVED::
@@ -413,14 +415,11 @@ class CuspArmServedAccuracyTestCase(_CuspArmCoverageTestCase):
 # `radius >= (c_P/bar)^(2/3)` gate and the angular coverage bound it
 # implied -- no longer exists in production:
 #
-# * `CoverageConstantTestCase` -- asserted only that `_CUSP_ARM_COVERAGE`
-#   is a 2-decimal number in (0, 1).  No oracle, and the derivation it
-#   documented ("minimum image-theta offset at which cusp_amplification
+# * `CoverageConstantTestCase` -- asserted only that the cusp-arm coverage
+#   constant is a 2-decimal number in (0, 1).  No oracle, and the derivation
+#   it documented ("minimum image-theta offset at which cusp_amplification
 #   serves") is now false: measured minimum over served near-cusp sources
-#   is 0.0.  The constant is still live in `surrogate.py` as a tube-window
-#   shrink, and its behavioural effect has ONE canonical pin, in
-#   `test_lensing_surrogate_training` (which monkey-patches it to 0.0 and
-#   0.07 and asserts the resulting window).
+#   is 0.0.
 #
 # * `CuspVertexRefusalTestCase::test_near_vertex_offsets_refused` --
 #   asserted that small perturbations of the vertex are refused.  F074
@@ -431,9 +430,9 @@ class CuspArmServedAccuracyTestCase(_CuspArmCoverageTestCase):
 #   test_exact_cusp_vertex_refused_at_every_frequency`.
 #
 # * `ServedSourceCoverageTestCase` (both methods) -- asserted every served
-#   source has `delta_theta >= _CUSP_ARM_COVERAGE`.  Measured at this
-#   build: all 50 served near-cusp sources violate it.  Not retunable --
-#   the arm's admission no longer reads an angle at all.
+#   source sits at least the cusp-arm coverage margin away in image-theta.
+#   Measured at this build: all 50 served near-cusp sources violate it.  Not
+#   retunable -- the arm's admission no longer reads an angle at all.
 #
 # * `TransitionMonotonicityTestCase::
 #   test_refused_then_served_crosses_coverage` -- the same dead bound,
@@ -450,6 +449,39 @@ class CuspArmServedAccuracyTestCase(_CuspArmCoverageTestCase):
 #   `CuspArmServedAccuracyTestCase::test_oracle_is_the_wave_engine_not_the_
 #   geometric_sum`, which shows the accuracy oracle is a genuinely
 #   different object from the arm.
+#
+#
+# ---------------------------------------------------------------------------
+# RETIRED (F079 constant removal, 2026-08-14)
+# ---------------------------------------------------------------------------
+# The F074 note above recorded the coverage constant as "still live in
+# `surrogate.py` as a tube-window shrink".  It is no longer: both the
+# positive-parity and saddle-parity cusp-arm coverage constants have been
+# DELETED from `surrogate.py` in this build.  They were measured dead for
+# two independent reasons:
+#
+#   (a) WRONG UNITS.  The constant was subtracted, in `_tube_serves`, from
+#       the chart's cusp-exclusion window half-width.  But the window is a
+#       critical-curve PARAMETER angle, while the coverage constant was
+#       calibrated as an image-plane POLAR offset.  Subtracting one from the
+#       other mixed two different angular coordinates -- the "correction"
+#       had no defined meaning for its consumer.
+#
+#   (b) ZERO BEHAVIOURAL EFFECT.  Post-F074, sweeping the constant over its
+#       whole range changed the serve/refuse decision on 0 of 64 production
+#       tube windows: the eta-floor and w-floor gates already decide every
+#       cusp-region query, so the angular shrink never flipped an outcome it
+#       was the last word on.
+#
+# `_tube_serves` now excludes the tube over the FULL cusp-exclusion window
+# (the chart's own `(theta_cusp, delta_theta)` schema, used with no angular
+# arm-coverage subtraction); a query inside the window falls through to the
+# serving ladder (Pearcey arm, then the exact engine).  There is
+# consequently NO live constant left for this suite to reference, and the
+# monkey-patch-window pin the F074 note pointed at (in
+# `test_lensing_surrogate_training`) is retired with the constant.  This
+# file is deliberately kept free of the deleted identifiers so the
+# post-removal grep stays clean.
 
 
 # ---------------------------------------------------------------------------

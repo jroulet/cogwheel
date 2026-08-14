@@ -291,28 +291,6 @@ _MACRO_SADDLE_IMAGE_COUNT = 4
 # the four-image interior `_MACRO_SADDLE_IMAGE_COUNT`.
 _MACRO_SADDLE_EXTERIOR_IMAGE_COUNT = 2
 
-# Angular half-width (radians) of the certified Pearcey-cusp arm coverage,
-# subtracted from each TubeChart cusp-exclusion window in `_tube_serves`.
-# Each 8c window ``(theta_cusp, delta_theta)`` excludes the tube where the
-# sqrt(eta) fold model is invalid near a cusp; the near-cusp uniform
-# Pearcey arm now covers the OUTER part of that neighbourhood (far enough
-# from the cusp vertex that ``R = hypot(x, y)`` clears the arm's radius
-# gate), so the window shrinks to ``max(0, delta_theta - coverage)`` -- the
-# complement of the arm's certified reach.  A query still inside the
-# shrunken window falls through to the arm, then the exact engine.
-# Measured by scripts/measure_cusp_arm_actual_boundary.py: minimum
-# image-theta offset from cusp at which cusp_amplification serves,
-# across (gamma, w) grid, floored to 2dp (conservative).
-
-# Cusp-arm Pearcey coverage for saddle deltoid cusps.  Set to zero
-# because saddle deep-interior images can be arbitrarily close to the
-# cusp (F018); the existing measure_cusp_arm_actual_boundary.py documents
-# convergence toward zero for saddle parity.  The value is a conservative
-# placeholder pending post-build calibration via
-# scripts/measure_saddle_cusp_arm_coverage.py.
-_SADDLE_CUSP_ARM_COVERAGE = 0.0
-_CUSP_ARM_COVERAGE = 0.07
-
 # Default package-data artifact name (under ``cogwheel/data/``).  The
 # trained global artifact is shipped here once training lands; until then
 # `load()` with no argument raises a clear FileNotFoundError.
@@ -2879,18 +2857,15 @@ def _tube_serves(chart: TubeChart, gamma: float, log_w_min: float,
         return False
     two_pi = 2.0 * np.pi
     for theta_cusp, delta_theta in chart.cusp_windows:
-        # Shrink each 8c cusp-exclusion window to the COMPLEMENT of the
-        # Pearcey arm's certified angular coverage: the arm serves the
-        # outer part of the cusp neighbourhood, so only the residual
-        # near-vertex core still excludes the tube.  A query inside this
-        # residual window returns False and falls through to the arm, then
-        # the engine.  ``_CUSP_ARM_COVERAGE`` (measured 0.07 rad) shrinks
-        # each window by that amount.  The chart schema is untouched --
-        # the shrink is applied at query time from the module constant,
-        # not stored.
-        coverage = (_SADDLE_CUSP_ARM_COVERAGE if chart.parity == -1
-                     else _CUSP_ARM_COVERAGE)
-        residual = max(0.0, delta_theta - coverage)
+        # Exclude the tube over the FULL 8c cusp-exclusion window, where the
+        # sqrt(eta) fold model is invalid near the cusp vertex.  A query
+        # inside the window returns False and falls through to the serving
+        # ladder (Pearcey arm, then the exact engine).  The window is used
+        # directly from the chart schema; there is no angular arm-coverage
+        # correction (post-F074 there is no certified angular serve boundary
+        # to subtract -- cusp-region losses surface as the w-floor / eta
+        # gates instead).
+        residual = delta_theta
         if abs((theta - theta_cusp + np.pi) % two_pi - np.pi) < residual:
             return False
     return True

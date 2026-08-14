@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [lensing_find_cusps_wrap_bug]
+
 ---
 
 - **FOLD TUBE-CHART SERVING INTO THE D2 FUNDAMENTAL DOMAIN — the last

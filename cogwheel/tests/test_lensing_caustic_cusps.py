@@ -138,6 +138,7 @@ import subprocess
 import textwrap
 
 from unittest import TestCase, main, skip, skipUnless
+from unittest import mock as unittest_mock
 
 import matplotlib
 matplotlib.use('Agg')
@@ -167,6 +168,39 @@ SAMPLING_STEP = 2.0 * np.pi / N_SAMPLES
 
 #: Positive-parity shears for the cusp-location / window specs (Spec 1/2).
 ASTROID_GAMMAS = (0.05, 0.2, 0.4, 0.7)
+
+#: Positive-parity shears spanning the astroid prior for the WP1 arc-survival
+#: topology pin and the theta=0 cusp-window value pin.  All four are measured
+#: to yield exactly 4 cusps -> 4 surviving arcs; 0.9 gives the widest x-axis
+#: cusp window (0.236 rad) -- the sharpest contrast with the pre-fix ~1.5*pi
+#: inflated theta=0 window (~4.7 rad half-width).
+ARC_SURVIVAL_GAMMAS = (0.2, 0.4, 0.7, 0.9)
+
+#: Surviving fold-arc count of the positive-parity astroid: 4 cusps bound 4
+#: fold arcs.  The pre-fix wrap-span bug dropped the two arcs adjacent to
+#: theta=0 and shipped only 2, so this is the invariant a silent arc drop
+#: (or an arc-count regression) must fail.
+ASTROID_EXPECTED_ARCS = 4
+
+#: Absolute tolerance (radians) for the theta=0 cusp-window value pin.  One
+#: detector sampling step: the x-axis reflection partners (the theta=0 and
+#: theta=pi cusps) carry a bit-identical window by the astroid's y->conj
+#: reflection symmetry (measured difference 0.0), so this generous "detector
+#: resolution" bound is never approached in the healthy case, while the
+#: wrap-bug re-inflation (span ~2*pi -> half-width ~4.7 rad) exceeds it by two
+#: orders of magnitude.  NOTE (measured deviation from the brief): the
+#: astroid is only 2-fold symmetric in cusp WINDOWS, not 4-fold -- the y-axis
+#: cusps (theta=pi/2, 3pi/2) floor to _CUSP_MIN_HALFWIDTH (0.05) at gamma >=
+#: 0.4 while the x-axis pair keep the wider dip, so the pin compares theta=0
+#: to its reflection partner theta=pi (equal by construction) and asserts it
+#: is not an OUTLIER above its three siblings, NOT that all four are equal.
+WINDOW_PARTNER_ATOL = SAMPLING_STEP
+
+#: Sane ceiling (radians) on the theta=0 cusp-window half-width.  The healthy
+#: window is 0.094..0.236 over ARC_SURVIVAL_GAMMAS, an order of magnitude
+#: below the pre-fix inflated ~4.5, so this bound documents the value is NOT
+#: the wrap-bug artefact even without the partner comparison.
+WINDOW_SANE_CEILING = 0.5
 
 #: A detected cusp's caustic speed must fall below this fraction of the
 #: branch peak speed (Architect Spec 1; measured worst ~4e-16).
@@ -275,11 +309,24 @@ YPRIME_MIN_NORM = 1e-3
 #: Independently cross-checked below via the two-image census (the served
 #: side of each frozen sign carries exactly four real images) so the frozen
 #: literals are not a self-oracle.
+#:
+#: WP1 (arc-survival wrap fix, 2026-08-14): the astroid rows are now
+#: FOUR-tuples, one sign per surviving fold arc.  The pre-fix ``_find_cusps``
+#: wrap-span bug inflated the theta=0 cusp window to ~1.5*pi and swallowed the
+#: two arcs adjacent to theta=0, so the shipped structure carried only TWO
+#: astroid arcs and this table used to freeze that bug as ``(-1, -1)``.  The
+#: four signs are DERIVED FROM GEOMETRY, never copied from the fixed run to
+#: make the count pass: at every astroid gamma each of the four arcs has
+#: ``sign(fold_opening_direction . serve_normal) = -1`` (measured worst |dot|
+#: 0.298 at gamma=0.2) AND its inward_sign side carries exactly four real
+#: images -- exactly the derivation
+#: ``test_frozen_sign_is_the_geometric_two_image_side`` re-checks.  The saddle
+#: 6-tuples are unchanged.
 GOLDEN_INWARD_SIGN = {
-    (0.2, 1): (-1, -1),
-    (0.4, 1): (-1, -1),
-    (0.7, 1): (-1, -1),
-    (0.9, 1): (-1, -1),
+    (0.2, 1): (-1, -1, -1, -1),
+    (0.4, 1): (-1, -1, -1, -1),
+    (0.7, 1): (-1, -1, -1, -1),
+    (0.9, 1): (-1, -1, -1, -1),
     (1.2, -1): (-1, -1, 1, -1, -1, 1),
     (1.5, -1): (-1, -1, 1, -1, -1, 1),
 }
@@ -335,6 +382,20 @@ def _axis_distance(theta: float) -> float:
     axes = np.asarray(AXIS_DIRECTIONS)
     return float(np.min(np.abs(((axes - theta + np.pi) % (2.0 * np.pi))
                                - np.pi)))
+
+
+def _wrap_distance(theta: float, target: float) -> float:
+    """Wrapped [0, pi] distance from ``theta`` to ``target`` (radians)."""
+    return float(abs(((theta - target + np.pi) % (2.0 * np.pi)) - np.pi))
+
+
+def _nearest_cusp(cusps, target: float):
+    """The ``(theta, delta_theta)`` cusp whose angle is nearest ``target``.
+
+    Wrap-aware, so the theta=0 cusp is found whether the detector returned
+    it at ~0 or (in a wrap-straddling regression) near 2pi.
+    """
+    return min(cusps, key=lambda tw: _wrap_distance(tw[0], target))
 
 
 def _real_image_count(gamma: float, arc, sign: int, eta: float):
@@ -540,6 +601,154 @@ class CuspAnalyticRootTestCase(_CuspTestCase):
 # `CuspWindowByteIdentityTestCase` deleted 2026-07-30 (F045).  It was already
 # skipped for F043; a skipped body still exports its helpers, which is how the
 # antipattern reached a later build.
+
+
+class AstroidArcSurvivalTopologyTestCase(_CuspTestCase):
+    """WP1 (wrap fix): the positive-parity astroid has EXACTLY four cusps AND
+    four surviving fold arcs, and the topology cross-check has teeth.
+
+    The pre-fix ``_find_cusps`` measured the theta=0 cusp's dip window with a
+    LINEAR span across a periodic index walk; the window wrapped the whole
+    [0, 2pi) sweep (~1.5*pi) and swallowed the two arcs adjacent to theta=0,
+    so ``detect_caustic_structure`` shipped only TWO astroid arcs while still
+    reporting four cusps.  The cusp count alone could not see that blind spot,
+    so ``detect_caustic_structure`` now also cross-checks the surviving-arc
+    count against `_EXPECTED_ARCS` and raises `CausticTopologyError` on a
+    mismatch.  This case pins the healthy 4-cusps -> 4-arcs invariant and,
+    with a monkeypatched expectation, proves the arc-count guard fires.
+    """
+
+    def test_four_cusps_and_four_surviving_arcs(self):
+        # Invariant: every astroid gamma yields detected_cusps == 4 AND
+        # len(arcs) == 4.  A future change that silently drops an arc (the
+        # theta=0 wrap victim, or any other) makes this go RED.
+        for gamma in ARC_SURVIVAL_GAMMAS:
+            with self.subTest(gamma=gamma):
+                structure = st.detect_caustic_structure(gamma, 1)
+                self.assertEqual(
+                    structure.detected_cusps, 4,
+                    f'gamma={gamma}: expected 4 astroid cusps, got '
+                    f'{structure.detected_cusps}')
+                self.assertEqual(
+                    len(structure.arcs), ASTROID_EXPECTED_ARCS,
+                    f'gamma={gamma}: expected {ASTROID_EXPECTED_ARCS} '
+                    f'surviving fold arcs, got {len(structure.arcs)} -- the '
+                    f'pre-fix wrap bug dropped the two arcs adjacent to '
+                    f'theta=0 and shipped 2')
+                self._count()
+
+    def test_arc_count_mismatch_raises_topology_error(self):
+        # Teeth: with the surviving-arc expectation monkeypatched away from
+        # the real astroid count, detect_caustic_structure must raise
+        # CausticTopologyError -- NOT silently ship a fold-ring hole.  This
+        # drives the guard synthetically (no engine campaign): the cusp count
+        # still matches (4 == _EXPECTED_CUSPS[1]) so only the arc-count
+        # cross-check can fire.
+        gamma = ARC_SURVIVAL_GAMMAS[0]
+        with unittest_mock.patch.dict(st._EXPECTED_ARCS, {1: 3}):
+            with self.assertRaises(st.CausticTopologyError) as caught:
+                st.detect_caustic_structure(gamma, 1)
+        self.assertIn(
+            'fold arc', str(caught.exception).lower(),
+            'the arc-count guard message must name the surviving fold arcs')
+        self._count()
+
+    def test_correct_arc_expectation_does_not_raise(self):
+        # Control: with the real expectation restored the same gamma builds
+        # cleanly -- the guard fires ONLY on a genuine mismatch, so the teeth
+        # test above is not a blanket refusal.
+        gamma = ARC_SURVIVAL_GAMMAS[0]
+        structure = st.detect_caustic_structure(gamma, 1)
+        self.assertEqual(len(structure.arcs), st._EXPECTED_ARCS[1])
+        self._count()
+
+
+class Theta0CuspWindowValueTestCase(_CuspTestCase):
+    """WP1 (wrap fix): the theta=0 cusp exclusion WINDOW is a sane value, not
+    the ~1.5*pi wrap-bug artefact.
+
+    This is a VALUE pin, not a path pin.  The pre-fix linear span across the
+    periodic index walk inflated the theta=0 cusp's ``delta_theta`` by 20-50x
+    (span ~2*pi -> half-width ~4.7 rad), so a wrap regression re-inflates
+    it and this case goes RED.  The astroid is 2-fold (not 4-fold) symmetric
+    in cusp WINDOWS: the x-axis pair (theta=0, theta=pi) share a bit-identical
+    window by the y->conj reflection symmetry, while the y-axis cusps
+    (theta=pi/2, 3pi/2) floor to ``_CUSP_MIN_HALFWIDTH`` at gamma >= 0.4.  So
+    the method is: compare the theta=0 window to its x-axis reflection partner
+    theta=pi (must agree to the detector resolution) and assert theta=0 is NOT
+    an outlier above its three siblings.  Measured healthy theta=0 half-width
+    is 0.094 (gamma <= 0.4), 0.141 (gamma=0.7), 0.236 (gamma=0.9).
+    """
+
+    def test_theta0_window_matches_x_axis_partner_and_is_not_inflated(self):
+        for gamma in ARC_SURVIVAL_GAMMAS:
+            with self.subTest(gamma=gamma):
+                thetas, speed = st._branch_speed_profile(
+                    gamma, 1, 0.0, 2.0 * np.pi, N_SAMPLES, periodic=True)
+                cusps = st._find_cusps(
+                    thetas, speed, periodic=True, gamma=gamma, branch=1)
+                self.assertEqual(
+                    len(cusps), 4,
+                    f'gamma={gamma}: expected 4 cusps, got {len(cusps)}')
+                theta0_c, delta0 = _nearest_cusp(cusps, 0.0)
+                theta_pi_c, delta_pi = _nearest_cusp(cusps, np.pi)
+                # The wrap victim: the detected cusp nearest theta=0.
+                self.assertLessEqual(
+                    _wrap_distance(theta0_c, 0.0), SAMPLING_STEP + 1e-9,
+                    f'gamma={gamma}: no cusp within one step of theta=0')
+                # (a) Reflection-partner equality: theta=0 window equals the
+                # interior theta=pi window (which the wrap bug never touched).
+                self.assertLessEqual(
+                    abs(delta0 - delta_pi), WINDOW_PARTNER_ATOL,
+                    f'gamma={gamma}: theta=0 window {delta0:.6f} disagrees '
+                    f'with its x-axis partner theta=pi {delta_pi:.6f} by more '
+                    f'than {WINDOW_PARTNER_ATOL:.6f} rad (wrap re-inflation?)')
+                # (b) Not an outlier: the theta=0 window does not spike above
+                # the largest of its three siblings.  The pre-fix ~4.7 rad
+                # value blows past every sibling (<= 0.236); the healthy value
+                # equals its theta=pi partner, i.e. it IS a sibling maximum.
+                others = [dt for (t, dt) in cusps
+                          if not np.isclose(t, theta0_c, atol=1e-9)]
+                self.assertEqual(
+                    len(others), 3,
+                    f'gamma={gamma}: expected 3 sibling cusps, got '
+                    f'{len(others)}')
+                self.assertLessEqual(
+                    delta0, max(others) + WINDOW_PARTNER_ATOL,
+                    f'gamma={gamma}: theta=0 window {delta0:.6f} is an outlier '
+                    f'above its siblings (max {max(others):.6f}) -- the '
+                    f'wrap-bug signature')
+                # (c) Sane ceiling: the value is nowhere near the ~4.7 rad
+                # inflated artefact, independent of the sibling comparison.
+                self.assertLess(
+                    delta0, WINDOW_SANE_CEILING,
+                    f'gamma={gamma}: theta=0 window {delta0:.6f} exceeds the '
+                    f'sane ceiling {WINDOW_SANE_CEILING} -- likely the '
+                    f'wrap-bug inflated value')
+                self._count()
+
+    def test_inflated_theta0_window_fails_partner_pin(self):
+        # Teeth (self-falsification): a synthetically re-inflated theta=0
+        # window (the wrap-bug signature, span ~2*pi -> ~4.7 rad) exceeds
+        # the partner tolerance AND the sane ceiling, so the pin above cannot
+        # pass a regression.
+        gamma = ARC_SURVIVAL_GAMMAS[-1]
+        thetas, speed = st._branch_speed_profile(
+            gamma, 1, 0.0, 2.0 * np.pi, N_SAMPLES, periodic=True)
+        cusps = st._find_cusps(
+            thetas, speed, periodic=True, gamma=gamma, branch=1)
+        _t0, delta0 = _nearest_cusp(cusps, 0.0)
+        _tpi, delta_pi = _nearest_cusp(cusps, np.pi)
+        inflated = st._CUSP_WIDTH_SAFETY * 0.5 * 1.5 * np.pi
+        self.assertGreater(
+            abs(inflated - delta_pi), WINDOW_PARTNER_ATOL,
+            'the wrap-bug inflated window must fail the partner tolerance')
+        self.assertGreater(
+            inflated, WINDOW_SANE_CEILING,
+            'the wrap-bug inflated window must exceed the sane ceiling')
+        # ...and the healthy value must PASS, so the teeth are specific.
+        self.assertLessEqual(abs(delta0 - delta_pi), WINDOW_PARTNER_ATOL)
+        self._count()
 
 
 class PositiveParityServedImageCountTestCase(_CuspTestCase):
@@ -1543,6 +1752,55 @@ class DiagnosticPlotTestCase(TestCase):
         axis.set_ylabel('source y')
         axis.set_title('served (4) vs opposite (2) fold sources')
         path = _OUTPUT_DIR / 'caustic_cusps_served_scatter.png'
+        figure.savefig(path)
+        plt.close(figure)
+        self.assertTrue(path.exists())
+
+    def test_specA_astroid_arc_spans_circle(self):
+        # Spec A diagnostic: the four surviving astroid arcs' [theta_lo,
+        # theta_hi] spans drawn around the [0, 2pi) circle.  The pre-fix wrap
+        # bug collapsed/absorbed the two arcs straddling theta=0, so the
+        # healthy plot shows four well-separated arc wedges.
+        figure = plt.figure()
+        axis = figure.add_subplot(projection='polar')
+        colors = plt.cm.tab10(np.linspace(0.0, 1.0, len(ARC_SURVIVAL_GAMMAS)))
+        for row, gamma in enumerate(ARC_SURVIVAL_GAMMAS):
+            structure = st.detect_caustic_structure(gamma, 1)
+            radius = 1.0 + 0.25 * row
+            for arc in structure.arcs:
+                span = np.linspace(arc.theta_lo, arc.theta_hi, 40)
+                axis.plot(span, np.full_like(span, radius),
+                          color=colors[row], linewidth=3)
+            axis.plot([], [], color=colors[row],
+                      label=f'gamma={gamma} ({len(structure.arcs)} arcs)')
+        axis.set_title('astroid surviving fold-arc spans (4 expected)')
+        axis.legend(loc='upper right', bbox_to_anchor=(1.35, 1.1))
+        path = _OUTPUT_DIR / 'caustic_cusps_specA_arc_spans_circle.png'
+        figure.savefig(path)
+        plt.close(figure)
+        self.assertTrue(path.exists())
+
+    def test_specB_cusp_halfwidths_bar(self):
+        # Spec B diagnostic: bar chart of the four cusp half-widths per gamma.
+        # The wrap victim (the cusp nearest theta=0) spikes ~20-50x above its
+        # three siblings under the bug; the healthy plot shows the x-axis pair
+        # equal and the y-axis pair floored.
+        figure, axis = plt.subplots()
+        width = 0.2
+        for row, gamma in enumerate(ARC_SURVIVAL_GAMMAS):
+            thetas, speed = st._branch_speed_profile(
+                gamma, 1, 0.0, 2.0 * np.pi, N_SAMPLES, periodic=True)
+            cusps = st._find_cusps(
+                thetas, speed, periodic=True, gamma=gamma, branch=1)
+            ordered = sorted(cusps, key=lambda tw: tw[0])
+            deltas = [dt for _t, dt in ordered]
+            positions = np.arange(len(deltas)) + row * width
+            axis.bar(positions, deltas, width=width, label=f'gamma={gamma}')
+        axis.set_xlabel('cusp index (ordered by theta)')
+        axis.set_ylabel('delta_theta (half-width) [rad]')
+        axis.set_title('astroid cusp window half-widths (wrap victim spikes)')
+        axis.legend()
+        path = _OUTPUT_DIR / 'caustic_cusps_specB_halfwidths_bar.png'
         figure.savefig(path)
         plt.close(figure)
         self.assertTrue(path.exists())

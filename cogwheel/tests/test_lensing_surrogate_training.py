@@ -180,6 +180,7 @@ import unittest
 from pathlib import Path
 from unittest import TestCase, main, mock
 
+import pytest
 import numpy as np
 
 from cogwheel.lensing import prior as lens_prior
@@ -187,7 +188,6 @@ from cogwheel.lensing import surrogate as surrogate_module
 from cogwheel.lensing.surrogate import ExteriorPolarChart, select_chart
 from cogwheel.lensing.surrogate import _wedge_cusp_axis_map, _uniform_axis
 from cogwheel.lensing.surrogate import _deltoid_cusp_axis_map
-from cogwheel.lensing.surrogate import _tube_serves, TubeChart
 from cogwheel.lensing.surrogate import LensAmplificationSurrogate
 from cogwheel.lensing import surrogate_training as training
 from cogwheel.lensing.chang_refsdal import geometry
@@ -3614,17 +3614,6 @@ _WP2_SA_ROUNDTRIP_RTOL = 1e-14
 #: Held-out eps bar for the correctly built saddle cusp-adapted chart.
 _WP2_SA_HELDOUT_EPS_BAR = 1e-3
 
-#: D2 fixture constants for parity-gated cusp-window self-falsification.
-_WP2_CUSP_WINDOW_THETA_CUSP: float = 0.0
-_WP2_CUSP_WINDOW_DELTA: float = 0.1
-_WP2_CUSP_WINDOW_QUERY_OFFSET: float = 0.04
-_WP2_CUSP_SYNTHETIC_GAMMA: float = 1.0
-_WP2_CUSP_SYNTHETIC_LOG_W_LO: float = 1.0
-_WP2_CUSP_SYNTHETIC_LOG_W_HI: float = 2.0
-_WP2_CUSP_SYNTHETIC_ETA: float = 0.09
-_WP2_CUSP_SYNTHETIC_U: float = 0.3
-_WP2_CUSP_SYNTHETIC_THETA: float = 0.5
-
 # ---------------------------------------------------------------------------
 
 def _ff_tile(*, center, half, region='exterior', w_range=(5.0, 40.0),
@@ -5993,264 +5982,6 @@ class SaddleThetaToUMutationSelfFalsificationSelfFalsification(
             f'D1 premise is vacuous — theta_to_u is not load-bearing.')
         self.comparisons += 1
 
-class CuspArmCoverageParityGateSelfFalsificationTestCase(_CountingTestCase):
-    """WP2 Spec D2: Parity-gated cusp-window coverage self-falsification.
-
-    Constructs synthetic tube charts (no engine) to test the parity-aware
-    cusp-window shrinkage in ``_tube_serves``:
-
-    * D2a: Positive-parity chart.  Monkey-patch ``_CUSP_ARM_COVERAGE``
-      to 0.0 → the full cusp window refuses, so a query at
-      ``theta_cusp + 0.04`` (inside the window when coverage=0.0 but
-      outside when coverage=0.07) is INCORRECTLY refused → returns False.
-    * D2b: Saddle-parity chart.  Monkey-patch
-      ``_SADDLE_CUSP_ARM_COVERAGE`` to 0.07 → the cusp window is shrunk
-      by 0.07 (instead of 0.0), so a query at ``theta_cusp + 0.04``
-      (outside the shrunk residual window 0.03) is INCORRECTLY served →
-      returns True.
-
-    Restoring the correct constants makes both queries return the CORRECT
-    results (positive: True, saddle: False), proving the guards have teeth.
-    NOT engine-backed; runs in the fast tier.
-    """
-
-    def setUp(self) -> None:
-        super().setUp()
-        n = 4
-        theta_grid = np.linspace(0.0, 1.0, n)
-        self._pos_tube = TubeChart._assemble(
-            gamma_grid=np.linspace(0.5, 1.5, n),
-            u_grid=np.linspace(0.2, 0.6, n),
-            theta_grid=theta_grid,
-            log_w_grid=np.linspace(0.5, 2.5, n),
-            real_coeffs=np.zeros((n, n, n, n)),
-            imag_coeffs=np.zeros((n, n, n, n)),
-            knots=(
-                self._knots(n, 0.5, 2.5),
-                self._knots(n, 0.5, 1.5),
-                self._knots(n, 0.2, 0.6),
-                self._knots(n, 0.0, 1.0)),
-            image_count=4, parity=1,
-            eta_floor=_WP2_CUSP_SYNTHETIC_ETA * 0.5,
-            eta_max=_WP2_CUSP_SYNTHETIC_ETA * 1.5,
-            cusp_windows=((_WP2_CUSP_WINDOW_THETA_CUSP,
-                           _WP2_CUSP_WINDOW_DELTA),))
-        self._saddle_tube = TubeChart._assemble(
-            gamma_grid=np.linspace(1.2, 2.0, n),
-            u_grid=np.linspace(0.2, 0.6, n),
-            theta_grid=theta_grid,
-            log_w_grid=np.linspace(0.5, 2.5, n),
-            real_coeffs=np.zeros((n, n, n, n)),
-            imag_coeffs=np.zeros((n, n, n, n)),
-            knots=(
-                self._knots(n, 0.5, 2.5),
-                self._knots(n, 1.2, 2.0),
-                self._knots(n, 0.2, 0.6),
-                self._knots(n, 0.0, 1.0)),
-            image_count=4, parity=-1,
-            eta_floor=_WP2_CUSP_SYNTHETIC_ETA * 0.5,
-            eta_max=_WP2_CUSP_SYNTHETIC_ETA * 1.5,
-            cusp_windows=((_WP2_CUSP_WINDOW_THETA_CUSP,
-                           _WP2_CUSP_WINDOW_DELTA),))
-
-    @staticmethod
-    def _knots(n: int, lo: float, hi: float) -> np.ndarray:
-        k = np.full(n + 2 + 3, lo)
-        k[n + 2:] = hi
-        return k
-
-    # -- Positive parity: correct coverage=0.07 → query at +0.04 served ---
-
-    def test_positive_parity_correctly_serves(self) -> None:
-        query_theta = _WP2_CUSP_WINDOW_QUERY_OFFSET
-        result = _tube_serves(
-            self._pos_tube, gamma=_WP2_CUSP_SYNTHETIC_GAMMA,
-            log_w_min=_WP2_CUSP_SYNTHETIC_LOG_W_LO,
-            log_w_max=_WP2_CUSP_SYNTHETIC_LOG_W_HI,
-            eta=_WP2_CUSP_SYNTHETIC_ETA,
-            theta=query_theta, image_count=4)
-        self.assertTrue(
-            result,
-            f'Positive-parity chart with correct coverage=0.07 must serve '
-            f'query at theta={query_theta} (residual window=0.03, '
-            f'query at {query_theta} is outside)')
-        self.comparisons += 1
-
-    # -- D2a: positive parity with patched coverage=0.0 → falsely refuses --
-
-    def test_positive_parity_refuses_when_coverage_zero(self) -> None:
-        query_theta = _WP2_CUSP_WINDOW_QUERY_OFFSET
-        original = surrogate_module._CUSP_ARM_COVERAGE
-        try:
-            surrogate_module._CUSP_ARM_COVERAGE = 0.0
-            result = _tube_serves(
-                self._pos_tube, gamma=_WP2_CUSP_SYNTHETIC_GAMMA,
-                log_w_min=_WP2_CUSP_SYNTHETIC_LOG_W_LO,
-                log_w_max=_WP2_CUSP_SYNTHETIC_LOG_W_HI,
-                eta=_WP2_CUSP_SYNTHETIC_ETA,
-                theta=query_theta, image_count=4)
-            self.assertFalse(
-                result,
-                f'Positive-parity chart with patched coverage=0.0 must '
-                f'FALSELY refuse query at theta={query_theta} '
-                f'(residual window=0.1, query is inside)')
-            self.comparisons += 1
-        finally:
-            surrogate_module._CUSP_ARM_COVERAGE = original
-
-    # -- Saddle parity: correct coverage=0.0 → query at +0.04 refused ----
-
-    def test_saddle_parity_correctly_refuses(self) -> None:
-        query_theta = _WP2_CUSP_WINDOW_QUERY_OFFSET
-        result = _tube_serves(
-            self._saddle_tube, gamma=1.5,
-            log_w_min=_WP2_CUSP_SYNTHETIC_LOG_W_LO,
-            log_w_max=_WP2_CUSP_SYNTHETIC_LOG_W_HI,
-            eta=_WP2_CUSP_SYNTHETIC_ETA,
-            theta=query_theta, image_count=4)
-        self.assertFalse(
-            result,
-            f'Saddle-parity chart with correct coverage=0.0 must refuse '
-            f'query at theta={query_theta} (residual window=0.1, '
-            f'query is inside)')
-        self.comparisons += 1
-
-    # -- D2b: saddle parity with patched coverage=0.07 → falsely serves ---
-
-    def test_saddle_parity_serves_when_coverage_0_07(self) -> None:
-        query_theta = _WP2_CUSP_WINDOW_QUERY_OFFSET
-        original = surrogate_module._SADDLE_CUSP_ARM_COVERAGE
-        try:
-            surrogate_module._SADDLE_CUSP_ARM_COVERAGE = 0.07
-            result = _tube_serves(
-                self._saddle_tube, gamma=1.5,
-                log_w_min=_WP2_CUSP_SYNTHETIC_LOG_W_LO,
-                log_w_max=_WP2_CUSP_SYNTHETIC_LOG_W_HI,
-                eta=_WP2_CUSP_SYNTHETIC_ETA,
-                theta=query_theta, image_count=4)
-            self.assertTrue(
-                result,
-                f'Saddle-parity chart with patched coverage=0.07 must '
-                f'FALSELY serve query at theta={query_theta} '
-                f'(residual window=0.03, query is outside)')
-            self.comparisons += 1
-        finally:
-            surrogate_module._SADDLE_CUSP_ARM_COVERAGE = original
-
-    # -- Verify constants are restored ---
-
-    def test_constants_restored_after_tests(self) -> None:
-        self.assertEqual(surrogate_module._CUSP_ARM_COVERAGE, 0.07,
-                         '_CUSP_ARM_COVERAGE must be restored to 0.07 '
-                         'after patching')
-        self.assertEqual(surrogate_module._SADDLE_CUSP_ARM_COVERAGE, 0.0,
-                         '_SADDLE_CUSP_ARM_COVERAGE must be restored to '
-                         '0.0 after patching')
-        self.comparisons += 2
-
-
-class CuspArmCoverageParityGateSelfFalsificationSelfFalsification(
-        _CountingTestCase):
-    """Prove D2 assertions have teeth — incorrect constants make tests fail.
-
-    Swaps the coverage constants: sets _CUSP_ARM_COVERAGE=0.0 (instead of
-    0.07) for positive parity and _SADDLE_CUSP_ARM_COVERAGE=0.07 (instead
-    of 0.0) for saddle parity, then asserts the opposite — proving the
-    correct constants are load-bearing.
-    NOT engine-backed; runs in the fast tier.
-    """
-
-    def setUp(self) -> None:
-        super().setUp()
-        n = 4
-        theta_grid = np.linspace(0.0, 1.0, n)
-        self._pos_tube = TubeChart._assemble(
-            gamma_grid=np.linspace(0.5, 1.5, n),
-            u_grid=np.linspace(0.2, 0.6, n),
-            theta_grid=theta_grid,
-            log_w_grid=np.linspace(0.5, 2.5, n),
-            real_coeffs=np.zeros((n, n, n, n)),
-            imag_coeffs=np.zeros((n, n, n, n)),
-            knots=(
-                np.array([0.5] * (n + 2) + [2.5] * 3, dtype=float),
-                np.array([0.5] * (n + 2) + [1.5] * 3, dtype=float),
-                np.array([0.2] * (n + 2) + [0.6] * 3, dtype=float),
-                np.array([0.0] * (n + 2) + [1.0] * 3, dtype=float)),
-            image_count=4, parity=1,
-            eta_floor=_WP2_CUSP_SYNTHETIC_ETA * 0.5,
-            eta_max=_WP2_CUSP_SYNTHETIC_ETA * 1.5,
-            cusp_windows=((_WP2_CUSP_WINDOW_THETA_CUSP,
-                           _WP2_CUSP_WINDOW_DELTA),))
-        self._saddle_tube = TubeChart._assemble(
-            gamma_grid=np.linspace(1.2, 2.0, n),
-            u_grid=np.linspace(0.2, 0.6, n),
-            theta_grid=theta_grid,
-            log_w_grid=np.linspace(0.5, 2.5, n),
-            real_coeffs=np.zeros((n, n, n, n)),
-            imag_coeffs=np.zeros((n, n, n, n)),
-            knots=(
-                np.array([0.5] * (n + 2) + [2.5] * 3, dtype=float),
-                np.array([1.2] * (n + 2) + [2.0] * 3, dtype=float),
-                np.array([0.2] * (n + 2) + [0.6] * 3, dtype=float),
-                np.array([0.0] * (n + 2) + [1.0] * 3, dtype=float)),
-            image_count=4, parity=-1,
-            eta_floor=_WP2_CUSP_SYNTHETIC_ETA * 0.5,
-            eta_max=_WP2_CUSP_SYNTHETIC_ETA * 1.5,
-            cusp_windows=((_WP2_CUSP_WINDOW_THETA_CUSP,
-                           _WP2_CUSP_WINDOW_DELTA),))
-
-    def test_positive_parity_false_refusal_is_reachable_red(self) -> None:
-        original = surrogate_module._CUSP_ARM_COVERAGE
-        try:
-            surrogate_module._CUSP_ARM_COVERAGE = 0.0
-            result_false = _tube_serves(
-                self._pos_tube, gamma=_WP2_CUSP_SYNTHETIC_GAMMA,
-                log_w_min=_WP2_CUSP_SYNTHETIC_LOG_W_LO,
-                log_w_max=_WP2_CUSP_SYNTHETIC_LOG_W_HI,
-                eta=_WP2_CUSP_SYNTHETIC_ETA,
-                theta=_WP2_CUSP_WINDOW_QUERY_OFFSET, image_count=4)
-            self.assertFalse(result_false,
-                             'patched coverage=0.0 must refuse')
-            self.comparisons += 1
-            surrogate_module._CUSP_ARM_COVERAGE = 0.07
-            result_true = _tube_serves(
-                self._pos_tube, gamma=_WP2_CUSP_SYNTHETIC_GAMMA,
-                log_w_min=_WP2_CUSP_SYNTHETIC_LOG_W_LO,
-                log_w_max=_WP2_CUSP_SYNTHETIC_LOG_W_HI,
-                eta=_WP2_CUSP_SYNTHETIC_ETA,
-                theta=_WP2_CUSP_WINDOW_QUERY_OFFSET, image_count=4)
-            self.assertTrue(result_true,
-                            'correct coverage=0.07 must serve')
-            self.comparisons += 1
-        finally:
-            surrogate_module._CUSP_ARM_COVERAGE = original
-
-    def test_saddle_parity_false_serve_is_reachable_red(self) -> None:
-        original = surrogate_module._SADDLE_CUSP_ARM_COVERAGE
-        try:
-            surrogate_module._SADDLE_CUSP_ARM_COVERAGE = 0.07
-            result_true = _tube_serves(
-                self._saddle_tube, gamma=1.5,
-                log_w_min=_WP2_CUSP_SYNTHETIC_LOG_W_LO,
-                log_w_max=_WP2_CUSP_SYNTHETIC_LOG_W_HI,
-                eta=_WP2_CUSP_SYNTHETIC_ETA,
-                theta=_WP2_CUSP_WINDOW_QUERY_OFFSET, image_count=4)
-            self.assertTrue(result_true,
-                            'patched coverage=0.07 must serve')
-            self.comparisons += 1
-            surrogate_module._SADDLE_CUSP_ARM_COVERAGE = 0.0
-            result_false = _tube_serves(
-                self._saddle_tube, gamma=1.5,
-                log_w_min=_WP2_CUSP_SYNTHETIC_LOG_W_LO,
-                log_w_max=_WP2_CUSP_SYNTHETIC_LOG_W_HI,
-                eta=_WP2_CUSP_SYNTHETIC_ETA,
-                theta=_WP2_CUSP_WINDOW_QUERY_OFFSET, image_count=4)
-            self.assertFalse(result_false,
-                             'correct coverage=0.0 must refuse')
-            self.comparisons += 1
-        finally:
-            surrogate_module._SADDLE_CUSP_ARM_COVERAGE = original
-
 # ---------------------------------------------------------------------------
 # SHARD D: held-out accuracy of a macro-saddle lobe-EXTERIOR chart against the
 # exact Schwinger oracle (WP1 LobeExteriorChart + WP2 admits_exterior /
@@ -6567,6 +6298,10 @@ if __name__ == '__main__':
     main()
 
 
+@pytest.mark.timeout(1800)  # fixture builds real training structures (~min
+# serial); on a loaded shared box the 8-way gate's 600 s default fired twice
+# while the test was green standalone (2026-08-14). Liveness guard, not a
+# performance pin.
 class DegenerateExteriorBandIsRecordedTestCase(_CountingTestCase):
     """A band whose caustic reach exceeds the prior box must SAY SO.
 

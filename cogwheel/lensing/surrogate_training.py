@@ -145,6 +145,10 @@ _WEDGE_R_MIN = 1e-2
 
 #: Expected cusp counts by parity (astroid / deltoid, both lobes summed).
 _EXPECTED_CUSPS = {1: 4, -1: 6}
+#: Expected surviving fold-arc counts by parity.  Astroid = 4 fold arcs
+#: between its 4 cusps; saddle deltoid = 6 surviving arcs, matching the
+#: frozen ``_WP1_GOLDEN_STRUCTURE`` which pins 6 cusps -> 6 arcs.
+_EXPECTED_ARCS = {1: 4, -1: 6}
 #: S2-1 interior directional admission (frozen WP6).  Polar-angle nodes of the
 #: band-minimum directional caustic boundary ``rho_boundary`` (`r_caustic`
 #: sampled per band gamma); the outer edge of each candidate interior tile is
@@ -551,6 +555,9 @@ def _find_cusps(thetas: np.ndarray, speed: np.ndarray, periodic: bool, *,
     bracketed strictly inside the sampled interval), and ``delta_theta`` is
     ``width_safety`` times the half-width of the dip that falls below
     ``window_dip_frac`` of the median speed, floored at ``min_halfwidth``.
+    On the periodic branch the dip span is measured wrap-aware (the house
+    ``abs((a-b+pi)%2pi-pi)`` idiom) so a cusp whose window straddles the
+    ``theta`` wrap point gets its true half-width, not the whole sweep.
     The astroid path uses the module defaults (`_CUSP_WIDTH_SAFETY`,
     `_CUSP_MIN_HALFWIDTH`); the saddle path passes its wider
     `_SADDLE_CUSP_WIDTH_SAFETY` / `_SADDLE_CUSP_MIN_HALFWIDTH` (Build 8g WP3).
@@ -595,7 +602,15 @@ def _find_cusps(thetas: np.ndarray, speed: np.ndarray, periodic: bool, *,
             hi = (hi + 1) % n if periodic else hi + 1
             if hi == i:
                 break
-        span = abs(thetas[i] - thetas[lo]) + abs(thetas[hi] - thetas[i])
+        if periodic:
+            # Dip-window walk uses periodic INDEX arithmetic, so the span must
+            # be measured wrap-aware (house idiom ``abs((a-b+pi)%2pi-pi)``);
+            # the linear form below computes ~1.5*pi for the theta=0 cusp whose
+            # window straddles the wrap point, killing its two adjacent arcs.
+            span = abs((thetas[i] - thetas[lo] + np.pi) % (2 * np.pi) - np.pi) \
+                + abs((thetas[hi] - thetas[i] + np.pi) % (2 * np.pi) - np.pi)
+        else:
+            span = abs(thetas[i] - thetas[lo]) + abs(thetas[hi] - thetas[i])
         delta = max(min_halfwidth, width_safety * 0.5 * span)
         # Relocate to the analytic root of y'.y'' = 0, bracketed strictly
         # inside the sampled interval (keeps brentq off the diverging saddle
@@ -777,7 +792,8 @@ def detect_caustic_structure(gamma: float, parity: int, *,
     Raises
     ------
     CausticTopologyError
-        If the detected cusp count does not match the expected topology.
+        If the detected cusp count or surviving fold-arc count does not match
+        the expected topology.
     """
     if parity == 1:
         cusps, arcs, reach = _astroid_arcs(gamma, n_samples)
@@ -791,6 +807,16 @@ def detect_caustic_structure(gamma: float, parity: int, *,
             f'(parity {parity:+d}) but the topology expects {expected} '
             f'({"astroid" if parity == 1 else "deltoid, 2 lobes x 3"}). '
             f'The caustic sampling or geometry is inconsistent.')
+    # Cross-check surviving ARCS, not just cusps: a fixed span but a dropped
+    # arc (from any other cause) must fail loudly rather than ship a fold-ring
+    # hole -- the astroid 2-of-4 blind spot the cusp count alone cannot see.
+    expected_arcs = _EXPECTED_ARCS[parity]
+    detected_arcs = len(arcs)
+    if detected_arcs != expected_arcs:
+        raise CausticTopologyError(
+            f'Detected {detected_arcs} surviving fold arcs at gamma={gamma} '
+            f'(parity {parity:+d}) but the topology expects {expected_arcs}. '
+            f'The cusp-window span or arc construction dropped an arc.')
     return CausticStructure(
         parity=parity, gamma=float(gamma),
         cusp_thetas=tuple(float(t) for t, _ in cusps),

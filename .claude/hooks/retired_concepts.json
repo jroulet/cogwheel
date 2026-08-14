@@ -20,6 +20,16 @@
   ],
   "retired": [
     {
+      "name": "_CUSP_ARM_COVERAGE",
+      "retired_by": "find_cusps_wrap_fix build (2026-08-14)",
+      "note": "F079: wrong units for its _tube_serves consumer (image-plane polar offset vs critical-curve parameter angle, 40x apart, non-monotonic) and measured INERT (0 differing serve decisions over 64 production windows). Post-F074 there is no angular serve boundary; the tube gate excludes on the full cusp window and the real structure is the w-floor 49."
+    },
+    {
+      "name": "_SADDLE_CUSP_ARM_COVERAGE",
+      "retired_by": "find_cusps_wrap_fix build (2026-08-14)",
+      "note": "Saddle sibling of _CUSP_ARM_COVERAGE, retired with it (F079)."
+    },
+    {
       "name": "_WEDGE_EPS",
       "retired_by": "145cec3",
       "note": "F044: the macro-saddle wedge edge is a REGULAR point of the caustic; the standoff bought no safety and cost coverage. Sweeps run edge to edge."

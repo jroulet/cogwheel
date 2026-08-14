@@ -445,8 +445,9 @@ _R_PPGO_ERROR_CONST = 0.10
 #: Kernel-truncation floor for the ppGO fast rung (1/w³ terms negligible
 #: above this).  A w below this floor would bias the ppGO amplitude because
 #: the geometric-sum kernel still has support beyond the saddle pair.
-#: Measured: ``scripts/calibrate_ppgo_rung.py`` sweep yields sub-percent
-#: agreement for w ≥ 5 in the serving region; floor set to 8 (1.6× safety).
+#: The retired calibration sweep observed sub-percent agreement for w ≥ 5
+#: in the serving region; floor set to 8 (1.6× safety margin over that
+#: measured region).
 _W_PPGO_FLOOR = 8.0
 
 #: ppGO envelope bar divisor: `bar_ppgo = envelope_bar / divisor`, i.e. the

@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [lensing_find_cusps_wrap_bug]
+
 ---
 
 - **NEXT-SESSION ORDER 6/7 (with 3/7 = lensing_find_cusps_wrap_bug) —

@@ -79,6 +79,7 @@ from collections import Counter
 from pathlib import Path
 from unittest import TestCase
 
+import pytest
 import numpy as np
 
 from cogwheel import data, waveform
@@ -1534,6 +1535,12 @@ def _draw_saddle_sample(module, seed, n):
     return categories, rho, rho <= 1.0
 
 
+@pytest.mark.timeout(1800)  # setUpClass draws a full census sample (~10 min
+# serial, measured 2026-08-14); under an 8-way gate on a loaded shared box
+# the first test's signal timer (which includes setUpClass) crossed the
+# gate's 600 s default twice while the class was green standalone. The
+# budget is a liveness guard, not a performance pin — timing guards are a
+# separate serial tier.
 class SaddleGapReductionHistogramTestCase(CensusTestCase):
     """Over a saddle-heavy (gamma > 1) sample, WP3 populates the two lobe
     categories and STRICTLY reduces the 'exact_engine' gap versus the pre-WP3
