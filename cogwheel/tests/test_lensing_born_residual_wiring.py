@@ -144,6 +144,9 @@ class _BornResidualProbe:
     _lens_params = LensedRelativeBinningLikelihood._lens_params
     _surrogate_coefficients = (
         LensedRelativeBinningLikelihood._surrogate_coefficients)
+    # The LIFTED Born rung (WP-B), reachable on the surrogate-free path.
+    _born_residual_analytic = (
+        LensedRelativeBinningLikelihood._born_residual_analytic)
     _reduce_dense_kernels = (
         LensedRelativeBinningLikelihood._reduce_dense_kernels)
     _image_delays = LensedRelativeBinningLikelihood._image_delays
@@ -183,10 +186,21 @@ class _BornResidualProbe:
 # ---------------------------------------------------------------------------
 
 class NoChartByteIdentityTestCase(unittest.TestCase):
-    """Verify _surrogate_coefficients returns None when born_residual_chart=None.
+    """Explicit ``born_residual_chart=None`` declines on BOTH Born rungs.
 
-    This is the HEAD behavior: the fact-4 slot declines when no chart is
-    attached, falling through to the exact engine.
+    With no chart attached, both the BURIED rung (``_surrogate_coefficients``,
+    reachable only behind an amplification surrogate) and the LIFTED rung
+    (``_born_residual_analytic``, WP-B, reachable on the surrogate-free
+    production path) return ``None`` and fall through to the exact engine.
+    Declining on both is what makes an explicit-None build byte-identical to
+    a build that never had a Born rung at all -- the byte-identity contract
+    the accuracy oracle relies on when it opts out with
+    ``born_residual_chart=None``.
+
+    Re-point (WP-B/WP-C): the class formerly covered only the buried rung;
+    it now also covers the lifted-rung fall-through so the explicit-None
+    opt-out is pinned on every chart-consulting entry point, not just the
+    one buried behind the surrogate.
     """
 
     def setUp(self):
@@ -266,6 +280,47 @@ class NoChartByteIdentityTestCase(unittest.TestCase):
         result_chart = probe_with_chart._surrogate_coefficients(par_dic)
         self.assertIsNotNone(result_chart)
         self.n_checks += 1
+
+    def test_lifted_born_intercept_falls_through_without_chart(self):
+        """The LIFTED rung ``_born_residual_analytic`` also returns None
+        when ``born_residual_chart=None`` -- the surrogate-free production
+        path honors the explicit-None opt-out just as the buried rung does.
+
+        TEETH (engine-free): the method's first two lines are
+        ``born_chart = self.born_residual_chart; if born_chart is None:
+        return None`` -- BEFORE it reads ``lens[...]`` or touches
+        ``dense_w``. We drive it with POISON ``lens`` values that would
+        RAISE the moment any downstream code touched them; a clean ``None``
+        return therefore proves the chart guard short-circuited FIRST, so
+        the fall-through is the chart guard, not an incidental crash or an
+        upstream guard. Each poison variant fails differently
+        (``None[...]`` -> TypeError, ``{}[...]`` -> KeyError, a mapping
+        whose ``__getitem__`` raises -> RuntimeError), so no single
+        accidental swallow could make all three pass."""
+
+        class _PoisonMapping:
+            """Any item access raises -- proves the key was never read."""
+
+            def __getitem__(self, key):
+                raise RuntimeError(
+                    f'poison lens accessed key {key!r}: the chart=None '
+                    f'guard did not short-circuit first')
+
+        probe = _BornResidualProbe(born_residual_chart=None)
+        dense_w = np.linspace(10.0, 100.0, 8)
+        poison_lenses = (
+            ('lens=None', None, None),
+            ('empty-dict lens', {}, dense_w),
+            ('raising-mapping lens', _PoisonMapping(), dense_w),
+        )
+        for label, poison_lens, poison_w in poison_lenses:
+            with self.subTest(poison=label):
+                result = probe._born_residual_analytic(poison_lens, poison_w)
+                self.assertIsNone(
+                    result,
+                    f'lifted Born rung did not fall through to None with '
+                    f'chart=None for {label}: {result!r}')
+                self.n_checks += 1
 
 
 class MockChartServePathTestCase(unittest.TestCase):

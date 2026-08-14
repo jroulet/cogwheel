@@ -2,7 +2,20 @@
 
 ## tube_d2_fold build (2026-08-14, Architect)
 - Professor (code-grounded) settled the core design: caustic_theta is a LENS-plane
-  gauge angle; under D2 source reflections at eigenframe (beta=0) it maps by EXACT
+  gauge angle; un# wire_serving_artifacts build (2026-08-14, planning)
+- F077: born_residual_chart.npz + certified_ppgo_map.npz dead code — Born rung
+  + map consults live INSIDE _surrogate_coefficients (surrogate-gated), no
+  surrogate ships. Fix: lift first-class Born intercept into
+  _amplification_coefficients (pattern=_saddle_farfield_analytic), serving Born
+  (rho>1 via covers) WITHOUT surrogate; consult map inside (band-split). Extract
+  shared _born_coefficients helper; surrogate born rung calls same helper.
+  BornResidualChart NEW load() mirrors CertifiedPpgoMap.load (hash+schema
+  refusal); shipped npz provenance=str(dict) no hash -> writer emits JSON+hash,
+  re-save. get_init_dict NotImplementedError both classes -> auto sentinel
+  default, explicit None=pure engine. marginalized ctor lacks chart -> thread.
+  ORACLE hazard: default likelihood is LnlikeAccuracyTestCase oracle -> explicit None.
+
+der D2 source reflections at eigenframe (beta=0) it maps by EXACT
   arithmetic: s1=sign(y1_eig)<0 -> t->pi-t; s2=sign(y2_eig)<0 -> t->-t; both->t->pi+t.
   Reflect the gauge angle (subtraction + %2pi via existing _theta_into_frame) — do
   NOT recompute caustic_theta from the abs-folded source (nearest_caustic_point is a

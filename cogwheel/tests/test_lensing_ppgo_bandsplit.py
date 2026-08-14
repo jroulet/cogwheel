@@ -348,10 +348,31 @@ class _DispatchProbe:
 
 
 class _PpgoTestCase(TestCase):
-    """Base carrying the counted assertion + anti-vacuity guard."""
+    """Base carrying the counted assertion + anti-vacuity guard AND the
+    process-global map save/restore discipline.
+
+    The certified-ppGO map is a PROCESS GLOBAL
+    (``get_certified_ppgo_map`` / ``set_certified_ppgo_map`` /
+    ``use_certified_ppgo_map``).  A test that installs a map and only
+    RESETS it to ``None`` on teardown CLOBBERS whatever map was already
+    installed by an outer scope, and under xdist ``--dist loadfile`` a
+    test-count change can reshuffle which files share a worker, so a
+    leaked global surfaces as a failure in an unrelated suite (the F078
+    leakage family).  ``setUp`` here captures the INCOMING map and
+    registers an ``addCleanup`` to RESTORE it -- ``addCleanup`` runs LIFO
+    after ``tearDown`` even when the anti-vacuity assertion raises, so
+    every subclass inherits leak-free map discipline without touching its
+    own body.  Subclasses that additionally reset to ``None`` mid-test
+    remain correct: the base restore then puts the captured map back.
+    """
 
     def setUp(self) -> None:
         self.comparisons = 0
+        # Capture-and-restore the process-global map so no test leaks an
+        # installed map into a sibling (see class docstring). LIFO order
+        # means this restore runs even if tearDown's anti-vacuity guard
+        # raises.
+        self.addCleanup(set_certified_ppgo_map, get_certified_ppgo_map())
 
     def tearDown(self) -> None:
         self.assertGreater(
@@ -361,6 +382,84 @@ class _PpgoTestCase(TestCase):
     def assert_within(self, value: float, tol: float, message: str) -> None:
         self.comparisons += 1
         self.assertLessEqual(value, tol, message)
+
+
+# ======================================================================
+# Re-point -- PROCESS-GLOBAL MAP SAVE/RESTORE DISCIPLINE (WP-B/F078).
+# ======================================================================
+
+class GlobalMapSaveRestoreDisciplineTestCase(_PpgoTestCase):
+    """The base-class ``addCleanup`` restores the process-global map to its
+    INCOMING value after every test -- even a test that installs a map and
+    never resets it, and even one whose body raises.
+
+    This pins the re-point directive: a test loading the global map must
+    RESTORE (not merely reset-to-None) so no map leaks into an unrelated
+    sibling under xdist ``--dist loadfile`` (the F078 leakage family).
+
+    TEETH: run a throwaway ``_PpgoTestCase`` subclass -- whose single test
+    installs a DIFFERENT synthetic map and does NOT reset it -- through a
+    real ``unittest.TestResult`` while an OUTER map is installed, then
+    assert the global is back to the OUTER object (identity). If the base
+    restore were removed the inner map would leak and ``assertIs`` fails;
+    the raising-inner variant proves the restore survives a failing body
+    (``addCleanup`` runs even when the test errors).
+    """
+
+    def _run_leaky_inner(self, inner_body) -> unittest.TestResult:
+        outer = _synthetic_map(parity='positive', gamma=0.5, rho=3.0,
+                               w_cert=40.0)
+        inner = _synthetic_map(parity='positive', gamma=0.5, rho=3.0,
+                               w_cert=55.0)
+        # The two maps must be distinct objects, else identity restoration
+        # is vacuous.
+        self.comparisons += 1
+        self.assertIsNot(outer, inner)
+
+        class _LeakyMapTest(_PpgoTestCase):
+            def test_installs_and_leaks(self_inner) -> None:
+                set_certified_ppgo_map(inner)
+                self_inner.comparisons += 1        # satisfy anti-vacuity
+                inner_body()
+
+        saved = get_certified_ppgo_map()
+        try:
+            set_certified_ppgo_map(outer)
+            result = unittest.TestResult()
+            _LeakyMapTest('test_installs_and_leaks').run(result)
+            restored = get_certified_ppgo_map()
+            self.comparisons += 1
+            self.assertIs(
+                restored, outer,
+                'base save/restore did not restore the incoming map: the '
+                'inner test leaked its installed map')
+            return result
+        finally:
+            set_certified_ppgo_map(saved)
+
+    def test_clean_inner_restores_incoming_map(self) -> None:
+        """A well-behaved inner test that installs a map is fully cleaned
+        up -- the outer map is restored and the inner run succeeds."""
+        result = self._run_leaky_inner(lambda: None)
+        self.comparisons += 1
+        self.assertTrue(
+            result.wasSuccessful(),
+            f'inner map test unexpectedly failed: '
+            f'{result.errors or result.failures}')
+
+    def test_raising_inner_still_restores(self) -> None:
+        """Even when the inner test body RAISES, the base ``addCleanup``
+        still restores the incoming map (restore is not conditional on a
+        passing body)."""
+
+        def _boom() -> None:
+            raise RuntimeError('inner test body failed on purpose')
+
+        result = self._run_leaky_inner(_boom)   # restore asserted inside
+        self.comparisons += 1
+        self.assertFalse(
+            result.wasSuccessful(),
+            'the raising inner body should have recorded an error')
 
 
 # ======================================================================

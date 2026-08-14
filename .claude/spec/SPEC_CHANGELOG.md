@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.41.0` (2026-08-14):
+- `0.42.0` (2026-08-14):
 
 Tube-chart serving folds the caustic gauge angle through the four exact D2
 images (`surrogate._tube_theta_inframe`, identity first) so one trained
@@ -17,7 +17,7 @@ single-arc fold is recorded UNSOUND (orientation-reversing gauge<->source
 map). New suite `test_lensing_tube_d2_fold.py`; census witness re-pointed
 to a gap theta. Build `tube_d2_fold` + driver fix-forward.
 
-- `0.40.0` (2026-08-14):
+- `0.41.0` (2026-08-14):
 
 Tier-1 macro-saddle far-field rung re-gated: the scalar
 `_SADDLE_FARFIELD_RHO_FLOOR = 2.0` and the `delta_tau > 0` resolution leg
@@ -29,6 +29,16 @@ moved in the same build. Rho-floor-era suites
 (`test_lensing_saddle_gauge.py`, `test_lensing_saddle_tier1_accuracy.py`,
 `test_lensing_saddle_tier1_refusal.py`) retired; successor
 `test_lensing_saddle_serve_gate.py`. Build `symmetry_tie_c3_admission`.
+
+- `0.40.0` (2026-08-14):
+
+F077 closed: first-class Born intercept in `_amplification_coefficients`
+(chart + certified-map reachable without a surrogate; kappa/beta/gamma-0/
+rho/covers gate; map band-split with byte-exact null-split identity);
+`BornResidualChart.load()` with schema/hash refusals; auto-attach at
+construction with explicit-None opt-out; marginalized threading; census
+mirror re-keyed. New suite `test_lensing_born_analytic_reachability.py`.
+Build `wire_serving_artifacts` + driver gamma==0 unlensed-limit guard.
 
 - `0.39.16` (2026-08-13):
 

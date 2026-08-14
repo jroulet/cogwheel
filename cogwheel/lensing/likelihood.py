@@ -83,6 +83,7 @@ from __future__ import annotations
 
 import math
 import types
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -107,8 +108,17 @@ from cogwheel.lensing.waveform import (LensedWaveformGenerator,
 from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
                                        CERTIFICATION_BAR, caustic_rho,
                                        get_certified_ppgo_map)
+from cogwheel.lensing.born_residual_chart import BornResidualChart
 
 __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
+
+#: Sentinel for the ``born_residual_chart`` constructor argument: when the
+#: caller omits it, the shipped chart artifact is auto-loaded (refusing to
+#: ``None`` on any load anomaly).  An *explicit* ``None`` is the pure-engine
+#: opt-out (no chart attached, byte-identical to the no-chart path) and must
+#: stay distinguishable from "argument not supplied", which is why a plain
+#: ``None`` default cannot serve here.
+_AUTO_BORN_CHART = object()
 
 #: Highest frequency moment retained for the data term ``(d|h)``.  The
 #: candidate component ratio is expanded to first order across a bin and
@@ -875,7 +885,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                  spline_degree=3, bin_delay_tol=_DEFAULT_BIN_DELAY_TOL,
                  kernel_subsamples=_DEFAULT_KERNEL_SUBSAMPLES,
                  amplification_surrogate=None,
-                 born_residual_chart=None):
+                 born_residual_chart=_AUTO_BORN_CHART):
         if isinstance(waveform_generator, LensedWaveformGenerator):
             base_generator = waveform_generator.waveform_generator
         else:
@@ -897,7 +907,32 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         self.amplification_surrogate = amplification_surrogate
         # Optional trained Born residual chart; same serialization
         # pattern as `amplification_surrogate` (see `get_init_dict`).
-        self.born_residual_chart = born_residual_chart
+        # Default (`_AUTO_BORN_CHART` sentinel): auto-load the shipped
+        # artifact, refusing to `None` on any load anomaly (mirrors
+        # `use_certified_ppgo_map`'s refuse-to-None pattern) so a corrupt /
+        # absent artifact degrades to the pure-engine path instead of
+        # raising.  An explicit `None` is the pure-engine opt-out; an
+        # explicit instance is stored verbatim.
+        #
+        # Record whether the chart came from the auto-load default so
+        # `get_init_dict` can round-trip it faithfully: once the sentinel is
+        # consumed here the resolved `self.born_residual_chart` (a chart, or
+        # `None` after a refused auto-load) no longer reveals the original
+        # intent.
+        self._born_residual_chart_is_default = (
+            born_residual_chart is _AUTO_BORN_CHART)
+        if born_residual_chart is _AUTO_BORN_CHART:
+            try:
+                self.born_residual_chart = BornResidualChart.load()
+            except (OSError, ValueError, KeyError) as error:
+                warnings.warn(
+                    f'Born-residual chart unavailable ({error}); the Born '
+                    f'weak-deflection rung will fall through to the exact '
+                    f'engine. Regenerate with '
+                    f'scripts/train_born_residual.py.', RuntimeWarning)
+                self.born_residual_chart = None
+        else:
+            self.born_residual_chart = born_residual_chart
 
         # Populated by ``_set_summary`` (triggered by the ``fbin`` setter
         # inside ``super().__init__``).
@@ -963,6 +998,22 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         serialization of a *fitted* surrogate is deferred to a later build
         (sampling is out of scope here); a non-None surrogate raises rather
         than emitting an unserializable object.
+
+        ``born_residual_chart`` round-trips three ways, keyed on the
+        recorded construction intent (`_born_residual_chart_is_default`),
+        NOT on the resolved chart (which cannot tell the auto-loaded default
+        apart from a caller-supplied copy of the same artifact):
+
+        * auto-loaded default (or a refused-to-``None`` auto-load) -> the key
+          is dropped so reconstruction re-defaults to the auto-load sentinel
+          and re-serves via the Born path;
+        * an explicit ``None`` opt-out -> ``None`` is emitted verbatim so the
+          reconstructed likelihood stays pure-engine (it must NOT silently
+          re-auto-load a chart);
+        * a caller-supplied in-memory chart -> raises, because the chart has
+          no source path to reference and its interpolation tables are not
+          embedded in the init dict (pickle preserves it for sampler
+          workers).
         """
         init_dict = super().get_init_dict(**kwargs)
         if init_dict.get('amplification_surrogate') is None:
@@ -973,13 +1024,19 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 'is deferred to a later build; pickle preserves it for '
                 'sampler workers.  Serialize with `amplification_surrogate='
                 'None` or omit the surrogate for JSON round-trips.')
-        if init_dict.get('born_residual_chart') is None:
+        if self._born_residual_chart_is_default:
             init_dict.pop('born_residual_chart', None)
+        elif self.born_residual_chart is None:
+            init_dict['born_residual_chart'] = None
         else:
             raise NotImplementedError(
-                'JSON serialization of a fitted `born_residual_chart` '
-                'is deferred to the training-driver build; pickle '
-                'preserves it for sampler workers.')
+                'JSON serialization of a caller-supplied in-memory '
+                '`born_residual_chart` is unsupported: the chart carries no '
+                'source path to reference and its interpolation tables are '
+                'not embedded in the init dict.  Reconstruct with the shipped '
+                'auto-loaded default by omitting `born_residual_chart`, or '
+                'opt out of the Born rung with `born_residual_chart=None`.  '
+                'Pickle preserves an in-memory chart for sampler workers.')
         return init_dict
 
     # -- Parameters ------------------------------------------------------
@@ -1890,6 +1947,14 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                             ZeroDivisionError):
                         pass  # Structural refusal: fall through.
                 return None
+            # Trained-band refusal (mirrors _born_residual_analytic): the
+            # residual interpolator cubic-extrapolates off the trained
+            # ``log_w_grid`` (fill_value=None).  This buried rung serves the
+            # WHOLE ``dense_w`` band, so decline and fall through to the exact
+            # engine when that band escapes the trained frequency range rather
+            # than serve a finite-but-wrong extrapolated residual.
+            if not born_chart.covers(lens['gamma'], rho, dense_w):
+                return None
             # Build a duck-typed namespace adapter for
             # born_carrier_from_partition (which reads attributes by name).
             partition_ns = types.SimpleNamespace(
@@ -2170,6 +2235,190 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         delays = self._image_delays(lens, geom)
         return delays, k0, k1, geom
 
+    def _born_residual_analytic(self, lens, dense_w):
+        """First-class Born weak-deflection analytic serve, or ``None``.
+
+        Serves the Born (weak-deflection) exterior directly from the
+        attached ``born_residual_chart`` -- WITHOUT any surrogate -- as the
+        analytic carrier ``born_carrier_from_partition`` plus the trained
+        residual, reconstructed under the ``FARFIELD_KERNEL_SUM`` tag.  It
+        is the reachability lift of the buried Born rung in
+        `_surrogate_coefficients`: the same carrier + interpolated-residual
+        decomposition, but reachable on the production (surrogate-free)
+        path.
+
+        GATE.  Serves ONLY when a chart is attached AND ``kappa == 0`` AND
+        ``beta == 0`` AND the caustic-frame ``rho = caustic_rho(...) > 2.0``
+        (exterior, both parities) AND ``born_chart.covers(gamma, rho)``.
+        The ``kappa == 0`` / ``beta == 0`` guards mirror the buried-path
+        guard precedence (``KappaBetaGuardPrecedenceTestCase``): the chart
+        axes are ``(gamma, rho, log_w)`` trained at the ``kappa = 0``,
+        ``beta = 0`` reference config, so a ``kappa != 0`` or ``beta != 0``
+        candidate CANNOT be represented and MUST fall through to the exact
+        engine -- serving a ``kappa = 0`` residual for a ``kappa != 0``
+        config would be a silent finite-but-wrong accuracy bug.  These stay
+        explicit flat guards (no shared optional-geometry helper).
+
+        MAP CONSULT.  When a certified-ppGO map is installed and this
+        draw's cell is certified with a trusted floor ``w_trust`` strictly
+        inside the band and at or below the effective ceiling
+        ``min(parity_wall, cell_ceiling)``, the dense ``w`` band is split:
+        the Born carrier + residual serves the nodes at or below
+        ``w_trust`` and the bare point-mass ppGO serves above (``E_ff = 0``,
+        which telescopes to the image-kernel sum in the ``FARFIELD_KERNEL_SUM``
+        gauge), mirroring the surrogate-path band-split arithmetic.  When no
+        map is installed, the cell is ``UNKNOWN``, or the split does not lie
+        strictly inside the band, the WHOLE band is served by Born and the
+        result is byte-identical to the un-split Born serve (the null-split
+        identity the test battery pins): ``below_mask`` is all-``True`` so
+        ``chart_w`` carries identical float values to ``dense_w``.
+
+        A geometry ``LensDomainError`` propagates unswallowed, mirroring
+        `_saddle_farfield_analytic` / `_ppgo_above_ceiling`; the cheap gates
+        are checked BEFORE the geometry solve so a gate miss costs nothing.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters from `_lens_params`.
+        dense_w : np.ndarray
+            Dimensionless frequency grid for the kernel subsamples.
+
+        Returns
+        -------
+        tuple or None
+            ``(delays, k0, k1, partition)`` on success, ``None`` to fall
+            through to the exact seed engine.
+        """
+        born_chart = self.born_residual_chart
+        if born_chart is None:
+            return None
+
+        # The chart is a kappa = 0, beta = 0 surface BY CONSTRUCTION (its
+        # axes carry neither dimension).  A candidate with kappa != 0 or
+        # beta != 0 CANNOT be represented, and serving it the kappa = 0 /
+        # beta = 0 residual would be finite-but-wrong -- the exact
+        # never-serve-where-wrong violation the guard exists to prevent.
+        # Fall through to the exact engine, which handles both fully.
+        if lens['kappa'] != 0.0 or lens['beta'] != 0.0:
+            return None
+
+        # Unlensed/macro-trivial limit: at gamma == 0 there is no caustic
+        # (reach 0), and `caustic_rho` raises a raw ZeroDivisionError there
+        # rather than a domain error -- measured 2026-08-14 when the F -> 1
+        # zero-noise anchors hit this rung through the auto-attached chart.
+        # No caustic frame means no Born exterior; fall through. Tiny
+        # nonzero gamma refuses via LensDomainError / covers() below.
+        if lens['gamma'] == 0.0:
+            return None
+
+        abs_y = math.hypot(lens['y1'], lens['y2'])
+        try:
+            rho = caustic_rho(lens['gamma'], abs_y, lens['kappa'])
+        except (ValueError, LensDomainError):
+            return None
+        if rho <= 2.0 or not born_chart.covers(lens['gamma'], rho):
+            return None
+
+        # Cheap geometry-only partition (same construction the sibling
+        # `_saddle_farfield_analytic` rung uses).  A geometry
+        # `LensDomainError` propagates unswallowed.
+        geom = ChangRefsdalChannels(dense_w).geometry_partition(
+            gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
+            beta=lens['beta'], kappa=lens['kappa'])
+
+        # Map consult: split the band at the certified trusted floor
+        # ``w_trust`` only when it lies strictly inside the band AND the
+        # band tops out at or below the effective ceiling
+        # ``min(parity_wall, cell_ceiling)`` (bare ppGO must never serve
+        # beyond-wall / beyond-measured-ceiling nodes).  Mirrors the
+        # surrogate-path band-split arithmetic.
+        w_trust = self._ppgo_band_split(lens)
+        w_lo = float(dense_w.min())
+        w_hi = float(dense_w.max())
+        if w_trust is not None:
+            wall = (ASTROID_WALL if float(lens['gamma']) < 1.0
+                    else SADDLE_WALL)
+            cell_ceiling = self._ppgo_cell_ceiling(lens)
+            eff_ceiling = (wall if cell_ceiling is None
+                           else min(wall, cell_ceiling))
+            if w_hi > eff_ceiling:
+                w_trust = None
+        band_split = w_trust is not None and w_lo < w_trust < w_hi
+
+        # ``below_mask`` marks the nodes the Born envelope actually serves;
+        # above ``w_trust`` the reconstructed envelope is zeroed (E_ff = 0,
+        # telescoping to the bare ppGO image-kernel sum).  Without a split it
+        # is all-True, so nothing is zeroed and the serve is the whole-band
+        # Born result.  ``chart_w`` is that served sub-band, used ONLY for
+        # the trained-band refusal below -- the carrier / residual / ppGO
+        # serve runs over the FULL ``dense_w`` (see INS-2-001 note below).
+        below_mask = ((dense_w <= w_trust) if band_split
+                      else np.ones(dense_w.shape, dtype=bool))
+        chart_w = dense_w[below_mask]
+
+        # Trained-band refusal: the residual interpolator cubic-extrapolates
+        # off the trained ``log_w_grid`` (RegularGridInterpolator with
+        # ``fill_value=None``), which produces finite-but-wrong output.  If
+        # the sub-band the chart must serve escapes the trained frequency
+        # range, decline and fall through to the exact engine rather than
+        # serve an extrapolated residual (F070 kernel-sum-below-floor class).
+        if not born_chart.covers(lens['gamma'], rho, chart_w):
+            return None
+
+        # Duck-typed namespace adapter for born_carrier_from_partition
+        # (reads attributes by name), built over the FULL ``dense_w`` band.
+        # The carrier / residual / ppGO are ALL served over the full band so
+        # their length matches ``geom.saddle_kernels`` (N rows) and
+        # ``geom.delays`` -- ``born_carrier_from_partition`` ->
+        # ``reconstruct_farfield`` validate ``saddle_kernels.shape[0] ==
+        # w.size`` and raise a shape ``ValueError`` on a ``chart_w``
+        # sub-slice against a full-length geometry (INS-2-001).  The band
+        # split is applied by ZEROING the reconstructed envelope above
+        # ``w_trust`` (below), mirroring the surrogate-path far-field serve
+        # mirror, never by sub-slicing ``w``.
+        partition_ns = types.SimpleNamespace(
+            w=dense_w,
+            source=np.array([lens['y1'], lens['y2']]),
+            gamma=lens['gamma'],
+            beta=lens['beta'],
+            kappa=lens['kappa'],
+            matrix=macro_matrix(
+                lens['gamma'], lens['beta'], lens['kappa']),
+            t_min=geom.t_min,
+            delays=geom.delays,
+            saddle_kernels=geom.saddle_kernels,
+            real_mask=geom.real_mask,
+            images=geom.images)
+        # Deferred import avoids cycle risk (born_carrier_from_partition's
+        # module imports channels which may circle back at module load).
+        from cogwheel.lensing.chang_refsdal.channels import (
+            born_carrier_from_partition)
+        carrier = born_carrier_from_partition(partition_ns)
+        residual = born_chart.evaluate(dense_w, lens['gamma'], rho)
+        f_total = carrier + residual
+
+        # Extract the far-field envelope over the full band by subtracting
+        # the resolved ppGO channels and demodulating, THEN zero it above
+        # ``w_trust`` (E_ff = 0, which telescopes to the bare ppGO
+        # image-kernel sum in the FARFIELD_KERNEL_SUM gauge).  Without a
+        # split ``below_mask`` is all-True so nothing is zeroed and the
+        # serve is the whole-band Born result (the null-split identity).
+        real = np.asarray(geom.real_mask, dtype=bool)
+        ppgo = np.sum(
+            geom.saddle_kernels[:, real]
+            * np.exp(1j * dense_w[:, None] * geom.delays[real][None, :]),
+            axis=1)
+        envelope = (f_total - ppgo) * np.exp(1j * dense_w * geom.t_min)
+        envelope[~below_mask] = 0.0
+
+        kernels, _total = reconstruct_farfield(
+            dense_w, envelope, geom.delays, geom.saddle_kernels,
+            geom.real_mask, FARFIELD_KERNEL_SUM, geom.t_min)
+        k0, k1 = self._reduce_dense_kernels(kernels)
+        delays = self._image_delays(lens, geom)
+        return delays, k0, k1, geom
+
     def _amplification_coefficients(self, par_dic):
         """
         Candidate amplification coefficients (ratio-layer dispatch).
@@ -2273,6 +2522,21 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             served = self._saddle_farfield_analytic(lens, dense_w)
             if served is not None:
                 return served
+
+        # First-class Born weak-deflection analytic intercept (WP-B).  When
+        # a `born_residual_chart` is attached and the candidate sits in the
+        # Born exterior (kappa == 0, beta == 0, caustic-frame rho > 2,
+        # covered by the chart box), serve the analytic carrier + trained
+        # residual directly -- no surrogate, no per-candidate engine cost --
+        # consulting the certified ppGO map to band-split the upper band to
+        # bare ppGO where certified.  Positioned LAST among the analytic
+        # intercepts (after the saddle far-field block, before the
+        # seed/fiducial/ratio engine path).  On any gate miss it returns
+        # None and falls through to the exact seed engine, byte-identical to
+        # the no-chart path.
+        served = self._born_residual_analytic(lens, dense_w)
+        if served is not None:
+            return served
 
         # Candidate seed engine evaluation (single call).  A candidate-side
         # `geometry.LensDomainError` / `SchwingerCertificationError` from

@@ -29,10 +29,40 @@ far-field surrogate charts.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
+from importlib.resources import files
+from pathlib import Path
 
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
+
+#: Shipped package-data artifact name (under ``cogwheel/data/``).
+_DEFAULT_CHART_NAME = 'born_residual_chart.npz'
+
+#: Artifact schema tag.  The loader hard-refuses (``ValueError``) an
+#: artifact whose ``schema`` key is absent or does not match this value,
+#: so a stale/foreign npz can never be silently deserialized.
+_SCHEMA = 'born_residual_v1'
+
+
+def _content_hash(gamma_grid: np.ndarray, rho_grid: np.ndarray,
+                  log_w_grid: np.ndarray, real_coeffs: np.ndarray,
+                  imag_coeffs: np.ndarray) -> str:
+    """SHA1 over the stored grids and coefficient arrays (float64).
+
+    This duplicates the ~5-line primitive in
+    ``cogwheel.lensing.ppgo_map`` rather than importing it, deliberately:
+    importing would introduce an intra-``lensing`` module edge for a
+    trivial helper, and the ppGO variant folds certification scalars this
+    chart does not have into its signature.  Duplication is the smaller
+    cost (DRY-vs-coupling tradeoff).
+    """
+    hasher = hashlib.sha1()
+    for array in (gamma_grid, rho_grid, log_w_grid, real_coeffs, imag_coeffs):
+        hasher.update(np.ascontiguousarray(array, dtype=np.float64).tobytes())
+    return hasher.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -68,7 +98,8 @@ class BornResidualChart:
     imag_coeffs: np.ndarray
     provenance: dict = field(default_factory=dict)
 
-    def covers(self, gamma: float, rho: float) -> bool:
+    def covers(self, gamma: float, rho: float,
+               w: np.ndarray | None = None) -> bool:
         """Axis-aligned box containment check.
 
         Parameters
@@ -77,15 +108,33 @@ class BornResidualChart:
             Shear parameter of the candidate.
         rho : float
             Caustic distance of the candidate.
+        w : ndarray, optional
+            Served dimensionless-frequency band.  When provided (and
+            non-empty), containment additionally requires the whole band to
+            lie within the trained ``log_w_grid`` range, so that
+            :meth:`evaluate` never cubic-extrapolates off the frequency
+            axis.  When ``None`` (default) only the (gamma, rho) box is
+            checked, preserving the original two-argument contract.
 
         Returns
         -------
         bool
             True if (gamma, rho) lies within the grid's bounding box
-            (inclusive on both ends).
+            (inclusive on both ends) and, when ``w`` is given, the served
+            band lies within the trained log-w range.
         """
-        return (self.gamma_grid[0] <= gamma <= self.gamma_grid[-1]
-                and self.rho_grid[0] <= rho <= self.rho_grid[-1])
+        in_box = (self.gamma_grid[0] <= gamma <= self.gamma_grid[-1]
+                  and self.rho_grid[0] <= rho <= self.rho_grid[-1])
+        if not in_box:
+            return False
+        if w is None:
+            return True
+        w = np.asarray(w, dtype=float)
+        if w.size == 0:
+            return True
+        log_w = np.log(w)
+        return (float(log_w.min()) >= self.log_w_grid[0]
+                and float(log_w.max()) <= self.log_w_grid[-1])
 
     def evaluate(self, w: np.ndarray, gamma: float, rho: float) -> np.ndarray:
         """Interpolate the residual R(w; gamma, rho).
@@ -137,3 +186,73 @@ class BornResidualChart:
         real_part = self._real_interp(points)
         imag_part = self._imag_interp(points)
         return real_part + 1j * imag_part
+
+    @classmethod
+    def load(cls, path: str | Path | None = None) -> 'BornResidualChart':
+        """Load and hash-verify a Born-residual chart artifact.
+
+        Parameters
+        ----------
+        path : str or Path, optional
+            Explicit artifact path; ``None`` resolves the shipped
+            package-data default under ``cogwheel/data/``.
+
+        Returns
+        -------
+        BornResidualChart
+            The reconstructed, schema- and hash-verified chart.
+
+        Raises
+        ------
+        ValueError
+            If the ``schema`` key is absent or does not match
+            ``born_residual_v1``, or if the recomputed content hash does
+            not match the stored one (corrupt / stale artifact).  The
+            message names ``scripts/train_born_residual.py`` as the
+            regeneration script.
+        """
+        if path is None:
+            path = cls._default_artifact_path()
+        with np.load(path, allow_pickle=False) as data:
+            if 'schema' not in data.files:
+                raise ValueError(
+                    'Born-residual chart artifact is missing the `schema` '
+                    'key; it is pre-schema, stale, or corrupt. Regenerate '
+                    'with scripts/train_born_residual.py.')
+            schema = str(data['schema'])
+            if schema != _SCHEMA:
+                raise ValueError(
+                    f'Born-residual chart schema mismatch: stored '
+                    f'{schema!r}, expected {_SCHEMA!r}. The artifact is '
+                    f'stale or foreign; regenerate with '
+                    f'scripts/train_born_residual.py.')
+            if 'content_hash' not in data.files:
+                raise ValueError(
+                    'Born-residual chart artifact is missing the '
+                    '`content_hash` key; it is stale or corrupt. Regenerate '
+                    'with scripts/train_born_residual.py.')
+            expected = str(data['content_hash'])
+            gamma_grid = np.asarray(data['gamma_grid'], dtype=np.float64)
+            rho_grid = np.asarray(data['rho_grid'], dtype=np.float64)
+            log_w_grid = np.asarray(data['log_w_grid'], dtype=np.float64)
+            real_coeffs = np.asarray(data['real_coeffs'], dtype=np.float64)
+            imag_coeffs = np.asarray(data['imag_coeffs'], dtype=np.float64)
+            provenance = json.loads(str(data['provenance']))
+
+        actual = _content_hash(gamma_grid, rho_grid, log_w_grid,
+                               real_coeffs, imag_coeffs)
+        if expected != actual:
+            raise ValueError(
+                f'Born-residual chart content-hash mismatch: stored '
+                f'{expected!r}, recomputed {actual!r}. The artifact is '
+                f'corrupt or stale; regenerate with '
+                f'scripts/train_born_residual.py.')
+        return cls(gamma_grid=gamma_grid, rho_grid=rho_grid,
+                   log_w_grid=log_w_grid, real_coeffs=real_coeffs,
+                   imag_coeffs=imag_coeffs, provenance=provenance)
+
+    @staticmethod
+    def _default_artifact_path() -> Path:
+        """Resolve the shipped package-data artifact under cogwheel/data."""
+        return Path(str(files('cogwheel').joinpath('data',
+                                                    _DEFAULT_CHART_NAME)))

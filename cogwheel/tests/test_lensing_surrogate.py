@@ -1331,13 +1331,23 @@ class OracleIndependenceTestCase(SurrogateTestCase):
 
 
 class DefaultSurrogatePathTestCase(SurrogateTestCase):
-    """The default ``amplification_surrogate=None`` construction is the
-    EXACT path: the attribute stays None and lnL is finite and
-    bit-reproducible on every crown-family fixture.
+    """Structural preconditions of the default construction.
 
-    ``LnlikeAccuracyTestCase`` uses this same default-constructed likelihood
-    as the oracle for every served-lnL gate, so these are the structural
-    preconditions of that oracle, asserted where they can be read.
+    The default construction leaves ``amplification_surrogate`` None (the
+    dense-kernel amplification surrogate is opt-in) but -- post WP-C --
+    AUTO-ATTACHES the shipped Born-residual chart: ``born_residual_chart``
+    is a real chart, not None, and ``_born_residual_chart_is_default`` is
+    True. lnL is still finite and bit-reproducible on every crown-family
+    fixture.
+
+    NOTE: because the Born rung is now live by default, the served lnL is
+    the exact engine ONLY where the lifted Born intercept declines (it
+    declines here: every fixture has kappa==0/beta==0 but the shipped Born
+    w-box does not cover the event band, so ``_born_residual_analytic``
+    falls through -- see the Born reachability suite). The accuracy oracle
+    ``LnlikeAccuracyTestCase`` therefore constructs with an EXPLICIT
+    ``born_residual_chart=None`` to stay engine-pure; that opt-out is what
+    keeps the oracle independent, and is asserted there.
     """
 
     #: Finite, non-refusing lens configs spanning the crown family and a
@@ -1358,14 +1368,37 @@ class DefaultSurrogatePathTestCase(SurrogateTestCase):
 
     def test_default_surrogate_attribute_is_none(self):
         """The constructor structurally leaves the surrogate attribute
-        ``None`` when it is not supplied."""
+        ``None`` when it is not supplied (the dense-kernel amplification
+        surrogate is opt-in and unaffected by the Born auto-attach)."""
         self.n_checks += 1
         self.assertIsNone(self.cur.amplification_surrogate,
                           'default construction must leave the surrogate None')
 
+    def test_default_construction_auto_attaches_born_chart(self):
+        """Post WP-C the default construction AUTO-ATTACHES the shipped
+        Born-residual chart -- the attribute is a real chart (not None) and
+        the provenance flag records that it came from the auto-load default.
+
+        This is the re-point: the old contract asserted the default was the
+        pure exact path with no Born chart; the shipped ``.npz`` now makes
+        the default a chart-attached construction. Explicit-None opt-out is
+        covered separately (accuracy oracle + Born reachability suite)."""
+        self.n_checks += 1
+        self.assertIsNotNone(
+            self.cur.born_residual_chart,
+            'default construction must auto-attach the shipped Born chart; '
+            'a None here means the shipped cogwheel/data artifact failed to '
+            'load (regenerate with scripts/train_born_residual.py)')
+        self.n_checks += 1
+        self.assertTrue(
+            self.cur._born_residual_chart_is_default,
+            'the provenance flag must record the auto-load default so '
+            'get_init_dict can round-trip it by omission')
+
     def test_default_path_lnlike_is_finite_and_bit_reproducible(self):
-        """The exact path returns a finite lnL and the SAME bits on a
-        repeat call -- a deterministic path, not a nondeterministic one."""
+        """The default (Born-auto-attached) path returns a finite lnL and
+        the SAME bits on a repeat call -- a deterministic path, not a
+        nondeterministic one."""
         for label, lens in self.CONFIGS:
             with self.subTest(config=label):
                 candidate = _lens_candidate(**lens)
@@ -1373,12 +1406,12 @@ class DefaultSurrogatePathTestCase(SurrogateTestCase):
                 self.n_checks += 1
                 self.assertTrue(
                     np.isfinite(lnl),
-                    f'the exact path returned a non-finite lnL at {label}: '
+                    f'the default path returned a non-finite lnL at {label}: '
                     f'{lnl!r}')
                 self.n_checks += 1
                 self.assertEqual(
                     lnl, self.cur.lnlike(candidate),
-                    f'the exact lnlike is not bit-reproducible at {label}: '
+                    f'the default lnlike is not bit-reproducible at {label}: '
                     f'{lnl!r} changed on a repeat call')
 
 
@@ -1612,9 +1645,13 @@ class RefusalPreservationTestCase(SurrogateTestCase):
         cls.like = LensedRelativeBinningLikelihood(
             event_data, wfg, _reference_par_dic(), delta_t_max=DELTA_T_MAX,
             fbin=edges, amplification_surrogate=_pos_surrogate_ship())
+        # Engine-pure oracle: opt OUT of the WP-C Born auto-attach with an
+        # EXPLICIT born_residual_chart=None so the reference lnL is the
+        # exact engine independent of the shipped Born artifact (an oracle
+        # sharing the production Born derivation would not be an oracle).
         cls.exact = LensedRelativeBinningLikelihood(
             event_data, wfg, _reference_par_dic(), delta_t_max=DELTA_T_MAX,
-            fbin=edges)
+            fbin=edges, born_residual_chart=None)
 
     def test_surrogate_path_preserves_named_refusals(self):
         """Both the surrogate-enabled and exact paths raise the identical
@@ -1899,9 +1936,13 @@ class LnlikeAccuracyTestCase(SurrogateTestCase):
         cls.sad_like = LensedRelativeBinningLikelihood(
             event_data, wfg, _reference_par_dic(), delta_t_max=DELTA_T_MAX,
             fbin=edges, amplification_surrogate=_sad_surrogate_ship())
+        # Engine-pure oracle: opt OUT of the WP-C Born auto-attach with an
+        # EXPLICIT born_residual_chart=None so the reference lnL is the
+        # exact engine independent of the shipped Born artifact (an oracle
+        # sharing the production Born derivation would not be an oracle).
         cls.exact = LensedRelativeBinningLikelihood(
             event_data, wfg, _reference_par_dic(), delta_t_max=DELTA_T_MAX,
-            fbin=edges)
+            fbin=edges, born_residual_chart=None)
 
     #: Served saddle configs (gamma' ~1.3); well emulated (eps_dense ~1e-3)
     #: but the |F|^2 quadratic sensitivity gives an eps->dlnL gain of ~1.85

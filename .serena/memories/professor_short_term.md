@@ -1,32 +1,45 @@
-# Professor Short-Term Observations (2026-08-14 session)
+# Professor short-term (Born-intercept wiring build REVIEW, 2026-08-14)
 
-## D2 tube-fold build review (test_lensing_tube_d2_fold.py) — VERDICT PASS
-Ran `cogwheel/tests/test_lensing_tube_d2_fold.py` (env cogwheel-newlal): **30/30 pass in ~5s.**
-Covers all six specs + a self-falsification class per spec (all have teeth).
+Reviewed the F077 lifted Born-intercept + band-split build (inference-review mode).
+Verdict: PASS. Env python: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python.
 
-Physics checks I confirmed by hand:
-- `_fold_caustic_theta` (surrogate.py:2823): `if y1_eig<0: t=pi-t; if y2_eig<0: t=-t`.
-  Reproduces the closed form mod 2pi for all four octants — (-,-) gives -(pi-t)=t-pi≡pi+t. Correct.
-- PRIMARY D2 equality pin: spec demanded BIT-EXACT across ALL four octants; build honestly
-  delivers bit-exact ONLY for the two negation-only octants (+,+)/(+,-) (float negation is
-  exact in IEEE-754) and a near-machine bound (rtol 1e-9, atol 1e-11) for the two pi-reflection
-  octants (-,+)/(-,-), because `math.pi - theta` rounds by <=1 ULP (pi irrational in float64).
-  This is the MATHEMATICALLY CORRECT treatment, thoroughly documented; bound is ~1e10 tighter
-  than a sign-bug's O(0.1) divergence, so the pin keeps full teeth (self-falsification drops the
-  s2 branch and the y2<0 octants break). Deviation from literal spec is justified, not a defect.
-- F079 half-ring closure test asserts the premise (physical angle OUTSIDE charted arc) before
-  asserting served=True+finite; self-falsification (identity fold) reopens the astroid hole. Solid.
-- Arc selection returns exactly 1 fundamental arc bracketing pi/4 (pi/2 is a cusp, not interior);
-  saddle arcs returned unchanged; training 4x reduction (detect 4, train 1) pinned + falsified.
-- Census fold-consistency: route-equality across 4 sign images, serve-fraction folded==unfolded,
-  c3-admission D2-equivariant — all pass, non-vacuous (anti-vacuity `_count` guard in base class).
+## Fast tests run (all green)
+- test_lensing_born_residual_wiring.py + born_analytic_reachability.py + born.py:
+  118 passed / 42s. Warning "Born-residual chart unavailable (artifact missing) ...
+  Regenerate with scripts/train_born_residual.py" is the EXPECTED auto-attach
+  fallback-to-None contract firing, not a fault.
+- test_lensing_ppgo_bandsplit.py + ppgo_map.py: 101 passed, 4 skipped / 15s. The 4
+  skips are COGWHEEL_TRAIN_TIER=1 engine-backed real-chart builds (minutes/class) =
+  correctly OPERATOR-DEFERRED post-build tier, NOT silent failures.
+- surrogate DefaultSurrogatePathTestCase + LnlikeAccuracyTestCase: 5 passed / 37s.
+  Oracle re-point verified: likelihood.py oracle constructs born_residual_chart=None
+  (test_lensing_surrogate.py L1651-53, L1942-44) with the engine-pure comment.
 
-Could NOT view PNGs (no image tool in this toolset) but every plotting test also asserts the
-underlying invariant numerically (no-gap map asserts all_served; scatter coincidence enforced by
-the equality tests), so plot content is validated by assertions.
+## Spec->test mapping (every item a named, anti-vacuity-guarded, passing test)
+- SERVE-PATH TRACE/reachability -> reachability suite; live-route pinned by
+  MockChartServePath(non-None) vs NoChart(None); recon identity <1e-13
+  (test_total_matches_carrier_plus_residual_at_dense). Diagnostic plot
+  born_residual_wiring_identity.png regenerated 17:34.
+- MAP BAND-SPLIT -> test_w_trust_lands_strictly_inside_band.
+- NULL-SPLIT IDENTITY -> test_null_split_map_matches_no_map_byte_exact,
+  _w_trust_at_or_above_band, _matches_direct_whole_band_rung, +self-falsification
+  _identity_breaks_for_different_chart (np.array_equal).
+- BYTE-IDENTITY BATTERY (incl. kappa!=0/beta!=0 fall-through) ->
+  test_battery_declines_born_intercept + KappaBetaGuardPrecedenceTestCase.
+- CORRUPTED HASH -> test_corrupted_content_hash_refuses (names train_born_residual.py).
+- SCHEMA REFUSAL -> test_missing_or_wrong_schema_refuses.
+- AUTO-ATTACH FALLBACK -> test_load_failure_refuses_to_none_with_warning +
+  test_fallback_serve_equals_explicit_none_serve.
+- JSON ROUND-TRIP BOTH CLASSES -> JsonRoundTripBornChartTestCase (RB + Marginalized;
+  default drops key & re-auto-loads, explicit None verbatim, in-memory chart ->
+  NotImplementedError naming 'source path').
+- ORACLE RE-POINT -> LnlikeAccuracyTestCase (explicit None) passes in tolerance.
+- ENUMERATED RE-POINTS -> DefaultSurrogatePath, NoChartByteIdentity, bandsplit
+  save/restore all green in-suite.
 
-NOT run (budget): heavier neighbor suites test_lensing_surrogate*/training/census timed out >240s
-as a batch — those are the operator's out-of-band gate. Modified files touched by build:
-surrogate.py, surrogate_census.py, surrogate_training.py.
-
-(Prior tube-chart D2 consultation findings retained in professor_code_observations.)
+## Physics sanity confirmed
+Born gate binding on covers() grid rho>2, kappa=0/beta=0 only; band-split reduces
+to un-split Born when w_trust>=w_max (byte-exact), consistent with residual R=F-carrier
+decaying in w so bare ppGO is exact above w_trust. kappa!=0 silent-accuracy bug (the
+gate's raison d'etre) is pinned refused. Heavy full-posterior/real-chart validation is
+operator-deferred (COGWHEEL_TRAIN_TIER=1 tier); verdict rests on fast tests + plots.

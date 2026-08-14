@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [lensing_wire_serving_artifacts]
+
 ---
 
 - **NEXT-SESSION ORDER 5/7 — RE-VALIDATE AND SELECTIVELY RELAX THE

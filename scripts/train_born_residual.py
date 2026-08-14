@@ -18,6 +18,7 @@ Grid:
 """
 from __future__ import annotations
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -28,7 +29,8 @@ import numpy as np
 _project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project_root))
 
-from cogwheel.lensing.born_residual_chart import BornResidualChart
+from cogwheel.lensing.born_residual_chart import (
+    _SCHEMA, BornResidualChart, _content_hash)
 from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal._born import born_lead_carrier
 from cogwheel.lensing.chang_refsdal.geometry import r_caustic
@@ -129,8 +131,13 @@ def main() -> None:
     print(f'Self-check: chart.evaluate at corner -> |R|_max = '
           f'{np.max(np.abs(test_R)):.4e}')
 
-    # Save to disk.
+    # Save to disk.  `content_hash` pins the numeric payload and `schema`
+    # tags the artifact framing so `BornResidualChart.load` can hard-refuse
+    # a stale/corrupt file (mirrors CertifiedPpgoMap in ppgo_map.py).
     out_path = _project_root / 'cogwheel' / 'data' / 'born_residual_chart.npz'
+    content_hash = _content_hash(chart.gamma_grid, chart.rho_grid,
+                                 chart.log_w_grid, chart.real_coeffs,
+                                 chart.imag_coeffs)
     np.savez(
         out_path,
         gamma_grid=chart.gamma_grid,
@@ -138,7 +145,9 @@ def main() -> None:
         log_w_grid=chart.log_w_grid,
         real_coeffs=chart.real_coeffs,
         imag_coeffs=chart.imag_coeffs,
-        provenance=np.array(str(chart.provenance)),
+        provenance=np.array(json.dumps(chart.provenance)),
+        content_hash=np.array(content_hash),
+        schema=np.array(_SCHEMA),
     )
     print(f'\nSaved chart to {out_path}')
     print(f'  File size: {out_path.stat().st_size} bytes')

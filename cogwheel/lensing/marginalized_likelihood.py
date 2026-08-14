@@ -63,6 +63,7 @@ from cogwheel.likelihood.marginalized_extrinsic import (
     MarginalizedExtrinsicLikelihood)
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood,
+    _AUTO_BORN_CHART,
     _DEFAULT_BIN_DELAY_TOL,
     _DEFAULT_KERNEL_SUBSAMPLES,
     _LENS_PARAMS,
@@ -103,7 +104,8 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
                  dlnl_marginalized_threshold=30.,
                  bin_delay_tol=_DEFAULT_BIN_DELAY_TOL,
                  kernel_subsamples=_DEFAULT_KERNEL_SUBSAMPLES,
-                 amplification_surrogate=None):
+                 amplification_surrogate=None,
+                 born_residual_chart=_AUTO_BORN_CHART):
         """
         Parameters
         ----------
@@ -163,6 +165,18 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
             ``self._engine._amplification_coefficients`` takes the surrogate
             fast path where the candidate is in-domain.  Default ``None``
             leaves the exact engine path (and JSON round-trip) unchanged.
+
+        born_residual_chart : BornResidualChart, None, or sentinel
+            Optional trained Born weak-deflection residual chart, forwarded
+            verbatim to the internal `LensedRelativeBinningLikelihood`
+            engine (which owns the auto-load / opt-out logic).  The default
+            is the ``_AUTO_BORN_CHART`` sentinel: it is forwarded unchanged
+            so the inner engine performs the SINGLE auto-load of the shipped
+            artifact (refusing to ``None`` on any load anomaly).  Passing an
+            explicit ``None`` opts out to the pure-engine path; passing a
+            fitted chart forwards it verbatim.  Forwarding the sentinel
+            (rather than resolving it here) keeps the load single-sourced in
+            the engine and avoids a double load.
         """
         # Fail fast: the reference (and every sampled point) must carry the
         # seven lens parameters, because the base constructor's terminal
@@ -182,6 +196,10 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
         self.bin_delay_tol = bin_delay_tol
         self.kernel_subsamples = kernel_subsamples
         self.amplification_surrogate = amplification_surrogate
+        # Stored verbatim (may be the `_AUTO_BORN_CHART` sentinel): the inner
+        # engine built in `_set_summary` owns the auto-load / opt-out logic,
+        # so forwarding the sentinel unchanged yields a single auto-load.
+        self.born_residual_chart = born_residual_chart
         self._engine = None  # Built by `_set_summary`.
 
         super().__init__(
@@ -192,7 +210,7 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
 
     def get_init_dict(self, **kwargs):
         """
-        JSON init dict, deferring surrogate serialization.
+        JSON init dict, deferring surrogate/chart serialization.
 
         With ``amplification_surrogate=None`` (the default) the key is
         dropped so the JSON round-trip is byte-identical to a build without
@@ -200,6 +218,24 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
         (pickle preserves it for sampler workers); serializing one raises
         `NotImplementedError` rather than silently emitting an unusable
         entry.
+
+        ``born_residual_chart`` round-trips three ways, matching
+        `LensedRelativeBinningLikelihood.get_init_dict`.  This class keeps
+        the constructor value verbatim (it may still be the
+        ``_AUTO_BORN_CHART`` sentinel; the inner engine owns the single
+        auto-load / opt-out), so the intent is read directly off
+        ``self.born_residual_chart`` rather than off the engine's resolved
+        chart (which cannot tell the auto-loaded default apart from a
+        caller-supplied copy):
+
+        * the ``_AUTO_BORN_CHART`` sentinel default -> the key is dropped so
+          reconstruction re-defaults to the sentinel and the inner engine
+          re-auto-loads (re-serving via the Born path);
+        * an explicit ``None`` opt-out -> ``None`` is emitted verbatim so the
+          reconstructed likelihood stays pure-engine;
+        * a caller-supplied in-memory chart -> raises, because the chart has
+          no source path to reference and its tables are not embedded in the
+          init dict (pickle preserves it for sampler workers).
         """
         init_dict = super().get_init_dict(**kwargs)
         if init_dict.get('amplification_surrogate') is None:
@@ -210,6 +246,19 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
                 'is deferred to a later build; pickle preserves it for '
                 'sampler workers.  Serialize with `amplification_surrogate='
                 'None` or omit the surrogate for JSON round-trips.')
+        if self.born_residual_chart is _AUTO_BORN_CHART:
+            init_dict.pop('born_residual_chart', None)
+        elif self.born_residual_chart is None:
+            init_dict['born_residual_chart'] = None
+        else:
+            raise NotImplementedError(
+                'JSON serialization of a caller-supplied in-memory '
+                '`born_residual_chart` is unsupported: the chart carries no '
+                'source path to reference and its interpolation tables are '
+                'not embedded in the init dict.  Reconstruct with the shipped '
+                'auto-loaded default by omitting `born_residual_chart`, or '
+                'opt out of the Born rung with `born_residual_chart=None`.  '
+                'Pickle preserves an in-memory chart for sampler workers.')
         return init_dict
 
     @property
@@ -249,7 +298,8 @@ class LensedMarginalizedExtrinsicLikelihood(MarginalizedExtrinsicLikelihood):
             spline_degree=self._spline_degree,
             bin_delay_tol=self.bin_delay_tol,
             kernel_subsamples=self.kernel_subsamples,
-            amplification_surrogate=self.amplification_surrogate)
+            amplification_surrogate=self.amplification_surrogate,
+            born_residual_chart=self.born_residual_chart)
 
     def _edge_amplification(self, delays, k0, k1):
         """

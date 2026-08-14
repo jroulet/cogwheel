@@ -309,6 +309,19 @@ def classify_fallthrough(
     # retirement, this is simply rho > 1 on both parities (Professor
     # ruling: two regimes per parity — caustic-attached and exterior).
     # The gamma-guard fires earlier, so caustic_rho's reach is safe.
+    #
+    # This is deliberately a FALL-THROUGH bucket, not a served category:
+    # the census carries no ``born_residual_chart``, so the production Born
+    # gate's ``born_chart.covers(gamma, rho)`` test is unevaluable here.
+    # That blocker is the ABSENT chart, not the presence of a surrogate, so
+    # it holds identically for BOTH the buried surrogate-path Born rung
+    # (``_surrogate_coefficients``, rho > 1) and WP-B's first-class
+    # ``_born_residual_analytic`` intercept (rho > 2): both require the same
+    # chart the census does not hold.  WP-B's reachability lift
+    # (surrogate-present -> surrogate-free) therefore adds no served path the
+    # census can model, and this rho > 1 bucket -- a superset of both rungs'
+    # served domains -- stays a conservative over-attribution to the exact
+    # engine.
     abs_y = math.hypot(y1_eig, y2_eig)
     try:
         rho = caustic_rho(gamma, abs_y, kappa)
@@ -416,7 +429,12 @@ def characterize_sample(
     # cell, only the sub-band [log_w_min, log(w_trust)] needs to be served
     # by the chart; nodes above w_trust are served by bare ppGO.  Narrow
     # the chart band accordingly so select_chart sees the same sub-band
-    # as the production likelihood.
+    # as the production likelihood.  This inlines _ppgo_cell_coords +
+    # _ppgo_band_split + _ppgo_cell_ceiling; WP-B's first-class Born
+    # intercept (_born_residual_analytic) reuses those SAME three
+    # likelihood methods verbatim for its own band split, so this one
+    # mirror already reflects the lifted Born reachability -- no separate
+    # or divergent band-split arithmetic exists to track.
     chart_log_w_max = log_w_max  # default: whole band (no split)
     ppgo_map = get_certified_ppgo_map()
     if ppgo_map is not None:

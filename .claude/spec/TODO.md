@@ -576,6 +576,36 @@ Tag conventions:
   follows the rename in step 5.
 
 
+- **NEXT-SESSION ORDER 5/7 — RE-VALIDATE AND SELECTIVELY RELAX THE
+  CERTIFIED MAP'S SADDLE rho<1 GUARD** `[→ spec]` — the artifact HOLDS
+  certified saddle rho<0.5 cells (w_cert 27.7/19.2/15.9 by gamma band;
+  independently reproduced at 16-28) but `CertifiedPpgoMap.w_cert`
+  hard-refuses all saddle rho<1 as F073-era defense-in-depth.
+
+  RE-VALIDATED 2026-08-14 (driver pilot, F080 — "verify, do not assume"
+  was the right call): the three certified cells are NOT equal.
+  - gamma [1.157, 1.339]: CLEAN (5/5 configs, sup 8.7e-5) — eligible for
+    per-cell relaxation now.
+  - gamma [1.339, 1.550]: MARGINAL (1.0-1.4e-4 at the w_cert node only,
+    under bar by w=27.7) — relax only with a small w_cert raise or after
+    re-measurement; decide from a denser scan of that node.
+  - gamma [1.100, 1.157]: CONTAMINATED — sup err 4.49e-1 (3.5 orders over
+    bar) at the lower-gamma-edge x transverse-angle corner; would not
+    re-certify at its own center today (fan-worst 1.21e-4). STAYS REFUSED
+    until the 7a retrain re-measures it with edge-biased, worst-over-cell
+    sampling (the F080 sampling-blindness fix).
+
+  Scope of the build therefore: per-cell relaxation keyed on re-validation
+  evidence (a stored or asserted re-validation stamp, not a blanket parity
+  x rho predicate), serving the clean cell(s) as the second certification
+  layer; the F073 deltoid-straddling-annulus reasoning stays in force for
+  everything unvalidated. The F080 fan-asymmetry question (mirrored fan
+  angles disagree 2.4x under exact D2 symmetry) must be answered before
+  the retrain trusts the fan — route it to the Professor in this build or
+  the 7a brief, whichever runs first. Full re-validation is cheap (~60 s
+  training fidelity, ~10 min corner-refinement, measured).
+
+
 - **EVERY CHART KIND REIMPLEMENTS TILING, SUBDIVISION AND PROBING — make it
   ONE parameterised machine** `[→ spec]` — owner-directed 2026-08-07. Two
   symptoms of one cause.
@@ -2897,6 +2927,61 @@ Tag conventions:
   the campaign cost estimate (call count = sum tiles x nodes).
 
 
+- **NEXT-SESSION ORDER 7a/7 — THE TRAINING CAMPAIGN (cost estimate FIRST,
+  always)** `[→ spec]` — the low-w tables that close every remaining
+  chart-owned cell of the coverage map. Standing rule: NO engine-run launch
+  without a recorded cost estimate. Method: run the SMOKE config
+  (`scripts/train_lens_surrogate.py`, TrainingConfig defaults,
+  engine_budget=400/chart, minutes-scale) to a scratch outdir, read
+  training_report.json's engine-call counts, extrapolate to the production
+  config via the tiling-census numbers, RECORD the estimate, then launch
+  with a monitor + stale alarm (monitored-not-unattended).
+
+  Production config content, all measured 2026-08-13/14: regions must
+  include lobe_interior + lobe_exterior (the deltoid annulus rho 0.5-1.5
+  and lobe interiors are the genuine table needs) and the near-lobe /
+  near-cusp annuli; near-cusp tile axes per the tiling-census verdict
+  (F074 control coordinates are the candidate); labels ONLY from the safe
+  oracle band (w <= 60 DD; SADDLE_WALL = 58) — labels above 60 were the
+  F075 contamination vector, now fixed but the band cap stays as
+  defense-in-depth. Also in this campaign: (a) RETRAIN
+  certified_ppgo_map.npz (`train_ppgo_map.py --production`) — 32
+  positive-parity exterior cells were measured against the contaminated
+  fold-arm oracle (over-conservative direction; re-measure, re-hash);
+  BINDING (F080, measured 2026-08-14): the retrain MUST replace the
+  one-center-config-per-cell certification with edge-biased,
+  worst-over-cell sampling (gamma near band lo, rho near the caustic
+  side, transverse angles) — a shipped CERTIFIED saddle cell was 3.5
+  orders over the bar at its band-edge corner while its center passed;
+  and the F080 fan asymmetry (mirrored fan angles 2.4x apart under exact
+  D2) must be resolved before the retrain trusts the fan;
+  (b) DONE via retirement, not measurement — F079 (2026-08-14,
+  `find_cusps_wrap_fix` build) measured `_SADDLE_CUSP_ARM_COVERAGE` INERT
+  (0 differing serve decisions over 64 production windows) and retired it
+  (`retired_concepts.json`); the saddle cusp-arm coverage placeholder no
+  longer exists to replace — the tube gate excludes on the full cusp
+  window, real structure is the F074/F075 w-floor 49; (c)
+  born_residual_chart.npz is CLEAN, no action. Post-training: attach the
+  new artifact (wiring already landed), run `post_build_sweeps.sh`
+  (driver-side, never in-build).
+
+
+- **NEXT-SESSION ORDER 7b/7 — FINAL ACCEPTANCE: THE NO-ENGINE-SERVE
+  CENSUS** `[→ spec]` — the owner's bar, verbatim: every region of
+  (y1, y2, w, reduced gamma) — astroid inside/outside, deltoid inside,
+  the origin-connecting exterior, the outward exterior, every cusp
+  neighborhood — served by a table or analytic rung, NEVER by live
+  quadrature or the exact engine at runtime (engine = offline oracle
+  only). Sweep both parities on a dense grid, classify every draw's
+  actual serve route (byte-equality against candidate serves identifies
+  the route; the F077 lesson — a trace, not an inventory), and report:
+  zero engine-served cells, or the exact list of survivors with owners.
+  Beware the dead census categories flagged 2026-08-14 (the cusp-window
+  fall-through category reports zero structurally — losses appear as
+  eta-floor/w-cap categories). This census is REPORTED acceptance
+  evidence; only invariants that survive refactors get pinned as tests.
+
+
 - **THE TUBE MAP IS BUILT AT ONE GAMMA AND USED ACROSS A BAND** `[→ spec]` —
   measured 2026-07-30. `_build_tube_chart` builds `theta_to_s` once at
   `rep_gamma = float(np.median(gamma_grid))` and stores it on the chart;
@@ -3227,107 +3312,6 @@ Tag conventions:
   could not be invoked per region (now fixed:
   [[2026-08-07_lensing-training-path-per-region]]). That fix does not change
   the re-run need above: these measurements used the old probes and predate it.
-
-
-- **NEXT-SESSION ORDER 4/7 — WIRE THE SERVING ARTIFACTS (F077: the chart
-  layer is dead code)** `[→ spec]` — `amplification_surrogate` and
-  `born_residual_chart` default to None and nothing auto-loads them;
-  `get_certified_ppgo_map()` reads a process global nothing sets.
-  Consequences (serve-path-traced): the SHIPPED `born_residual_chart.npz`
-  is unreachable; the c3 interior rung is one level deeper still;
-  the certified map's own cells are never consulted. Wire attach-at-
-  construction for the artifacts that EXIST (born chart, certified map —
-  the surrogate npz arrives with the training campaign), each behind its
-  existing content-hash/schema refusals. An artifact is not coverage until
-  a serve-path trace shows a production entry reaching it — the acceptance
-  is exactly such a trace per artifact, plus the F075 retroactive-label
-  advisory (32 contaminated map cells are served-conservative; retrain is
-  the campaign's job, not this one's).
-
-
-- **NEXT-SESSION ORDER 5/7 — RE-VALIDATE AND SELECTIVELY RELAX THE
-  CERTIFIED MAP'S SADDLE rho<1 GUARD** `[→ spec]` — the artifact HOLDS
-  certified saddle rho<0.5 cells (w_cert 27.7/19.2/15.9 by gamma band;
-  independently reproduced at 16-28) but `CertifiedPpgoMap.w_cert`
-  hard-refuses all saddle rho<1 as F073-era defense-in-depth.
-
-  RE-VALIDATED 2026-08-14 (driver pilot, F080 — "verify, do not assume"
-  was the right call): the three certified cells are NOT equal.
-  - gamma [1.157, 1.339]: CLEAN (5/5 configs, sup 8.7e-5) — eligible for
-    per-cell relaxation now.
-  - gamma [1.339, 1.550]: MARGINAL (1.0-1.4e-4 at the w_cert node only,
-    under bar by w=27.7) — relax only with a small w_cert raise or after
-    re-measurement; decide from a denser scan of that node.
-  - gamma [1.100, 1.157]: CONTAMINATED — sup err 4.49e-1 (3.5 orders over
-    bar) at the lower-gamma-edge x transverse-angle corner; would not
-    re-certify at its own center today (fan-worst 1.21e-4). STAYS REFUSED
-    until the 7a retrain re-measures it with edge-biased, worst-over-cell
-    sampling (the F080 sampling-blindness fix).
-
-  Scope of the build therefore: per-cell relaxation keyed on re-validation
-  evidence (a stored or asserted re-validation stamp, not a blanket parity
-  x rho predicate), serving the clean cell(s) as the second certification
-  layer; the F073 deltoid-straddling-annulus reasoning stays in force for
-  everything unvalidated. The F080 fan-asymmetry question (mirrored fan
-  angles disagree 2.4x under exact D2 symmetry) must be answered before
-  the retrain trusts the fan — route it to the Professor in this build or
-  the 7a brief, whichever runs first. Full re-validation is cheap (~60 s
-  training fidelity, ~10 min corner-refinement, measured).
-
-
-- **NEXT-SESSION ORDER 7a/7 — THE TRAINING CAMPAIGN (cost estimate FIRST,
-  always)** `[→ spec]` — the low-w tables that close every remaining
-  chart-owned cell of the coverage map. Standing rule: NO engine-run launch
-  without a recorded cost estimate. Method: run the SMOKE config
-  (`scripts/train_lens_surrogate.py`, TrainingConfig defaults,
-  engine_budget=400/chart, minutes-scale) to a scratch outdir, read
-  training_report.json's engine-call counts, extrapolate to the production
-  config via the tiling-census numbers, RECORD the estimate, then launch
-  with a monitor + stale alarm (monitored-not-unattended).
-
-  Production config content, all measured 2026-08-13/14: regions must
-  include lobe_interior + lobe_exterior (the deltoid annulus rho 0.5-1.5
-  and lobe interiors are the genuine table needs) and the near-lobe /
-  near-cusp annuli; near-cusp tile axes per the tiling-census verdict
-  (F074 control coordinates are the candidate); labels ONLY from the safe
-  oracle band (w <= 60 DD; SADDLE_WALL = 58) — labels above 60 were the
-  F075 contamination vector, now fixed but the band cap stays as
-  defense-in-depth. Also in this campaign: (a) RETRAIN
-  certified_ppgo_map.npz (`train_ppgo_map.py --production`) — 32
-  positive-parity exterior cells were measured against the contaminated
-  fold-arm oracle (over-conservative direction; re-measure, re-hash);
-  BINDING (F080, measured 2026-08-14): the retrain MUST replace the
-  one-center-config-per-cell certification with edge-biased,
-  worst-over-cell sampling (gamma near band lo, rho near the caustic
-  side, transverse angles) — a shipped CERTIFIED saddle cell was 3.5
-  orders over the bar at its band-edge corner while its center passed;
-  and the F080 fan asymmetry (mirrored fan angles 2.4x apart under exact
-  D2) must be resolved before the retrain trusts the fan;
-  (b) DONE via retirement, not measurement — F079 (2026-08-14,
-  `find_cusps_wrap_fix` build) measured `_SADDLE_CUSP_ARM_COVERAGE` INERT
-  (0 differing serve decisions over 64 production windows) and retired it
-  (`retired_concepts.json`); the saddle cusp-arm coverage placeholder no
-  longer exists to replace — the tube gate excludes on the full cusp
-  window, real structure is the F074/F075 w-floor 49; (c)
-  born_residual_chart.npz is CLEAN, no action. Post-training: attach the
-  new artifact (wiring already landed), run `post_build_sweeps.sh`
-  (driver-side, never in-build).
-
-
-- **NEXT-SESSION ORDER 7b/7 — FINAL ACCEPTANCE: THE NO-ENGINE-SERVE
-  CENSUS** `[→ spec]` — the owner's bar, verbatim: every region of
-  (y1, y2, w, reduced gamma) — astroid inside/outside, deltoid inside,
-  the origin-connecting exterior, the outward exterior, every cusp
-  neighborhood — served by a table or analytic rung, NEVER by live
-  quadrature or the exact engine at runtime (engine = offline oracle
-  only). Sweep both parities on a dense grid, classify every draw's
-  actual serve route (byte-equality against candidate serves identifies
-  the route; the F077 lesson — a trace, not an inventory), and report:
-  zero engine-served cells, or the exact list of survivors with owners.
-  Beware the dead census categories flagged 2026-08-14 (the cusp-window
-  fall-through category reports zero structurally — losses appear as
-  eta-floor/w-cap categories). This census is REPORTED acceptance
-  evidence; only invariants that survive refactors get pinned as tests.
 
 
 - **Zero-quadrature Pearcey hot path (expand table, remove live quadrature)**
