@@ -45,3 +45,41 @@ coder_fix, chained to the INS-4-001 measurement-currency fix (script must
 measure the actual production p90/max contract, no cap, floor >=1.15) —
 promoting these two tests to live assertions is CONTINGENT on that floor
 fix landing first, not a standalone doc edit.
+
+2026-08-14 symmetry_tie_c3_admission PLAN START: replacing HEAD's
+_saddle_farfield_analytic_serves(real_delays,w_lo,rho) two-leg gate (rho>=2.0
+floor + delta_taus>0 tie hole) with a c3-led certificate
+(S*ppgo_error_estimate<=bar) + image-separation tie discriminator. Live rung
+_saddle_farfield_analytic (likelihood.py:2075) IS reached by saddle path
+(dispatch :2253 gamma>1.0 -> served); NO separate _saddle_grid — CHECKPOINT
+answered: unified direct-rung dispatch. Census mirror surrogate_census.py:523.
+Gate signature must change (needs real_images/source/matrix) -> both call
+sites + all 4 saddle/ppgo test files updated. Professor pins S/bar/ghost
+decision/separation-floor; Simplifier on 1-WP + discriminator redundancy.
+
+
+2026-08-14 symmetry_tie_c3_admission PLAN FINALIZED: WP1 (Coder,
+cogwheel/lensing/likelihood.py) rewrite _saddle_farfield_analytic_serves to
+4-arg (real_images, source, matrix, w_lo); admit iff
+S*ppgo_error_estimate(...w_lo) <= bar with _SADDLE_FARFIELD_SAFETY=20,
+_SADDLE_FARFIELD_CERT_BAR=1e-3; thin separation backstop min pairwise
+|image sep| >= 0.05 defense-in-depth; tied mirror pairs far-apart->cert
+finite->serve, genuine merge->mu->inf->cert None->refuse; retire
+_SADDLE_FARFIELD_RHO_FLOOR + drop caustic_rho from live rung. WP2
+(Foreman-Lite, surrogate_census.py) census mirror to new signature. Tests->
+Test Dev. Calibration evidence via calibrate_saddle_exterior_certificate.py
+--followup in WP1 verification. Doc staleness -> Librarian.
+
+2026-08-14 symmetry_tie_c3_admission DESIGN triage (INS-1-003): masked-red
+test file. `test_lensing_saddle_serve_gate.py` encodes the INS-1-001
+double-mask crash as GREEN expected behavior (undecorated
+assertRaises(IndexError) crash-tripwire + @expectedFailure on the
+served==counted invariant WP2 exists to guarantee) instead of asserting
+the true post-fix contract. Verdict: coder_fix, CONTINGENT on the
+INS-1-001 production double-mask fix landing first (same coupling pattern
+as the INS-4-001/INS-4-003 floor-fix chain) — invert/remove the
+crash-tripwire test and promote the expectedFailure test to a plain
+assertion once production no longer crashes. Not new-test authorship (an
+existing Test-Developer-authored file's wrong expectations being
+corrected to match fixed production code), so it stays coder scope, not
+routed back to Test Developer.

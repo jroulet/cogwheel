@@ -1,5 +1,96 @@
 # Test Dev Short-Term Observations
 
+## 2026-08-14 (saddle serve-gate shard 2: cert-bar w_lo flip + w^-3 decay + census mirror)
+
+- EXTENDED test_lensing_saddle_serve_gate.py (now 33 passed, 1 xfailed,
+  ~5.4s) with the 3 remaining Architect specs for the c3-certificate gate
+  `_saddle_farfield_analytic_serves(real_images, source, matrix, w_lo)`
+  (NOTE: this is the NEWER 4-arg signature; test_lensing_saddle_tier1_*
+  suites still use the OLDER 3-arg (real_delays, w_lo, eta) port — two
+  distinct builds, don't cross them):
+  * CertificateBarFlipTestCase: fixed resolved far-apart saddle pair,
+    two w_lo bracketing S*ppgo_error_estimate==_SADDLE_FARFIELD_CERT_BAR
+    (1e-3); refuse at low w_lo, serve at high; flip point matches
+    `_SADDLE_FARFIELD_SAFETY*est==bar` within tol; sep>>0.05 so backstop
+    inactive. Diagnostic plot S*cert(w_lo) vs w_lo w/ bar line.
+  * CertificateMonotoneDecayTestCase: increasing w_lo array; est strictly
+    decreasing; log-log slope ~= -3 (est = sum(sqrt|mu||c3|)/w_min**3 is
+    EXACT w^-3, so slope pins to -3 to ~1e-6). Diagnostic log-log plot.
+  * CensusMirrorMatchesProductionGateTestCase (+ _decoy_saddle_blind_
+    surrogate() helper): battery of saddle 2-image draws (serve gamma=2.0
+    src=[1,0]; refuse gamma=1.6 src=1.001*reach*dir via caustic_geometry)
+    -> compare characterize_sample's served (record.category==
+    'saddle-farfield-analytic') vs direct gate call.
+- WP2 CENSUS INDEXERROR = GENUINE PRODUCTION DEFECT (confirmed end-to-end
+  vs REAL objects, not a mock artifact): `characterize_sample` (surrogate_
+  census.py:523/524, saddle far-field block) + live rung likelihood.py:2153
+  build `real_images = np.asarray(geom.images)[real]`. But geom.images is
+  ALREADY only real images (length k=2 for a saddle 2-image); real_mask is
+  the length-4 CHANNEL mask -> `[real]` DOUBLE-MASKS -> IndexError on EVERY
+  2-image saddle draw. Correct = drop `[real]` (use np.asarray(geom.images)).
+  So served==counted is UNVERIFIABLE end-to-end today. Represented via the
+  house pattern: GREEN tripwire test_census_crashes_reproducing_production_
+  args (`assertRaises(IndexError)`, auto-flips RED when `[real]` dropped) +
+  `@unittest.expectedFailure` test_census_served_matches_production_gate
+  (auto-flips to unexpected-success on fix). This is the SAME root as the
+  rho_guards CensusBandSplitMirrorIntegrityTestCase failures (there via
+  incomplete mocks); the earlier short-term note calling it "NOT a
+  production defect" was WRONG for the 2-image real path — the `[real]`
+  read is the defect for length-2 images; a real decoy-surrogate run
+  crashes with no mock involved.
+- BACKWARD-COMPAT (step 7, out of scope, unchanged): tier1_accuracy /
+  tier1_refusal / gauge still collection-ERROR on retired
+  `_SADDLE_FARFIELD_RHO_FLOOR` (owned elsewhere). rho_guards
+  CensusBandSplitMirrorIntegrityTestCase 2 failed + 2 err from the SAME
+  WP2 `[real]` line via mocks lacking geom.images.
+
+## 2026-08-14 (saddle serve-gate rewrite: c3 certificate + separation backstop)
+
+- NEW SUITE test_lensing_saddle_serve_gate.py (19 tests, ~3.8s green) for
+  the rewritten `_saddle_farfield_analytic_serves(real_images, source,
+  matrix, w_lo)` (WP1 c3-led certificate + separation backstop; WP2 census
+  mirror). Constants moved: retired `_SADDLE_FARFIELD_RHO_FLOOR` ->
+  `_SADDLE_FARFIELD_SAFETY=20.0`, `_SADDLE_FARFIELD_CERT_BAR=1e-3`,
+  `_SADDLE_FARFIELD_MIN_IMAGE_SEP=0.05`. Gate: est=ppgo_error_estimate at
+  band floor; est None -> refuse (primary coalescence discriminator);
+  serve iff min pairwise Euclidean image sep >= 0.05 AND 20*est <= 1e-3.
+- SPEC 1 (tied mirror serves): genuine engine source=(1,0) gamma=2 ->
+  +/-y mirror pair, delay tie delta_tau==0.0 EXACT (Fermat y->-y symmetry
+  of [[1-g,0],[0,1+g]]), sep=1.04>>0.05, 20*est=7.6e-4<=1e-3 -> served.
+  HEAD's retired `w_lo*delta_tau>=4` = 0>=4 False -> HEAD REFUSED; the
+  false refusal the rewrite fixes.
+- SPEC 2 (merging refuses) — SPEC DISCREPANCY (documented in class
+  docstring, NOT papered): `est is None` is UNREACHABLE from a physical
+  near-fold. Measured: even at rho=1.0 EXACTLY the DD root finder lands the
+  merging image just OFF the critical curve, so mu stays finite (~1e15) and
+  est blows up to 1e15+ but never None. Two legs used: (a) physical
+  rho=1.001 gamma=1.6 -> finite-but-huge est, 20*est>>1e-3 -> refuse via
+  CERTIFICATE (sep=2.07 backstop would pass); (b) genuine None branch via
+  the documented degenerate trigger w_min<=0 with the SAME well-separated
+  images -> assert `ppgo_error_estimate(...) is None` and gate refuses,
+  isolating the None leg from the backstop.
+- SPEC 3 (separation-floor flip): synthetic +/-x pairs at y0=2.0 bracket
+  the floor by +/-0.01 (DERIVED from `_SADDLE_FARFIELD_MIN_IMAGE_SEP`, not
+  pinned), BOTH with 20*est~2.5e-4<=1e-3 (cert clears both) -> below=False,
+  above=True. 25-pt sweep asserts EXACTLY ONE flip straddling the floor.
+- WP2 REGRESSION IN A NON-OWNED SUITE (reported, NOT edited — scope
+  discipline): WP2 added `real_images = np.asarray(geom.images)[real]` at
+  surrogate_census.py:487 and :523. test_lensing_saddle_rho_guards.py
+  `CensusBandSplitMirrorIntegrityTestCase` (2 methods) mock sets
+  `geom.delays` + `geom.real_mask` but NOT `geom.images` -> bare MagicMock
+  -> 0-d asarray -> `IndexError: boolean index did not match indexed
+  array`. Same MAGICMOCK-HIDES-NEW-ATTRIBUTE-READ family as the 2026-08-13
+  note (that time it was `geom.delays`; now `geom.images`). FIX (owner):
+  add `mock_geom.images = np.array([[0.3,0.2],[0.3,-0.2]])` (len-2 matching
+  real_mask) in BOTH test_corridor_source_no_band_split and
+  test_lobe_interior_source_no_band_split. NOT a production defect — the
+  hot-path read is correct; complete the mock, do not add a length check.
+- 3 STALE SIBLINGS still error at COLLECTION on retired
+  `_SADDLE_FARFIELD_RHO_FLOOR` (out of scope, owned elsewhere):
+  test_lensing_saddle_tier1_accuracy.py, test_lensing_saddle_tier1_refusal.py,
+  test_lensing_saddle_gauge.py. Need the rho->c3-certificate port by their
+  owning runs.
+
 ## 2026-08-14 (INS-2-001 eta-floor non-regression governance guard)
 
 - INS-2-001 re-flagged the SAME breach as INS-1-001 (near-floor eta band

@@ -1,5 +1,134 @@
 # Coder Short-Term Observations
 
+## 2026-08-14 (INS-1-001/002/003 fixes — c3 serve-gate double-mask + orphaned suites)
+
+- INS-1-001 (double-mask crash, gamma>1 every draw): FIXED at BOTH sites.
+  `geom.images` is ALREADY real-only (channels `_frame_delays` ->
+  `geometry.find_images` returns length-k real array), so indexing it with
+  the length-4 `geom.real_mask` IndexErrors on a 2-image saddle. Dropped the
+  `[real]` index + the `real = np.asarray(geom.real_mask,bool)` line ->
+  `real_images = np.asarray(geom.images)` in likelihood.py
+  `_saddle_farfield_analytic` (~L2152) AND surrogate_census.py
+  `characterize_sample` saddle block (~L520). Reworded the predicate
+  docstring `real_images` param (likelihood.py ~L586): "geom.images is
+  already the real-only array (find_images); pass directly -- do NOT index
+  with the length-4 channel mask". The interior 4-image sibling rung
+  (L1853, gated `if real_mask.sum()==4`) is a harmless all-True no-op and
+  was left alone.
+- INS-1-002 (3 orphaned old-gate suites error at COLLECTION): RETIRED via
+  `git rm` — test_lensing_saddle_tier1_refusal.py,
+  test_lensing_saddle_tier1_accuracy.py, test_lensing_saddle_gauge.py. All
+  three are, as bodies, the OLD rho-floor/RHO_END/eta-resolvability gate
+  ACCEPTANCE suite (constants RHO_END_INFLATED, `_SADDLE_FARFIELD_RHO_FLOOR`
+  import, `w_lo*mdt >= RHO_END` monotone-crossing tests). That mechanism is
+  GONE; the new c3 gate has its own self-contained acceptance suite
+  test_lensing_saddle_serve_gate.py (serve/refuse/both-flip-mechanisms/
+  w^-3-monotone/census served==counted). Inspector explicitly authorized
+  retirement "if the rho-floor contract is fully superseded". Verified: (a)
+  ZERO `_SADDLE_FARFIELD_RHO_FLOOR` refs remain tree-wide post-rm; (b) no
+  module imports the 3 files (leaf nodes); (c) serve_gate's
+  `_decoy_saddle_blind_surrogate` is LOCAL (L736), so deletion is safe.
+  FLAG -> Test Dev / Professor: the 3 files held UNIQUE live coverage the
+  boolean serve_gate.py does NOT: tier-1 served-vs-exact p90 ACCURACY
+  (accuracy file, via gate-independent `_tier1_serve` FARFIELD_KERNEL_SUM
+  reconstruction) and FARFIELD_KERNEL_SUM gauge identity/frame-phase
+  round-trip/handover continuity (gauge file). Re-establishing those
+  against the new c3 gate needs fresh fixtures that land in the new serve
+  region = certification of my own gate = Test Dev scope, NOT mechanically
+  migratable (their admission helpers call the retired 3-arg gate).
+- INS-1-003 (masked-red in serve_gate.py, contingent on 001 census fix —
+  now landed): DELETED `test_census_crashes_reproducing_production_args`
+  (the assertRaises(IndexError) crash tripwire); PROMOTED
+  `test_census_served_matches_production_gate` from `@unittest.
+  expectedFailure` to a plain undecorated live assertion of served==counted
+  (verified `__unittest_expecting_failure__`=False). Also rewrote the now-
+  stale module-level + class-level "SPEC DISCREPANCY (production defect)"
+  docstrings to "CENSUS ARG CONSTRUCTION (resolved, INS-1-001)" so the file
+  is internally consistent. Left `test_diagnostic_census_mirror_table`'s
+  now-unreachable `except IndexError` branch untouched (per "do not modify
+  other tests"; harmless future-regression sentinel).
+- SMOKE: py_compile OK on likelihood.py + surrogate_census.py +
+  serve_gate.py; serve_gate.py collects 33 cases (no ImportError), tripwire
+  absent, served==counted decorator gone. Did NOT run suites as
+  certification (role boundary).
+
+
+## 2026-08-14 (WP2 census mirror -> c3-cert serve-gate signature)
+
+- NOTE: this session's WP1/WP2 "eta re-key" entries BELOW are STALE — that
+  build was fully reverted (handoff symmetry_tie_c3_admission.md fact 6;
+  checkpoint d5672fa6 not an ancestor). HEAD's WP1 gate
+  `_saddle_farfield_analytic_serves` now takes (real_images, source, matrix,
+  w_lo) and is a c3-led certificate + image-separation backstop.
+- WP2: re-keyed the census mirror in surrogate_census.py
+  `characterize_sample` saddle block (gamma>1) onto WP1's 4-arg signature.
+  Now builds `real = np.asarray(geom.real_mask, bool)`, `real_images =
+  np.asarray(geom.images)[real]`, `source = np.array([y1, y2])`,
+  `matrix = macro_matrix(gamma, 0.0, 0.0)` (local import mirroring the
+  sibling interior-handoff block just above), `w_lo = float(w_grid.min())`,
+  then `_saddle_farfield_analytic_serves(real_images, source, matrix,
+  w_lo)`. DROPPED the `rho = caustic_rho(...)` serve-decision line + its
+  try/except + `real_delays`.
+- KAPPA: census pins beta=kappa=0 (fixed-geometry contract); geom above
+  built with kappa=0.0, so matrix uses 0.0 — the faithful mirror of the
+  production rung's lens['kappa'] source for census draws. served==counted.
+- caustic_rho import KEPT — still used by the band-split at L416
+  (characterize_sample) and L305 (classify_fallthrough). Only ONE
+  `_saddle_farfield_analytic_serves` call-site in the census, now 4-arg.
+- SMOKE: module imports clean; characterize_sample source contains the
+  4-arg call and no `real_delays`. No test module touched (Test Dev owns
+  the census-mirror decision-level tests + --followup evidence re-run).
+
+## 2026-08-14 (WP1 — saddle far-field gate re-keyed rho->c3 certificate)
+
+- REPLACED `_saddle_farfield_analytic_serves` signature `(real_delays,
+  w_lo, rho)` -> `(real_images, source, matrix, w_lo)` in
+  cogwheel/lensing/likelihood.py. New body: local import
+  `ppgo_error_estimate` from chang_refsdal.geometry; `len(images)<2 ->
+  False`; `est=ppgo_error_estimate(images,source,matrix,w_lo)`;
+  `est is None -> False` (PRIMARY merge discriminator — divergent mu/c3);
+  min pairwise Euclidean image separation via triu_indices >=
+  `_SADDLE_FARFIELD_MIN_IMAGE_SEP`; admit iff sep-ok AND
+  `_SADDLE_FARFIELD_SAFETY*est <= _SADDLE_FARFIELD_CERT_BAR`. Deleted the
+  whole delta_tau resolution leg (no more RHO_END in this gate; RHO_END
+  import KEPT — still used at rungs ~2044/2235).
+- CONSTANTS: RETIRED `_SADDLE_FARFIELD_RHO_FLOOR=2.0` (+ its comment
+  block); ADDED `_SADDLE_FARFIELD_SAFETY=20.0`,
+  `_SADDLE_FARFIELD_CERT_BAR=1e-3`, `_SADDLE_FARFIELD_MIN_IMAGE_SEP=0.05`
+  (Professor-authorized S/bar at w_lo — DO NOT re-derive). Grep confirms
+  ZERO `_SADDLE_FARFIELD_RHO_FLOOR` refs remain in likelihood.py.
+- LIVE RUNG `_saddle_farfield_analytic`: now builds source=np.array([y1,
+  y2]), matrix=macro_matrix(gamma,beta,kappa), real_images=
+  np.asarray(geom.images)[real_mask] (mirrors interior sibling ~1811);
+  DROPPED the `rho=caustic_rho(...)` serve-decision try/except entirely;
+  calls the 4-arg gate; False -> None fallthrough unchanged. caustic_rho
+  import KEPT (still used at ~1506/1811). macro_matrix already module-
+  level imported (L101).
+- SMOKE-TESTED (production imports only, NO test module): gate executes
+  end-to-end on ChangRefsdalChannels partitions, gamma=1.2. Near-caustic
+  y=(1.5,0.9)/(0.2,0) REFUSE (S*est 1.9e-2/1.1e-2); far-from-caustic
+  y=(3.5,2.2)/(5,3)/(6,4) SERVE (S*est 1.1e-4/5.6e-5/3.1e-5, monotone
+  shrinking with |y| as w^-3 c3 expects). Confirms c3-led admission +
+  None-refusal + shape handling.
+- ACCEPTANCE EVIDENCE (calibrate_saddle_exterior_certificate.py
+  --followup) is UNVERIFIED / BLOCKED-ON-TESTDEV: the script borrows
+  helpers from cogwheel/tests/test_lensing_saddle_tier1_accuracy.py, whose
+  L86 imports the now-retired `_SADDLE_FARFIELD_RHO_FLOOR` -> ImportError
+  before any measurement runs. This is anticipated Test-Dev re-key scope
+  (per prior memory "TESTS WILL GO RED"), NOT a gate defect. I did update
+  the ONE production-gate call site in the script's `_pairing_gate`
+  (scripts/, not a test) to the new 4-arg signature so the evidence run
+  works once the test module is re-keyed. Test Dev must re-key the L86
+  import in test_lensing_saddle_tier1_accuracy.py (drop
+  `_SADDLE_FARFIELD_RHO_FLOOR`; import the 3 new constants if asserted) and
+  re-point every `_saddle_farfield_analytic_serves(real_delays, w_lo, rho)`
+  call onto the 4-arg `(real_images, source, matrix, w_lo)` signature; then
+  re-run the --followup script for the max-true-err / max-cert(w_lo) /
+  false-admit numbers.
+- WP2 (surrogate_census.py saddle census mirror) NOT touched — separate
+  work package; the census must re-key its mirror onto the same 4-arg gate
+  in the same build (served==counted).
+
 ## 2026-08-14 (INS-3-001 fix — RAISE saddle eta floor 0.5 -> 0.9)
 
 - FIX: cogwheel/lensing/likelihood.py `_SADDLE_ETA_FLOOR` raised 0.5 -> 0.9.

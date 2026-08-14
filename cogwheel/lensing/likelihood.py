@@ -191,19 +191,37 @@ _LOO_STOP_STRONG = 1e-3
 #: ``gamma' == gamma``, so the crown fixture stays on the fast stop unchanged.
 _STRONG_SHEAR_STOP_THRESHOLD = 0.5
 
-#: Far-from-caustic floor on ``rho = |y| / caustic_reach`` for the tier-1
-#: macro-saddle analytic serve rung (`_saddle_farfield_analytic`).  That rung
-#: serves with a ZERO residual envelope, so its accuracy is governed by
-#: CAUSTIC PROXIMITY, not by the resolvability gate: a near-caustic (small
-#: ``rho``) source that is nonetheless resolvable at the band floor is the
-#: DEFERRED tier-2 population (~23% beyond-shell, which must be CHARTED, not
-#: served) and is REFUSED here so it falls through to the exact Schwinger
-#: engine rather than being answered with an O(1)-wrong likelihood.
-#: Calibrated by measurement (test_lensing_saddle_tier1_accuracy) so the
-#: admitted ``rho >= _SADDLE_FARFIELD_RHO_FLOOR`` population meets the spec
-#: p90 <= 1e-3 with ~20x headroom (measured p90 ~ 5e-5, worst ~ 7e-4 at the
-#: floor).
-_SADDLE_FARFIELD_RHO_FLOOR = 2.0
+#: c3-led certificate admission for the tier-1 macro-saddle far-field serve
+#: rung (`_saddle_farfield_analytic`).  The rung serves a 2-image saddle
+#: exterior with a ZERO residual envelope; the omitted physics is the
+#: leading stationary-phase remainder, which decays as ``w**-3`` with the
+#: SAME SHAPE as the c3 term ``geometry.ppgo_error_estimate`` computes
+#: per-image.  A draw is admitted iff the safety-factored certificate,
+#: evaluated at the band FLOOR ``w_lo`` (worst case -- ``w**-3`` is largest
+#: there, so a pass there certifies the whole band), clears the production
+#: bar: ``_SADDLE_FARFIELD_SAFETY * ppgo_error_estimate(...) <=
+#: _SADDLE_FARFIELD_CERT_BAR``.  The certificate's ``None`` return (divergent
+#: ``mu``/``c3`` at a merging pair near the critical curve) is the PRIMARY
+#: coalescence discriminator; ``S = 20``, ``bar = 1e-3`` at ``w_lo`` are
+#: Professor-authorized from the 672-point calibration set (they clear the
+#: measured max-error leg by 21x and the p90 leg by 2.1x with zero false
+#: admits) -- do NOT re-derive them.  This replaces the retired scalar
+#: ``rho`` floor (a proxy the measured failure geometry did not respect) and
+#: the delta_tau resolution leg (whose ``delta_taus > 0`` tie filter refused
+#: symmetry-tied mirror pairs that are spatially far apart and serve fine).
+_SADDLE_FARFIELD_SAFETY = 20.0
+_SADDLE_FARFIELD_CERT_BAR = 1e-3
+
+#: Image-separation backstop (defense-in-depth) for the saddle far-field
+#: gate.  SECONDARY to the certificate's ``None`` return: it guards the
+#: residual case of a finite-but-optimistic certificate near a merge.  We
+#: require the minimum pairwise Euclidean separation among the real image
+#: positions (source-plane, Einstein-radius units) to be ``>= 0.05`` -- a
+#: symmetry-tied mirror pair at ``+/-x`` has separation ``2|x| >= 0.1`` and
+#: passes, while a genuinely coalescing pair falls below the floor and is
+#: refused.  It discriminates coalescence by SPATIAL separation, never by
+#: delay coincidence.
+_SADDLE_FARFIELD_MIN_IMAGE_SEP = 0.05
 
 #: Hard ceiling on the number of coarse envelope nodes.  The SACR-C
 #: envelope is beat-free by construction, so a certified reconstruction
@@ -535,7 +553,7 @@ def _loo_stop_for_lens(lens):
     return _LOO_STOP_FAST
 
 
-def _saddle_farfield_analytic_serves(real_delays, w_lo, rho):
+def _saddle_farfield_analytic_serves(real_images, source, matrix, w_lo):
     """
     Whether the far-from-caustic macro saddle may be served analytically
     with a zero residual envelope.
@@ -545,51 +563,63 @@ def _saddle_farfield_analytic_serves(real_delays, w_lo, rho):
     band-splitting (WP-2) call this exact predicate, so the served set and
     the counted set can never skew.
 
-    The gate has TWO independent terms, BOTH required:
+    The gate is a c3-led certificate with a separation backstop:
 
-    1. Caustic proximity (accuracy).  The rung serves with a ZERO residual
-       envelope, so its error is governed by caustic proximity
-       ``rho = |y| / caustic_reach`` -- NOT by resolvability.  A near-caustic
-       (small ``rho``) source that is nonetheless resolvable is the DEFERRED
-       tier-2 population (which must be CHARTED, not served); serving it
-       returns an O(1)-wrong likelihood.  We therefore REQUIRE
-       ``rho >= _SADDLE_FARFIELD_RHO_FLOOR`` so tier-2 sources are refused and
-       fall through to the exact Schwinger engine.
+    1. Certificate (accuracy, PRIMARY).  The zero-envelope serve's true
+       remainder decays as ``w**-3`` with the same shape as the per-image
+       c3 term ``ppgo_error_estimate`` computes.  We admit iff the
+       safety-factored estimate at the band FLOOR clears the production bar,
+       ``_SADDLE_FARFIELD_SAFETY * est <= _SADDLE_FARFIELD_CERT_BAR``.  The
+       band floor ``w_lo`` is the worst case (``w**-3`` largest), so a pass
+       there certifies the whole band.  A ``None`` estimate -- divergent
+       ``mu``/``c3`` at a genuinely merging pair near the critical curve --
+       is the PRIMARY coalescence discriminator and refuses.
 
-    2. Resolvability.  At least two REAL image delays AND the narrowest
-       positive pairwise delay gap resolved at the band floor, i.e.
-       ``w_lo * min_delta_tau >= RHO_END``.  Below that the neighbouring
-       images are not individually resolved, so the switched analytic channel
-       sum is not accurate.
+    2. Separation backstop (defense-in-depth, SECONDARY).  Require the
+       minimum pairwise Euclidean separation among the real image positions
+       to be ``>= _SADDLE_FARFIELD_MIN_IMAGE_SEP``.  This guards the residual
+       case of a finite-but-optimistic certificate near a merge; a
+       symmetry-tied mirror pair at ``+/-x`` (separation ``2|x| >= 0.1``)
+       passes, a coalescing pair falls below the floor and refuses.
 
     Parameters
     ----------
-    real_delays : array_like
-        Fermat delays [dimensionless] of the REAL images (already masked
-        by ``geom.real_mask``).
+    real_images : np.ndarray
+        Shape ``(k, 2)``, the REAL image positions (source-plane,
+        Einstein-radius units).  ``geom.images`` is already the real-only
+        array (``geometry.find_images``); pass it directly -- do NOT index
+        it with the length-4 channel mask ``geom.real_mask``.
+    source : np.ndarray
+        Shape ``(2,)``, the source position.  Passed to
+        ``ppgo_error_estimate`` for interface symmetry.
+    matrix : np.ndarray
+        Shape ``(2, 2)``, the macro matrix.
     w_lo : float
-        Band-floor dimensionless frequency ``min(dense_w)``.
-    rho : float or None
-        Caustic-relative source distance ``|y| / caustic_reach`` from the
-        authoritative ``caustic_rho`` converter.  ``None`` or a non-finite
-        value (e.g. the converter could not place the source) declines.
+        Band-floor dimensionless frequency ``min(dense_w)``, at which the
+        ``w**-3`` remainder is largest.
 
     Returns
     -------
     bool
         Whether the analytic far-field rung may serve the whole band.
     """
-    if rho is None or not np.isfinite(rho) or rho < _SADDLE_FARFIELD_RHO_FLOOR:
+    from cogwheel.lensing.chang_refsdal.geometry import ppgo_error_estimate
+    images = np.asarray(real_images, dtype=float)
+    if len(images) < 2:
+        # Cannot be a resolved 2-image exterior.
         return False
-    real = np.sort(np.asarray(real_delays, dtype=float))
-    if len(real) < 2:
+    est = ppgo_error_estimate(images, source, matrix, w_lo)
+    if est is None:
+        # Divergent mu/c3 near the critical curve -- a genuinely merging
+        # pair.  This is the primary coalescence discriminator.
         return False
-    delta_taus = np.diff(real)
-    positive_deltas = delta_taus[delta_taus > 0]
-    if len(positive_deltas) == 0:
-        return False
-    min_delta_tau = float(np.min(positive_deltas))
-    return w_lo * min_delta_tau >= RHO_END
+    # Minimum pairwise Euclidean image separation (separation backstop).
+    diffs = images[:, None, :] - images[None, :, :]
+    dists = np.hypot(diffs[..., 0], diffs[..., 1])
+    iu = np.triu_indices(len(images), k=1)
+    min_sep = float(np.min(dists[iu]))
+    return (min_sep >= _SADDLE_FARFIELD_MIN_IMAGE_SEP
+            and _SADDLE_FARFIELD_SAFETY * est <= _SADDLE_FARFIELD_CERT_BAR)
 
 
 def _data_term(a_moments, rho0, rho1, kbar0, kbar1, tau, f_center):
@@ -2078,26 +2108,25 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         Serves the resolvable far-from-caustic macro saddle from the
         switched analytic channels with a ZERO envelope -- no engine call,
-        no fold_ppgo correction.  The rung serves only when BOTH gate terms
-        of `_saddle_farfield_analytic_serves` hold: the source is
-        far-from-caustic (``rho = |y| / caustic_reach >=
-        _SADDLE_FARFIELD_RHO_FLOOR``, so the zero-envelope error is within
-        spec) AND the real image pair is resolved at the band floor
-        (``w_lo * min_delta_tau >= RHO_END``).  On those, the switched
-        analytic channel sum reconstructed under the ``FARFIELD_KERNEL_SUM``
-        tag -- which parks ``tau_c = 0`` and hardcodes ``S_a = 1`` on the
-        saturated set -- carries the whole band to within the rung's
-        certified bar, so the residual envelope is SET to zero and the
-        analytic carriers alone reconstruct the amplification.  It is
-        NEGLIGIBLE, not identically zero: measured over the gate-admitted
-        far-from-caustic population, pointwise relative error is p90 ~5e-5
-        with max ~7e-4 at the ``rho = 2.0`` floor (certified by
-        ``test_lensing_saddle_tier1_accuracy.py`` against p90 <= 1e-3).
-        Accuracy degrades as ``rho`` falls toward the caustic, which is
-        what the rho-floor gate term exists to bound.  A near-caustic
-        (small ``rho``) resolvable source is the DEFERRED tier-2
-        population and is REFUSED here.  On any gate miss, returns
-        ``None`` and the caller falls through to the exact seed engine,
+        no fold_ppgo correction.  The rung serves only when the c3-led
+        certificate gate `_saddle_farfield_analytic_serves` admits: the
+        safety-factored leading-remainder estimate at the band floor clears
+        the production bar (``_SADDLE_FARFIELD_SAFETY *
+        ppgo_error_estimate(...) <= _SADDLE_FARFIELD_CERT_BAR``) AND the
+        minimum pairwise image separation clears the backstop.  The omitted
+        physics is the ``w**-3`` stationary-phase remainder, whose shape the
+        c3 term already carries, so the certificate at the band floor bounds
+        the whole band.  On those, the switched analytic channel sum
+        reconstructed under the ``FARFIELD_KERNEL_SUM`` tag -- which parks
+        ``tau_c = 0`` and hardcodes ``S_a = 1`` on the saturated set --
+        carries the whole band to within the rung's certified bar, so the
+        residual envelope is SET to zero and the analytic carriers alone
+        reconstruct the amplification.  It is NEGLIGIBLE, not identically
+        zero.  A genuinely merging pair near the critical curve
+        (``ppgo_error_estimate`` returns ``None``) or a near-caustic source
+        whose certificate exceeds the bar is REFUSED here and falls through
+        to the exact Schwinger engine.  On any gate miss, returns ``None``
+        and the caller falls through to the exact seed engine,
         byte-identical to HEAD.
 
         The rung never uses ``geom.switch`` / ``geom.critical_delay``: the
@@ -2123,23 +2152,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
             beta=lens['beta'], kappa=lens['kappa'])
 
-        real = np.asarray(geom.real_mask, dtype=bool)
-        real_delays = np.asarray(geom.delays)[real]
+        real_images = np.asarray(geom.images)  # already real-only (find_images)
+        source = np.array([lens['y1'], lens['y2']], dtype=float)
+        matrix = macro_matrix(lens['gamma'], lens['beta'], lens['kappa'])
         w_lo = float(dense_w.min())
-        # Caustic-relative distance rho = |y| / caustic_reach (engine-free).
-        # Gauged at the candidate's OWN kappa, matching the partition built
-        # above and the sibling `_ppgo_above_ceiling` rung -- the dispatch
-        # gates only on gamma > 1.0 (see the caller), so a general kappa != 0
-        # candidate can reach this rung and must be gauged against its own
-        # caustic, not the kappa=0 one. The WP-2 census separately gauges at
-        # kappa=0.0, which is correct for its kappa=0 sampled census space.
-        try:
-            rho = caustic_rho(
-                lens['gamma'], float(np.hypot(lens['y1'], lens['y2'])),
-                kappa=lens['kappa'])
-        except (ValueError, LensDomainError):
-            return None
-        if not _saddle_farfield_analytic_serves(real_delays, w_lo, rho):
+        if not _saddle_farfield_analytic_serves(
+                real_images, source, matrix, w_lo):
             return None
 
         envelope = np.zeros(dense_w.shape, dtype=complex)

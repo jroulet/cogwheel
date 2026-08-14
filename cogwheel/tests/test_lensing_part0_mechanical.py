@@ -366,6 +366,7 @@ _ABSORBER_ALLOWLIST: frozenset[tuple[str, str]] = frozenset({
     ('cogwheel/lensing/chang_refsdal/_schwinger.py', '_U_MARGIN_CONST'),
     ('cogwheel/lensing/chang_refsdal/_airy_fold.py', '_CUSP_TIE_EPS'),  # Delay-equality tolerance for cusp-cluster detection, NOT a discretization absorber
     ('cogwheel/lensing/likelihood.py', '_PPGO_INTERIOR_SAFETY'),  # Measured margin on the interior c3 certificate (worst ratio 0.980, p99 0.953 over 1248 oracle points), not a discretization absorber
+    ('cogwheel/lensing/likelihood.py', '_SADDLE_FARFIELD_SAFETY'),  # Measured margin on the EXTERIOR c3 certificate (covers the 9.4x worst measured c3 shortfall with ~2.1x headroom; zero false admits over 672 calibration points, scripts/calibration_pilot_followup.json), not a discretization absorber
 })
 
 

@@ -508,20 +508,24 @@ def characterize_sample(
     # subset is served and leaves the exact-engine bucket, while the
     # unresolvable saddle sources keep their existing classification.
     if gamma > 1.0:
-        real_mask = np.asarray(geom.real_mask, dtype=bool)
-        real_delays = np.asarray(geom.delays)[real_mask]
+        # Build the c3-certificate gate arguments IDENTICALLY to the live
+        # serve rung `_saddle_farfield_analytic` (real image positions,
+        # source, macro matrix, band floor) so the census served set stays a
+        # byte-faithful mirror of the production predicate -- served ==
+        # counted.  The census pins beta = kappa = 0 for every draw
+        # (fixed-geometry contract) and `geom` above was built with
+        # kappa = 0.0, so the macro matrix is built with that same kappa,
+        # matching the production rung's `lens['kappa']` source.  A
+        # near-caustic (small-reach) resolvable saddle is the DEFERRED
+        # tier-2 population: the certificate refuses it and it stays
+        # classified by classify_fallthrough below.
+        from cogwheel.lensing.chang_refsdal.geometry import macro_matrix
+        real_images = np.asarray(geom.images)  # already real-only (find_images)
+        source = np.array([y1, y2], dtype=float)
+        matrix = macro_matrix(gamma, 0.0, 0.0)
         w_lo = float(w_grid.min())  # band floor == exp(log_w_min)
-        # Caustic-relative distance rho = |y| / caustic_reach.  Computed the
-        # SAME way as the live serve rung (raw (y1, y2), kappa=0.0) so the
-        # shared gate's rho input is identical on both sides and the served
-        # set can never skew from the counted set.  A near-caustic (small
-        # rho) resolvable saddle is the DEFERRED tier-2 population: the gate
-        # refuses it and it stays classified by classify_fallthrough below.
-        try:
-            rho = caustic_rho(gamma, float(np.hypot(y1, y2)), kappa=0.0)
-        except (ValueError, LensDomainError):
-            rho = None
-        if _saddle_farfield_analytic_serves(real_delays, w_lo, rho):
+        if _saddle_farfield_analytic_serves(
+                real_images, source, matrix, w_lo):
             record.served = True
             record.category = 'saddle-farfield-analytic'
             return record

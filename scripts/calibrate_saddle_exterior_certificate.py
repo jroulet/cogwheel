@@ -270,11 +270,12 @@ def _pairing_gate(w_grid):
     gamma, rho, angle = 1.2, 3.0, 0.7
     y = _polar_source(rho, angle, gamma)
     geom, f_serve = _tier1_serve(w_grid, gamma, y)
-    real = np.asarray(geom.real_mask, dtype=bool)
-    real_delays = np.asarray(geom.delays)[real]
+    real_images = _real_images(geom)
+    source = np.asarray(y, dtype=float)
+    matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
     rho_prod = caustic_rho(gamma, float(np.hypot(y[0], y[1])), kappa=0.0)
     admitted = _saddle_farfield_analytic_serves(
-        real_delays, float(w_grid.min()), rho_prod)
+        real_images, source, matrix, float(w_grid.min()))
     f_exact = _exact_total_w(w_grid, gamma, y)
     err_max = float((np.abs(f_serve - f_exact) / np.abs(f_exact)).max())
     assert admitted, (
