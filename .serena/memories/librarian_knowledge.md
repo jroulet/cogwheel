@@ -360,3 +360,19 @@
   retires that field entirely, not just when its value/behavior changes.
   Detection method is the same: grep the literal identifier across
   SPEC.md whenever the corresponding code file is in the diff.
+
+
+## 2026-08-15 (fold-carrier schema cross-ref cluster — CORRECTION, resolved)
+
+- CORRECTION to the 2026-08-10 "FOLD-CARRIER SCHEMA CROSS-REF CLUSTER STILL
+  STALE (INS-1-002/003)" entry above: this is now RESOLVED. Fresh grep
+  confirms SPEC.md ~line 61-62 and DATA_CONTRACTS.yaml ~line 198 already
+  correctly describe the two-tag V4/V5 set
+  (`_EXTERIOR_POLAR_AXIS_SCHEMA_V4` retained-for-back-compat /
+  `_V5` current-write-tag) and the 2-D `(n_rho, n_theta_c)` rho_u_carrier
+  array with the 1-D-broadcast backward-compat note. Fixed by some earlier
+  untracked librarian pass between 2026-08-10 and 2026-08-15 with no memory
+  record of the closure at the time. Inspector's short-term memory still
+  lists this pair as carried-forward on a stale cadence — do NOT re-fix if
+  re-flagged again; re-verify with a fresh grep against the live docs
+  first, since the memory record itself can lag the actual fix.

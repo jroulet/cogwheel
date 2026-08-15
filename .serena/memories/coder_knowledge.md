@@ -884,3 +884,29 @@
   from the live production selector (e.g. calling _tube_training_arcs
   directly) is the correct fix; deleting the assertion or loosening the
   tolerance is not — Inspector's pass-2 explicitly required this pattern.
+
+
+## 2026-08-15 build (lobe_cusp_axis_edge_tolerance, WP1)
+
+- WP1 edge-coincidence tolerance in `_lobe_cusp_axis_map` (surrogate.py):
+  relaxed the two strict cusp-vs-edge guards (`if not cusp_angle > theta_hi:
+  raise` / `< theta_lo`) to admit a cusp coincident with the side-appropriate
+  edge within `_CUSP_EDGE_COINCIDENCE_ULPS = 8` ULPs (tol =
+  ULPS*eps*max(1,|edge|,|cusp|)); d at that edge clamped to 0 via
+  `max(..., 0.0)`. KEEP-MAP semantics (return type stays non-Optional tuple)
+  chosen over the sibling `_deltoid_cusp_axis_map`'s Optional-return pattern,
+  specifically to avoid the known latent `_chart_from_npz` unconditional
+  `data['theta_to_u']` KeyError trap (documented in the 2026-08-08
+  lobe_cusp_coordinate entry above) — a None-returning fix would have hit
+  that trap on NPZ round-trip. Genuine interior straddle still raises
+  ValueError. Const name ends `_ULPS`, not in the part0 absorber regex
+  suffix list (_EPS|_MARGIN|_FRAC|_STANDOFF|_SAFETY) — flag for a future
+  Tidier/Librarian naming-convention sweep if that allowlist gets extended.
+- SIBLING-SHAPE AUDIT REUSABLE RESULT: of the three cusp-axis-map siblings,
+  only `_lobe_cusp_axis_map` had a strict-inequality-at-coincidence shape.
+  `_wedge_cusp_axis_map` pins its cusp to the domain boundary by
+  construction (origin='low'/'high') so it has no cusp-vs-edge guard at all.
+  `_deltoid_cusp_axis_map` already used non-strict `<=` branch selection
+  plus straddle->None, so it was already safe. When auditing a sibling
+  family for the same defect shape, check the GUARD STRICTNESS, not just
+  whether the function has a similarly-named guard.

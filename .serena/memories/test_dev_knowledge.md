@@ -663,3 +663,38 @@
   from "oracles must call shipping code" (that rule is for NUMERICAL
   physics oracles, not structural/algorithmic correctness of the thing
   being tested).
+
+
+## 2026-08-15 (lobe cusp edge-coincidence test patterns)
+
+- BOUNDARY-TRICHOTOMY SUBTEST SWEEP PATTERN: for a coincidence-tolerance
+  guard (edge vs interior-straddle), a single parametrized test
+  (`test_boundary_trichotomy_at_edge`) sweeping subTests over
+  {exterior, on_edge, hair_inside, straddle} x {both sides} at fixed
+  theta_lo/theta_hi pins the `<`/`<=` flip guard far more cheaply than one
+  test per case — exterior/on-edge/hair-inside must build a strictly-
+  increasing map with bit-exact endpoints, straddle must raise. Watch for
+  a "hair_inside" offset landing inside half-ULP of the edge (e.g. 2e-17
+  vs half-ULP(0.9)=5.55e-17) — it rounds TO the edge exactly, which still
+  exercises the tolerance branch validly, just not the "just inside" case
+  it was meant to probe; note this explicitly rather than assuming the
+  offset always resolves as intended.
+- CALLER-PATH COVERAGE FOR A LEAF-FUNCTION GUARD: when a fix lives in a
+  leaf helper (`_lobe_cusp_axis_map`), add a companion test exercising the
+  actual caller (`_lobe_child_boxes`) with the SAME coincident-edge
+  fixture, engine-free — confirms the guard's return value flows correctly
+  through the real call site (side selection, box count, split point) and
+  that the interior-straddle case still propagates its ValueError through
+  the caller, not just the leaf.
+- SELF-FALSIFICATION FOR A ULP-WIDTH TOLERANCE: an offset of 1e-6 (vastly
+  larger than an 8-ULP-at-this-scale band of ~1.8e-15) inside the edge
+  must still raise — this is the cheapest self-falsification check for any
+  newly-introduced small-tolerance guard: confirm the tolerance band is
+  narrow relative to a "how would a real regression look" magnitude, not
+  just that a few chosen literals happen to pass.
+- AUDIT PRE-EXISTING STRADDLE TESTS FOR TOLERANCE-BAND OVERLAP: before
+  shipping a new ULP-scale coincidence tolerance, grep all pre-existing
+  `assertRaises` sites on the guarded function and confirm their offsets
+  (here 0.1-0.7 rad, both surrogate_lobe and lobe_subdivision suites) are
+  far above the new band — cheap and prevents silently flipping an
+  existing regression test into a false negative.

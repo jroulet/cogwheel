@@ -527,3 +527,28 @@
   st._tube_training_arcs(structure, parity)) inside the SAME build that
   changed the selector, not a delete-and-move-on. Confirmed green via
   fresh collect-only + targeted suite runs, not by trusting the diff.
+
+
+## 2026-08-15 (lobe_cusp_axis_edge_tolerance, PASS)
+
+- Reviewed the `_lobe_cusp_axis_map` edge-coincidence ULP-tolerance fix
+  (surrogate.py): signature unchanged (4 positional); both production
+  callers (from_lobe_engine, from_lobe_exterior_engine) and
+  `_lobe_child_boxes` set `side` from the tile CENTRE via
+  `_lobe_nearest_cusp`, guaranteeing the far-edge distance is > 0 — the
+  negative-base complex-power regime is UNREACHABLE via production
+  callers (noted, not a finding). Sibling audit confirmed correct:
+  `_wedge_cusp_axis_map` has no cusp-vs-edge guard (cusp pinned to domain
+  edge by construction); `_deltoid_cusp_axis_map` already handles the
+  coincident/straddle case via `None` + non-strict branch. New test
+  suites cover endpoint bit-exactness, monotonicity, the boundary
+  trichotomy (exterior/on-edge/hair-inside->map, straddle->raise) on both
+  sides, and self-falsification. Full targeted + neighbor suites green
+  (139 passed, 10 skipped train-tier). No SPEC/DATA_CONTRACTS impact.
+- RESOLVED (verify before re-flagging): the carried-forward INS-1-002/003
+  "exterior_polar_rho_log_carrier_v1 'ONLY known tag' staleness since V5
+  2D carrier" item is confirmed closed — Librarian's short-term memory
+  independently found SPEC.md/DATA_CONTRACTS.yaml already correctly
+  describe the V4/V5 two-tag set and the 2D rho_u_carrier, fixed by some
+  earlier untracked pass. Do not re-open this pair from memory alone;
+  re-verify with a fresh grep if it resurfaces.

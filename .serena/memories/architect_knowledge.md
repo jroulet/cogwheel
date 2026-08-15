@@ -717,3 +717,23 @@
   Test Dev picked them up same session; Inspector's pass-2 required
   RE-DERIVING each expectation from the live production selector (not
   just deleting/loosening the old assertion) before granting PASS.
+
+
+## 2026-08-15 build (lobe_cusp_axis_edge_tolerance, F082 smoke crash)
+
+- 7a smoke crash in `_lobe_cusp_axis_map` (surrogate.py): `_lobe_nearest_cusp`
+  picks `side` from tile CENTER while the cusp-vs-edge guard was STRICT
+  (raises on machine-precision straddle, cusp 3.27e-16 vs theta_hi 3.55e-16,
+  2.8e-17 inside). Shipped fix: option (a), tolerance-relax the edge guards
+  (`_CUSP_EDGE_COINCIDENCE_ULPS = 8`) + clamp d->0 at coincidence, keeping
+  the function's non-Optional return type — NOT option (b) mirroring
+  `_deltoid_cusp_axis_map`'s Optional-straddle->None pattern, because 3
+  production callers don't None-handle and `_chart_from_npz` has a known
+  latent unconditional `data['theta_to_u']` KeyError trap that a None
+  return would walk straight into. Sibling audit confirmed only
+  `_lobe_cusp_axis_map` had this defect shape — `_wedge_cusp_axis_map`
+  pins cusp to the domain edge by construction (no guard needed) and
+  `_deltoid_cusp_axis_map` already handled coincidence gracefully.
+  Professor + Inspector both PASSed the fix; Librarian confirmed no
+  SPEC/DATA_CONTRACTS impact (private-helper guard tolerance, not a public
+  contract change).

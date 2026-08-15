@@ -649,3 +649,29 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   all-6-arc incumbent serve set over a 720-angle ring sweep, 0
   violations — this end-to-end coverage pin backs the 6->2 arc-count
   collapse even if the internal orbit bookkeeping were subtly off.
+
+
+## 2026-08-15 (lobe cusp-coincident-edge tolerance review, verdict PASS)
+
+- `_lobe_cusp_axis_map` edge-coincidence fix (surrogate.py,
+  `_CUSP_EDGE_COINCIDENCE_ULPS=8`) verified physically sound: u=d**(2/3)
+  is the A3 cusp caustic-reach scaling; a tile edge landing on a cusp ray
+  clamps d->0 exactly (`max(theta_lo-cusp,0)` left / `max(cusp-theta_hi,0)`
+  right) and anchors u there. `np.clip(base_lo-u_fine,0,None)**1.5` on the
+  right guards the power against FP-negative base (would NaN). Symmetric
+  tolerance on both edges.
+- Independent numeric checks performed: Pin A (endpoints bit-exact,
+  u_max==0.5**(2/3) to 0 rel-err, strictly increasing); Pin B (7a sliver
+  tl=0, th=3.5527e-16, ca=3.2703e-16: ca<th holds so real straddle
+  premise, no raise, endpoints bit-exact, NON-decreasing — linspace nodes
+  collide at ~3.5e-16 so >= not > is the correct monotonicity invariant
+  here); boundary trichotomy (tol band = 8*eps*max(1,|edge|)~1.776e-15 at
+  this scale; 2e-17 offset admits, 1e-3 offset raises) on both sides;
+  caller path `_lobe_child_boxes` coincident-lower-edge -> side='left' ->
+  4 children with split in [theta_lo,theta_hi], while an interior cusp
+  still propagates ValueError through the splitter (guard not vacuous).
+- Test evidence: test_lensing_surrogate_lobe.py 19 pass in 4.4s
+  (LobeCuspAxisMap*/EdgeCoincidence*/LobeChildBoxesCoincidentEdge*);
+  test_lensing_lobe_subdivision.py 49 pass in 112s. Heavy full-engine
+  training + sampling (COGWHEEL_TRAIN_TIER=1) left operator-deferred, not
+  needed for this verdict.
