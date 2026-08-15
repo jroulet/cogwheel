@@ -4414,3 +4414,39 @@ hard-refusal wholesale. Relax per-cell on re-validation evidence — today
 that is [1.157, 1.339] only; [1.100, 1.157] stays refused until the
 edge-biased retrain re-measures it. Full re-validation is cheap (~60 s at
 training fidelity; corner-refinement ~10 min single-process).
+
+## F081
+**A band-wide `max()` over heterogeneous per-arc tube shells starves every
+saddle lobe admission — the census's SILENT_EMPTY verdicts trace to one
+knob and one wiring flaw (2026-08-14, driver diagnosis, engine-free knob
+bisection at HEAD ff52e85).**
+
+At production config (`max_tube_arcs=20`) `_tube_training_arcs` returns
+all 6 deltoid arcs; the two nearly-straight OUTER arcs have
+`r_min = 3.80` vs `0.31` for the four lobe-edge arcs, so
+`max_eta_max = f_max * max(arc_r_min) = 0.40 * 3.80 = 1.519` — larger
+than the entire lobe reach (1.033). That band-wide scalar feeds
+`_saddle_lobe_admissions` (every probe fails `nearest < eta_max`) and the
+deltoid far-field `exclusion_rho` (2.557 > rho_outer 2.300 → `[]`):
+lobe_interior 0, lobe_exterior 0, deltoid ff 0 tiles. Flipping
+`max_tube_arcs` to 1 alone yields 13 / 30 / 24 tiles at otherwise-
+production settings (bisection decisive both directions;
+gamma_band_halfwidth and n_caustic_samples innocent — and the NARROW
+production band `halfwidth=0.02` actually FIXES lobe_interior, which is
+empty at the default width even at default arcs: a band-width artifact).
+
+TWO defects: (a) config — production `max_tube_arcs=20` violates the
+admission machinery's one-eta-scale assumption; (b) wiring — admissions
+and `exclusion_rho` consume `max(per-arc shells)` applied isotropically
+to the whole caustic cloud while each chart's actual shell is per-arc
+(`eta_max = f_max * r_min_k`); the excluded annulus 0.124-1.52 off the
+lobe-edge caustic is served by NO chart — this is the 1236-draw saddle
+gap's mechanism, not tube-served territory. Any multi-arc saddle config
+with heterogeneous r_min reproduces it, so the D2 fundamental-arc trim
+(which retains an outer-arc orbit representative) does NOT fix it: the
+per-arc-shell union must replace the band-wide max wherever admissions
+consume it.
+
+The engine-free census caught all of this pre-campaign — a production
+training run would have burned the saddle-side budget training nothing
+for the lobes and shipped the gap intact.
