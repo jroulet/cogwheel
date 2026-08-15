@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "5a739b66b782f4220c5b74e4d44a8d2bb42851be",
-  "timestamp": "2026-08-14T22:11:15Z",
+  "commit": "1ed6bedf2589495496d4739842464f029fd2587f",
+  "timestamp": "2026-08-15T00:48:37Z",
   "touched_files": [
     "cogwheel/lensing/born_residual_chart.py",
     "cogwheel/lensing/chang_refsdal/__init__.py",
@@ -44,10 +44,12 @@
     "cogwheel/tests/test_lensing_ppgo_above_ceiling.py",
     "cogwheel/tests/test_lensing_ppgo_bandsplit.py",
     "cogwheel/tests/test_lensing_ppgo_certificate.py",
+    "cogwheel/tests/test_lensing_ppgo_map.py",
     "cogwheel/tests/test_lensing_ppgo_midw_and_minus_ghost.py",
     "cogwheel/tests/test_lensing_prior.py",
     "cogwheel/tests/test_lensing_ratio_layer.py",
     "cogwheel/tests/test_lensing_saddle_gauge.py",
+    "cogwheel/tests/test_lensing_saddle_rho_guards.py",
     "cogwheel/tests/test_lensing_saddle_tier1_accuracy.py",
     "cogwheel/tests/test_lensing_schwinger.py",
     "cogwheel/tests/test_lensing_surrogate.py",
