@@ -621,3 +621,14 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   anomaly -> None + RuntimeWarning (engine stays pure), never a raise past
   construction.
 
+
+## F080 saddle rho<1 per-cell relaxation review (2026-08-14)
+- `get_certified_ppgo_map()` returns the process-global singleton, which is
+  `None` in a fresh process — any oracle/test code must call
+  `CertifiedPpgoMap.load()` directly rather than the accessor when no prior
+  code path has populated the global.
+- `CertifiedPpgoMap` allowlist relaxation (`_SADDLE_RHO_RELAXED_CELLS`) is
+  keyed on exact float64 gamma-edge equality; verified in-box Cell 1 gives
+  w_cert=19.164305537818887, w_trust=max(1.5*floor, floor+2)=28.74645830672833,
+  w_ceiling=58.0 (finite, >= w_trust), while MARGINAL/CONTAM/off-band/edge-
+  neighbor cells all still return UNKNOWN across w_cert/w_trust/w_ceiling.

@@ -629,3 +629,18 @@
   from-scratch battery rather than reading the fix — corroborating
   evidence a fix's regression coverage is real, not just self-reported.
 
+
+## 2026-08-14 (F080 ppGO saddle rho<1 per-cell relaxation)
+
+- MIRROR TEST VIA REAL BOUND METHODS, NOT REIMPLEMENTED PRIMITIVES: when
+  testing a census/likelihood mirror, bind the test probe's unbound methods
+  to the PRODUCTION module's globals (`__globals__`) so
+  `get_certified_ppgo_map`/`caustic_rho`/etc. resolve to the real shipping
+  functions without needing a full engine instance — avoids re-deriving the
+  primitives from scratch, which is the class of bug a mirror test exists
+  to catch.
+- EXACT-EDGE-KEYED ALLOWLISTS ARE BACKWARD-COMPAT BY CONSTRUCTION: a guard
+  keyed on exact float64 grid-edge equality is unreachable from any
+  synthetic-fixture suite using different edges — before flipping old
+  tests, check whether their fixtures can even reach the new allowlisted
+  cell; if the edges never match, no pre-existing test needs updating.

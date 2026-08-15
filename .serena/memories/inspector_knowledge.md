@@ -507,3 +507,12 @@
   spec to match the artifact — direction is a triage call, not an
   Inspector call.
 
+
+## 2026-08-14 (certified_map_guard_relaxation, F080, final pass)
+
+- STALE-DOCSTRING-AFTER-GUARD-REMOVAL: when a build removes a guard and
+  rewrites SOME sibling test docstrings, a missed sibling can still pass
+  but for a DIFFERENT reason than its stale docstring claims (latent
+  vacuity) — sweep every docstring naming the removed mechanism, not just
+  the one the finding cites, and re-verify any numeric claim (e.g. why a
+  test passes) against a fresh run rather than trusting the prose.

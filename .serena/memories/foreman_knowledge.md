@@ -138,3 +138,9 @@
   (2026-08-14, error text: "USE SERENA for shell commands"): invoke git/ls/
   stat/etc. directly with `-C <path>` (never a leading `cd`), and route all
   content search through `mcp__serena__search_for_pattern` instead of grep.
+- SWEEP SIBLING DOCSTRINGS AFTER A GUARD-REMOVAL FIX (2026-08-14): when a
+  finding names one stale docstring caused by a removed guard, grep the
+  whole file for the same stale phrasing — sibling tests/comments describing
+  the same removed mechanism are the same defect, not a separate finding.
+  Verify any numeric claim in the corrected prose (w_trust, thresholds) with
+  a fresh pytest run before trusting it, not just internal consistency.

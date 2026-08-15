@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "generated_by": "scripts/regenerate_consumer_graph.py (jedi.goto + ripgrep)",
-  "generated_at": "2026-08-13",
+  "generated_at": "2026-08-14",
   "loaders": {
     "EventData.from_npz": {
       "artifact": "event_data_npz",
@@ -197,8 +197,16 @@
       ],
       "callers": [
         {
+          "name": "BandScopedRelaxationTestCase.setUpClass",
+          "file": "cogwheel/tests/test_lensing_ppgo_map.py"
+        },
+        {
           "name": "CensusBandSplitMirrorIntegrityTestCase.setUpClass",
           "file": "cogwheel/tests/test_lensing_saddle_rho_guards.py"
+        },
+        {
+          "name": "CensusLikelihoodBandSplitMirrorTestCase.setUpClass",
+          "file": "cogwheel/tests/test_lensing_ppgo_map.py"
         },
         {
           "name": "LoaderCeilingRefusalTestCase.test_ceiling_less_artifact_is_hard_refused",
@@ -219,6 +227,14 @@
         {
           "name": "PpgoMapDefenseInDepthTestCase.setUpClass",
           "file": "cogwheel/tests/test_lensing_saddle_rho_guards.py"
+        },
+        {
+          "name": "RelaxedCellSelfFalsificationTestCase.setUpClass",
+          "file": "cogwheel/tests/test_lensing_ppgo_map.py"
+        },
+        {
+          "name": "ShippedMapSaddleRelaxedCellTestCase.setUpClass",
+          "file": "cogwheel/tests/test_lensing_ppgo_map.py"
         },
         {
           "name": "use_certified_ppgo_map",

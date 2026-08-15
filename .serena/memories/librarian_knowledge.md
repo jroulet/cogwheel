@@ -341,3 +341,11 @@
   `calibrate_*`/`measure_*` script's import block names a test module and
   the adjacent build touches that same test module; not blocking if the
   script already produced its cited output artifact before going stale.
+
+- SELF-LINK-TO-DELETED-TARGET (2026-08-14): a completed.d fragment
+  documenting the closure of a todo.d item must NEVER `[[wiki-link]]` that
+  todo.d stem inside its own prose when the same edit `git rm`'s it — the
+  dangling-link checker correctly flags it one run later. State the
+  closure in plain prose instead (name the file, note it was removed by
+  this completion) rather than linking to a target that no longer exists
+  by the time the fragment lands.

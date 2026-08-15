@@ -842,3 +842,19 @@
   byte-identity pin can be built purely from the mask logic without an
   engine call — reusable whenever validating a new band-split consumer.
 
+
+## 2026-08-14 build (saddle rho<1 per-cell relaxation, WP1)
+
+- BLANKET GUARD -> PER-CELL ALLOWLIST: replaced a blanket saddle-rho<1
+  UNKNOWN guard with `_SADDLE_RHO_RELAXED_CELLS`, keyed on EXACT float64
+  gamma-edge equality (e.g. `[1.1572945272629378, 1.3393306228327468]`) —
+  gate placed AFTER the value computation so refused cells still compute
+  before being discarded (cheap, keeps the code path uniform). w_ceiling
+  gained a matching consistency gate. Duplicate SITE1/SITE4 guards in
+  likelihood.py/surrogate_census.py deleted in favor of the single
+  CertifiedPpgoMap-owned allowlist (map methods are the source of truth,
+  consumers delegate rather than re-guard).
+- EXACT FLOAT EDGES MUST COME FROM THE SHIPPED ARTIFACT, NOT A HANDOFF
+  PROSE VALUE: an allowlist keyed on float64 equality needs the true
+  `repr()` read from `CertifiedPpgoMap.load()`'s grid, never a rounded
+  value copied from a driver/inspector handoff note.
