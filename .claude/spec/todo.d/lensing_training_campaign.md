@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [lensing_tiling_census_node_budget]
+
 ---
 
 - **NEXT-SESSION ORDER 7a/7 — THE TRAINING CAMPAIGN (cost estimate FIRST,

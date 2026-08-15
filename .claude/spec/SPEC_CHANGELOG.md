@@ -6,7 +6,7 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
-- `0.42.1` (2026-08-15):
+- `0.43.1` (2026-08-15):
 
 The `wire_serving_artifacts` build (5a739b6) updated the pipeline-row
 sentence for the Born intercept correctly but left an older paragraph
@@ -21,7 +21,7 @@ chart, and that the shipped artifact covers the astroid parity only
 (mirrors the `contracts_changelog.d/2026-08-15_born_chart_astroid_only_
 narrowing.md` DATA_CONTRACTS.yaml fix for the same artifact).
 
-- `0.42.0` (2026-08-14):
+- `0.43.0` (2026-08-14):
 
 Tube-chart serving folds the caustic gauge angle through the four exact D2
 images (`surrogate._tube_theta_inframe`, identity first) so one trained
@@ -31,6 +31,16 @@ tube theta now means "no D2 image in the chart frame". The sign-keyed
 single-arc fold is recorded UNSOUND (orientation-reversing gauge<->source
 map). New suite `test_lensing_tube_d2_fold.py`; census witness re-pointed
 to a gap theta. Build `tube_d2_fold` + driver fix-forward.
+
+- `0.42.0` (2026-08-14):
+
+Engine-free tiling census + node-budget predictor shipped
+(`cogwheel/lensing/tiling_census.py` + CLI): thin caller of the
+production tilers, two-sided bands, campaign call-count estimate
+cross-checked against `_self_estimate`, pre-campaign questions Q1-Q4.
+Build `tiling_census_node_budget` + driver DRY fix (the Q4 DD-margin
+mirror replaced by reading the production `_DD_PRODUCT_MARGIN` at the
+use site — the part0 absorber guard caught the third mirrored copy).
 
 - `0.41.0` (2026-08-14):
 
