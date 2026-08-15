@@ -133,9 +133,10 @@ def _exterior_nodes_per_tile(config: st.TrainingConfig) -> int:
 #: Q1 fundamental-domain fold-arc counts for the smoke config's representative
 #: bands (MEASURED 2026-08-14, grounded in a live ``run``).  The astroid detects
 #: its four D2-image arcs but trains ONE (the fundamental arc bracketing pi/4 --
-#: the F079 wrap fix); the macro-saddle deltoid detects six arcs and trains the
-#: ``max_tube_arcs`` slice.  These are the DETECTED counts (a topology fact of
-#: the caustic), independent of ``max_tube_arcs``.
+#: the F079 wrap fix); the macro-saddle deltoid detects six arcs and trains ONE
+#: representative per D2 gauge orbit (F081 -- a strict fold below the detected
+#: count, whose exact value follows the orbit partition, not a knob).  These are
+#: the DETECTED counts (a topology fact of the caustic).
 _ASTROID_DETECTED_ARCS = 4
 _ASTROID_TRAINED_ARCS = 1
 _SADDLE_DETECTED_ARCS = 6
@@ -460,17 +461,19 @@ class BandVerdictLogicTestCase(_CensusTestCase):
 
 
 class ArcCensusQ1TestCase(_CensusTestCase):
-    """Q1: detected-vs-trained fold-arc separation survives D2-slice refactors.
+    """Q1: detected-vs-trained fold-arc separation survives D2-fold refactors.
 
     The durable invariant is the fundamental-domain reduction: the astroid
     detects four D2-image arcs but trains ONE (the F079 wrap fix), while the
-    macro-saddle deltoid detects six arcs and trains the ``max_tube_arcs``
-    slice.  We pin ``trained <= detected`` for both parities, the astroid's
-    trained-count of exactly one, and the saddle's ``min(detected,
-    max_tube_arcs)`` slice -- the last with genuine teeth via a second config
-    whose ``max_tube_arcs`` opens the slice wider (default config has
-    ``max_tube_arcs == 1``, which would let a "saddle always trains 1" bug
-    masquerade as correct).
+    macro-saddle deltoid detects six arcs and trains one representative per D2
+    gauge orbit (F081) -- a strict fold BELOW the detected count whose exact
+    value follows the orbit partition, not a knob.  We pin ``trained <=
+    detected`` for both parities, the astroid's trained-count of exactly one,
+    and the saddle's trained count re-derived independently from the production
+    selector ``_tube_training_arcs(structure, -1)`` on the census's own
+    first-saddle band structure -- with genuine teeth via the strict fold
+    ``1 <= trained < detected`` (a "saddle always trains N" bug that decoupled
+    the count from the orbit partition would trip the re-derivation).
     """
 
     def test_detected_and_trained_arc_counts_match_fundamental_domain(
@@ -498,13 +501,36 @@ class ArcCensusQ1TestCase(_CensusTestCase):
             'happening (the F079 half-ring hole would reopen).')
         self._observe()
 
-        # Saddle: detects six arcs, trains the max_tube_arcs slice.
+        # Saddle: detects six arcs, folds to one representative per D2 gauge
+        # orbit (F081).  We re-derive the expected trained count INDEPENDENTLY
+        # by re-running the production selector on the census's own
+        # first-saddle band structure (the SAME context Q1 reports), so a
+        # census that sliced/hardcoded/mis-parity'd its ``tube_arcs`` wiring
+        # would diverge from this oracle.
         self.assertEqual(sad['detected_arcs'], _SADDLE_DETECTED_ARCS,
                          'saddle detected-arc count regressed from six.')
+        box = st.PriorBox.from_prior_classes()
+        saddle_ctxs, _dropped = tc._collect_band_contexts(st, box, -1, config)
+        self.assertTrue(saddle_ctxs,
+                        'premise lost: no saddle band context to re-derive '
+                        'the trained-arc count from.')
+        expected_saddle_trained = len(
+            st._tube_training_arcs(saddle_ctxs[0].structure, -1))
         self.assertEqual(
-            sad['trained_arcs'],
-            min(_SADDLE_DETECTED_ARCS, config.max_tube_arcs),
-            'saddle trained-arc count is not min(detected, max_tube_arcs).')
+            sad['trained_arcs'], expected_saddle_trained,
+            'saddle trained-arc count does not match the production D2-orbit '
+            f'selector: census={sad["trained_arcs"]}, '
+            f'_tube_training_arcs={expected_saddle_trained}.')
+        # Strict fold below the six detected arcs -- teeth that a "saddle
+        # trains all detected arcs" regression (the F081 gauge fold undone)
+        # would trip.
+        self.assertGreaterEqual(
+            sad['trained_arcs'], 1,
+            'saddle trained-arc count fell below one -- no representative arc.')
+        self.assertLess(
+            sad['trained_arcs'], _SADDLE_DETECTED_ARCS,
+            'saddle trained == detected -- the D2 gauge-orbit fold is not '
+            'happening (F081 reduction undone).')
         self._observe()
 
         # trained <= detected for BOTH parities (a coverage-hole guard: never
@@ -518,29 +544,44 @@ class ArcCensusQ1TestCase(_CensusTestCase):
                 self.assertGreaterEqual(entry['trained_arcs'], 1)
                 self._observe()
 
-    def test_saddle_slice_widens_with_max_tube_arcs(self) -> None:
-        """A config with ``max_tube_arcs=2`` trains 2 saddle arcs, not 1.
+    def test_saddle_folds_strictly_below_detected_while_astroid_pins_one(
+            self) -> None:
+        """Saddle folds 6 -> a D2-orbit subset < 6; astroid stays pinned at 1.
 
-        Teeth for the ``min(detected, max_tube_arcs)`` slice: the default
-        config's ``max_tube_arcs == 1`` cannot distinguish the correct slice
-        from a "saddle always trains one arc" bug, so we open the knob and
-        require the trained count to follow -- while the astroid stays pinned
-        at its single fundamental arc regardless of the knob.
+        Replaces the retired ``max_tube_arcs`` widening test (F081 removed the
+        knob).  The saddle's trained count is now the number of D2 gauge orbits
+        the deltoid's detected arcs partition into -- a strict fold below the
+        detected six -- while the astroid's positive-parity fold always reduces
+        to its single pi/4 fundamental arc.  We assert the saddle count equals
+        the production selector run directly on the caustic structure (a
+        SECOND, geometry-level oracle independent of the census's own
+        ``tube_arcs`` wiring) and that it is strictly below detected.
         """
-        wide = st.TrainingConfig(max_tube_arcs=2)
-        self.assertEqual(wide.max_tube_arcs, 2,
-                         'premise lost: TrainingConfig did not accept '
-                         'max_tube_arcs=2.')
-        q1 = tc.run(wide)['q1_arc_census']
+        config = _smoke_config()
+        q1 = _baseline_run()['q1_arc_census']
+
+        box = st.PriorBox.from_prior_classes()
+        saddle_ctxs, _dropped = tc._collect_band_contexts(st, box, -1, config)
+        self.assertTrue(saddle_ctxs,
+                        'premise lost: no saddle band context to fold.')
+        structure = saddle_ctxs[0].structure
+        n_orbits = len(st._tube_training_arcs(structure, -1))
+
         self.assertEqual(
-            q1['saddle']['trained_arcs'],
-            min(_SADDLE_DETECTED_ARCS, 2),
-            'saddle trained-arc count did not follow max_tube_arcs=2 -- the '
-            'slice is decoupled from the knob (or hardwired to 1).')
+            q1['saddle']['trained_arcs'], n_orbits,
+            'saddle trained-arc count decoupled from the D2 gauge-orbit '
+            f'partition: census={q1["saddle"]["trained_arcs"]}, '
+            f'orbits={n_orbits}.')
+        self.assertGreaterEqual(n_orbits, 1,
+                                'the deltoid partitioned into zero D2 orbits.')
+        self.assertLess(
+            n_orbits, len(structure.arcs),
+            'saddle folded to every detected arc -- the D2 gauge-orbit '
+            'reduction (F081) is not reducing anything.')
         self.assertEqual(
             q1['astroid']['trained_arcs'], _ASTROID_TRAINED_ARCS,
-            'astroid trained-arc count changed with max_tube_arcs -- the '
-            'positive-parity fold must always reduce to one arc.')
+            'astroid trained-arc count is not one -- the positive-parity fold '
+            'must reduce to the single pi/4 fundamental arc.')
         self._observe()
 
 

@@ -1293,13 +1293,14 @@ class InteriorAdmissionMarginRemovalTestCase(_CuspTestCase):
     def test_margin_removal_is_a_safe_superset(self):
         config = st.TrainingConfig()
         for band in INTERIOR_ADMISSION_BANDS:
-            # Compute per-band eta_max = f_max * max(R_c) over arcs (mirrors
-            # production _train_band_charts logic).
+            # Compute per-band eta_max = f_max * max(R_c) over the trained
+            # arcs (mirrors production _train_band_charts: the astroid trains
+            # its single pi/4 fundamental arc via _tube_training_arcs).
             structure = st.band_caustic_structure(
                 band, 1, n_samples=config.n_caustic_samples)
             arc_r_min = [st._min_curvature_radius(
                 band, arc, config.n_caustic_samples)
-                for arc in structure.arcs[:config.max_tube_arcs]]
+                for arc in st._tube_training_arcs(structure, 1)]
             eta_max = config.f_max * max(arc_r_min) if arc_r_min else 0.05
             admission = st._interior_admission(
                 band, 1, 0.0, config, eta_max=eta_max)
@@ -1658,7 +1659,7 @@ class SelfFalsificationTestCase(TestCase):
             band, 1, n_samples=config.n_caustic_samples)
         arc_r_min = [st._min_curvature_radius(
             band, arc, config.n_caustic_samples)
-            for arc in structure.arcs[:config.max_tube_arcs]]
+            for arc in st._tube_training_arcs(structure, 1)]
         eta_max = config.f_max * max(arc_r_min) if arc_r_min else 0.05
         admission = st._interior_admission(
             band, 1, 0.0, config, eta_max=eta_max)

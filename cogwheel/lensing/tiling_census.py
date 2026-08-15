@@ -144,7 +144,7 @@ class MalformedConfigError(TilingCensusError):
 #: TrainingConfig fields the node budget reads; a missing one is malformed.
 _REQUIRED_CONFIG_FIELDS = (
     'n_gamma', 'n_u', 'n_theta', 'n_rho', 'n_theta_c', 'w_nodes_per_decade',
-    'f_max', 'gamma_band_halfwidth', 'min_gamma_band', 'max_tube_arcs',
+    'f_max', 'gamma_band_halfwidth', 'min_gamma_band',
     'n_farfield_tiles_per_side', 'n_caustic_samples',
     'gamma_refine_near_one_window', 'gamma_refine_near_one_width',
 )
@@ -239,10 +239,16 @@ def _build_band_ctx(st: Any, box: Any, parity: int,
     band as dropped and continues.
     """
     gamma_mid = 0.5 * (band[0] + band[1])
-    tube_arcs = st._tube_training_arcs(structure, parity, config.max_tube_arcs)
+    tube_arcs = st._tube_training_arcs(structure, parity)
     arc_r_min = [st._min_curvature_radius(band, arc, config.n_caustic_samples)
                  for arc in tube_arcs]
+    # ``max_eta_max`` (widest tube shell) sizes the parity==1 interior-skip and
+    # wedge extent; ``min_eta_max`` (narrowest shell) is the region-adjacent
+    # LOBE-EDGE shell feeding the saddle lobe admissions and the deltoid
+    # far-field inner edge (F081).  Single-arc astroid: min == max.
     max_eta_max = (config.f_max * max(arc_r_min)
+                   if arc_r_min else config.f_max * 0.05)
+    min_eta_max = (config.f_max * min(arc_r_min)
                    if arc_r_min else config.f_max * 0.05)
     reach_scalar = st._scalar_caustic_reach(gamma_mid)
     coordinate_radius_min, reach_max = st._coordinate_radius_bounds(band, parity)
@@ -253,7 +259,7 @@ def _build_band_ctx(st: Any, box: Any, parity: int,
         m_lo_region, m_hi_region = box.m_lens_range
     y_outer_region = float(st._lens_prior._source_scale(m_lo_region))
     rho_outer_region = 1.0 + y_outer_region - coordinate_radius_min
-    physical_exclusion_radius = reach_max + max_eta_max
+    physical_exclusion_radius = reach_max + min_eta_max
     exclusion_rho = 1.0 + physical_exclusion_radius - coordinate_radius_min
     inradius, encloses = st._caustic_inradius(
         gamma_mid, parity, config.n_caustic_samples)
@@ -262,7 +268,7 @@ def _build_band_ctx(st: Any, box: Any, parity: int,
     if parity != 1:
         try:
             saddle_lobe_admissions = st._saddle_lobe_admissions(
-                band, config, eta_max=max_eta_max)
+                band, config, eta_max=min_eta_max)
         except geometry.LensDomainError as exc:
             notes['saddle_lobe_admissions'] = f'refused: {exc}'
     return _BandCtx(

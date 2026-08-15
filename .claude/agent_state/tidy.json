@@ -1,5 +1,5 @@
 {
-  "last_commit": "12afd1466bed51646ceb57782011a3ed02105f07",
+  "last_commit": "93f25913d67aed4a817ddb3f8fe31bf3874314ee",
   "last_run": "2026-08-14T03:53:56+00:00",
   "status": "skipped_in_dag",
   "skip_reason": "SDK_SKIP_TIDIER set",

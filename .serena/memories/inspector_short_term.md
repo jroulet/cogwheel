@@ -1,45 +1,46 @@
 # Inspector Short-Term Observations
 
-## 2026-08-14 FINAL RE-REVIEW — Build tiling_census_node_budget (INS-1-001 CLOSED) — PASS
+## 2026-08-15 — Build saddle_tube_fundamental_training (F081) pass-2 — PASS
 
-Scope: re-review of sole open finding INS-1-001 (design). Repo worktree =
-/home/tejaswi/Work/cogwheel-claude-dev. Three census files still UNTRACKED
-(new): cogwheel/lensing/tiling_census.py, scripts/tiling_census.py,
-cogwheel/tests/test_lensing_tiling_census.py. Suite: 26 passed in 57s. Green.
+Scope: uncommitted tree, /home/tejaswi/Work/cogwheel-claude-dev. Re-review of the
+three test-file findings raised in pass-1 (INS-1-001/002/003). Production code
+(surrogate_training.py +115/-, tiling_census.py, scripts) UNCHANGED since pass-1
+where I already confirmed it correct (D2 orbit-partition `_tube_training_arcs`,
+min_eta_max lobe-edge shell, field `max_tube_arcs` removed everywhere).
 
-### INS-1-001: RESOLVED (was: design, non-blocking; disclosure was test-only)
-Prior pass kept it OPEN because the conservative-upper-bound caveat lived ONLY
-in the test-file docstring + a structural pin (PpgoTrimIndependenceTestCase),
-NOT on the shipped surface the JSON consumer / human module reader sees. Coder
-has now added BOTH pieces the suggested fix asked for, on the shipped surface:
-1. Module docstring: dedicated section "CONSERVATIVE UPPER BOUND (no ppGO trim
-   modeled)" (tiling_census.py lines ~23-34) naming
-   `surrogate_training._apply_ppgo_trim` / `get_certified_ppgo_map()`, stating
-   counts are a conservative UPPER BOUND, never an underestimate, and that
-   ppGO-served empties are not mis-flagged SILENT_EMPTY.
-2. run() Returns docstring (lines ~736-742) repeats the caveat and points at
-   the ppgo_trim_modeled key.
-3. Real dict key `'ppgo_trim_modeled': False` (line 779) placed immediately
-   after `aggregate_call_count` — machine-readable for the 7a cost consumer.
-Out-of-scope constraint honored: NO `_apply_ppgo_trim`/`get_certified_ppgo_map`
-call added to the counting loops (all grep hits are docstrings). Counting loops
-still use `_census_region` -> record['n_nodes'] * _LABELS_PER_NODE.
-Non-breaking: no test asserts an exact set(result.keys()), so the additive key
-breaks nothing; PpgoTrimIndependenceTestCase intact (test file line 338).
+### All three pass-1 findings RESOLVED (re-derived, not just deleted):
+- INS-1-001: test_lensing_surrogate_training.py — `max_tube_arcs=4` class-body
+  literal removed. Collection now succeeds: 279 tests collected across the 4
+  suites, no TypeError. Zero `max_tube_arcs` refs in the file.
+- INS-1-002: test_lensing_tiling_census.py — ArcCensusQ1TestCase (2 tests) PASS
+  in 12s. `test_detected_and_trained_arc_counts_match_fundamental_domain` now
+  derives `expected_saddle_trained = len(st._tube_training_arcs(saddle_ctxs[0]
+  .structure, -1))` with strict `1 <= trained < _SADDLE_DETECTED_ARCS(6)` teeth.
+  Retired widening test replaced by `test_saddle_folds_strictly_below_detected_
+  while_astroid_pins_one` (uses `n_orbits = len(_tube_training_arcs(structure,-1))`).
+- INS-1-003: test_lensing_caustic_cusps.py — both `test_margin_removal_is_a_safe_
+  superset` and `test_inflated_margin_changes_admission` PASS in 12s; both now use
+  `st._tube_training_arcs(structure, 1)` (astroid single pi/4 arc) instead of the
+  removed `structure.arcs[:config.max_tube_arcs]` slice.
 
-### Everything else: re-confirmed correct across prior passes (unchanged)
-Engine-free guarantee, thin-caller tiler fidelity, cost model mirroring
-`_self_estimate`, band-verdict two-sided logic, Q1-Q4, schema tag
-'tiling_census_v1'. No new findings.
+### Verification runs (all green)
+- collect-only over 4 suites: 279 collected, no error.
+- ArcCensusQ1TestCase: 2 passed.
+- caustic_cusps -k "margin_removal_is_a_safe_superset or inflated_margin_changes_
+  admission": 2 passed.
+- tube_d2_fold + tiling_census -k D2/orbit/fold/saddle: 28 passed.
+- Tree-wide grep: only 3 residual `max_tube_arcs` hits, ALL docstrings/comments
+  naming the "retired" knob (test_lensing_tube_d2_fold.py L49/583, tiling_census
+  test L550). No live refs.
 
-### Carry-forward -> Librarian (doc staleness, NOT this build's code):
-- Region vocabulary (lobe_exterior/lobe_interior/wedge_interior, and the
-  census region names) absent from SPEC.md / DATA_CONTRACTS.yaml.
+### Lesson reinforced
+The pass-1 "field removal is a signature change — sweep ALL tests same build"
+finding was correctly actioned: the deferral rationale ("owned by other runs")
+was invalid and the follow-up build fixed all three files by RE-DERIVING the
+expectation from the production selector, which is the right fix (a green test
+keyed on the new D2-orbit semantics), not a delete.
+
+### Carry-forward -> Librarian (doc staleness, NOT this build's code)
+- Region vocabulary (lobe_exterior/lobe_interior/wedge_interior) still absent
+  from SPEC.md / DATA_CONTRACTS.yaml.
 - exterior_polar_rho_log_carrier_v1 "ONLY known tag" stale since V5 2D carrier.
-
-### Pattern reinforced
-DISCLOSURE-IN-TEST != DISCLOSURE-ON-SHIPPED-SURFACE (from prior pass) — now
-CLOSED the right way: the caveat a downstream JSON consumer or human module
-reader needs must live in the MODULE docstring AND the output payload, not only
-the test file. A structural test is a good regression guard but is not the
-disclosure the consumer reads.

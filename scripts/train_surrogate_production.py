@@ -58,7 +58,6 @@ def main():
         gamma_refine_near_one_width=0.05,
         # Budget per chart (production: generous)
         engine_budget=2000,
-        max_tube_arcs=20,
         # Held-out
         n_heldout=50,
         n_caustic_samples=500,
@@ -69,7 +68,6 @@ def main():
           f"n_theta={config.n_theta}, n_rho={config.n_rho}")
     print(f"  w_nodes_per_decade={config.w_nodes_per_decade}")
     print(f"  gamma_band_halfwidth={config.gamma_band_halfwidth}")
-    print(f"  max_tube_arcs={config.max_tube_arcs}")
     print(f"  engine_budget={config.engine_budget}")
     print(f"  Output: {OUTDIR}")
     print(flush=True)

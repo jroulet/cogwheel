@@ -44,20 +44,62 @@ Pinned invariants (one pin each):
    (the incumbent) reopens the hole for the three mirrors while the
    fundamental octant still serves -- proving the closure comes from the
    image search and the pins have teeth.
-5. **Training-arc selection.**  Astroid: exactly one arc, the canonical
-   gauge arc bracketing ``pi/4`` (selected by theta-interval predicate,
-   not slice position).  Saddle: the incumbent ``arcs[:max_tube_arcs]``
-   slice -- the knob still governs the deltoid because ``max_eta_max``
-   sized over ALL deltoid arcs (r_min ~3.5 outer vs ~0.28 lobe-edge)
-   balloons the tube shell and starves the lobe admissions.
+5. **Training-arc selection (astroid).**  Exactly one arc, the canonical
+   gauge arc bracketing ``pi/4`` (selected by a theta-interval predicate,
+   not slice position).  The retired ``max_tube_arcs`` knob no longer
+   appears in the signature (``_tube_training_arcs(structure, parity)``).
+6. **Saddle orbit-partition selection.**  The six detected deltoid arcs
+   collapse to ONE representative per D2 gauge orbit derived from the fold
+   law ``{theta, pi - theta, -theta, pi + theta}``; the retained count is
+   COMPUTED from the partition, never hard-coded (measured ``6 -> 2`` on
+   the fixture band -- the four branch ``+1`` lobe-edge arcs share one
+   orbit, the two branch ``-1`` arcs at gauge ``0`` / ``pi`` the other).
+   Every detected arc is D2-equivalent to exactly one representative and
+   the representatives are pairwise non-equivalent.  Teeth: defeating the
+   D2 coincidence test degenerates the trim to the identity (``6 -> 6``).
+7. **Serve-coverage preservation under D2 folding** (the symmetry equality
+   pin).  Sweeping a dense gauge ring, every theta the all-six-arc
+   incumbent tube set serves is still served by the trimmed fundamental
+   set through `_tube_theta_inframe` -- the fundamental served-theta set
+   is a SUPERSET of the incumbent's, so the trim introduces NO new
+   unserved band.  Teeth: dropping any single representative strands a
+   band the folding cannot recover.
+8. **Per-arc lobe-edge shell, NOT band-wide max** (F081 Part B; the
+   anisotropic-shell pin).  The macro-saddle tube shell excluded from the
+   lobe interior (and added to the far-field inner edge ``exclusion_rho``)
+   is sized by the SMALLEST arc curvature radius over the band --
+   ``min_eta_max = f_max * min(arc_r_min)`` (the tightly-curved lobe-edge
+   arc) -- NOT the band-wide maximum ``f_max * max(arc_r_min)`` (the nearly
+   straight outer arc).  An isotropic band-wide-max shell would over-exclude
+   a wide annulus of genuinely served interior around the lobe-edge caustic.
+   Witness: a synthetic point at caustic distance ``d`` with
+   ``min_eta_max < d < max_eta_max`` is ADMITTED by `_SaddleLobeAdmission`
+   under the shipped ``min_eta_max`` shell and clears the far-field inner
+   edge, yet FLIPS to excluded the instant the shell is widened to
+   ``max_eta_max`` (self-falsification: the reverted band-wide-max code
+   wrongly drops it).  Also: `_saddle_lobe_admissions` fed the shipped shell
+   builds ``corridor_half == _INTERLOBE_CORRIDOR_ETA_SCALE * f_max *
+   min(arc_r_min)``, distinct from the ``* max`` value.  Engine-free real
+   saddle-band geometry; no census-count or coverage test pins it precisely.
 """
+import dataclasses
 import math
+import pathlib
 import unittest
 from unittest import mock
 
 import numpy as np
 
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    _HAVE_MPL = True
+except Exception:  # pragma: no cover - diagnostics are best-effort
+    _HAVE_MPL = False
+
 from cogwheel.lensing import surrogate as surrogate_module
+from cogwheel.lensing import surrogate_training as surrogate_training_module
 from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate,
     TubeChart,
@@ -65,9 +107,19 @@ from cogwheel.lensing.surrogate import (
     _tube_theta_inframe,
 )
 from cogwheel.lensing.surrogate_training import (
+    TrainingConfig,
     band_caustic_structure,
+    _INTERLOBE_CORRIDOR_ETA_SCALE,
+    _coordinate_radius_bounds,
+    _min_curvature_radius,
+    _saddle_lobe_admissions,
+    _SaddleLobeAdmission,
     _tube_training_arcs,
 )
+
+#: Directory for diagnostic plots (created lazily; plotting is best-effort
+#: and never gates an assertion).
+_OUTPUT_DIR = pathlib.Path(__file__).resolve().parent / 'output'
 
 #: Caustic-distance band served by the fixture tubes ``[eta_floor, eta_max]``.
 ETA_FLOOR = 0.005
@@ -214,6 +266,156 @@ def _identity_only_inframe(chart, theta):
     if frame_lo <= theta_inframe <= float(chart.theta_grid[-1]):
         return theta_inframe
     return None
+
+
+#: Circular tolerance (rad) for the INDEPENDENT orbit oracle's D2 midpoint
+#: coincidence test.  Comfortably above the exact-to-float D2 coincidences
+#: measured on the fixture band (partner midpoints agree to <1e-12) yet far
+#: below the ~0.6 rad gap between distinct orbits, so the partition is not
+#: sensitive to this choice.
+_ORBIT_TOL = 0.05
+
+#: Number of gauge angles swept over ``[0, 2*pi)`` for the serve-coverage
+#: superset pin.  Dense enough to enter every fixture arc's frame yet trivial
+#: to evaluate (pure ``_tube_theta_inframe`` geometry, no engine).
+N_SERVE_RING = 720
+
+
+def _circular_gap(a: float, b: float) -> float:
+    """Independent oracle for the shortest angular distance between ``a`` and
+    ``b`` on the circle.
+
+    Re-derived here (NOT the production ``_circular_angular_distance``) so the
+    orbit oracle does not gate the trim against its own helper.
+    """
+    return abs((a - b + math.pi) % (2.0 * math.pi) - math.pi)
+
+
+def _d2_gauge_images(theta: float) -> tuple[float, float, float, float]:
+    """The four D2 gauge images of ``theta`` from the fold law:
+    ``{theta, pi - theta, -theta, pi + theta}`` (identity first)."""
+    return (theta, math.pi - theta, -theta, math.pi + theta)
+
+
+def _arc_midpoint(arc) -> float:
+    """Caustic-segment midpoint (gauge angle) of a detected fold arc."""
+    return 0.5 * (arc.theta_lo + arc.theta_hi)
+
+
+def _independent_orbit_labels(midpoints: list[float],
+                              tol: float = _ORBIT_TOL) -> list[int]:
+    """Union-find D2 orbit labels for arc ``midpoints`` (independent oracle).
+
+    Two midpoints share an orbit iff one lands on the other under some D2
+    gauge image within ``tol``.  Returns a canonical label per input (equal
+    labels iff same orbit).  Built from scratch -- it does NOT call
+    `_tube_training_arcs` or its production helper -- so it is a genuine
+    cross-check of the trim's partition.
+    """
+    n = len(midpoints)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if any(_circular_gap(image, midpoints[j]) <= tol
+                   for image in _d2_gauge_images(midpoints[i])):
+                parent[find(i)] = find(j)
+    roots = [find(i) for i in range(n)]
+    canonical = {root: label for label, root in enumerate(sorted(set(roots)))}
+    return [canonical[root] for root in roots]
+
+
+def _d2_equivalent(theta_a: float, theta_b: float,
+                   tol: float = _ORBIT_TOL) -> bool:
+    """True iff ``theta_a`` coincides with a D2 gauge image of ``theta_b``
+    (independent oracle, symmetric within ``tol``)."""
+    return any(_circular_gap(image, theta_b) <= tol
+               for image in _d2_gauge_images(theta_a))
+
+
+def _tube_chart_for_arc(arc, *, parity: int, image_count: int,
+                        gamma_lo: float, gamma_hi: float,
+                        phase: float = 0.0) -> TubeChart:
+    """A minimal serve-ready TubeChart whose ``theta_grid`` spans ``arc``.
+
+    Only the trained ``theta_grid`` frame matters for serve-coverage
+    geometry (`_tube_theta_inframe` reads the frame endpoints); the envelope
+    is an arbitrary smooth surface.
+    """
+    gamma = np.linspace(gamma_lo, gamma_hi, 4)
+    theta = np.linspace(arc.theta_lo, arc.theta_hi, 4)
+    u_grid = np.linspace(np.sqrt(ETA_FLOOR), np.sqrt(ETA_MAX), 4)
+    real, imag = _smooth_tensor(gamma, u_grid, theta, LOG_W_GRID, phase)
+    return TubeChart.from_values(
+        gamma_grid=gamma, u_grid=u_grid, theta_grid=theta,
+        log_w_grid=LOG_W_GRID, envelope_real=real, envelope_imag=imag,
+        image_count=image_count, parity=parity,
+        eta_floor=ETA_FLOOR, eta_max=ETA_MAX)
+
+
+def _set_serves(charts: list[TubeChart], theta: float) -> bool:
+    """True iff ANY chart in the set has ``theta`` (via a D2 gauge image)
+    inside its trained frame -- i.e. the tube set serves ``theta``."""
+    return any(_tube_theta_inframe(chart, theta) is not None
+               for chart in charts)
+
+
+def _served_ring(charts: list[TubeChart],
+                 ring: np.ndarray) -> np.ndarray:
+    """Boolean served-flag over ``ring`` for a tube set."""
+    return np.array([_set_serves(charts, float(theta)) for theta in ring])
+
+
+def _save_orbit_plot(name: str, midpoints: list[float], labels: list[int],
+                     rep_midpoints: list[float]) -> None:
+    """Diagnostic: arc midpoints on the theta circle coloured by orbit, with
+    retained representatives ringed.  Best-effort; never gates an assertion.
+    """
+    if not _HAVE_MPL:
+        return
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    fig, axis = plt.subplots(subplot_kw={'projection': 'polar'})
+    mids = np.asarray(midpoints)
+    axis.scatter(mids, np.ones_like(mids), c=labels, cmap='tab10', s=90,
+                 zorder=3)
+    reps = np.asarray(rep_midpoints)
+    axis.scatter(reps, np.ones_like(reps), facecolors='none',
+                 edgecolors='k', s=220, linewidths=1.8, zorder=4,
+                 label='retained representative')
+    axis.set_title(f'{name}: detected arc midpoints coloured by D2 orbit')
+    axis.legend(loc='upper right', bbox_to_anchor=(1.25, 1.1))
+    fig.savefig(_OUTPUT_DIR / f'{name}_orbit_partition.png', dpi=110,
+                bbox_inches='tight')
+    plt.close(fig)
+
+
+def _save_serve_plot(name: str, ring: np.ndarray, incumbent: np.ndarray,
+                     fundamental: np.ndarray) -> None:
+    """Diagnostic: theta-vs-served overlay for the all-arc incumbent and the
+    trimmed fundamental set.  A regression shows as a theta band the
+    incumbent serves but the fundamental set does not.  Best-effort.
+    """
+    if not _HAVE_MPL:
+        return
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    fig, axis = plt.subplots(figsize=(9, 3))
+    axis.fill_between(ring, 0, incumbent.astype(float), step='mid',
+                      alpha=0.35, label='all-arc incumbent served')
+    axis.step(ring, fundamental.astype(float) * 0.9, where='mid',
+              color='C3', label='trimmed fundamental served (x0.9)')
+    axis.set_xlabel('gauge theta [rad]')
+    axis.set_ylabel('served flag')
+    axis.set_title(f'{name}: serve-coverage preservation under D2 folding')
+    axis.legend(loc='upper right')
+    fig.savefig(_OUTPUT_DIR / f'{name}_serve_coverage.png', dpi=110,
+                bbox_inches='tight')
+    plt.close(fig)
 
 
 class _TubeD2TestCase(unittest.TestCase):
@@ -376,42 +578,525 @@ class HalfRingHoleClosureTestCase(_TubeD2TestCase):
 
 
 class TubeTrainingArcSelectionTestCase(_TubeD2TestCase):
-    """Pin 5: training-arc selection on REAL band caustic structures."""
+    """Pin 5: astroid training-arc selection on a REAL band structure.
+
+    The retired ``max_tube_arcs`` knob no longer appears in the signature:
+    `_tube_training_arcs` is called ``(structure, parity)`` and the astroid
+    choice is a pure theta-interval predicate.
+    """
 
     def test_astroid_selects_exactly_the_pi_over_four_arc(self) -> None:
         """Astroid: exactly ONE arc, the one bracketing pi/4 in gauge angle,
-        selected by theta-interval predicate regardless of max_tube_arcs."""
+        selected by a theta-interval predicate (2-arg signature)."""
         structure = band_caustic_structure(
             ASTROID_BAND, 1, n_samples=N_CAUSTIC_SAMPLES)
         quarter_pi = 0.25 * math.pi
-        for knob in (1, 20):
-            selected = _tube_training_arcs(structure, 1, knob)
-            self._count(2)
-            self.assertEqual(
-                len(selected), 1,
-                f'astroid must select exactly one arc (got {len(selected)} '
-                f'with max_tube_arcs={knob})')
-            arc = selected[0]
-            self.assertTrue(
-                arc.theta_lo <= quarter_pi <= arc.theta_hi,
-                f'selected arc [{arc.theta_lo:.4f}, {arc.theta_hi:.4f}] '
-                f'does not bracket pi/4')
+        self._count()
+        self.assertGreater(
+            len(structure.arcs), 1,
+            'fixture astroid band must expose multiple gauge-image arcs so '
+            'the single-arc trim is non-trivial')
+        selected = _tube_training_arcs(structure, 1)
+        self._count()
+        self.assertEqual(
+            len(selected), 1,
+            f'astroid must select exactly one arc (got {len(selected)})')
+        arc = selected[0]
+        self._count()
+        self.assertTrue(
+            arc.theta_lo <= quarter_pi <= arc.theta_hi,
+            f'selected arc [{arc.theta_lo:.4f}, {arc.theta_hi:.4f}] '
+            f'does not bracket pi/4')
 
-    def test_saddle_reconsumes_max_tube_arcs_slice(self) -> None:
-        """Saddle: the incumbent ``arcs[:max_tube_arcs]`` slice -- the knob
-        must still bound the deltoid arc set because ``max_eta_max`` sized
-        over all arcs balloons the tube shell (outer-arc r_min ~3.5 vs
-        lobe-edge ~0.28) and starves the lobe admissions."""
+    def test_astroid_rejects_the_third_positional_argument(self) -> None:
+        """The retired knob is gone: a third positional argument now raises
+        ``TypeError`` -- proving the signature really is 2-arg and no dead
+        knob path lingers."""
+        structure = band_caustic_structure(
+            ASTROID_BAND, 1, n_samples=N_CAUSTIC_SAMPLES)
+        self._count()
+        with self.assertRaises(TypeError):
+            _tube_training_arcs(structure, 1, 20)
+
+
+class SaddleOrbitPartitionSelectionTestCase(_TubeD2TestCase):
+    """Pin 6: the saddle trim keeps exactly one arc per D2 gauge orbit.
+
+    The retained count is COMPUTED from an independent union-find partition
+    of the detected arc midpoints under the fold law, never hard-coded.
+    Every detected arc is D2-equivalent to exactly one retained
+    representative and the representatives are pairwise non-equivalent.
+    Engine-free (band caustic-structure geometry only).
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.structure = band_caustic_structure(
+            SADDLE_BAND, -1, n_samples=N_CAUSTIC_SAMPLES)
+        self.midpoints = [_arc_midpoint(arc) for arc in self.structure.arcs]
+        self.labels = _independent_orbit_labels(self.midpoints)
+        self.reps = _tube_training_arcs(self.structure, -1)
+        self.rep_midpoints = [_arc_midpoint(arc) for arc in self.reps]
+
+    def test_multiple_arcs_detected(self) -> None:
+        """Premise: the fixture band exposes several deltoid arcs so the
+        collapse is non-trivial (guards against a degenerate band silently
+        making the trim a no-op)."""
+        self._count()
+        self.assertGreater(
+            len(self.structure.arcs), 1,
+            'fixture saddle band must expose multiple deltoid arcs')
+
+    def test_retained_count_equals_independent_orbit_count(self) -> None:
+        """The number of retained representatives equals the orbit count from
+        the INDEPENDENT partition -- computed, not hard-coded."""
+        expected_orbits = len(set(self.labels))
+        self._count()
+        self.assertEqual(
+            len(self.reps), expected_orbits,
+            f'trim kept {len(self.reps)} arcs but the independent D2 '
+            f'partition of midpoints {[round(m, 4) for m in self.midpoints]} '
+            f'has {expected_orbits} orbits')
+        # The collapse must be genuine (fewer reps than detected arcs), else
+        # the pin would pass vacuously on a band with no redundancy.
+        self._count()
+        self.assertLess(len(self.reps), len(self.structure.arcs),
+                        'expected a genuine 6 -> fewer collapse')
+
+    def test_every_arc_maps_to_exactly_one_representative(self) -> None:
+        """Each detected arc is D2-equivalent to exactly ONE retained
+        representative -- no arc is orphaned or double-covered."""
+        for midpoint in self.midpoints:
+            matches = [rep_mid for rep_mid in self.rep_midpoints
+                       if _d2_equivalent(midpoint, rep_mid)]
+            self._count()
+            self.assertEqual(
+                len(matches), 1,
+                f'arc midpoint {midpoint:.4f} is D2-equivalent to '
+                f'{len(matches)} representatives {matches}, expected exactly '
+                f'one')
+
+    def test_representatives_pairwise_non_equivalent(self) -> None:
+        """No two retained representatives are D2 gauge images of each other
+        (the orbits are distinct)."""
+        for i in range(len(self.rep_midpoints)):
+            for j in range(i + 1, len(self.rep_midpoints)):
+                self._count()
+                self.assertFalse(
+                    _d2_equivalent(self.rep_midpoints[i],
+                                   self.rep_midpoints[j]),
+                    f'representatives {self.rep_midpoints[i]:.4f} and '
+                    f'{self.rep_midpoints[j]:.4f} are D2-equivalent -- the '
+                    f'trim kept two members of one orbit')
+        _save_orbit_plot('saddle', self.midpoints, self.labels,
+                         self.rep_midpoints)
+
+
+class SaddleOrbitPartitionSelfFalsificationTestCase(_TubeD2TestCase):
+    """Pin 6 teeth: defeating the D2 coincidence test degenerates the trim to
+    the identity.
+
+    Patching the production ``_circular_angular_distance`` to always report a
+    large distance makes every arc look like a fresh orbit, so the trim
+    retains ALL detected arcs (``6 -> 6``).  This proves the collapse is
+    driven by the D2 coincidence test, not by an incidental slice.
+    """
+
+    def test_no_merging_retains_every_arc(self) -> None:
         structure = band_caustic_structure(
             SADDLE_BAND, -1, n_samples=N_CAUSTIC_SAMPLES)
+        n_detected = len(structure.arcs)
+        with mock.patch.object(surrogate_training_module,
+                               '_circular_angular_distance',
+                               lambda a, b: 1.0e9):
+            reps = _tube_training_arcs(structure, -1)
         self._count()
-        self.assertGreater(len(structure.arcs), 1,
-                           'fixture band must expose multiple deltoid arcs')
-        self._count(2)
-        self.assertEqual(_tube_training_arcs(structure, -1, 1),
-                         list(structure.arcs[:1]))
-        self.assertEqual(_tube_training_arcs(structure, -1, 20),
-                         list(structure.arcs))
+        self.assertEqual(
+            len(reps), n_detected,
+            f'with the coincidence test defeated the trim must keep all '
+            f'{n_detected} arcs (got {len(reps)}) -- otherwise the real '
+            f'6 -> 2 collapse has no teeth')
+
+
+class SaddleServeCoveragePreservationTestCase(_TubeD2TestCase):
+    """Pin 7: the trim introduces no new unserved theta band.
+
+    The trimmed fundamental tube set's served-theta set is a SUPERSET of the
+    all-six-arc incumbent's over a dense gauge ring -- every query the
+    incumbent served is still served through `_tube_theta_inframe`'s D2 gauge
+    images.  The symmetry equality pin: folding recovers exactly what the
+    redundant mirror charts covered.  Engine-free serve-side geometry.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.structure = band_caustic_structure(
+            SADDLE_BAND, -1, n_samples=N_CAUSTIC_SAMPLES)
+        gamma_lo, gamma_hi = SADDLE_BAND
+        self.incumbent = [
+            _tube_chart_for_arc(arc, parity=-1, image_count=4,
+                                gamma_lo=gamma_lo, gamma_hi=gamma_hi)
+            for arc in self.structure.arcs]
+        self.fundamental = [
+            _tube_chart_for_arc(arc, parity=-1, image_count=4,
+                                gamma_lo=gamma_lo, gamma_hi=gamma_hi)
+            for arc in _tube_training_arcs(self.structure, -1)]
+        self.ring = np.linspace(0.0, 2.0 * math.pi, N_SERVE_RING,
+                                endpoint=False)
+        self.incumbent_served = _served_ring(self.incumbent, self.ring)
+        self.fundamental_served = _served_ring(self.fundamental, self.ring)
+
+    def test_incumbent_serves_a_nontrivial_band(self) -> None:
+        """Premise: the incumbent set serves a non-empty theta band, so the
+        superset claim is not vacuous."""
+        self._count()
+        self.assertGreater(
+            int(self.incumbent_served.sum()), 0,
+            'incumbent tube set served nothing -- superset pin would be '
+            'vacuous')
+
+    def test_fundamental_served_is_superset_of_incumbent(self) -> None:
+        """No theta the incumbent serves is left unserved by the trimmed
+        fundamental set (SUPERSET; zero new unserved band)."""
+        violations = np.logical_and(self.incumbent_served,
+                                    np.logical_not(self.fundamental_served))
+        n_violations = int(violations.sum())
+        self._count(len(self.ring))
+        self.assertEqual(
+            n_violations, 0,
+            f'{n_violations} of {int(self.incumbent_served.sum())} '
+            f'incumbent-served angles became unserved after the trim -- the '
+            f'fold dropped a gauge orbit it cannot recover')
+        _save_serve_plot('saddle', self.ring, self.incumbent_served,
+                         self.fundamental_served)
+
+
+class SaddleServeCoverageSelfFalsificationTestCase(_TubeD2TestCase):
+    """Pin 7 teeth: dropping any single representative strands a band.
+
+    If a genuine fundamental representative is removed, the D2 folding can no
+    longer recover its orbit and a band the incumbent served becomes
+    unserved -- so the superset pin above is discriminating, not automatic.
+    """
+
+    def test_dropping_each_representative_creates_violations(self) -> None:
+        structure = band_caustic_structure(
+            SADDLE_BAND, -1, n_samples=N_CAUSTIC_SAMPLES)
+        gamma_lo, gamma_hi = SADDLE_BAND
+        incumbent = [
+            _tube_chart_for_arc(arc, parity=-1, image_count=4,
+                                gamma_lo=gamma_lo, gamma_hi=gamma_hi)
+            for arc in structure.arcs]
+        reps = _tube_training_arcs(structure, -1)
+        fundamental = [
+            _tube_chart_for_arc(arc, parity=-1, image_count=4,
+                                gamma_lo=gamma_lo, gamma_hi=gamma_hi)
+            for arc in reps]
+        ring = np.linspace(0.0, 2.0 * math.pi, N_SERVE_RING, endpoint=False)
+        incumbent_served = _served_ring(incumbent, ring)
+        self.assertGreater(len(fundamental), 1,
+                           'need >1 representative to test dropping one')
+        for drop in range(len(fundamental)):
+            reduced = [c for k, c in enumerate(fundamental) if k != drop]
+            reduced_served = _served_ring(reduced, ring)
+            violations = int(np.logical_and(
+                incumbent_served,
+                np.logical_not(reduced_served)).sum())
+            self._count()
+            self.assertGreater(
+                violations, 0,
+                f'dropping representative {drop} left the incumbent coverage '
+                f'fully served -- that representative was redundant, so the '
+                f'superset pin would not detect its loss')
+
+
+def _saddle_shell_derivation() -> dict:
+    """Real saddle-band tube-shell sizing quantities (engine-free).
+
+    Reproduces the production derivation
+    (`surrogate_training._train_band_charts`): detect the topology-stable
+    macro-saddle band structure, select the D2-orbit tube-arc representatives,
+    and size the per-arc curvature-relative tube shell.  The lobe-edge shell
+    ``min_eta_max = f_max * min(arc_r_min)`` (the tightly-curved lobe-edge arc)
+    is what the shipped code feeds `_saddle_lobe_admissions` and the far-field
+    ``exclusion_rho``; ``max_eta_max = f_max * max(arc_r_min)`` (the nearly
+    straight outer arc) is the retired isotropic band-wide-max shell.  Also
+    returns the caustic coordinate bounds feeding ``exclusion_rho``.
+    """
+    config = TrainingConfig()
+    structure = band_caustic_structure(
+        SADDLE_BAND, -1, n_samples=N_CAUSTIC_SAMPLES)
+    tube_arcs = _tube_training_arcs(structure, -1)
+    arc_r_min = [
+        _min_curvature_radius(SADDLE_BAND, arc, config.n_caustic_samples)
+        for arc in tube_arcs]
+    min_eta_max = config.f_max * min(arc_r_min)
+    max_eta_max = config.f_max * max(arc_r_min)
+    coordinate_radius_min, reach_max = _coordinate_radius_bounds(
+        SADDLE_BAND, -1)
+    return {
+        'config': config, 'tube_arcs': tube_arcs, 'arc_r_min': arc_r_min,
+        'min_eta_max': min_eta_max, 'max_eta_max': max_eta_max,
+        'coordinate_radius_min': coordinate_radius_min,
+        'reach_max': reach_max,
+    }
+
+
+def _circular_lobe(radius: float, n: int = 1440) -> np.ndarray:
+    """Ordered CCW closed ring of ``n`` points on a circle of ``radius``.
+
+    A synthetic single macro-saddle deltoid lobe standing in for both the
+    winding loop and the caustic cloud.  ``n`` includes an exact sample at
+    gauge angle ``0`` (``endpoint=False`` from ``0``), so an interior probe on
+    the ``+x`` axis has an EXACT nearest caustic distance ``radius - r_probe``.
+    """
+    ang = np.linspace(0.0, 2.0 * math.pi, n, endpoint=False)
+    return np.column_stack([radius * np.cos(ang), radius * np.sin(ang)])
+
+
+def _build_lobe_witness(min_eta_max: float, max_eta_max: float):
+    """Synthetic lobe admission + a witness at distance ``d`` between shells.
+
+    Builds a circular synthetic lobe and a single interior probe whose nearest
+    caustic distance ``d`` satisfies ``min_eta_max < d < max_eta_max`` (the
+    geometric mean when ``max_eta_max`` is finite; ``4 * min_eta_max`` if the
+    outer arc is straight, ``r_min = inf``).  The probe sits on the ``+x`` axis
+    at an EXACT ring-sample angle so ``d = radius - r_probe`` exactly.  The
+    other lobe is placed far away and the corridor half-width is small, so
+    admission is decided PURELY by the tube-shell distance test -- the point
+    flips from admitted (``eta_max = min_eta_max``) to excluded
+    (``eta_max = max_eta_max``) on the shell size alone.
+
+    Returns ``(admission, center, half, witness_xy, d, radius)`` with the
+    admission carrying the shipped ``min_eta_max`` shell.
+    """
+    d = (math.sqrt(min_eta_max * max_eta_max)
+         if math.isfinite(max_eta_max) else 4.0 * min_eta_max)
+    radius = d + 2.0
+    ring = _circular_lobe(radius)
+    boundary_theta = np.linspace(-math.pi, math.pi, 65)[1:]
+    boundary_r = np.full_like(boundary_theta, radius)
+    admission = _SaddleLobeAdmission(
+        centroid=np.zeros(2), other_centroid=np.array([1000.0, 0.0]),
+        reach=radius, eta_max=min_eta_max, corridor_half=min_eta_max,
+        loops=(ring,), caustic_cloud=ring,
+        boundary_theta=boundary_theta, boundary_r=boundary_r)
+    r_probe = radius - d
+    center = (r_probe / radius, 0.0)   # (rho_lobe, theta_local)
+    half = (0.0, 0.0)                  # collapse the 9 probes to the witness
+    witness_xy = np.array([r_probe, 0.0])
+    return admission, center, half, witness_xy, d, radius
+
+
+def _save_shell_witness_plot(radius: float, min_eta_max: float,
+                             max_eta_max: float,
+                             witness_xy: np.ndarray) -> None:
+    """Diagnostic: the lobe caustic ring, the lobe-edge (min) shell, the old
+    band-wide-max shell, and the admitted witness (best-effort)."""
+    if not _HAVE_MPL:  # pragma: no cover - diagnostics are best-effort
+        return
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    ang = np.linspace(0.0, 2.0 * math.pi, 400)
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.plot(radius * np.cos(ang), radius * np.sin(ang), 'k-',
+            label='lobe caustic')
+    for shell, style, lbl in (
+            (min_eta_max, 'g--', 'lobe-edge shell (min, shipped)'),
+            (max_eta_max if math.isfinite(max_eta_max) else radius,
+             'r:', 'band-wide-max shell (retired)')):
+        inner = radius - shell
+        if inner > 0:
+            ax.plot(inner * np.cos(ang), inner * np.sin(ang), style,
+                    label=lbl)
+    ax.plot(witness_xy[0], witness_xy[1], 'bo', ms=8, label='witness')
+    ax.set_aspect('equal')
+    ax.legend(loc='upper right', fontsize=8)
+    ax.set_title('F081 per-arc lobe-edge shell, not band-wide max')
+    fig.savefig(_OUTPUT_DIR / 'saddle_lobe_edge_shell_witness.png', dpi=90)
+    plt.close(fig)
+
+
+class SaddleLobeEdgeShellTestCase(_TubeD2TestCase):
+    """Pin 8: the macro-saddle tube shell tracks the SMALLEST arc curvature
+    radius (the lobe-edge arc), not the band-wide maximum.
+
+    Real saddle-band geometry sizes ``min_eta_max`` (lobe-edge) and
+    ``max_eta_max`` (outer, nearly straight); a synthetic witness at a caustic
+    distance strictly between them is served by the shipped ``min_eta_max``
+    shell -- through both the per-lobe interior admission and the far-field
+    inner-edge ``exclusion_rho`` -- and is WRONGLY dropped by the retired
+    ``max_eta_max`` shell.  Engine-free.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.deriv = _saddle_shell_derivation()
+
+    def test_arc_radii_span_min_strictly_below_max(self) -> None:
+        """Premise (vacuity guard): the two tube arcs have DISTINCT curvature
+        radii, so min-vs-max is a real anisotropy and every downstream flip is
+        non-trivial."""
+        arc_r_min = self.deriv['arc_r_min']
+        self._count()
+        self.assertGreaterEqual(
+            len(arc_r_min), 2,
+            'saddle band trimmed to <2 tube arcs -- the per-arc shell '
+            'distinction is vacuous; the fixture band must retain the '
+            'lobe-edge and outer orbits')
+        self.assertLess(
+            self.deriv['min_eta_max'], self.deriv['max_eta_max'],
+            'lobe-edge and outer arc curvature radii coincide -- the '
+            'band-wide-max reversion would be indistinguishable, so the pin '
+            'has no teeth on this band')
+
+    def test_corridor_half_uses_min_arc_radius_not_max(self) -> None:
+        """`_saddle_lobe_admissions` fed the shipped lobe-edge shell builds
+        ``corridor_half == _INTERLOBE_CORRIDOR_ETA_SCALE * f_max *
+        min(arc_r_min)`` -- distinct from the band-wide-max value."""
+        min_eta_max = self.deriv['min_eta_max']
+        max_eta_max = self.deriv['max_eta_max']
+        admissions = _saddle_lobe_admissions(
+            SADDLE_BAND, self.deriv['config'], eta_max=min_eta_max)
+        self.assertEqual(len(admissions), 2,
+                         'expected exactly two macro-saddle lobe admissions')
+        for adm in admissions:
+            self._count()
+            self.assertAlmostEqual(
+                adm.corridor_half,
+                _INTERLOBE_CORRIDOR_ETA_SCALE * min_eta_max, places=12,
+                msg='corridor half-width must equal one lobe-edge tube shell')
+            self.assertAlmostEqual(adm.eta_max, min_eta_max, places=12)
+            # ... and NOT the retired isotropic band-wide-max shell.
+            self.assertNotAlmostEqual(
+                adm.corridor_half,
+                _INTERLOBE_CORRIDOR_ETA_SCALE * max_eta_max, places=6,
+                msg='corridor half-width tracked the band-wide MAX arc '
+                    'radius -- the isotropic reversion')
+
+    def test_witness_admitted_under_min_shell_excluded_under_max(self) -> None:
+        """A point at caustic distance ``d`` with ``min < d < max`` is a served
+        lobe interior under the shipped ``min_eta_max`` shell, and flips to
+        excluded under the band-wide ``max_eta_max`` shell (self-falsifying)."""
+        min_eta_max = self.deriv['min_eta_max']
+        max_eta_max = self.deriv['max_eta_max']
+        admission, center, half, witness_xy, d, radius = _build_lobe_witness(
+            min_eta_max, max_eta_max)
+        # Premise: the witness distance really lies between the two shells.
+        nearest = float(np.hypot(
+            admission.caustic_cloud[:, 0] - witness_xy[0],
+            admission.caustic_cloud[:, 1] - witness_xy[1]).min())
+        self.assertAlmostEqual(nearest, d, places=9)
+        self.assertLess(min_eta_max, nearest)
+        self.assertLess(nearest, max_eta_max)
+        # Shipped lobe-edge shell: the interior point is served.
+        self._count()
+        self.assertTrue(
+            admission.admits(center, half),
+            'lobe-edge (min) shell wrongly excluded a served interior point')
+        # Band-wide-max shell: the SAME point is dropped (the reversion bug).
+        reverted = dataclasses.replace(admission, eta_max=max_eta_max)
+        self._count()
+        self.assertFalse(
+            reverted.admits(center, half),
+            'band-wide-max shell admitted the witness -- the two shells did '
+            'not produce distinct admission, so the pin lacks teeth')
+        _save_shell_witness_plot(radius, min_eta_max, max_eta_max, witness_xy)
+
+    def test_farfield_inner_edge_admits_under_min_shell_excludes_max(
+            self) -> None:
+        """The far-field inner-edge ``exclusion_rho`` uses ``min_eta_max``:
+        a child tile whose inner rho edge lies between the min-shell and
+        max-shell ``exclusion_rho`` clears the shipped inner edge but not the
+        band-wide-max one.
+
+        Mirrors the production predicate ``child_rho - child_half_r >=
+        exclusion_rho`` (`surrogate_training._subdivide_farfield_tile`).
+        """
+        min_eta_max = self.deriv['min_eta_max']
+        max_eta_max = self.deriv['max_eta_max']
+        base = 1.0 + self.deriv['reach_max'] - self.deriv[
+            'coordinate_radius_min']
+        exclusion_rho_min = base + min_eta_max        # shipped inner edge
+        capped_max = (max_eta_max if math.isfinite(max_eta_max)
+                      else min_eta_max + 4.0)
+        exclusion_rho_max = base + capped_max         # band-wide-max edge
+        self.assertLess(exclusion_rho_min, exclusion_rho_max)
+        # A child tile inner edge strictly between the two exclusion radii.
+        child_half_r = 0.0
+        child_rho = 0.5 * (exclusion_rho_min + exclusion_rho_max)
+        inner_edge = child_rho - child_half_r
+        self._count()
+        self.assertGreaterEqual(
+            inner_edge, exclusion_rho_min,
+            'the shipped lobe-edge exclusion_rho wrongly rejected an '
+            'exterior tile')
+        self._count()
+        self.assertLess(
+            inner_edge, exclusion_rho_max,
+            'band-wide-max exclusion_rho admitted the tile -- the inner edge '
+            'did not tighten with the larger shell, so the pin has no teeth')
+
+
+class SaddleLobeEdgeShellSelfFalsificationTestCase(_TubeD2TestCase):
+    """Pin 8 teeth: the flip is caused by shell ANISOTROPY, not by noise.
+
+    Under a SINGLE isotropic shell the witness admission does not flip -- it is
+    admitted at the small shell and (if the shell is grown to the max) excluded
+    at the large one, but never differs BETWEEN two equal shells.  This proves
+    the main pin's admit/exclude split is a genuine consequence of
+    ``min(arc_r_min) < max(arc_r_min)``, not an unrelated artefact.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.deriv = _saddle_shell_derivation()
+
+    def test_equal_shells_never_flip_the_witness(self) -> None:
+        """With the SAME shell on both admissions the witness decision is
+        identical -- so the main test's flip must come from the min/max
+        difference, not from the witness construction."""
+        min_eta_max = self.deriv['min_eta_max']
+        max_eta_max = self.deriv['max_eta_max']
+        admission, center, half, _witness, _d, _radius = _build_lobe_witness(
+            min_eta_max, max_eta_max)
+        both_min = dataclasses.replace(admission, eta_max=min_eta_max)
+        self._count()
+        self.assertEqual(
+            admission.admits(center, half), both_min.admits(center, half),
+            'two equal (min) shells disagreed on the witness -- admission is '
+            'not a pure function of the shell size')
+        both_max = dataclasses.replace(admission, eta_max=max_eta_max)
+        reverted = dataclasses.replace(admission, eta_max=max_eta_max)
+        self._count()
+        self.assertEqual(
+            reverted.admits(center, half), both_max.admits(center, half),
+            'two equal (max) shells disagreed on the witness')
+
+    def test_reverted_derivation_signature_excludes_and_widens_corridor(
+            self) -> None:
+        """The reverted band-wide-max code path (feeding ``max_eta_max`` to
+        `_saddle_lobe_admissions`) both WIDENS the corridor to the max shell
+        and, on the witness, excludes it -- the exact double signature the
+        shipped ``min_eta_max`` wiring avoids."""
+        min_eta_max = self.deriv['min_eta_max']
+        max_eta_max = self.deriv['max_eta_max']
+        reverted = _saddle_lobe_admissions(
+            SADDLE_BAND, self.deriv['config'], eta_max=max_eta_max)
+        for adm in reverted:
+            self._count()
+            self.assertAlmostEqual(
+                adm.corridor_half,
+                _INTERLOBE_CORRIDOR_ETA_SCALE * max_eta_max, places=12,
+                msg='the reverted wiring must widen the corridor to the max '
+                    'shell (this is the bug the pin guards against)')
+        admission, center, half, _w, _d, _r = _build_lobe_witness(
+            min_eta_max, max_eta_max)
+        self._count()
+        self.assertFalse(
+            dataclasses.replace(admission, eta_max=max_eta_max).admits(
+                center, half),
+            'reverted band-wide-max shell served the witness -- no exclusion '
+            'to falsify against')
 
 
 if __name__ == '__main__':

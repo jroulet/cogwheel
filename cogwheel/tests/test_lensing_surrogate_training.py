@@ -6327,7 +6327,7 @@ class DegenerateExteriorBandIsRecordedTestCase(_CountingTestCase):
         gamma_band_halfwidth=0.02, min_gamma_band=1e-6,
         tube_eps_max=5e-2, farfield_eps_max=1e-3, interior_eps_max=5e-2,
         gamma_refine_near_one_window=0.15, gamma_refine_near_one_width=0.05,
-        engine_budget=2000, max_tube_arcs=4, n_heldout=4,
+        engine_budget=2000, n_heldout=4,
         n_caustic_samples=120, seed=1)
 
     @staticmethod

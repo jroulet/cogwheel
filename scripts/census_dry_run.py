@@ -123,13 +123,15 @@ def _saddle_stable_subbands(band: tuple) -> list:
     out: list = []
     for sub_band, structure in stable:
         try:
+            tube_arcs = _st._tube_training_arcs(structure, _SADDLE_PARITY)
             arc_r_min = [
                 _st._min_curvature_radius(sub_band, arc, cfg.n_caustic_samples)
-                for arc in structure.arcs[:cfg.max_tube_arcs]]
-            max_eta_max = (cfg.f_max * max(arc_r_min)
+                for arc in tube_arcs]
+            # Lobe admissions abut the LOBE-EDGE shell ``min(arc_r_min)`` (F081).
+            min_eta_max = (cfg.f_max * min(arc_r_min)
                            if arc_r_min else cfg.f_max * 0.05)
             admissions = _st._saddle_lobe_admissions(
-                sub_band, cfg, eta_max=max_eta_max)
+                sub_band, cfg, eta_max=min_eta_max)
             coordinate_radius_min, _ = _st._coordinate_radius_bounds(
                 sub_band, _SADDLE_PARITY)
             rho_outer = 1.0 + _SOURCE_BOX_CORNER - coordinate_radius_min

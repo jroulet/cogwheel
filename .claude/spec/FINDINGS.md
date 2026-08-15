@@ -4450,3 +4450,18 @@ consume it.
 The engine-free census caught all of this pre-campaign — a production
 training run would have burned the saddle-side budget training nothing
 for the lobes and shipped the gap intact.
+
+RESOLVED 2026-08-15 by build `saddle_tube_fundamental_training` — both
+defects fixed. (a) config: the saddle branch of `_tube_training_arcs`
+now derives a D2-orbit partition from the fold law (typically 6 -> 3
+representative arcs) instead of slicing `arcs[:max_tube_arcs]`; the
+`max_tube_arcs` field is retired from `TrainingConfig` entirely, so the
+heterogeneous-`r_min` config this finding diagnosed can no longer be
+constructed. (b) wiring: `_train_band_charts` now computes both
+`max_eta_max` and `min_eta_max` per band and feeds `min_eta_max` (the
+lobe-edge arcs' own shell) to `saddle_lobe_admissions` and the deltoid
+far-field `physical_exclusion_radius`, replacing the isotropic band-wide
+`max()` this finding identified as the starvation mechanism.
+`max_eta_max` still sizes the tube w-grid cap and the astroid
+interior-skip/wedge extent, where the outer-arc shell is the correct
+scale. See `completed.d/2026-08-15_lensing_saddle_tube_fundamental_training.md`.

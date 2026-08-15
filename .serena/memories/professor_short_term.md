@@ -1,28 +1,42 @@
-# Professor short-term (tiling census INFERENCE REVIEW, 2026-08-14)
+# Professor short-term (session: F081/saddle-tube-fundamental review, 2026-08-15)
 
-Reviewed cogwheel/tests/test_lensing_tiling_census.py (26 tests) on
-cogwheel-newlal env. ALL 26 PASS in ~60s (fast tier). Verdict: PASS.
+Reviewed uncommitted build "trim saddle tube training to D2 fundamental set"
++ F081 per-arc lobe-edge shell (worktree cogwheel-claude-dev, on top of HEAD
+93f2591). Env python: /home/tejaswi/anaconda3/envs/cogwheel-newlal/bin/python.
 
-Live run of tc.run(TrainingConfig()) sanity-checked (not just green ticks):
-- Q1: astroid detected=4/trained=1 (D2 fundamental arc), saddle detected=6/
-  trained=min(6,max_tube_arcs=1). 6 saddle arcs = two 3-cusp deltoids (An&Evans).
-  trained<=detected both parities. Correct topology. max_tube_arcs=2 widens
-  saddle trained->2, astroid stays 1 (teeth present).
-- Q4: astroid ceiling 34.64=60/sqrt(s=3.0)<480 -> min picks DD cap. Saddle tube
-  floor=58 (SADDLE_WALL), ceil=148 (_SADDLE_W_CEILING). Saddle far-field floor
-  70.19=(2e4*K)^(1/3), K~17.3, matches independent find_images+ppgo_error_estimate
-  recompute to 1e-9. Constants: coeff 2e4, DD margin 60, labels/node 8, s/label 0.09.
-- Engine-free tripwire strict (traps evaluate/f_schwinger/_f_schwinger_mpmath +
-  namespace absence). Thin-caller delta==1 tile & one tile's nodes; unrelated
-  tiler patch leaves counts unmoved. Verdict logic: 0->SILENT_EMPTY (zero-guard
-  load-bearing), in->IN_BAND, above->EXPLOSION. Cross-check: nodes 12064*8*0.09=
-  8686.1s=census_s; self_estimate 806.4s exact passthrough; ratio 10.8<<factor 5000.
-- Census caught a REAL silent-empty live: lobe_interior:-1 has 0 tiles ->
-  SILENT_EMPTY on smoke config (legit coverage-hole report, not a bug).
+## Verdict: PASS (fast domain tests only; heavy full-sampling operator-deferred)
 
-MINOR NOTE (not a fail): spec wanted any Q4 contained=False to carry a reason;
-build reinterprets -- numeric-floor False is reason-less (bounds ARE the reason),
-reason populated only on deferral (floor=None). Intent (no silent hole) satisfied.
+## Ran (engine-free / fast)
+- test_lensing_tube_d2_fold.py: 24/24 pass, 9s (orbit-partition, serve-coverage, per-arc shell).
+- test_lensing_tiling_census.py: 26/26 pass, 53s (census Q1 re-derives saddle trained via production selector).
+- caustic_cusps ported: InteriorAdmissionMarginRemovalTestCase + test_inflated_margin_changes_admission: 2/2 pass, 12s.
+- Full 4-file run timed out (240s) only due to slow engine tests in caustic_cusps/surrogate_training, unrelated to this build.
 
-No sampling/heavy validation involved (census is itself an engine-free pre-train
-gate). No operator-deferred heavy test applies here.
+## Physics confirmed (real band (1.1,1.15), independent recompute)
+- 6 detected deltoid arcs -> 2 D2-orbit reps (orbit sizes {4,2}: four +1-branch
+  lobe-edge arcs = one orbit, two -1-branch arcs at gauge 0/pi = the other).
+  COUNT DERIVED via independent union-find (_circular_gap/_d2_gauge_images
+  re-derived in test, NOT production helper). Mission's a-priori "3" was
+  explicitly to be derived; 2 is correct for this fixture.
+- arc_r_min=[0.399, 9.156], f_max=0.4 => min_eta_max=0.160, max_eta_max=3.66
+  (~23x anisotropy). corridor_half=0.160=1.0*min_eta_max (NOT max) — F081 fix
+  intact (matches my prior Q1 ruling: lobe eta = f_max*lobe-edge r_min).
+
+## Why PASS (teeth verified, not just green)
+- Orbit trim: anti-vacuity (reps<arcs) + self-falsification (defeat
+  _circular_angular_distance -> 6->6 identity).
+- Serve coverage (symmetry moral-imperative equality pin): fundamental served
+  set SUPERSET of all-6 incumbent over 720-angle ring, 0 violations; teeth =
+  dropping ANY rep strands a band. This end-to-end pin backs the 6->2 count
+  even if arc bookkeeping were off.
+- Part B shell: witness at geometric-mean distance admitted under min shell,
+  flips to excluded under max shell; equal-shell + reverted-derivation legs.
+- Census Q1 & caustic_cusps ported off retired max_tube_arcs to
+  _tube_training_arcs(structure, parity); assert live-geometry values.
+
+## Caveat
+Could not render PNGs in this harness (no image Read tool); confirmed 3 fresh
+plots generated (saddle_orbit_partition, saddle_serve_coverage,
+saddle_lobe_edge_shell_witness) and verified the assertions they visualize.
+Docstring says "6->2 collapse" in one self-falsif docstring — matches reality;
+an earlier astroid narrative still says "6->3" nowhere binding. No concern.

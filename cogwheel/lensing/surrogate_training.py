@@ -304,11 +304,6 @@ class TrainingConfig:
     gamma_band_halfwidth: float = 0.1
     min_gamma_band: float = 1e-6
     engine_budget: int = 400
-    # Governs SADDLE tube training only (`_tube_training_arcs` slices the
-    # deltoid arcs by it, and the band's ``max_eta_max`` -- which feeds the
-    # lobe admissions -- follows).  The astroid always trains its one
-    # canonical arc; the D2 gauge-image serve match covers the mirrors.
-    max_tube_arcs: int = 1
     # ``None`` = no cap (the production default: the tiling itself bounds the
     # count); an int caps admitted tiles with a loud truncation record.
     max_farfield_regions: int | None = None
@@ -4780,15 +4775,26 @@ def _subdivide_lobe_tile(
             'max_achieved_depth': summary['max_achieved_depth']}
 
 
-def _tube_training_arcs(structure: CausticStructure, parity: int,
-                        max_tube_arcs: int) -> list[FoldArc]:
+def _circular_angular_distance(theta_a: float, theta_b: float) -> float:
+    """Smallest unsigned angular gap between two angles, radians.
+
+    Wraps the raw difference into ``[-pi, pi)`` before taking the magnitude,
+    so ``0`` and ``2*pi`` register as coincident.  Used to test whether two
+    fold-arc midpoints coincide under a D2 gauge reflection.
+    """
+    return abs((theta_a - theta_b + math.pi) % (2.0 * math.pi) - math.pi)
+
+
+def _tube_training_arcs(structure: CausticStructure,
+                        parity: int) -> list[FoldArc]:
     """Select the fold arcs to charge with tube charts for one gamma band.
 
     The amplification is exactly D2-symmetric and the serve path matches a
     tube query's gauge angle against a chart's trained arc through all four
     D2 gauge images (`surrogate._tube_theta_inframe`), so a chart trained
-    on ANY single astroid arc serves all four mirror copies at zero
-    accuracy cost (closes the F079 half-ring hole).
+    on ANY single arc serves all four mirror copies at zero accuracy cost
+    (closes the F079 half-ring hole).  Both parities therefore train ONE
+    representative per D2 gauge orbit; the redundant mirror arcs are dropped.
 
     Positive parity (astroid): ONE arc suffices.  The four astroid arcs
     are exact D2 gauge images of each other (cusps at gauge angles
@@ -4807,14 +4813,17 @@ def _tube_training_arcs(structure: CausticStructure, parity: int,
     serve match this is irrelevant to coverage; it is fatal to any scheme
     that keys the fold on source-coordinate signs.)
 
-    Saddle parity (macro-saddle deltoid): the incumbent
-    ``arcs[:max_tube_arcs]`` slice is kept.  The deltoid's arcs are NOT
-    all D2 copies of one another (lobe-edge vs outer arcs differ, with
-    minimum curvature radii ~0.28 vs ~3.5 at gamma ~1.3), and the band's
-    ``max_eta_max = f_max * max(arc r_min)`` feeds the lobe admissions and
-    the interior-skip predicate: sizing it over ALL arcs balloons the tube
-    shell (0.11 -> 1.40 measured at gamma 1.3) and starves the lobe
-    charts.  The knob therefore still governs saddle tube training.
+    Saddle parity (macro-saddle deltoid): the six detected deltoid arcs
+    are partitioned into D2 gauge orbits derived from the fold law -- two
+    arcs share an orbit iff their caustic-segment midpoints coincide under
+    one of the four D2 gauge images ``{theta, pi - theta, -theta,
+    pi + theta}`` (identity first) within a circular tolerance.  ONE
+    representative per orbit is trained (the first arc detected in that
+    orbit); its three mirrors are served through `_tube_theta_inframe`.
+    The retained count follows the partition -- it is NOT hard-coded (the
+    deltoid's lobe-edge and outer arcs typically collapse 6 -> 3).  The
+    F079 detection guard (``_EXPECTED_ARCS``) and the detected-arc count
+    are untouched: only tube-chart SELECTION is trimmed here.
 
     Parameters
     ----------
@@ -4823,20 +4832,43 @@ def _tube_training_arcs(structure: CausticStructure, parity: int,
     parity : int
         ``+1`` for the positive-parity astroid, ``-1`` for the macro-saddle
         deltoid.
-    max_tube_arcs : int
-        ``TrainingConfig.max_tube_arcs``; consumed by the saddle branch
-        only (the astroid branch always selects its one canonical arc).
 
     Returns
     -------
     list of FoldArc
-        The arc(s) to charge with tube charts.
+        One arc per D2 gauge orbit to charge with tube charts.
     """
     if parity == 1:
         quarter_pi = 0.25 * math.pi
         return [arc for arc in structure.arcs
                 if arc.theta_lo <= quarter_pi <= arc.theta_hi]
-    return list(structure.arcs[:max_tube_arcs])
+
+    arcs = list(structure.arcs)
+    if not arcs:
+        return arcs
+    # Partition the detected deltoid arcs into D2 gauge orbits: two arcs are
+    # symmetry-redundant iff a caustic-segment midpoint of one lands on the
+    # other under an element of the Klein four-group {identity, theta->-theta,
+    # theta->pi-theta, theta->pi+theta}.  The serve path folds a query through
+    # exactly these four gauge images, so one trained representative per orbit
+    # serves the whole orbit.  Tolerance scales with the narrowest arc so a
+    # near-cusp sliver is not spuriously merged with a wide neighbour.
+    midpoints = [0.5 * (arc.theta_lo + arc.theta_hi) for arc in arcs]
+    min_width = min(arc.theta_hi - arc.theta_lo for arc in arcs)
+    tol = max(1e-3, 0.25 * min_width)
+    representatives: list[FoldArc] = []
+    representative_midpoints: list[float] = []
+    for arc, midpoint in zip(arcs, midpoints):
+        gauge_images = (midpoint, math.pi - midpoint,
+                        -midpoint, math.pi + midpoint)
+        is_new_orbit = not any(
+            _circular_angular_distance(image, rep_midpoint) <= tol
+            for rep_midpoint in representative_midpoints
+            for image in gauge_images)
+        if is_new_orbit:
+            representatives.append(arc)
+            representative_midpoints.append(midpoint)
+    return representatives
 
 
 def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
@@ -4854,18 +4886,28 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
 
     # -- Tube charts (per fold arc, resumable) --
     # The serve path matches a tube query against a chart through all four
-    # exact D2 gauge images (`surrogate._tube_theta_inframe`), so the astroid
-    # trains ONE canonical arc (the gauge arc bracketing pi/4) and serves all
-    # four mirror copies from it (closes F079).  The saddle keeps the
-    # incumbent ``arcs[:max_tube_arcs]`` slice: its arcs are not D2 copies of
-    # one another, and ``max_eta_max`` below feeds the lobe admissions and
-    # interior-skip predicate (see `_tube_training_arcs`).
-    tube_arcs = _tube_training_arcs(structure, parity, config.max_tube_arcs)
+    # exact D2 gauge images (`surrogate._tube_theta_inframe`), so both parities
+    # train ONE representative per D2 gauge orbit (the astroid's four arcs
+    # collapse to the pi/4 arc; the saddle's six deltoid arcs collapse to one
+    # per gauge orbit) and serve the mirror copies from it (closes F079).  See
+    # `_tube_training_arcs`.
+    tube_arcs = _tube_training_arcs(structure, parity)
     # Pre-compute per-arc minimum curvature radii (worst over gamma band).
     # The absolute tube band [eta_floor, eta_max] is f * R_c per arc.
     arc_r_min = [_min_curvature_radius(band, arc, config.n_caustic_samples)
                  for arc in tube_arcs]
+    # Two eta shells sized from the per-arc curvature radii (fallback
+    # f_max*0.05 when no arc is selected).  ``max_eta_max`` (widest tube shell,
+    # over ALL arcs) sizes the tube w-grid cap, the astroid interior-skip and
+    # wedge extent; ``min_eta_max`` (the narrowest tube shell) is the
+    # region-adjacent LOBE-EDGE shell -- outer deltoid arcs have the largest
+    # r_min (nearly straight), the lobe-edge arcs the smallest, so
+    # ``min(arc_r_min)`` is exactly the shell the saddle lobe interiors and the
+    # deltoid far-field inner edge abut (F081).  For a single-arc astroid band
+    # ``min_eta_max == max_eta_max``, so its arithmetic is byte-identical.
     max_eta_max = (config.f_max * max(arc_r_min)
+                   if arc_r_min else config.f_max * 0.05)
+    min_eta_max = (config.f_max * min(arc_r_min)
                    if arc_r_min else config.f_max * 0.05)
     # Cap the tube w grid by the largest source magnitude it samples
     # (caustic reach plus the outer eta wall), so w * |y| stays below the
@@ -4964,7 +5006,10 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     gamma_mid = 0.5 * (band[0] + band[1])
     reach_scalar = _scalar_caustic_reach(gamma_mid)
     coordinate_radius_min, reach_max = _coordinate_radius_bounds(band, parity)
-    physical_exclusion_radius = reach_max + max_eta_max
+    # The far-field inner edge abuts the region-adjacent LOBE-EDGE shell, so
+    # size it with ``min_eta_max`` (F081).  For a single-arc astroid band
+    # ``min_eta_max == max_eta_max``, so the positive-parity value is unchanged.
+    physical_exclusion_radius = reach_max + min_eta_max
     # Additive scalar/directional caustic-fixed inner edge for BOTH parities:
     # ``rho = 1 + |y| - coordinate_radius_min`` is the exact inverse of the
     # serve map's exterior arm (`_from_caustic_fixed`), giving ``rho = 1`` at
@@ -5215,11 +5260,13 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # ``_build_lobe_exterior_chart`` in the build loop below.
     # Shared saddle lobe admissions (INS-1-002): the lobe_exterior packing
     # and lobe_interior sites both consume ``_saddle_lobe_admissions`` with the
-    # SAME eta_max (the band's widest tube shell, ``max_eta_max``).  That call
-    # runs 2 lobes x 3 band gammas of caustic-point + winding-loop sweeps, so
-    # compute it ONCE per band and reuse it at both sites rather than twice.
+    # SAME eta_max (the region-adjacent LOBE-EDGE shell, ``min_eta_max``; F081).
+    # Its per-lobe nearest-caustic-distance test is already per-segment, so only
+    # the scalar shell changes.  That call runs 2 lobes x 3 band gammas of
+    # caustic-point + winding-loop sweeps, so compute it ONCE per band and reuse
+    # it at both sites rather than twice.
     saddle_lobe_admissions = (
-        _saddle_lobe_admissions(band, config, eta_max=max_eta_max)
+        _saddle_lobe_admissions(band, config, eta_max=min_eta_max)
         if parity != 1 and ({'lobe_interior', 'lobe_exterior'} & set(regions))
         else None)
     lobe_exterior_records: list[dict] = []
