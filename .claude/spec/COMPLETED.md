@@ -1908,6 +1908,18 @@ the same session: updated `certified_ppgo_map`'s DATA_CONTRACTS.yaml
 description and consumer list, the SPEC.md `ppgo_map.py` module-row
 clause, and the stale `CONSUMER_GRAPH.json` cache entry.
 
+DRIVER ACCEPTANCE (post-build, per plan; measured against the shipped
+relaxed gate): pairing gate green; cell 1 (gamma [1.157, 1.339] x
+rho [0, 0.5]) re-validates at sup err 8.69e-5 < 1e-4 over 5 fresh in-box
+2-image configs x 8 nodes on [w_cert 19.164, 58] (worst config
+gamma 1.2434, rho 0.372: 8.69e-5 at the w_cert node, decaying to 2.0e-6
+by w = 58). Gate values exact: w_cert 19.164305537818887, w_trust
+28.74645830672833, w_ceiling 58.0; marginal cell 2, contaminated cell 3
+and a generic saddle rho<1 query all still return UNKNOWN. Marginal
+cell 2 reproduces its F080 verdict on fresh draws (fails only at the
+shipped 15.9 node, clean by 27.7) — the documented raised-floor recipe
+remains the activation path after denser driver re-measurement.
+
 
 ## Likelihood
 
