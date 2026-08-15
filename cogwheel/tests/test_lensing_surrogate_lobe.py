@@ -2293,6 +2293,241 @@ class LobeCuspAxisMapSelfFalsificationTestCase(TestCase):
                 0.5, 1.5, _RIGHT_CUSP_ANGLE, 'right')
         self.assertGreater(abs(float(u_fine[0])), 1e-15,
                            'a reversed map must have nonzero u_fine[0]')
+
+
+# ---------------------------------------------------------------------------
+# Edge-coincidence tolerance (WP1): a lobe tile edge landing EXACTLY (or a
+# float-hair) on a deltoid cusp ray is a valid degenerate case -- the tile
+# abuts the cusp, ``d`` at that edge clamps to 0, and the ``u = d**(2/3)`` map
+# is anchored there ("keep-map" semantics).  Only a cusp genuinely interior to
+# the tile BEYOND ``_CUSP_EDGE_COINCIDENCE_ULPS`` ULPs is a real straddle that
+# still raises.  These pins guard the tolerance branch that WP1 added.
+
+
+class LobeCuspAxisMapEdgeCoincidenceTestCase(TestCase):
+    """WP1: cusp-coincident tile edges are KEPT (not refused)."""
+
+    def test_right_edge_coincidence_keeps_map(self) -> None:
+        """Pin A: cusp_angle == theta_hi (side='right') builds a valid map.
+
+        theta_lo=0.4, theta_hi=0.9, cusp_angle=0.9 exactly.  The right edge
+        abuts the cusp, so ``d`` there is 0 and ``u_max = (theta_hi -
+        theta_lo)**(2/3)``; the map must be a smooth strictly-increasing
+        curve over this normal-width tile (a kink/reversal at the right
+        endpoint would betray a bad d-clamp).
+        """
+        theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+            0.4, 0.9, 0.9, 'right')
+        # Endpoints pinned bit-exactly to the tile bounds.
+        self.assertEqual(float(theta_fine[0]), 0.4)
+        self.assertEqual(float(theta_fine[-1]), 0.9)
+        self.assertEqual(float(u_fine[0]), 0.0)
+        # u at the anchored (theta_lo) end spans (cusp - theta_lo)**(2/3).
+        expected_u_max = 0.5 ** (2.0 / 3.0)
+        self.assertAlmostEqual(
+            float(u_fine[-1]), expected_u_max,
+            delta=1e-12 * expected_u_max,
+            msg='u_fine[-1] must equal (theta_hi-theta_lo)**(2/3)')
+        # Strictly increasing over a normal-width tile (no clamp kink).
+        self.assertTrue(np.all(np.diff(theta_fine) > 0),
+                        'theta_fine not strictly increasing')
+        self.assertTrue(np.all(np.diff(u_fine) > 0),
+                        'u_fine not strictly increasing')
+
+    def test_left_edge_coincidence_keeps_map(self) -> None:
+        """Pin A-left: cusp_angle == theta_lo (side='left') builds a valid map.
+
+        theta_lo=0.4, theta_hi=0.9, cusp_angle=0.4 exactly.  Proves the
+        edge-coincidence clamp is applied symmetrically to the theta_lo edge,
+        not only to theta_hi.
+        """
+        theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+            0.4, 0.9, 0.4, 'left')
+        self.assertEqual(float(theta_fine[0]), 0.4)
+        self.assertEqual(float(theta_fine[-1]), 0.9)
+        self.assertEqual(float(u_fine[0]), 0.0)
+        self.assertTrue(np.all(np.diff(theta_fine) > 0),
+                        'theta_fine not strictly increasing')
+        self.assertTrue(np.all(np.diff(u_fine) > 0),
+                        'u_fine not strictly increasing')
+
+    def test_degenerate_sliver_regression_7a(self) -> None:
+        """Pin B: the logged 7a machine-precision straddle no longer crashes.
+
+        These EXACT literals are the configuration that crashed the smoke
+        run: a ~3.5e-16-wide sliver whose cusp sits 2.8e-17 INSIDE theta_hi.
+        The old strict guard (``if not cusp_angle > theta_hi: raise``) would
+        have rejected it (teeth: ``cusp_angle < theta_hi`` holds here, which
+        is exactly the condition it tripped on).  The tolerance branch must
+        now complete the call and return a well-formed, non-decreasing map.
+        """
+        theta_lo = 0.0
+        theta_hi = 3.552713678800501e-16
+        cusp_angle = 3.270275691376951e-16
+        # Teeth: this input IS a strict straddle -- the pre-fix guard raised.
+        self.assertLess(cusp_angle, theta_hi,
+                        'fixture premise lost: cusp must sit inside theta_hi '
+                        'for this to exercise the tolerance branch')
+        result = surrogate_module._lobe_cusp_axis_map(
+            theta_lo, theta_hi, cusp_angle, 'right')
+        self.assertIsNotNone(result)
+        theta_fine, u_fine = result
+        self.assertEqual(float(theta_fine[0]), theta_lo)
+        self.assertEqual(float(theta_fine[-1]), theta_hi)
+        self.assertEqual(float(u_fine[0]), 0.0)
+        # NON-decreasing: at this scale the linspace nodes may collide at
+        # float precision, so >= (not >) is the correct invariant.
+        self.assertTrue(np.all(np.diff(theta_fine) >= 0),
+                        'theta_fine must be non-decreasing')
+        self.assertTrue(np.all(np.diff(u_fine) >= 0),
+                        'u_fine must be non-decreasing')
+
+    def test_boundary_trichotomy_at_edge(self) -> None:
+        """Boundary-trichotomy sweep (guards the guard against a </<= flip).
+
+        For theta_lo=0.4, theta_hi=0.9 and BOTH sides, sweep the cusp across
+        the side-appropriate edge: clearly exterior, exactly on the edge, a
+        float-hair inside (within the 8-ULP tolerance), and a genuine
+        interior straddle 1e-3 past the edge.  The first three must build a
+        valid strictly-increasing map with bit-exact endpoints; only the
+        last must raise.  This pins the exterior->map / edge->map /
+        interior->raise trichotomy exactly at the boundary, so a refactor
+        that swaps a strict/non-strict comparison in the wrong place -- on
+        either side -- is caught.
+        """
+        theta_lo, theta_hi = 0.4, 0.9
+        # (side, [(case_label, cusp_angle, should_raise), ...])
+        sweeps = (
+            ('right', (
+                ('exterior', theta_hi + 1e-3, False),
+                ('on_edge', theta_hi, False),
+                ('hair_inside', theta_hi - 2e-17, False),
+                ('straddle', theta_hi - 1e-3, True),
+            )),
+            ('left', (
+                ('exterior', theta_lo - 1e-3, False),
+                ('on_edge', theta_lo, False),
+                ('hair_inside', theta_lo + 2e-17, False),
+                ('straddle', theta_lo + 1e-3, True),
+            )),
+        )
+        for side, cases in sweeps:
+            for label, cusp_angle, should_raise in cases:
+                with self.subTest(side=side, case=label, cusp=cusp_angle):
+                    if should_raise:
+                        with self.assertRaises(ValueError):
+                            surrogate_module._lobe_cusp_axis_map(
+                                theta_lo, theta_hi, cusp_angle, side)
+                        continue
+                    theta_fine, u_fine = surrogate_module._lobe_cusp_axis_map(
+                        theta_lo, theta_hi, cusp_angle, side)
+                    # Endpoints pinned bit-exact to the tile bounds.
+                    self.assertEqual(float(theta_fine[0]), theta_lo)
+                    self.assertEqual(float(theta_fine[-1]), theta_hi)
+                    self.assertEqual(float(u_fine[0]), 0.0)
+                    # Normal-width tile: strictly increasing, no clamp kink.
+                    self.assertTrue(np.all(np.diff(theta_fine) > 0),
+                                    'theta_fine not strictly increasing')
+                    self.assertTrue(np.all(np.diff(u_fine) > 0),
+                                    'u_fine not strictly increasing')
+
+
+class LobeCuspAxisMapEdgeCoincidenceSelfFalsificationTestCase(TestCase):
+    """Prove the edge-coincidence keep-map pins have teeth.
+
+    The Pin A/B "no exception" assertions are only meaningful if the
+    function CAN still refuse: the tolerance is a NARROW ULP band, not a
+    blanket admission.  A cusp genuinely interior to the tile beyond the
+    band must still raise -- otherwise deleting the straddle guard would
+    pass the keep-map pins silently.
+    """
+
+    def test_genuine_straddle_beyond_tolerance_still_raises(self) -> None:
+        """A cusp 1e-6 inside theta_hi (>> 8 ULP band) still raises."""
+        # 8 * eps * max(1, |theta_hi|, |cusp|) ~ 1.8e-15; 1e-6 is ~9 orders
+        # above the band, so this is an unambiguous straddle.
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(0.4, 0.9, 0.9 - 1e-6, 'right')
+
+    def test_genuine_left_straddle_beyond_tolerance_still_raises(self) -> None:
+        """A cusp 1e-6 above theta_lo (side='left') still raises."""
+        with self.assertRaises(ValueError):
+            surrogate_module._lobe_cusp_axis_map(0.4, 0.9, 0.4 + 1e-6, 'left')
+
+
+class LobeChildBoxesCoincidentEdgeTestCase(TestCase):
+    """WP1 caller-path pin: the tiler subdivision splitter no longer raises
+    on a cusp-coincident lobe-tile edge.
+
+    `surrogate_training._lobe_child_boxes` routes ``_lobe_nearest_cusp ->
+    side selection -> _lobe_cusp_axis_map`` to place the angular child split
+    at the ``u``-midpoint.  Before the edge-coincidence tolerance, a tile
+    whose lower edge coincided (within float noise) with a recorded cusp at
+    the ``theta_local = 0`` domain end crashed here via the map's strict
+    straddle guard.  These tests exercise the real production splitter with
+    NO engine call, proving the fix propagated from `_lobe_cusp_axis_map`
+    all the way to the subdivider that actually consumes it.
+    """
+
+    def test_coincident_lower_edge_subdivides(self) -> None:
+        """theta_lo ~ 0 coincident with a cusp at 0.0 -> four child boxes.
+
+        The tile centre sits a ~3.5e-16 float-hair above 0, with a matching
+        half-width so the lower edge theta_lo = center - half lands on 0.0
+        exactly, coincident with the recorded cusp there.  The nearest-cusp
+        router must pick ``side='left'`` and the splitter must complete.
+        """
+        theta_hair = 3.5e-16
+        tile = {
+            'center': (0.5, theta_hair),
+            'half': (0.1, theta_hair),
+            'lobe_cusps': [0.0],
+        }
+        theta_lo = float(tile['center'][1]) - float(tile['half'][1])
+        theta_hi = float(tile['center'][1]) + float(tile['half'][1])
+        # Premise: the router selects the coincident left edge at the domain
+        # end (0.0 < theta_local_c) -- this is what reaches the tolerance
+        # branch of the map.
+        nearest_cusp, side = training_module._lobe_nearest_cusp(tile)
+        self.assertEqual(nearest_cusp, 0.0)
+        self.assertEqual(side, 'left')
+        # Production splitter: no raise (this path previously crashed via the
+        # map's strict straddle guard).
+        boxes, theta_split, child_half_rho = (
+            training_module._lobe_child_boxes(tile))
+        self.assertEqual(len(boxes), 4,
+                         'subdivision must yield exactly four child boxes')
+        # The angular split lies within the tile's theta span.
+        self.assertGreaterEqual(theta_split, theta_lo)
+        self.assertLessEqual(theta_split, theta_hi)
+        self.assertGreater(child_half_rho, 0.0)
+        # Every child is a well-formed ((rho_c, theta_c), (half_rho, half_th)).
+        for center, half in boxes:
+            self.assertEqual(len(center), 2)
+            self.assertEqual(len(half), 2)
+
+    def test_genuine_interior_cusp_propagates_valueerror(self) -> None:
+        """Teeth: a cusp genuinely interior to the tile still crashes the
+        splitter.
+
+        theta in [0.2, 0.8] with a recorded cusp at 0.6 (a real straddle,
+        ~0.2 rad past the near edge, >> the 8-ULP band).  `_lobe_child_boxes`
+        must propagate the map's ``ValueError`` -- proving the coincident-edge
+        success above is NOT vacuous: the caller genuinely depends on the
+        map's straddle guard, so a deletion of that guard would be caught
+        here as well as in the map's own suite.
+        """
+        tile = {
+            'center': (0.5, 0.5),
+            'half': (0.1, 0.3),   # theta_local in [0.2, 0.8]
+            'lobe_cusps': [0.6],  # interior; nearest -> side='right' straddle
+        }
+        # Premise: the router picks the interior cusp on the right side.
+        nearest_cusp, side = training_module._lobe_nearest_cusp(tile)
+        self.assertEqual(nearest_cusp, 0.6)
+        self.assertEqual(side, 'right')
+        with self.assertRaises(ValueError):
+            training_module._lobe_child_boxes(tile)
 # ---------------------------------------------------------------------------
 # Schema hard-refuse (WP lobe-2): old axis schema tags reject; new tag loads.
 

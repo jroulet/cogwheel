@@ -151,6 +151,16 @@ _CUSP_NODE_DEDUP_TOL = 1e-9
 # measured round-trip error at 2001 is ~1e-7 (< the 1e-6 tolerance).
 _FARFIELD_ARC_MAP_SIZE = 2001
 
+# Edge-coincidence tolerance for the cusp-adapted axis maps, expressed as an
+# integer count of ULPs (units in the last place).  This is a DIMENSIONLESS
+# float-representation-noise bound, NOT a tuned physical fudge: when a lobe
+# tile edge lands exactly on a deltoid cusp ray, the edge angle and the cusp
+# angle are the same physical value differing only by round-off in the two
+# code paths that produced them (observed 2.8e-17 apart at theta ~ 3.5e-16).
+# 8 ULPs comfortably covers such a round-off gap while staying far below any
+# real angular tile width, so it can never absorb a genuine geometric offset.
+_CUSP_EDGE_COINCIDENCE_ULPS = 8
+
 
 # Fixed medial-axis / near-tied-foot tolerance in caustic-source (``y``)
 # units: a source whose two nearest caustic feet are closer than this in
@@ -632,11 +642,18 @@ def _lobe_cusp_axis_map(theta_lo: float, theta_hi: float,
         Lobe-local angle tile bounds, radians,
         ``0 <= theta_lo < theta_hi <= pi``.
     cusp_angle : float
-        The nearest deltoid lobe cusp angle, radians; must lie strictly
-        outside ``(theta_lo, theta_hi)`` on the side given by ``side``.
+        The nearest deltoid lobe cusp angle, radians.  Must lie outside
+        ``(theta_lo, theta_hi)`` on the side given by ``side``, OR coincide
+        with the side-appropriate edge (``theta_hi`` for ``'right'``,
+        ``theta_lo`` for ``'left'``) within ``_CUSP_EDGE_COINCIDENCE_ULPS``
+        ULPs of float-representation noise -- a cusp-coincident edge is a
+        valid degenerate case (the tile abuts the cusp; ``d`` at that edge is
+        clamped to exactly ``0`` and the ``u = d**(2/3)`` map is anchored
+        there).  A cusp genuinely interior to the tile beyond the noise band
+        (a real straddle) raises ``ValueError``.
     side : str
-        ``'left'`` (cusp_angle < theta_lo, ``d = theta - cusp_angle``) or
-        ``'right'`` (cusp_angle > theta_hi,
+        ``'left'`` (cusp_angle <~ theta_lo, ``d = theta - cusp_angle``) or
+        ``'right'`` (cusp_angle >~ theta_hi,
         ``d = cusp_angle - theta``).
 
     Returns
@@ -652,7 +669,8 @@ def _lobe_cusp_axis_map(theta_lo: float, theta_hi: float,
     ------
     ValueError
         If ``side`` is not ``'left'`` or ``'right'``, the bounds are
-        malformed, or ``cusp_angle`` is not on the correct side.
+        malformed, or ``cusp_angle`` is interior to the tile beyond the
+        edge-coincidence tolerance (a genuine straddle).
     """
     theta_lo = float(theta_lo)
     theta_hi = float(theta_hi)
@@ -666,24 +684,40 @@ def _lobe_cusp_axis_map(theta_lo: float, theta_hi: float,
             f'theta_lo ({theta_lo}) must be strictly below theta_hi '
             f'({theta_hi}).')
     exponent = 2.0 / 3.0
+    eps = np.finfo(float).eps
     if side == 'left':
-        if not cusp_angle < theta_lo:
+        # A cusp at (or a float-hair inside) theta_lo is the tile abutting the
+        # cusp ray: treat the edge AS the cusp (d clamped to exactly 0).  A
+        # cusp genuinely interior to the tile beyond the noise band is a real
+        # straddle -> fail loud (the Professor confirmed this is unreachable
+        # in the current tiler, so the raise is a guard, not a live path).
+        tol_lo = _CUSP_EDGE_COINCIDENCE_ULPS * eps * max(
+            1.0, abs(theta_lo), abs(cusp_angle))
+        if not (cusp_angle < theta_lo or abs(cusp_angle - theta_lo) <= tol_lo):
             raise ValueError(
                 f'side={side!r} requires cusp_angle ({cusp_angle}) '
-                f'< theta_lo ({theta_lo}).')
-        d_lo = theta_lo - cusp_angle
+                f'< theta_lo ({theta_lo}); the cusp is interior to the tile '
+                f'beyond float-noise tolerance -- a straddle.')
+        d_lo = max(theta_lo - cusp_angle, 0.0)
         d_hi = theta_hi - cusp_angle
         base_lo = d_lo ** exponent
         u_max = d_hi ** exponent - base_lo
         u_fine = np.linspace(0.0, u_max, _FARFIELD_ARC_MAP_SIZE)
         theta_fine = cusp_angle + (u_fine + base_lo) ** 1.5
     elif side == 'right':
-        if not cusp_angle > theta_hi:
+        # A cusp at (or a float-hair inside) theta_hi is the tile abutting the
+        # cusp ray: treat the edge AS the cusp (d clamped to exactly 0).  A
+        # cusp genuinely interior to the tile beyond the noise band is a real
+        # straddle -> fail loud (unreachable in the current tiler).
+        tol_hi = _CUSP_EDGE_COINCIDENCE_ULPS * eps * max(
+            1.0, abs(theta_hi), abs(cusp_angle))
+        if not (cusp_angle > theta_hi or abs(cusp_angle - theta_hi) <= tol_hi):
             raise ValueError(
                 f'side={side!r} requires cusp_angle ({cusp_angle}) '
-                f'> theta_hi ({theta_hi}).')
+                f'> theta_hi ({theta_hi}); the cusp is interior to the tile '
+                f'beyond float-noise tolerance -- a straddle.')
         d_lo = cusp_angle - theta_lo
-        d_hi = cusp_angle - theta_hi
+        d_hi = max(cusp_angle - theta_hi, 0.0)
         base_lo = d_lo ** exponent
         u_max = base_lo - d_hi ** exponent
         u_fine = np.linspace(0.0, u_max, _FARFIELD_ARC_MAP_SIZE)
