@@ -376,3 +376,25 @@
   lists this pair as carried-forward on a stale cadence — do NOT re-fix if
   re-flagged again; re-verify with a fresh grep against the live docs
   first, since the memory record itself can lag the actual fix.
+
+
+## 2026-08-15 (post-commit sync, stamp a16f42f -> commit 5e4fb43)
+
+- IN-DAG BUILD COMMIT CAN CARRY ZERO DOC EDITS EVEN WITH A TRAILING "docs"
+  COMMIT PRESENT: lobe_cusp_axis_edge_tolerance (ce8896f) shipped a real
+  production fix but neither the build commit nor its trailing "docs:
+  trailing doc surfaces after librarian" commit (a3bac69, touched only
+  foreman_lite.json/tidy_advisory.json) carried any FINDINGS/COMPLETED/
+  TODO/SPEC edit. Distinct from the known "docs-trailing-commit only
+  touches side files while the real edits are inside the build commit"
+  pattern (saddle_tube_fundamental_training) — here the build commit
+  ITSELF was also silent. "Its in-DAG Librarian ran" is not evidence of
+  doc coverage; check the BUILD commit's own diff for spec/findings edits
+  too, not just the trailing docs commit. Filled via FINDINGS F082 +
+  completed.d/2026-08-15_lobe_cusp_axis_edge_tolerance.md.
+- WIKI-LINK CHECKER SELF-FLAGS LITERAL BRACKETS IN PROSE: a fragment that
+  describes the `[[fragment_name]]` bracket syntax by writing literal
+  `[[...]]` in its own body gets flagged by check_wiki_links as dangling-
+  linking itself. Describe the syntax without literal brackets (e.g.
+  "double-bracketed FINDINGS F0xx") in any fragment about the wiki-link
+  convention.
