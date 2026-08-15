@@ -4465,3 +4465,28 @@ far-field `physical_exclusion_radius`, replacing the isotropic band-wide
 `max_eta_max` still sizes the tube w-grid cap and the astroid
 interior-skip/wedge extent, where the outer-arc shell is the correct
 scale. See `completed.d/2026-08-15_lensing_saddle_tube_fundamental_training.md`.
+
+## F082
+**`_lobe_cusp_axis_map`'s cusp-vs-edge guard was a strict float inequality
+at exact coincidence — the first lobe-exterior tile the F081 fix let the
+tiler emit crashed the trainer (2026-08-15, 7a smoke run, boundary-defect
+family alongside F079).**
+
+The 7a smoke run (first end-to-end reach of the lobe-exterior training path
+now that F081 unblocks its tiler) raised `ValueError: side='right' requires
+cusp_angle (3.270275691376951e-16) > theta_hi (3.552713678800501e-16)` from
+`LensAmplificationSurrogate.from_lobe_exterior_engine`. Both numbers are
+ZERO at machine precision, 2.8e-17 apart: a lobe-exterior tile's upper theta
+edge lands exactly on the theta = 0 cusp ray, and the guard's strict `<`/`>`
+comparison treats float round-off noise between two representations of the
+same physical value as a genuine cusp-interior-to-tile straddle.
+
+RESOLVED 2026-08-15 by build `lobe_cusp_axis_edge_tolerance` — a
+dimensionless edge-coincidence tolerance (`_CUSP_EDGE_COINCIDENCE_ULPS = 8`,
+`cogwheel/lensing/surrogate.py`) now lets a cusp within that many ULPs of
+the side-appropriate edge (`theta_hi` for `'right'`, `theta_lo` for
+`'left'`) be treated AS the cusp: `d` at that edge clamps to exactly `0.0`
+and the `u = d**(2/3)` map anchors there. A cusp genuinely interior to the
+tile beyond the tolerance still raises `ValueError` (unreachable in the
+current tiler per Professor review, so the raise stays a guard, not a live
+path). See `completed.d/2026-08-15_lobe_cusp_axis_edge_tolerance.md`.
