@@ -1,6 +1,6 @@
 ---
-spec_version: 0.42.0
-last_updated: 2026-08-14
+spec_version: 0.42.1
+last_updated: 2026-08-15
 ---
 
 # cogwheel — Project Specification
@@ -147,19 +147,31 @@ Docs). Packaging: setuptools + setuptools_scm, GPL-3.0-or-later, Python >=3.9.
   the deltoid caustic does not enclose the origin, so `rho < 1` does not
   imply interior on the saddle); both checks are independent of `born_gate`
   (no `w` available at census time). The
-  fact-4 slot in `likelihood._surrogate_coefficients` is now wired: when
-  a `BornResidualChart` (frozen 3-D interpolation dataclass in
-  `cogwheel/lensing/born_residual_chart.py`) is attached to the likelihood
-  object, the slot reconstructs `F_carrier + R(w; gamma, rho)` and returns
-  the surrogate coefficient array. When the chart is `None` (default),
-  exterior draws fall through to the exact engine — correct, just not
-  zero-quadrature. A trained artifact `cogwheel/data/born_residual_chart.npz`
+  fact-4 slot in `likelihood._surrogate_coefficients` reconstructs
+  `F_carrier + R(w; gamma, rho)` from an attached `BornResidualChart`
+  (frozen 3-D interpolation dataclass in `cogwheel/lensing/
+  born_residual_chart.py`) and returns the surrogate coefficient array.
+  As of build `wire_serving_artifacts` (2026-08-14) `born_residual_chart`
+  AUTO-ATTACHES at `LensedRelativeBinningLikelihood` construction
+  (`BornResidualChart.load()` via the `_AUTO_BORN_CHART` sentinel default,
+  refusing to `None` on any load anomaly rather than silently disabling
+  the rung); passing an explicit `born_residual_chart=None` opts out and
+  keeps the pure-engine path. The SAME attached chart is now also consulted
+  by the first-class Born intercept `_born_residual_analytic` in
+  `_amplification_coefficients` (see the pipeline row above), which
+  reaches the exterior WITHOUT any surrogate. When no chart is attached
+  (explicit `None`), exterior draws fall through to the exact engine —
+  correct, just not zero-quadrature. A trained artifact
+  `cogwheel/data/born_residual_chart.npz`
   (≈ 8 KB, produced by `scripts/train_born_residual.py`) is **shipped as
   package data** — a 3-D tensor-product cubic spline of
   `R(w; gamma, rho) = F_exact_demod(w) − F_carrier_demod(w)` over a
-  7 gamma × 5 rho × 10 w sparse grid, all in the min-relative delay frame.
-  Attaching a `BornResidualChart` instance (constructed from the shipped `.npz`) completes
-  the zero-quadrature exterior serve path for `rho > 2`.
+  7 gamma × 5 rho × 10 w sparse grid, all in the min-relative delay frame,
+  covering the astroid parity only (gamma grid 0.05-0.9; saddle Born nodes
+  are a training-campaign decision, not a shipped capability). Attaching a
+  `BornResidualChart` instance (constructed from the shipped `.npz`)
+  completes the zero-quadrature exterior serve path for `rho > 2` on the
+  covered parity.
 - **Lensing delay frame.** Every channel kernel in `chang_refsdal` is carried in
   the partition's *min-subtracted* frame: `ChangRefsdalPartition` subtracts
   `t_min = min(absolute real-image Fermat delays)` from every delay, so

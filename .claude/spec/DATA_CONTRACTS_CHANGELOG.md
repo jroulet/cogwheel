@@ -6,6 +6,30 @@ Add a new entry by creating a fragment in `contracts_changelog.d/`.
 
 ---
 
+- `3.2.1` (2026-08-15):
+
+`born_residual_chart`: the `wire_serving_artifacts` build (5a739b6) claimed
+in its commit message and `completed.d/2026-08-14_lensing_wire_serving_
+artifacts.md` that in-build escalation INS-3 ("both parities" claim vs the
+astroid-only shipped artifact) was "fixed by text-narrowing" — but the
+actual diff left the description's "covering the far exterior (rho > 2)
+on both parities" clause, and the gate prose's "(far exterior, both
+parities)", byte-for-byte unchanged; the claimed fix never landed. Post-
+commit verification (Inspector findings INS-1-002/INS-2-002/INS-3-001,
+carried in `.claude/sync_issues.json`) confirmed the shipped
+`cogwheel/data/born_residual_chart.npz` has `gamma_grid` entirely below
+1.0 (astroid parity only; `rho_grid` >= 2.0, `log_w_grid` spanning w in
+[5, 60]) with no saddle node — `covers()` refuses any `gamma > 0.9` query
+regardless of code-level "both parities" phrasing. Narrowed both
+occurrences to the shipped truth (astroid-only; saddle Born nodes are a
+training-campaign decision, not a shipped capability) and corrected the
+gate prose from `covers(gamma, rho)` to the full coded guard
+`covers(gamma, rho, chart_w)` (box containment plus the trained log-w
+band, refusing rather than cubic-extrapolating). Mirrored the same
+narrowing into the `_born_residual_analytic` docstring in
+`cogwheel/lensing/likelihood.py`, which repeated the identical stale
+"(exterior, both parities)" / two-argument `covers()` phrasing.
+
 - `3.2.0` (2026-08-14):
 
 `born_residual_chart`: the false "attaches at construction time" claim is
@@ -178,7 +202,7 @@ Flagged three times by the Inspector during the `subdivision_recursion` build
 (INS-1-001) and correctly routed to doc-sync each time; applied here by the
 driver after the tree gate blocked the build's own Librarian phase.
 
-- `0.5.1` (2026-08-01):
+- `0.6.1` (2026-08-01):
 
 `lens_amplification_surrogate` artifact: lobe-interior charts now persist a
 `theta_to_s` axis map (2 × N_map array) under the new
@@ -186,7 +210,7 @@ driver after the tree gate blocked the build's own Librarian phase.
 tag. Legacy V1 charts (no map) load under the old schema tag with
 `theta_to_s=None`. The map is gamma-independent (depends only on tile bounds).
 
-- `0.5.0` (2026-07-31):
+- `0.6.0` (2026-07-31):
 
 ### Far-field surrogate charts use gamma-resolved fold coordinates
 
@@ -203,7 +227,7 @@ wrong-frame artifact. Macro-saddle far-field charts intentionally remain
 unavailable: those queries fall through to the exact engine until a
 per-deltoid-edge design is certified.
 
-- `0.4.0` (2026-07-30):
+- `0.5.0` (2026-07-30):
 
 ### TubeChart records gain a `theta_to_s` arc-length axis map
 
@@ -226,6 +250,19 @@ map `s = theta - theta_lo`, under which splining in `s` is the previous
 
 No trained artifact exists yet, so nothing on disk needs migrating — the
 window in which this is free closes when the first surrogate is trained.
+
+- `0.4.0` ():
+
+Registered four more test-only callers of `CertifiedPpgoMap.load` on
+`certified_ppgo_map` (`cogwheel/tests/test_lensing_ppgo_map.py`:
+`BandScopedRelaxationTestCase.setUpClass`,
+`CensusLikelihoodBandSplitMirrorTestCase.setUpClass`,
+`RelaxedCellSelfFalsificationTestCase.setUpClass`,
+`ShippedMapSaddleRelaxedCellTestCase.setUpClass`), each tagged `kind: test`
+per the 2026-08-13 convention (`contracts_changelog.d/
+2026-08-13_register_test_consumers.md`). These were flagged by the
+pre-commit consumer-graph advisory during the `certified_map_guard_
+relaxation` build; folding them in clears the noise for future commits.
 
 - `0.3.1` ():
 

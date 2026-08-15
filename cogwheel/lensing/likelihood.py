@@ -2252,7 +2252,11 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         GATE.  Serves ONLY when a chart is attached AND ``kappa == 0`` AND
         ``beta == 0`` AND the caustic-frame ``rho = caustic_rho(...) > 2.0``
-        (exterior, both parities) AND ``born_chart.covers(gamma, rho)``.
+        (exterior) AND ``born_chart.covers(gamma, rho, chart_w)`` (box
+        containment plus the served w sub-band inside the trained log-w
+        range).  The shipped artifact's ``gamma_grid`` covers the astroid
+        parity only (0.05-0.9); a saddle ``gamma > 1`` query fails
+        ``covers()`` and falls through regardless of this gate.
         The ``kappa == 0`` / ``beta == 0`` guards mirror the buried-path
         guard precedence (``KappaBetaGuardPrecedenceTestCase``): the chart
         axes are ``(gamma, rho, log_w)`` trained at the ``kappa = 0``,
