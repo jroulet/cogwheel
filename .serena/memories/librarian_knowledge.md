@@ -349,3 +349,14 @@
   closure in plain prose instead (name the file, note it was removed by
   this completion) rather than linking to a target that no longer exists
   by the time the fragment lands.
+
+
+## 2026-08-15 (saddle_tube_fundamental_training doc sync)
+
+- SPEC STALENESS EXTENDS TO CONFIG FIELD NAMES: the "SPEC entries that cite
+  a function by name go stale silently" family generalizes to any
+  identifier SPEC.md names — a SPEC/doc sentence citing a specific CONFIG
+  FIELD NAME (e.g. max_tube_arcs) goes stale the moment a later build
+  retires that field entirely, not just when its value/behavior changes.
+  Detection method is the same: grep the literal identifier across
+  SPEC.md whenever the corresponding code file is in the diff.

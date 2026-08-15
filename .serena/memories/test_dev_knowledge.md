@@ -644,3 +644,22 @@
   synthetic-fixture suite using different edges — before flipping old
   tests, check whether their fixtures can even reach the new allowlisted
   cell; if the edges never match, no pre-existing test needs updating.
+
+
+## 2026-08-15 (F081 saddle tube fundamental training)
+
+- DOUBLE-SIGNATURE SELF-FALSIFICATION: for a fix that changes TWO coupled
+  behaviors from a single wrong-currency input (widens the corridor AND
+  admits/excludes a witness), feeding the OLD wrong value (max_eta_max
+  instead of min_eta_max) should produce a "double signature" test failure
+  (both symptoms flip together) — stronger self-falsification than a
+  single-assertion mutation test.
+- PARTITION/CLUSTERING PREDICATES NEED AN INDEPENDENTLY-CODED ORACLE, NOT
+  A RE-CALL OF PRODUCTION: verifying a count invariant on a grouping
+  algorithm (e.g. 6 arcs -> 2 D2-orbit reps) requires an independently
+  written classifier (e.g. a from-scratch union-find via
+  _circular_gap/_independent_orbit_labels), never a call into the same
+  production clustering function under test — this is a distinct pattern
+  from "oracles must call shipping code" (that rule is for NUMERICAL
+  physics oracles, not structural/algorithmic correctness of the thing
+  being tested).

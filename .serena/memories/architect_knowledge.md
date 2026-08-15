@@ -675,3 +675,45 @@
   design ambiguity. Generalizes: when a design adds args to a shared call,
   grep ALL call sites of that function name, not just the one the brief
   names.
+
+## 2026-08-14/15 build (tiling_census_node_budget)
+
+- ENGINE-FREE census design pattern: reuse existing tiler fns as THIN
+  CALLERS (never reimplement selection/counting logic) — parallel
+  reimplementation is the F-class defect the census exists to avoid.
+  When a census necessarily omits a downstream trim step (e.g. per-node
+  ppGO trim) because mirroring it would require re-implementing DROP
+  DECISION logic (a second copy of decision logic), the right triage is
+  DISCLOSE the one-directional (conservative, over-count only) divergence
+  via docstring + an explicit output field (e.g. `ppgo_trim_modeled:
+  False`) rather than fully mirroring it — full fidelity isn't worth the
+  duplication-drift risk for a pre-campaign gate.
+
+## 2026-08-14/15 build (saddle_tube_fundamental_training, F081)
+
+- v1 plan REJECTED: it enshrined the band-wide max(arc_r_min) as an
+  invariant to PRESERVE — but that max IS the F081 starvation defect
+  (an outlier outer-arc r_min balloons the shared admission shell and
+  starves lobe/far-field tiles). Lesson: when a fix's own acceptance
+  criterion is "preserve invariant X" and X is exactly the quantity the
+  triggering defect report says is wrong, re-derive the acceptance
+  criterion from the defect report, don't just port the old value
+  forward.
+- v2 (shipped): Part A = orbit-partition trim of per-parity training arcs
+  by D2 midpoint-angle clustering (retiring the max_tube_arcs knob
+  entirely — count follows the partition, never hardcoded); Part B =
+  route the two SHARED admission scalars (saddle lobe eta_max, far-field
+  exclusion_rho) to the REGION-ADJACENT min(arc_r_min) instead of the
+  band-wide max(arc_r_min); tube w-cap + astroid interior-skip/wedge
+  extent correctly KEPT on the max (different consumer, different
+  currency).
+- Measured outcome (saddle band, real geometry): 6 detected deltoid arcs
+  -> 2 D2-orbit representative arcs (NOT the naive a-priori guess of 3;
+  orbit sizes {4,2}). Confirms the standing "DERIVE, don't hardcode"
+  rule — verify via independent union-find, not by eye. arc_r_min
+  anisotropy ~23x (0.399 to 9.156) on this fixture.
+- Cross-build consumer-suite handling: Coder correctly deferred 4 broken
+  test files (signature/field removal) to Test Dev AS FLAGGED findings;
+  Test Dev picked them up same session; Inspector's pass-2 required
+  RE-DERIVING each expectation from the live production selector (not
+  just deleting/loosening the old assertion) before granting PASS.

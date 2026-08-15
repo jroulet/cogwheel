@@ -632,3 +632,20 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   w_cert=19.164305537818887, w_trust=max(1.5*floor, floor+2)=28.74645830672833,
   w_ceiling=58.0 (finite, >= w_trust), while MARGINAL/CONTAM/off-band/edge-
   neighbor cells all still return UNKNOWN across w_cert/w_trust/w_ceiling.
+
+
+## F081 saddle tube fundamental training review (2026-08-15)
+
+- 6 detected deltoid arcs collapse to 2 D2-orbit representative arcs on
+  the real SADDLE_BAND fixture (orbit sizes {4,2}), derived via an
+  independent union-find (_circular_gap/_d2_gauge_images), NOT the
+  a-priori guess of 3 — always derive orbit count from the actual
+  partition, never assume the naive symmetry-order division.
+- arc_r_min anisotropy on this fixture: [0.399, 9.156] (~23x range);
+  f_max=0.4 => min_eta_max=0.160, max_eta_max=3.66. corridor_half is
+  correctly keyed to 1.0*min_eta_max (NOT max) confirming the F081 fix.
+- Serve-coverage equality pin (moral-imperative symmetry check): the
+  fundamental-domain served set (2 orbit reps) is a SUPERSET of the
+  all-6-arc incumbent serve set over a 720-angle ring sweep, 0
+  violations — this end-to-end coverage pin backs the 6->2 arc-count
+  collapse even if the internal orbit bookkeeping were subtly off.

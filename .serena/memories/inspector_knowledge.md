@@ -516,3 +516,14 @@
   vacuity) — sweep every docstring naming the removed mechanism, not just
   the one the finding cites, and re-verify any numeric claim (e.g. why a
   test passes) against a fresh run rather than trusting the prose.
+
+
+## 2026-08-15 (saddle_tube_fundamental_training, F081, pass-2)
+
+- DEFERRED FIX MUST RE-DERIVE, NOT DELETE OR LOOSEN: when a prior pass
+  defers 3 test-file findings to a later run ("owned by other runs"), that
+  deferral rationale is itself invalid — the correct fix re-derives each
+  broken expectation from the live production selector (e.g.
+  st._tube_training_arcs(structure, parity)) inside the SAME build that
+  changed the selector, not a delete-and-move-on. Confirmed green via
+  fresh collect-only + targeted suite runs, not by trusting the diff.

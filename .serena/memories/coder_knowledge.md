@@ -858,3 +858,29 @@
   PROSE VALUE: an allowlist keyed on float64 equality needs the true
   `repr()` read from `CertifiedPpgoMap.load()`'s grid, never a rounded
   value copied from a driver/inspector handoff note.
+
+## 2026-08-14/15 build (F081 saddle tube fundamental training + tiling_census)
+- ENGINE-FREE IS NO-CALL, NOT NO-IMPORT: importing any module inside
+  cogwheel/lensing/ necessarily runs the package's __init__ chain (prior/
+  posterior/marginalized_likelihood -> chang_refsdal -> channels ->
+  _schwinger), so amplitude-engine module OBJECTS load at import time
+  regardless. The achievable + load-bearing guarantee is NO ENGINE CALL +
+  mpmath never entering sys.modules — verify via mock.patch booby-traps on
+  the actual evaluate entry points, not via namespace-absence checks alone.
+- HETEROGENEOUS PER-ARC SCALAR NEEDS BOTH EXTREMES COMPUTED: when a shared
+  admission scalar (e.g. eta_max/exclusion_rho) is derived from a per-arc
+  quantity (arc_r_min) that varies widely across arcs on the same band
+  (~23x anisotropy measured), compute BOTH max_eta_max and min_eta_max and
+  route each existing consumer to whichever currency it actually needs —
+  don't silently reuse one extreme everywhere out of convenience.
+- REMOVED DATACLASS FIELD FAILS ONLY AT COLLECTION TIME: a config literal
+  referencing a since-removed field (e.g. TrainingConfig(max_tube_arcs=4))
+  inside a test CLASS BODY only raises TypeError when the class body
+  executes (pytest --collect-only or actual import) — py_compile does NOT
+  execute class bodies and reports clean. When told to fix a removed-field
+  break, verify with collect-only, not py_compile alone.
+- A NON-VACUOUS FIX RE-DERIVES, NEVER JUST DELETES/LOOSENS: fixing broken
+  tests after a signature/field removal by re-deriving the expected value
+  from the live production selector (e.g. calling _tube_training_arcs
+  directly) is the correct fix; deleting the assertion or loosening the
+  tolerance is not — Inspector's pass-2 explicitly required this pattern.
