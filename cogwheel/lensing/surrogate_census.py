@@ -443,8 +443,11 @@ def characterize_sample(
             rho = caustic_rho(gamma, float(np.hypot(y1, y2)), kappa=0.0)
         except (ValueError, LensDomainError):
             rho = None
-        if parity == 'saddle' and rho is not None and rho < 1.0:
-            rho = None
+        # Saddle rho<1 is no longer suppressed here: the decision lives
+        # solely in CertifiedPpgoMap.w_trust / w_ceiling (single
+        # authoritative source; F080 per-cell allowlist), so this census
+        # band-split mirror routes through the same map methods as the
+        # likelihood -- served == counted.
         if rho is not None:
             w_trust = ppgo_map.w_trust(parity, gamma, rho)
             if w_trust is not UNKNOWN:

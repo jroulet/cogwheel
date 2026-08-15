@@ -1,6 +1,6 @@
 ---
 section: Backlog
-depends_on: [lensing_training_campaign, lensing_certified_map_guard_relaxation]
+depends_on: [lensing_training_campaign, 2026-08-14_saddle_rho_relaxed_guard]
 ---
 
 - **NEXT-SESSION ORDER 7b/7 — FINAL ACCEPTANCE: THE NO-ENGINE-SERVE

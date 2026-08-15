@@ -201,10 +201,6 @@
           "file": "cogwheel/tests/test_lensing_saddle_rho_guards.py"
         },
         {
-          "name": "CensusBandSplitMirrorSelfFalsificationTestCase.test_site4_rho_none_is_load_bearing",
-          "file": "cogwheel/tests/test_lensing_saddle_rho_guards.py"
-        },
-        {
           "name": "LoaderCeilingRefusalTestCase.test_ceiling_less_artifact_is_hard_refused",
           "file": "cogwheel/tests/test_lensing_ppgo_bandsplit.py"
         },

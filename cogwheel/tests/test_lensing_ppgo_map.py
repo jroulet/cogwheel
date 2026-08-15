@@ -81,8 +81,10 @@ from cogwheel.lensing.ppgo_map import (
     caustic_rho, caustic_geometry)
 from cogwheel.lensing import ppgo_map
 from cogwheel.lensing.chang_refsdal import geometry
+from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.surrogate_training import (
     _coordinate_radius_bounds, _scalar_caustic_reach, _stratum_ppgo_boundary)
+from cogwheel.lensing import likelihood as _likelihood
 
 #: Directory for diagnostic plots (created lazily; hook-blocked from
 #: directory listings, so generated files are verified via ``glob``).
@@ -1770,6 +1772,651 @@ class Wp1DirectionSelfFalsificationTestCase(_GaugeTestCase):
                     f'a 0.1-rad-rotated direction passed the angle bar '
                     f'(angle={angle:.3e}) at gamma={gamma}')
             self.n_compared += 1
+
+
+# ----------------------------------------------------------------------
+# F080 -- per-cell evidence-keyed relaxation of the saddle rho<1 ppGO
+# certification guard (the map owns the decision; consumers deduplicated).
+#
+# These constants are FROZEN copies of the shipped `_SADDLE_RHO_RELAXED_CELLS`
+# Cell 1 entry.  They are deliberately NOT read from the live module (that
+# would make the governance tripwire vacuous against itself): a bit-level
+# copy here lets `RelaxedCellGovernanceTestCase` catch an accidental table
+# edit -- a shifted or typo'd allowlist edge, or a silently lowered floor.
+# ----------------------------------------------------------------------
+
+#: Grid band edges of the F080-CLEAN saddle cell (Cell 1), exact float64 as
+#: shipped.  The whole box is exactly ONE certified grid cell.
+_CELL1_FROZEN_GAMMA_LO = 1.1572945272629378
+_CELL1_FROZEN_GAMMA_HI = 1.3393306228327468
+_CELL1_FROZEN_RHO_LO = 0.0
+_CELL1_FROZEN_RHO_HI = 0.5
+
+#: Effective raw-``w`` floor the CLEAN cell serves at (== the shipped
+#: w_cert at this node, so `w_cert` returns exactly this).  Pinned to the
+#: literal at rtol=1e-9 per Professor: a hardcoded allowlist constant, so a
+#: bit-level pin catches accidental table edits.
+_CELL1_FROZEN_FLOOR = 19.164305537818887
+
+#: Derived margin-inflated dispatch floor for the CLEAN cell.  Pinned via
+#: the DERIVATION ``max(1.5 * floor, floor + 2.0)`` -- never a magic number.
+_CELL1_FROZEN_W_TRUST = max(1.5 * _CELL1_FROZEN_FLOOR,
+                            _CELL1_FROZEN_FLOOR + 2.0)
+
+#: A point strictly inside the CLEAN cell box (mid-gamma, low rho), derived
+#: from the frozen edges so it tracks a legitimate re-centering of the box
+#: rather than a magic coordinate; `RelaxedCellGovernanceTestCase` proves
+#: the live box still equals these frozen edges.
+_CELL1_IN_BOX_GAMMA = 0.5 * (_CELL1_FROZEN_GAMMA_LO + _CELL1_FROZEN_GAMMA_HI)
+_CELL1_IN_BOX_RHO = 0.25
+
+#: A generic saddle (gamma > 1) rho<1 query landing OUTSIDE every certified
+#: /allowlisted band -- gamma is well clear of the CLEAN Cell-1 band AND of
+#: the two gamma-adjacent certified cells the existing witness already
+#: covers.  Spec-1 part (c): all three map methods must return UNKNOWN here
+#: (the F073 blanket saddle rho<1 refusal, undisturbed by the F080 cell).
+_GENERIC_OFFBAND_SADDLE_GAMMA = 2.0
+_GENERIC_OFFBAND_SADDLE_RHO = 0.30
+
+#: Minimal gamma step across a Cell-1 grid edge into the adjacent (still
+#: certified, but off-allowlist) band.  The grid edge sits exactly at the
+#: frozen Cell-1 boundary, so ANY positive step lands off the CLEAN box;
+#: the band-scoped relaxation must not leak into the neighbor.
+_CELL1_GAMMA_EDGE_STEP = 1e-3
+
+
+class ShippedMapSaddleRelaxedCellTestCase(_GaugeTestCase):
+    """F080 CLEAN-cell relaxation on the SHIPPED certified ppGO map.
+
+    Spec (b): a saddle ``rho < 1`` query strictly inside the F080-CLEAN
+    Cell 1 box serves the finite effective floor 19.164 (NOT the UNKNOWN
+    sentinel), pinned to the literal at rtol=1e-9.  Spec (c): the
+    Professor-authorized margin rule flows CONSISTENTLY to ``w_trust`` and
+    ``w_ceiling`` -- ``w_trust == max(1.5*floor, floor+2.0) == 28.746`` and
+    ``w_ceiling`` is finite (not UNKNOWN) and ``>= w_trust``; the exact
+    inconsistency this build removes is one method still refusing while the
+    others serve.
+
+    The map is loaded FRESH via `CertifiedPpgoMap.load()` in `setUpClass`
+    rather than the process global (which is ``None`` unless installed and
+    is an xdist-worker leak hazard, memory F078); no global is touched.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Load the shipped certified ppGO map once for the class."""
+        cls.shipped_map = CertifiedPpgoMap.load()
+
+    def test_clean_cell_serves_frozen_floor(self) -> None:
+        """Spec (b): in-box saddle rho<1 serves 19.164, not UNKNOWN.
+
+        A small grid strictly inside the box is swept as the diagnostic the
+        Architect asked for: every point maps to the single CLEAN cell and
+        must return the identical frozen floor.  A shifted or typo'd
+        allowlist edge would drop some grid points back to UNKNOWN, and the
+        assertion message carries the full (gamma, rho) -> floor table.
+        """
+        self._expect_comparisons = True
+        span = _CELL1_FROZEN_GAMMA_HI - _CELL1_FROZEN_GAMMA_LO
+        gammas = [_CELL1_FROZEN_GAMMA_LO + frac * span
+                  for frac in (0.2, 0.5, 0.8)]
+        rhos = [0.05, 0.25, 0.45]           # strictly inside (0, 0.5)
+        table = []
+        for gamma, rho in itertools.product(gammas, rhos):
+            floor = self.shipped_map.w_cert('saddle', gamma, rho)
+            table.append((gamma, rho, floor))
+        report = '\n'.join(
+            f'  gamma={g:.6f} rho={r:.3f} -> {f!r}' for g, r, f in table)
+        for gamma, rho, floor in table:
+            with self.subTest(gamma=gamma, rho=rho):
+                self.assertIsNot(
+                    floor, UNKNOWN,
+                    f'in-box CLEAN cell wrongly refused:\n{report}')
+                self.assertNotEqual(
+                    floor, UNKNOWN,
+                    f'in-box CLEAN cell wrongly refused:\n{report}')
+                self.assertTrue(
+                    math.isfinite(float(floor)),
+                    f'in-box floor is not finite:\n{report}')
+                self.assertAlmostEqual(
+                    float(floor), _CELL1_FROZEN_FLOOR,
+                    delta=abs(_CELL1_FROZEN_FLOOR) * 1e-9,
+                    msg=f'in-box floor drifted from the frozen literal:'
+                        f'\n{report}')
+            self.n_compared += 1
+
+    def test_margin_rule_propagates_to_trust_and_ceiling(self) -> None:
+        """Spec (c): w_trust == max(1.5*floor, floor+2.0); w_ceiling finite.
+
+        Pins the margin DERIVATION (not a magic number) and asserts every
+        method serves the relaxed cell coherently: none may refuse while
+        another serves.
+        """
+        self._expect_comparisons = True
+        gamma, rho = _CELL1_IN_BOX_GAMMA, _CELL1_IN_BOX_RHO
+        w_cert = self.shipped_map.w_cert('saddle', gamma, rho)
+        w_trust = self.shipped_map.w_trust('saddle', gamma, rho)
+        w_ceiling = self.shipped_map.w_ceiling('saddle', gamma, rho)
+        diagnostic = (f'(w_cert, w_trust, w_ceiling) = '
+                      f'({w_cert!r}, {w_trust!r}, {w_ceiling!r})')
+
+        # No method may refuse while the others serve -- the inconsistency
+        # this build removes.
+        for name, value in (('w_cert', w_cert), ('w_trust', w_trust),
+                            ('w_ceiling', w_ceiling)):
+            self.assertIsNot(value, UNKNOWN,
+                             f'{name} still refuses the relaxed cell: '
+                             f'{diagnostic}')
+
+        expected_trust = max(1.5 * float(w_cert), float(w_cert) + 2.0)
+        self.assertAlmostEqual(
+            float(w_trust), expected_trust,
+            delta=abs(expected_trust) * 1e-9,
+            msg=f'w_trust does not equal the derived margin rule: '
+                f'{diagnostic}')
+        # And that derived value is the frozen 28.746 (guards the floor too).
+        self.assertAlmostEqual(
+            float(w_trust), _CELL1_FROZEN_W_TRUST,
+            delta=abs(_CELL1_FROZEN_W_TRUST) * 1e-9,
+            msg=f'w_trust drifted from the frozen derivation: {diagnostic}')
+
+        self.assertTrue(math.isfinite(float(w_ceiling)),
+                        f'w_ceiling is not finite: {diagnostic}')
+        self.assertGreaterEqual(
+            float(w_ceiling), float(w_trust),
+            f'w_ceiling below w_trust -- inverted trusted range: '
+            f'{diagnostic}')
+        self.n_compared += 1
+
+    def test_non_allowlisted_certified_saddle_low_rho_refuses(self) -> None:
+        """F073-preserved witness: a CERTIFIED saddle rho<1 cell OFF the
+        allowlist still refuses across all three methods.
+
+        The two gamma-adjacent cells (one band above, one below the CLEAN
+        box) are ``STATUS_CERTIFIED`` yet return UNKNOWN -- proving the
+        allowlist GATE, not the certification status, does the refusing.
+        This is the strongest F073 witness: status alone would serve them.
+        """
+        self._expect_comparisons = True
+        witnesses = (
+            ('gamma-below-box', _CELL1_FROZEN_GAMMA_LO - 0.05, 0.25),
+            ('gamma-above-box', _CELL1_FROZEN_GAMMA_HI + 0.05, 0.25),
+        )
+        for label, gamma, rho in witnesses:
+            cell = self.shipped_map._cell('saddle', gamma, rho)
+            self.assertIsNotNone(
+                cell, f'{label} witness fell off the grid; pick another')
+            # Premise: the witness cell IS certified (so only the allowlist
+            # gate can be responsible for the refusal).
+            self.assertEqual(
+                self.shipped_map.cell_status_grid[cell], STATUS_CERTIFIED,
+                f'{label} witness is not certified; premise lost')
+            for method in ('w_cert', 'w_trust', 'w_ceiling'):
+                value = getattr(self.shipped_map, method)('saddle', gamma, rho)
+                with self.subTest(witness=label, method=method):
+                    self.assertIs(
+                        value, UNKNOWN,
+                        f'{label}: certified-but-off-allowlist {method} '
+                        f'served {value!r}; F073 refusal broken')
+                self.n_compared += 1
+
+    def test_rho_half_boundary_stays_refused(self) -> None:
+        """The CLEAN box is rho in [0, 0.5): rho == 0.5 lands in the next
+        band and is NOT relaxed -- a boundary witness that the relaxation is
+        confined to its certified box.
+        """
+        self._expect_comparisons = True
+        floor = self.shipped_map.w_cert('saddle', _CELL1_IN_BOX_GAMMA, 0.5)
+        self.assertIs(
+            floor, UNKNOWN,
+            'rho == 0.5 (next band) was relaxed; box leaked upward')
+        self.n_compared += 1
+
+    def test_generic_offband_saddle_low_rho_refuses(self) -> None:
+        """Spec-1 part (c): a generic saddle rho<1 point OUTSIDE every
+        certified/allowlisted band refuses across all three methods.
+
+        The two gamma-adjacent certified cells (parts a/b -- the MARGINAL
+        Cell 2 and CONTAMINATED Cell 3 boxes) are already witnessed by
+        `test_non_allowlisted_certified_saddle_low_rho_refuses`; this adds
+        the genuinely distinct witness -- a saddle rho<1 query far from the
+        CLEAN band whose cell is NOT on the allowlist at all -- so the F080
+        entry has not perturbed the ambient F073 blanket refusal.
+        """
+        self._expect_comparisons = True
+        gamma, rho = _GENERIC_OFFBAND_SADDLE_GAMMA, _GENERIC_OFFBAND_SADDLE_RHO
+        # Premise: this cell is genuinely off the allowlist (the relaxation
+        # helper declines it) -- so the refusal below is the F073 blanket
+        # rule, not an accident of grid membership.
+        self.assertIsNone(
+            self.shipped_map._saddle_rho_relaxed_floor('saddle', gamma, rho),
+            'generic-offband witness is unexpectedly allowlisted; pick a '
+            'gamma/rho further from the CLEAN Cell-1 band')
+        for method in ('w_cert', 'w_trust', 'w_ceiling'):
+            value = getattr(self.shipped_map, method)('saddle', gamma, rho)
+            with self.subTest(method=method):
+                self.assertIs(
+                    value, UNKNOWN,
+                    f'{method} served a generic off-band saddle rho<1 point '
+                    f'({value!r}); F073 blanket refusal broken')
+            self.n_compared += 1
+
+
+class BandScopedRelaxationTestCase(_GaugeTestCase):
+    """Spec-2: the F080 relaxation is EDGE-SCOPED, not blanket-saddle.
+
+    The allowlist keys on exact grid-edge equality, so the relaxation can
+    only serve the ONE certified Cell-1 box.  This proves the confinement
+    on both axes of the SHIPPED map:
+
+    * rho axis -- sweeping rho from 0 through 0.6 at the Cell-1 gamma, the
+      served -> UNKNOWN transition must land EXACTLY at the rho-band edge
+      0.5 (served strictly below, refused at/above); the box is rho in
+      ``[0, 0.5)``.
+    * gamma axis -- a query one minimal grid-edge step below 1.157 or above
+      1.339 (same Cell-1 rho, still saddle & rho<1) lands in the adjacent
+      band and must return UNKNOWN.
+
+    The rho boundary is read from the frozen ``_CELL1_FROZEN_RHO_HI`` rather
+    than pinned as a bare coordinate, so the transition assertion tracks the
+    certified box.  A diagnostic served-vs-UNKNOWN curve is saved to
+    ``output/``.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Load the shipped certified ppGO map once for the class."""
+        cls.shipped_map = CertifiedPpgoMap.load()
+
+    def test_rho_transition_lands_exactly_at_the_band_edge(self) -> None:
+        """Sweep rho 0->0.6 at Cell-1 gamma; served below 0.5, UNKNOWN above.
+
+        The last served rho must be strictly below the frozen 0.5 edge and
+        the first refused rho at/above it -- i.e. the relaxation cannot leak
+        into the next rho band.  Saves the served-vs-UNKNOWN curve.
+        """
+        self._expect_comparisons = True
+        gamma = _CELL1_IN_BOX_GAMMA
+        edge = _CELL1_FROZEN_RHO_HI
+        rhos = np.linspace(0.0, 0.6, 61)
+        served_flags: list[tuple[float, bool]] = []
+        for rho in rhos:
+            floor = self.shipped_map.w_cert('saddle', gamma, float(rho))
+            served = floor is not UNKNOWN
+            served_flags.append((float(rho), served))
+            with self.subTest(rho=float(rho)):
+                if rho < edge:
+                    self.assertIsNot(
+                        floor, UNKNOWN,
+                        f'rho={rho:.4f} (< {edge}) inside the CLEAN box was '
+                        f'refused; the box lost coverage')
+                else:
+                    self.assertIs(
+                        floor, UNKNOWN,
+                        f'rho={rho:.4f} (>= {edge}, next band) was served; '
+                        f'the relaxation leaked across the rho-band edge')
+            self.n_compared += 1
+
+        # Transition-exactness: last served rho < edge <= first refused rho.
+        served_rhos = [r for r, s in served_flags if s]
+        refused_rhos = [r for r, s in served_flags if not s]
+        self.assertTrue(served_rhos, 'no rho in the sweep served; premise lost')
+        self.assertTrue(refused_rhos,
+                        'no rho in the sweep refused; sweep too narrow')
+        self.assertLess(
+            max(served_rhos), edge,
+            'a served rho sits at/above the band edge; leak upward')
+        self.assertGreaterEqual(
+            min(refused_rhos), edge,
+            'a refused rho sits below the band edge; box lost coverage')
+
+        self._save_transition_plot(gamma, edge, served_flags)
+
+    def test_gamma_neighbors_off_the_box_refuse(self) -> None:
+        """One minimal grid-edge step off Cell-1 on the gamma axis refuses.
+
+        Just below 1.157 and just above 1.339 (same Cell-1 rho, still saddle
+        & rho<1) fall into the adjacent bands and must be UNKNOWN across all
+        three methods -- the relaxation does not bleed into neighbor gamma
+        cells.
+        """
+        self._expect_comparisons = True
+        rho = _CELL1_IN_BOX_RHO
+        neighbors = (
+            ('just-below-gamma-lo',
+             _CELL1_FROZEN_GAMMA_LO - _CELL1_GAMMA_EDGE_STEP),
+            ('just-above-gamma-hi',
+             _CELL1_FROZEN_GAMMA_HI + _CELL1_GAMMA_EDGE_STEP),
+        )
+        for label, gamma in neighbors:
+            # Premise: the neighbor is still a saddle rho<1 query but NOT on
+            # the allowlist (edge-scoped keying declines it).
+            self.assertGreater(gamma, 1.0, f'{label} is not a saddle gamma')
+            self.assertIsNone(
+                self.shipped_map._saddle_rho_relaxed_floor(
+                    'saddle', gamma, rho),
+                f'{label} unexpectedly allowlisted; the edge step did not '
+                f'cross the grid boundary')
+            for method in ('w_cert', 'w_trust', 'w_ceiling'):
+                value = getattr(self.shipped_map, method)('saddle', gamma, rho)
+                with self.subTest(neighbor=label, method=method):
+                    self.assertIs(
+                        value, UNKNOWN,
+                        f'{label}: {method} served {value!r}; the relaxation '
+                        f'leaked into the neighbor gamma band')
+                self.n_compared += 1
+
+    def _save_transition_plot(self, gamma: float, edge: float,
+                              served_flags: list[tuple[float, bool]]) -> None:
+        """Save the rho served-vs-UNKNOWN step curve (best-effort)."""
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except Exception:                       # pragma: no cover - optional
+            return
+        _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        rhos = [r for r, _ in served_flags]
+        flags = [1 if s else 0 for _, s in served_flags]
+        fig, ax = plt.subplots(figsize=(6, 3))
+        ax.step(rhos, flags, where='post', color='C0')
+        ax.axvline(edge, color='C3', ls='--', label=f'rho band edge = {edge}')
+        ax.set_xlabel('rho (caustic-relative)')
+        ax.set_ylabel('served (1) / UNKNOWN (0)')
+        ax.set_yticks([0, 1])
+        ax.set_title(f'F080 band-scoped relaxation, saddle gamma={gamma:.4f}')
+        ax.legend(loc='center right')
+        fig.tight_layout()
+        fig.savefig(
+            _OUTPUT_DIR / 'band_scoped_relaxation_rho_transition.png', dpi=110)
+        plt.close(fig)
+
+
+class RelaxedCellGovernanceTestCase(_GaugeTestCase):
+    """Governance tripwire on the live `_SADDLE_RHO_RELAXED_CELLS` table.
+
+    The false-admit/false-refuse asymmetry makes an accidental EDIT to the
+    allowlist the dangerous change: a shifted edge silently changes which
+    cells serve, a lowered ``effective_floor`` silently serves at an
+    uncertified-safe ``w``.  This pins the one active entry to the frozen
+    Cell 1 literals (bit-exact), so any table edit trips here.  The frozen
+    constants are copies, not live reads, so the comparison is never
+    vacuous against itself.
+    """
+
+    def test_allowlist_holds_exactly_the_frozen_clean_cell(self) -> None:
+        """Exactly one active entry, equal to the frozen Cell 1 literals."""
+        self._expect_comparisons = True
+        active = ppgo_map._SADDLE_RHO_RELAXED_CELLS
+        self.assertEqual(
+            len(active), 1,
+            'the saddle rho<1 allowlist changed size; a cell was '
+            '(de)activated -- re-validate the driver evidence before '
+            'updating this pin')
+        entry = active[0]
+        self.assertEqual(entry.parity, 'saddle')
+        self.assertEqual(entry.gamma_lo, _CELL1_FROZEN_GAMMA_LO)
+        self.assertEqual(entry.gamma_hi, _CELL1_FROZEN_GAMMA_HI)
+        self.assertEqual(entry.rho_lo, _CELL1_FROZEN_RHO_LO)
+        self.assertEqual(entry.rho_hi, _CELL1_FROZEN_RHO_HI)
+        self.assertEqual(entry.effective_floor, _CELL1_FROZEN_FLOOR)
+        self.n_compared += 1
+
+
+class _BandSplitProbe:
+    """Minimal carrier binding the REAL shipping band-split methods.
+
+    `_ppgo_band_split` and its helper `_ppgo_cell_coords` are lifted
+    verbatim from `LensedRelativeBinningLikelihood`; binding them onto this
+    lightweight object runs the genuine production dispatch code (they touch
+    only ``self._ppgo_cell_coords`` and likelihood-module globals -- no
+    other likelihood state), so no heavy `LensedRelativeBinningLikelihood`
+    instance is constructed.  This is what makes the mirror a comparison of
+    the ACTUAL production path, not a re-transcription of it.
+    """
+
+    _ppgo_cell_coords = (
+        _likelihood.LensedRelativeBinningLikelihood._ppgo_cell_coords)
+    _ppgo_band_split = (
+        _likelihood.LensedRelativeBinningLikelihood._ppgo_band_split)
+
+
+def _census_band_split(shipped_map: CertifiedPpgoMap, gamma: float,
+                       y1: float, y2: float) -> float | None:
+    """Census-side ppGO dispatch floor, mirroring `characterize_sample`.
+
+    Reproduces the band-split ``w_trust`` derivation inlined in
+    `surrogate_census.characterize_sample` (parity rule + the authoritative
+    `caustic_rho` gauge + ``ppgo_map.w_trust`` with ``UNKNOWN -> None``).
+    The reach converter and the map method are the SAME shipping primitives
+    the census calls; only the trivial parity ternary and the UNKNOWN guard
+    are re-expressed here, because the census never surfaces this floor on
+    its returned `SampleRecord` (it is consumed internally to narrow the
+    chart band, then discarded), so no engine run can read it back out.
+    """
+    parity = 'positive' if gamma < 1.0 else 'saddle'
+    try:
+        rho = caustic_rho(gamma, float(np.hypot(y1, y2)), kappa=0.0)
+    except (ValueError, LensDomainError):
+        return None
+    w_trust = shipped_map.w_trust(parity, gamma, rho)
+    if w_trust is UNKNOWN:
+        return None
+    return float(w_trust)
+
+
+class CensusLikelihoodBandSplitMirrorTestCase(_GaugeTestCase):
+    """Spec-3: served == counted -- the census mirror agrees with the
+    production likelihood band-split.
+
+    Single-source discipline: `characterize_sample` and
+    `_surrogate_coefficients` must dispatch off the SAME certified-ppGO map
+    at the SAME cell.  Both derive ``(parity, gamma, rho)`` from the parity
+    boundary at ``gamma = 1`` and the authoritative `caustic_rho` gauge, and
+    both read ``w_trust`` from the map -- so for any source they must agree
+    on the ppGO dispatch floor (or agree that there is none).
+
+    Engine-free by construction (a DECISIVE SUBSTITUTION, not an
+    approximation): the likelihood path here is the REAL
+    `_ppgo_band_split` shipping method run through `_BandSplitProbe`, and
+    the census floor is not observable on the `SampleRecord` the engine
+    returns, so a full `characterize_sample` run could not read it back --
+    the engine-free map query IS the only faithful witness of the census
+    band-split.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Load the shipped map and derive in-box / off-band saddle sources.
+
+        Both sources are derived from the LIVE `caustic_geometry` reach so
+        the ``rho`` they realise tracks the gauge, never a pinned literal:
+        ``|y| = rho * reach`` gives ``caustic_rho(gamma, |y|) == rho``.
+        """
+        cls.shipped_map = CertifiedPpgoMap.load()
+
+        gamma = _CELL1_IN_BOX_GAMMA
+        reach, _direction = caustic_geometry(gamma, 0.0)
+        cls.in_box_lens = {
+            'gamma': gamma, 'y1': _CELL1_IN_BOX_RHO * float(reach), 'y2': 0.0}
+
+        off_gamma = _GENERIC_OFFBAND_SADDLE_GAMMA
+        off_reach, _off_direction = caustic_geometry(off_gamma, 0.0)
+        cls.off_band_lens = {
+            'gamma': off_gamma,
+            'y1': _GENERIC_OFFBAND_SADDLE_RHO * float(off_reach), 'y2': 0.0}
+
+    def setUp(self) -> None:
+        """Install the shipped map as the process global for the probe."""
+        super().setUp()
+        self._probe = _BandSplitProbe()
+        self._saved_global = ppgo_map.get_certified_ppgo_map()
+        ppgo_map.set_certified_ppgo_map(self.shipped_map)
+
+    def tearDown(self) -> None:
+        """Restore the pre-test process global (F078 leak hygiene)."""
+        ppgo_map.set_certified_ppgo_map(self._saved_global)
+        super().tearDown()
+
+    def test_in_box_census_and_likelihood_agree(self) -> None:
+        """A CLEAN Cell-1 saddle source: both paths serve the SAME floor.
+
+        The likelihood side is the real `_ppgo_band_split`; the census side
+        is the `characterize_sample` band-split rule.  Both must return the
+        frozen ``w_trust`` (28.746) -- the cell now serves in BOTH.
+        """
+        self._expect_comparisons = True
+        lens = self.in_box_lens
+        # Premise: this source really is the allowlisted CLEAN cell.
+        rho = caustic_rho(lens['gamma'],
+                          float(np.hypot(lens['y1'], lens['y2'])), kappa=0.0)
+        self.assertLess(rho, 1.0, 'in-box source is not rho<1; premise lost')
+        self.assertIsNotNone(
+            self.shipped_map._saddle_rho_relaxed_floor(
+                'saddle', lens['gamma'], rho),
+            'in-box source is not on the allowlist; premise lost')
+
+        likelihood_floor = self._probe._ppgo_band_split(lens)
+        census_floor = _census_band_split(
+            self.shipped_map, lens['gamma'], lens['y1'], lens['y2'])
+
+        self.assertIsNotNone(
+            likelihood_floor,
+            'likelihood refused to band-split the CLEAN cell')
+        self.assertIsNotNone(
+            census_floor, 'census refused to band-split the CLEAN cell')
+        # served == counted: identical dispatch floor (same map, same cell).
+        self.assertEqual(
+            likelihood_floor, census_floor,
+            'census and likelihood band-split floors diverge for the CLEAN '
+            'cell -- single-source discipline broken')
+        self.assertAlmostEqual(
+            likelihood_floor, _CELL1_FROZEN_W_TRUST,
+            delta=abs(_CELL1_FROZEN_W_TRUST) * 1e-9,
+            msg='shared band-split floor drifted from the frozen w_trust')
+        self.n_compared += 1
+
+    def test_off_band_both_yield_no_ppgo_band(self) -> None:
+        """A non-allowlisted saddle rho<1 source: both yield 'no ppGO band'.
+
+        Neither path may invent a dispatch floor where the map refuses --
+        both return ``None`` (UNKNOWN downstream), together.
+        """
+        self._expect_comparisons = True
+        lens = self.off_band_lens
+        rho = caustic_rho(lens['gamma'],
+                          float(np.hypot(lens['y1'], lens['y2'])), kappa=0.0)
+        self.assertLess(rho, 1.0, 'off-band source is not rho<1; premise lost')
+        self.assertIsNone(
+            self.shipped_map._saddle_rho_relaxed_floor(
+                'saddle', lens['gamma'], rho),
+            'off-band source is unexpectedly allowlisted; premise lost')
+
+        likelihood_floor = self._probe._ppgo_band_split(lens)
+        census_floor = _census_band_split(
+            self.shipped_map, lens['gamma'], lens['y1'], lens['y2'])
+        self.assertIsNone(
+            likelihood_floor,
+            f'likelihood band-split an off-band cell ({likelihood_floor!r})')
+        self.assertIsNone(
+            census_floor,
+            f'census band-split an off-band cell ({census_floor!r})')
+        self.n_compared += 1
+
+    def test_empty_allowlist_flips_both_to_none(self) -> None:
+        """Self-falsification: emptying the allowlist refuses the CLEAN cell
+        on BOTH paths together -- so the agreement above is not vacuous.
+
+        Absent the F080 entry the F073 blanket refusal returns; the SAME
+        in-box source that served 28.746 on both paths now yields ``None``
+        on both.  If either path kept serving, the mirror would be reading
+        a hardcoded floor rather than the live map.
+        """
+        self._expect_comparisons = True
+        lens = self.in_box_lens
+        with mock.patch.object(ppgo_map, '_SADDLE_RHO_RELAXED_CELLS', ()):
+            likelihood_floor = self._probe._ppgo_band_split(lens)
+            census_floor = _census_band_split(
+                self.shipped_map, lens['gamma'], lens['y1'], lens['y2'])
+        self.assertIsNone(
+            likelihood_floor,
+            'likelihood still served the CLEAN cell with an empty allowlist; '
+            'the mirror is vacuous on the likelihood side')
+        self.assertIsNone(
+            census_floor,
+            'census still served the CLEAN cell with an empty allowlist; '
+            'the mirror is vacuous on the census side')
+        self.n_compared += 1
+
+
+class RelaxedCellSelfFalsificationTestCase(_GaugeTestCase):
+    """Prove the F080 relaxation pins have TEETH on the shipped map.
+
+    Each test corrupts exactly one ingredient of the live allowlist and
+    confirms the CLEAN-cell behavior would change -- so neither the
+    exact-floor pin (spec b) nor the margin pin (spec c) is vacuously
+    green.  The allowlist is restored automatically by `mock.patch.object`.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Load the shipped certified ppGO map once for the class."""
+        cls.shipped_map = CertifiedPpgoMap.load()
+
+    def test_empty_allowlist_flips_the_clean_cell_to_unknown(self) -> None:
+        """With no allowlist, the CLEAN cell refuses across all methods.
+
+        This is the direct falsifier of `test_clean_cell_serves_frozen_floor`
+        and `test_margin_rule_propagates_*`: absent the F080 entry the F073
+        blanket refusal returns and the identical in-box query is UNKNOWN.
+        """
+        self._expect_comparisons = True
+        gamma, rho = _CELL1_IN_BOX_GAMMA, _CELL1_IN_BOX_RHO
+        with mock.patch.object(ppgo_map, '_SADDLE_RHO_RELAXED_CELLS', ()):
+            for method in ('w_cert', 'w_trust', 'w_ceiling'):
+                value = getattr(self.shipped_map, method)('saddle', gamma, rho)
+                with self.subTest(method=method):
+                    self.assertIs(
+                        value, UNKNOWN,
+                        f'{method} still served with an empty allowlist; '
+                        f'the relaxation pin is vacuous')
+                self.n_compared += 1
+
+    def test_raising_the_floor_moves_the_served_value(self) -> None:
+        """A raised effective_floor moves w_cert AND w_trust off the frozen
+        literals -- so the rtol=1e-9 pins would have caught it.
+
+        ``w_cert = max(shipped_w_cert, effective_floor)``; raising the floor
+        above the shipped value makes it dominate, and the margin rule
+        carries the change into ``w_trust``.  Proves both frozen-literal
+        pins track the table rather than coincidentally matching.
+        """
+        self._expect_comparisons = True
+        gamma, rho = _CELL1_IN_BOX_GAMMA, _CELL1_IN_BOX_RHO
+        raised = _CELL1_FROZEN_FLOOR + 5.0
+        entry = ppgo_map._SADDLE_RHO_RELAXED_CELLS[0]
+        mutated = (entry._replace(effective_floor=raised),)
+        with mock.patch.object(
+                ppgo_map, '_SADDLE_RHO_RELAXED_CELLS', mutated):
+            w_cert = self.shipped_map.w_cert('saddle', gamma, rho)
+            w_trust = self.shipped_map.w_trust('saddle', gamma, rho)
+        # The served floor moved to the raised value (dominates the shipped).
+        self.assertAlmostEqual(
+            float(w_cert), raised, delta=abs(raised) * 1e-9,
+            msg='raising effective_floor did not move w_cert; the '
+                'exact-floor pin has no teeth')
+        self.assertGreater(
+            abs(float(w_cert) - _CELL1_FROZEN_FLOOR), 1.0,
+            'the frozen exact-floor pin would NOT have caught this edit')
+        # And w_trust followed the margin rule off the frozen 28.746.
+        expected_trust = max(1.5 * raised, raised + 2.0)
+        self.assertAlmostEqual(
+            float(w_trust), expected_trust, delta=abs(expected_trust) * 1e-9,
+            msg='w_trust did not track the raised floor')
+        self.assertGreater(
+            abs(float(w_trust) - _CELL1_FROZEN_W_TRUST), 1.0,
+            'the frozen margin pin would NOT have caught this edit')
+        self.n_compared += 1
 
 
 if __name__ == '__main__':

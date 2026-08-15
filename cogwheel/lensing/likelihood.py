@@ -1567,8 +1567,11 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 gamma, float(np.hypot(lens['y1'], lens['y2'])), kappa=0.0)
         except LensDomainError:
             return None
-        if parity == 'saddle' and rho < 1.0:
-            return None
+        # The saddle rho<1 decision now lives solely in
+        # CertifiedPpgoMap.w_trust / w_ceiling (single authoritative
+        # source; F080 per-cell allowlist).  A still-refused cell returns
+        # UNKNOWN downstream, so _ppgo_band_split / _ppgo_cell_ceiling are
+        # unchanged there; only the allowlisted cell newly flows through.
         return parity, gamma, rho
 
     def _ppgo_band_split(self, lens):

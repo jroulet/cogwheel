@@ -70,35 +70,52 @@ class _PpgoProbe:
     _ppgo_cell_coords = LensedRelativeBinningLikelihood._ppgo_cell_coords
 
 
-class PpgocellcoordsCorridorRefusalTestCase(_SaddleRhoTestCase):
-    """TD-1: ``_ppgo_cell_coords`` returns None for saddle corridor sources.
+class PpgocellcoordsCorridorDelegationTestCase(_SaddleRhoTestCase):
+    """TD-1: ``_ppgo_cell_coords`` DELEGATES the saddle rho<1 decision.
 
-    The guard ``if parity == 'saddle' and rho < 1.0`` fires because all
-    three corridor sources have ``|y| < caustic_reach`` (rho < 1) and
-    gamma > 1 (saddle).  The ppGO map taints this band, so the cell
-    coordinate derivation rightly refuses.
+    SITE 1 -- the ``if parity == 'saddle' and rho < 1.0: return None``
+    pre-guard formerly inside ``_ppgo_cell_coords`` -- was removed by
+    design.  The per-cell allowlist in ``CertifiedPpgoMap`` (F080) is now
+    the single authoritative source of the saddle rho<1 serve/refuse
+    decision, so ``_ppgo_cell_coords`` returns the plain
+    ``(parity, gamma, rho)`` delegation tuple for EVERY saddle corridor
+    source.  Whether that cell is served (Cell 1) or refused (every other
+    saddle rho<1 cell) is decided downstream by ``w_trust`` / ``w_ceiling``
+    -- pinned in ``PpgoMapDefenseInDepthTestCase``.
+
+    All three corridor sources have gamma > 1 (saddle) and rho < 1; the
+    method rightly returns the delegation tuple rather than ``None``.
     """
 
-    def test_corridor_source_0(self) -> None:
+    def _assert_delegates(self, y1: float, y2: float) -> None:
+        from cogwheel.lensing.ppgo_map import caustic_rho
         probe = _PpgoProbe()
-        lens = {'gamma': 1.3, 'y1': 0.0, 'y2': 0.3}
+        lens = {'gamma': _SADDLE_GAMMA, 'y1': y1, 'y2': y2}
         result = probe._ppgo_cell_coords(lens)
         self.comparisons += 1
-        self.assertIsNone(result)
+        self.assertIsNotNone(
+            result,
+            'SITE 1 removed: saddle rho<1 delegates to the map, not None')
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 3)
+        parity, gamma, rho = result
+        self.assertEqual(parity, 'saddle')
+        self.assertEqual(gamma, _SADDLE_GAMMA)
+        expected_rho = caustic_rho(
+            _SADDLE_GAMMA, float(np.hypot(y1, y2)), kappa=0.0)
+        self.comparisons += 1
+        self.assertAlmostEqual(rho, expected_rho)
+        self.assertLess(rho, 1.0, 'premise: corridor source has rho < 1')
+
+    def test_corridor_source_0(self) -> None:
+        self._assert_delegates(0.0, 0.3)
 
     def test_corridor_source_1(self) -> None:
-        probe = _PpgoProbe()
-        lens = {'gamma': 1.3, 'y1': 0.5, 'y2': 0.0}
-        result = probe._ppgo_cell_coords(lens)
-        self.comparisons += 1
-        self.assertIsNone(result)
+        self._assert_delegates(0.5, 0.0)
 
     def test_corridor_source_2(self) -> None:
-        probe = _PpgoProbe()
-        lens = {'gamma': 1.3, 'y1': 0.3, 'y2': 0.3}
-        result = probe._ppgo_cell_coords(lens)
-        self.comparisons += 1
-        self.assertIsNone(result)
+        self._assert_delegates(0.3, 0.3)
+
 
 class CensusCorridorBornClassificationTestCase(_SaddleRhoTestCase):
     """TD-1: ``classify_fallthrough`` returns ``'born'`` for saddle corridor.
@@ -268,35 +285,16 @@ class PositiveParityCensusTestCase(_SaddleRhoTestCase):
         self.assertNotEqual(category, 'born')
 
 class SaddleRhoGuardSelfFalsificationTestCase(_SaddleRhoTestCase):
-    """Reachable-red: the saddle rho guards CAN go red.
+    """Reachable-red: the SURVIVING saddle rho guards CAN go red.
 
     A numerical/decision suite without a self-falsification class is not
-    finished.  These foils prove that each guard tested above is genuinely
-    load-bearing — bypassing it flips the outcome.
+    finished.  SITE 1 (the ``_ppgo_cell_coords`` saddle rho<1 refusal) was
+    removed by design -- its foil was retired with it.  These foils prove
+    the two guards that remain are genuinely load-bearing: the census
+    ``gamma > 1 and image_count == 2 -> 'born'`` classifier, and the
+    ``parity == 'saddle'`` scoping that keeps positive-parity delegation
+    untouched.
     """
-
-    #: A saddle source that the rho<1 guard refuses under the real code.
-    _SADDLE_CORRIDOR_LENS: dict[str, float] = {'gamma': 1.3, 'y1': 0.0, 'y2': 0.3}
-
-    def test_ppgo_cell_coords_would_return_tuple_without_guard(self) -> None:
-        """Without the parity guard, ``_ppgo_cell_coords`` returns a tuple.
-
-        If the guard ``if parity == 'saddle' and rho < 1.0`` were removed,
-        the corridor source would return ``('saddle', 1.3, rho)`` instead
-        of None — proving the guard is load-bearing.
-        """
-        # Compute what the guard blocks: parity and rho for this source.
-        from cogwheel.lensing.ppgo_map import caustic_rho
-        rho = caustic_rho(1.3, 0.3)
-        self.comparisons += 1
-        self.assertLess(rho, 1.0, 'premise: corridor source has rho < 1')
-        # The guard blocks ('saddle', 1.3, rho) — without it, this tuple
-        # would be returned.  Asserting the blocking is the test's purpose.
-        probe = _PpgoProbe()
-        result = probe._ppgo_cell_coords(self._SADDLE_CORRIDOR_LENS)
-        self.comparisons += 1
-        self.assertIsNone(result,
-                          'guard must return None for saddle corridor')
 
     def test_census_would_not_be_born_without_image_count_guard(self) -> None:
         """Without the image_count guard, census falls through to out-of-box.
@@ -345,25 +343,21 @@ class SaddleRhoGuardSelfFalsificationTestCase(_SaddleRhoTestCase):
 # ---------------------------------------------------------------------------
 
 class PpgoMapDefenseInDepthTestCase(_SaddleRhoTestCase):
-    """TD-4: ``CertifiedPpgoMap.w_cert`` returns UNKNOWN for saddle rho < 1.
+    """TD-4: ``CertifiedPpgoMap.w_cert`` gates saddle rho<1 per-cell (F080).
 
-    SITE 5 guard (``ppgo_map.py``)::
-
-        if parity == 'saddle' and rho < 1.0:
-            return UNKNOWN
-
-    This is defense-in-depth — the shipped map already has CERTIFIED
-    saddle cells at ``rho < 1`` (gamma=[1.1,1.55], rho=[0,0.5]) whose
-    ``w_cert_grid`` floors are 19—22.  Without this guard,
-    ``w_cert('saddle', 1.3, 0.25)`` would return ~19.2, propagating a
-    certified-but-unsound floor into the WP2 dispatch.  The guard blocks
-    them unconditionally.
+    The blanket saddle rho<1 refusal was replaced by a per-cell
+    allowlist: exactly ONE cell -- Cell 1, the F080-CLEAN band
+    (parity='saddle', gamma in [1.1572945272629378, 1.3393306228327468],
+    rho in [0.0, 0.5)) -- now serves its certified floor
+    (``w_cert`` = 19.164305537818887), while EVERY other saddle rho<1
+    cell, certified-in-grid or not, still returns UNKNOWN.  ``w_cert`` /
+    ``w_trust`` / ``w_ceiling`` all consult the same allowlist so they
+    route consistently.
 
     Positive-parity ``rho < 1`` cells are all BEYOND_WALL in the shipped
-    map, so the fixture ``w_cert('positive', 0.5, 0.5)`` returns UNKNOWN
-    from cell status — NOT from the guard.  This proves the parity check
-    is load-bearing (only saddle is blocked), but the spec's claim that
-    it returns a float is false with the current map coverage.
+    map, so ``w_cert('positive', 0.5, 0.5)`` returns UNKNOWN from cell
+    status — the allowlist is saddle-only and never touches positive
+    parity.
     """
 
     @classmethod
@@ -372,11 +366,15 @@ class PpgoMapDefenseInDepthTestCase(_SaddleRhoTestCase):
         cls._ppgo_map = CertifiedPpgoMap.load()
 
     def test_saddle_rho_lt_1_returns_unknown(self) -> None:
+        # (saddle, gamma=1.3, rho=0.5): rho=0.5 is the exclusive upper edge
+        # of Cell 1's rho band [0.0, 0.5), so this lands in the next band
+        # and is NOT allowlisted -> UNKNOWN.
         result = self._ppgo_map.w_cert('saddle', 1.3, 0.5)
         self.comparisons += 1
         from cogwheel.lensing.ppgo_map import UNKNOWN
         self.assertIs(result, UNKNOWN,
-                      'SITE 5 guard must return UNKNOWN for saddle rho<1')
+                      'a saddle rho<1 cell outside the Cell 1 allowlist '
+                      'must return UNKNOWN')
 
     def test_saddle_rho_ge_1_returns_float(self) -> None:
         result = self._ppgo_map.w_cert('saddle', 1.3, 1.5)
@@ -388,23 +386,53 @@ class PpgoMapDefenseInDepthTestCase(_SaddleRhoTestCase):
         self.assertTrue(math.isfinite(result))
 
     def test_saddle_rho_lt_1_overrides_certified_cell(self) -> None:
-        """SITE 5 blocks a CERTIFIED saddle cell: guard is load-bearing.
+        """A CERTIFIED but NON-allowlisted saddle rho<1 cell stays UNKNOWN.
 
-        The cell at (saddle, gamma=1.3, rho=0.25) has status CERTIFIED
-        with w_cert_grid ≈ 19.2.  Without the guard, w_cert would return a
-        float.  With the guard, UNKNOWN — proving SITE 5 is not dead code.
+        The per-cell allowlist relaxes exactly Cell 1.  The cell at
+        (saddle, gamma=1.45, rho=0.25) is CERTIFIED in the shipped grid
+        (status 0, a finite ``w_cert_grid`` value) yet lies OUTSIDE Cell 1
+        (gamma 1.45 is above the Cell 1 upper edge 1.3393306228327468).
+        Without the per-cell gate ``w_cert`` would return that certified
+        float; with it, UNKNOWN — proving the gate still overrides a
+        certified cell that the allowlist does not name.
         """
         from cogwheel.lensing.ppgo_map import UNKNOWN, STATUS_CERTIFIED
-        cell = self._ppgo_map._cell('saddle', 1.3, 0.25)
+        cell = self._ppgo_map._cell('saddle', 1.45, 0.25)
         self.comparisons += 1
-        self.assertIsNotNone(cell, 'saddle gamma=1.3 rho=0.25 must be in grid')
+        self.assertIsNotNone(cell, 'saddle gamma=1.45 rho=0.25 must be in grid')
         self.assertEqual(self._ppgo_map.cell_status_grid[cell], STATUS_CERTIFIED,
                          'premise: cell must be CERTIFIED')
-        result = self._ppgo_map.w_cert('saddle', 1.3, 0.25)
+        result = self._ppgo_map.w_cert('saddle', 1.45, 0.25)
         self.comparisons += 1
         self.assertIs(result, UNKNOWN,
-                      'SITE 5 must override a certified saddle rho<1 cell '
-                      '— guard is load-bearing')
+                      'a certified saddle rho<1 cell OUTSIDE the Cell 1 '
+                      'allowlist must still return UNKNOWN — gate is '
+                      'load-bearing')
+
+    def test_cell1_serves_certified_floor(self) -> None:
+        """Positive pin: allowlisted Cell 1 serves its certified floor.
+
+        (saddle, gamma=1.25, rho=0.25) is inside Cell 1 (gamma in
+        [1.1572945272629378, 1.3393306228327468], rho in [0.0, 0.5)).
+        ``w_cert`` now returns the shipped certified floor
+        19.164305537818887, and ``w_trust`` / ``w_ceiling`` route
+        consistently through the same allowlist.
+        """
+        from cogwheel.lensing.ppgo_map import UNKNOWN
+        wc = self._ppgo_map.w_cert('saddle', 1.25, 0.25)
+        self.comparisons += 1
+        self.assertIsInstance(wc, float,
+                              'Cell 1 (saddle, gamma=1.25, rho=0.25) must '
+                              'serve a float, not UNKNOWN')
+        self.assertEqual(wc, 19.164305537818887,
+                         'Cell 1 serves its shipped certified floor')
+        wt = self._ppgo_map.w_trust('saddle', 1.25, 0.25)
+        wl = self._ppgo_map.w_ceiling('saddle', 1.25, 0.25)
+        self.comparisons += 1
+        self.assertIsNot(wt, UNKNOWN, 'w_trust routes with w_cert for Cell 1')
+        self.assertIsNot(wl, UNKNOWN, 'w_ceiling routes with w_cert for Cell 1')
+        self.assertEqual(wt, 28.74645830672833)
+        self.assertEqual(wl, 58.0)
 
     def test_positive_rho_lt_1_not_blocked_by_guard(self) -> None:
         """Positive parity rho<1 is NOT blocked by the saddle-only guard.
@@ -427,7 +455,7 @@ class PpgoMapDefenseInDepthTestCase(_SaddleRhoTestCase):
 
 
 class PpgoMapDefenseInDepthSelfFalsificationTestCase(_SaddleRhoTestCase):
-    """Reachable-red for TD-4: the defense-in-depth guard CAN go red."""
+    """Reachable-red for TD-4: the per-cell allowlist gate CAN go red."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -435,41 +463,45 @@ class PpgoMapDefenseInDepthSelfFalsificationTestCase(_SaddleRhoTestCase):
         cls._ppgo_map = CertifiedPpgoMap.load()
 
     def test_positive_would_not_be_blocked(self) -> None:
-        """Positive parity passes the SITE 5 guard (only saddle is blocked).
+        """Positive parity never consults the saddle-only allowlist.
 
-        The guard condition includes ``parity == 'saddle'``.  For positive
-        parity, this part of the guard evaluates to False, so the guard
-        does NOT fire.  Only the cell-status path determines UNKNOWN.
+        The allowlist gate keys on ``parity == 'saddle'``; for positive
+        parity it is never entered, so the UNKNOWN here comes purely from
+        the cell-status path (BEYOND_WALL), not from the gate.
         """
         from cogwheel.lensing.ppgo_map import UNKNOWN
-        # Cell status returns UNKNOWN for positive rho<1 (BEYOND_WALL)
-        # but SITE 5 does NOT add a second refusal.  The UNKNOWN is from
-        # cell_status_grid, not from parity=='saddle'.
         result = self._ppgo_map.w_cert('positive', 0.5, 0.5)
         self.comparisons += 1
         self.assertIs(result, UNKNOWN)
 
     def test_saddle_would_return_float_without_guard(self) -> None:
-        """Without SITE 5, the certified saddle rho<1 cell returns ~19.2.
+        """Without the gate, a non-allowlisted certified cell leaks a float.
 
-        This proves the guard is NOT dead code — removing it would let
-        an unsound floor through (the whole reason for the WP-1 fix).
+        (saddle, gamma=1.45, rho=0.25) is CERTIFIED in the grid — its raw
+        ``w_cert_grid`` entry is a finite float — but it lies OUTSIDE the
+        Cell 1 allowlist.  ``w_cert`` returns UNKNOWN for it, so the raw
+        grid float proves the gate is load-bearing: dropping the gate
+        would let that unvetted floor through.
         """
-        cell = self._ppgo_map._cell('saddle', 1.3, 0.25)
+        from cogwheel.lensing.ppgo_map import STATUS_CERTIFIED, UNKNOWN
+        cell = self._ppgo_map._cell('saddle', 1.45, 0.25)
         self.comparisons += 1
-        from cogwheel.lensing.ppgo_map import STATUS_CERTIFIED
         self.assertEqual(self._ppgo_map.cell_status_grid[cell],
                          STATUS_CERTIFIED)
         w_cert_val = float(self._ppgo_map.w_cert_grid[cell])
         self.comparisons += 1
         import math
         self.assertTrue(math.isfinite(w_cert_val),
-                        f'without guard, w_cert would be {w_cert_val}')
+                        f'raw grid float (would leak without gate): '
+                        f'{w_cert_val}')
         self.assertGreater(w_cert_val, 10.0,
                            'certified saddle rho<1 floor is plausible (>10)')
+        # The gate turns that finite grid float into UNKNOWN.
+        self.assertIs(self._ppgo_map.w_cert('saddle', 1.45, 0.25), UNKNOWN,
+                      'gate must refuse the non-allowlisted certified cell')
 
     def test_saddle_rho_ge_1_still_served(self) -> None:
-        """Saddle rho>=1 is NOT refused — guard is narrow (only rho<1)."""
+        """Saddle rho>=1 is NOT refused — gate is narrow (only rho<1)."""
         result = self._ppgo_map.w_cert('saddle', 1.3, 1.5)
         self.comparisons += 1
         self.assertIsInstance(result, float,
@@ -478,26 +510,31 @@ class PpgoMapDefenseInDepthSelfFalsificationTestCase(_SaddleRhoTestCase):
         self.assertTrue(math.isfinite(result))
 
 # ---------------------------------------------------------------------------
-# TD-5: Census band-split mirror integrity (SITE 4 rho=None guard)
+# TD-5: Census band-split mirror integrity (w_trust-driven, no rho guard)
 # ---------------------------------------------------------------------------
 
 class CensusBandSplitMirrorIntegrityTestCase(_SaddleRhoTestCase):
-    """TD-5: ``characterize_sample`` suppresses band-split for saddle rho<1.
+    """TD-5: ``characterize_sample`` band-split is governed by w_trust alone.
 
-    SITE 4 guard (``surrogate_census.py``)::
+    The former SITE 4 guard (``surrogate_census.py``)::
 
         if parity == 'saddle' and rho is not None and rho < 1.0:
             rho = None
 
-    This mirrors SITE 1's refusal at the census level: when a saddle
-    draw has ``rho < 1``, the ppGO map query is entirely skipped
-    (``rho`` set to ``None``), so ``chart_log_w_max`` stays at the
-    original ``log_w_max`` — no band-split is attempted.
+    and its SITE 1 mirror in ``likelihood.py`` have both been removed.
+    Saddle ``rho < 1`` sources are no longer suppressed; whether a
+    band-split can occur is decided entirely by ``ppgo_map.w_trust``.
+
+    The corridor source (gamma=1.3, y=(0.0, 0.3)) has rho=0.175 and is
+    now allowlisted as Cell 1, with a finite ``w_trust`` of 28.746. No
+    band-split occurs in this test because ``w_trust`` (28.746) lies
+    well above the test's tiny w-band (max ~1.24, see ``_M_LENS``
+    below) — the split condition ``w_lo < w_trust < w_hi`` is False,
+    not because ``rho`` was suppressed.
 
     For lobe interior sources with saddle parity where ``rho >= 1``,
-    SITE 4 does NOT fire, but ``ppgo_map.w_trust`` returns UNKNOWN
-    because the cell is BEYOND_WALL — the band-split is also suppressed,
-    just via a different route (SITE 5 in ``w_cert``).
+    the ppGO map cell is BEYOND_WALL, so ``ppgo_map.w_trust`` returns
+    UNKNOWN and the band-split is suppressed via that route instead.
 
     Both corridor and lobe interior sources show full-band serving.
     """
@@ -511,7 +548,7 @@ class CensusBandSplitMirrorIntegrityTestCase(_SaddleRhoTestCase):
     #: Frequency grid for dimensionless-w computation.
     _F_GRID = np.array([20.0, 100.0])
 
-    #: Lens mass (Msun) — chosen so w ∈ [10, 50] for a 20-100 Hz band.
+    #: Lens mass (Msun) — gives w ∈ [~0.25, ~1.24] for a 20-100 Hz band.
     _M_LENS = 100.0
 
     @classmethod
@@ -541,7 +578,7 @@ class CensusBandSplitMirrorIntegrityTestCase(_SaddleRhoTestCase):
         return float(w_grid.min()), float(w_grid.max()), rho_val
 
     def test_corridor_source_no_band_split(self) -> None:
-        """Corridor source: SITE 4 sets rho=None, no band-split."""
+        """Corridor source: w_trust (28.746) exceeds the tiny w-band."""
         from unittest.mock import patch, MagicMock
         from cogwheel.lensing.surrogate_census import characterize_sample
 
@@ -597,10 +634,10 @@ class CensusBandSplitMirrorIntegrityTestCase(_SaddleRhoTestCase):
                 f'!= full-band {log_w_max}')
 
     def test_lobe_interior_source_no_band_split(self) -> None:
-        """Lobe interior: rho>=1 so SITE 4 does NOT fire, but w_trust=UNKNOWN.
+        """Lobe interior: rho>=1 reaches the ppGO map, but w_trust=UNKNOWN.
 
-        Even without SITE 4, the ppGO map returns UNKNOWN for this cell
-        (BEYOND_WALL), so no band-split is attempted regardless.
+        The ppGO map returns UNKNOWN for this cell (BEYOND_WALL), so no
+        band-split is attempted regardless.
         """
         from unittest.mock import patch, MagicMock
         from cogwheel.lensing.surrogate_census import characterize_sample
@@ -652,42 +689,3 @@ class CensusBandSplitMirrorIntegrityTestCase(_SaddleRhoTestCase):
             msg=f'band-split was NOT suppressed: '
                 f'select_chart log_w_max={sc_kwargs["log_w_max"]} '
                 f'!= full-band {log_w_max}')
-
-
-class CensusBandSplitMirrorSelfFalsificationTestCase(_SaddleRhoTestCase):
-    """Reachable-red for TD-5: the mirror refusal CAN go red."""
-
-    def test_site4_rho_none_is_load_bearing(self) -> None:
-        """Without SITE 4, saddle rho<1 would call ppgo_map.w_trust.
-
-        SITE 4 sets rho=None so that no map query is made for saddle
-        rho<1 draws.  Without this guard, rho would be ~0.175 and
-        the code would call ``w_trust('saddle', 1.3, 0.175)``.
-        SITE 5 in ``w_cert`` would still return UNKNOWN (defense-in-depth),
-        but SITE 4 prevents even the call — proving both guards are
-        load-bearing at different levels.
-        """
-        from cogwheel.lensing.ppgo_map import caustic_rho, UNKNOWN
-        rho = caustic_rho(1.3, np.hypot(0.0, 0.3))
-        self.comparisons += 1
-        self.assertLess(rho, 1.0,
-                        'premise: corridor source has rho < 1')
-        self.assertGreater(rho, 0.0)
-
-        # If SITE 4 were absent, the code would call w_trust with this rho.
-        # SITE 5 (w_cert) would still return UNKNOWN, but SITE 4 is the
-        # census-level mirror that prevents the query entirely.
-        # Both guards working together ensure defense-in-depth.
-        from cogwheel.lensing.ppgo_map import (
-            CertifiedPpgoMap, set_certified_ppgo_map, get_certified_ppgo_map)
-        prev = get_certified_ppgo_map()
-        try:
-            ppgo_map = CertifiedPpgoMap.load()
-            set_certified_ppgo_map(ppgo_map)
-            result = ppgo_map.w_cert('saddle', 1.3, rho)
-            self.comparisons += 1
-            self.assertIs(result, UNKNOWN,
-                          'SITE 5 defense-in-depth must also return UNKNOWN '
-                          '(double guard: SITE 4 at census + SITE 5 at map)')
-        finally:
-            set_certified_ppgo_map(prev)

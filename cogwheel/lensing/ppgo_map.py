@@ -105,7 +105,7 @@ import warnings
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
-from typing import Sequence
+from typing import NamedTuple, Sequence
 
 import numpy as np
 
@@ -213,6 +213,54 @@ _EXTRAP_W_CERT_DEFLATION = 2.0  # conservative safety factor (inflates floor)
 #: are DIFFERENT reconstruction objects and never share a cell.
 _DEFAULT_RHO_EDGES: tuple[float, ...] = (0.0, 0.5, 0.9, 1.0, 1.5, 2.5, 4.0,
                                          math.inf)
+
+
+# ----------------------------------------------------------------------
+# Per-cell relaxation of the saddle rho<1 refusal (F080, evidence-keyed).
+# ----------------------------------------------------------------------
+#
+# `w_cert` / `w_ceiling` refuse ALL saddle ``rho < 1`` cells by default
+# (the F073-era defense-in-depth: the exterior-ghost physics there is
+# uncertified).  The shipped artifact nevertheless HOLDS three CERTIFIED
+# saddle rho<0.5 cells; the driver's F080 re-validation (2026-08-14, HEAD
+# 3bca34a; pairing gate 1.15e-7 green; oracle = training-recipe ppGO vs
+# exact Schwinger, 5 uniform in-box 2-image configs/cell, 8 nodes on
+# [w_cert, 58]) showed they are NOT equal.  This allowlist lifts the
+# refusal ONLY for the cell(s) the evidence clears, keyed on the shipped
+# grid EDGES (exact float64 from certified_ppgo_map.npz, content hash
+# 7ed0e54566dff803791b368a3a73ce1523c1cbe0) so a future re-grid whose
+# edges differ fails the match and safely falls back to refusal.
+
+class _RelaxedCell(NamedTuple):
+    """A saddle ``rho < 1`` cell cleared for ppGO serving.
+
+    Keyed on the shipped grid's exact float64 band edges;
+    ``effective_floor`` is the raw ``w`` floor the cell may serve at
+    (`w_cert` returns ``max(shipped_w_cert, effective_floor)``).
+    """
+
+    parity: str
+    gamma_lo: float
+    gamma_hi: float
+    rho_lo: float
+    rho_hi: float
+    effective_floor: float
+
+
+#: Saddle ``rho < 1`` cells whose F073 refusal is lifted, one entry per
+#: re-validated-clean cell.  Everything absent here stays refused.
+_SADDLE_RHO_RELAXED_CELLS: tuple[_RelaxedCell, ...] = (
+    # Cell 1 -- CLEAN (F080): 5/5 in-box 2-image configs, sup err 8.7e-5 <
+    # the 1e-4 bar, pairing gate 1.15e-7.  effective_floor == the shipped
+    # w_cert, so `w_cert` returns exactly 19.1643 (w_trust 28.746).
+    _RelaxedCell('saddle', 1.1572945272629378, 1.3393306228327468,
+                 0.0, 0.5, 19.164305537818887),
+    # Cell 2 -- MARGINAL (documentation-only recipe below; NOT active).
+    # F080: 2/5 configs over-bar (1.0-1.4e-4) at the shipped w_cert 15.934
+    # node; all under-bar by w = 27.7.  Deferred pending a denser driver
+    # re-measurement -- do NOT activate without driver re-validation.
+    # _RelaxedCell('saddle', 1.3393306228327468, 1.55, 0.0, 0.5, 27.7),
+)
 
 
 # ----------------------------------------------------------------------
@@ -489,6 +537,36 @@ class CertifiedPpgoMap:
 
     # -- queries ------------------------------------------------------
 
+    def _saddle_rho_relaxed_floor(self, parity: str, gamma: float,
+                                  rho: float) -> float | None:
+        """Effective serve floor for an allowlisted saddle ``rho < 1`` cell.
+
+        Resolves the query cell, reads its ACTUAL gamma / rho edge pair
+        from this map's grid, and matches it against
+        `_SADDLE_RHO_RELAXED_CELLS` by EXACT edge equality.  Returns the
+        cell's ``effective_floor`` on a match, else ``None``.
+
+        Exact-equality keying is deliberate: a future re-grid whose edges
+        no longer match the shipped values fails the match and the caller
+        falls back to refusal (UNKNOWN) -- refuse, never mis-serve.
+        """
+        cell = self._cell(parity, gamma, rho)
+        if cell is None:
+            return None
+        _, gi, ri = cell
+        gamma_lo = float(self.gamma_edges[gi])
+        gamma_hi = float(self.gamma_edges[gi + 1])
+        rho_lo = float(self.rho_edges[ri])
+        rho_hi = float(self.rho_edges[ri + 1])
+        for entry in _SADDLE_RHO_RELAXED_CELLS:
+            if (entry.parity == parity
+                    and entry.gamma_lo == gamma_lo
+                    and entry.gamma_hi == gamma_hi
+                    and entry.rho_lo == rho_lo
+                    and entry.rho_hi == rho_hi):
+                return entry.effective_floor
+        return None
+
     def w_cert(self, parity: str, gamma: float, rho: float
                ) -> float | _UnknownSentinel:
         """Raw certified-ppGO floor for the cell, or `UNKNOWN`.
@@ -507,8 +585,6 @@ class CertifiedPpgoMap:
         rho : float
             Caustic-frame rho coordinate ``|y| / caustic_reach``.
         """
-        if parity == 'saddle' and rho < 1.0:
-            return UNKNOWN
         cell = self._cell(parity, gamma, rho)
         if cell is None:
             return UNKNOWN
@@ -517,6 +593,17 @@ class CertifiedPpgoMap:
         value = float(self.w_cert_grid[cell])
         if not math.isfinite(value):
             return UNKNOWN
+        # Per-cell relaxation of the F073 saddle rho<1 refusal (F080): a
+        # certified saddle rho<1 cell serves ONLY if it is on the
+        # evidence-keyed `_SADDLE_RHO_RELAXED_CELLS` allowlist; every
+        # other saddle rho<1 cell (cells 2 and 3, and all uncertified
+        # queries) still refuses UNKNOWN.
+        if parity == 'saddle' and rho < 1.0:
+            floor_override = self._saddle_rho_relaxed_floor(
+                parity, gamma, rho)
+            if floor_override is None:
+                return UNKNOWN
+            return max(value, floor_override)
         return value
 
     def w_trust(self, parity: str, gamma: float, rho: float
@@ -541,7 +628,10 @@ class CertifiedPpgoMap:
         ``min(parity_wall, w_ceiling)`` and refuses / charts above it.
         Out-of-grid, beyond-``rho_measured_max``, beyond-wall and invalid
         cells return the `UNKNOWN` sentinel (mirrors `w_cert` exactly; no
-        new sentinel).
+        new sentinel).  Saddle ``rho < 1`` cells additionally route
+        through the F080 per-cell allowlist (`_saddle_rho_relaxed_floor`),
+        so this ceiling stays consistent with `w_cert` / `w_trust`: a
+        non-allowlisted saddle ``rho < 1`` cell is UNKNOWN here as well.
 
         Parameters
         ----------
@@ -559,6 +649,15 @@ class CertifiedPpgoMap:
             return UNKNOWN
         value = float(self.w_ceiling_grid[cell])
         if not math.isfinite(value):
+            return UNKNOWN
+        # Consistency guard (NEW; w_ceiling previously had no saddle
+        # rho<1 gate): route the saddle rho<1 decision through the SAME
+        # F080 allowlist as w_cert so w_cert / w_trust / w_ceiling agree
+        # cell by cell -- a non-allowlisted saddle rho<1 cell is UNKNOWN
+        # here too.
+        if parity == 'saddle' and rho < 1.0 \
+                and self._saddle_rho_relaxed_floor(
+                    parity, gamma, rho) is None:
             return UNKNOWN
         return value
 

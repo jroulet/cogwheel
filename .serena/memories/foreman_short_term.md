@@ -1,14 +1,21 @@
 # Foreman-Lite Short-Term Observations
 
-- INS-1-001 (2026-08-14, _pearcey_cusp.py): dangling comment reference to a
-  git-rm'd script (scripts/calibrate_ppgo_rung.py) is fixed by rewording
-  the comment to state the measurement result inline ("the retired
-  calibration sweep observed...") rather than citing a live path — simple
-  pattern for any future "deleted script cited in shipping comment" finding.
-- INS-2-002 (2026-08-14, surrogate.py `_evaluate_chart` docstring): a stale
-  "ignored for a tube chart" claim about `y1_eig`/`y2_eig` is fixed by
-  documenting that the tube branch also folds `theta` via
-  `_fold_caustic_theta(theta, y1_eig, y2_eig)` before frame/arc-length
-  mapping — the same fold as `_tube_serves`. Pure docstring reword, no
-  logic touched; verified with `ast.parse` only (no test impact expected
-  for a docstring-only change per proportionate-verification memory).
+- INS-2-001 (2026-08-14, test_lensing_saddle_rho_guards.py): docstring-only
+  fix. CensusBandSplitMirrorIntegrityTestCase's class docstring, section
+  header comment, test_corridor_source_no_band_split docstring, and the
+  _M_LENS inline comment all described the REMOVED SITE 4
+  (surrogate_census rho=None) guard as the reason the test passes. Rewrote
+  all four to state the true mechanism: SITE 4/1 were removed, saddle
+  rho<1 is no longer suppressed, and the corridor test passes because
+  w_trust (28.746, finite, Cell 1 allowlisted) sits above the test's tiny
+  w-band (max ~1.24 for f=[20,100]Hz, M=100 Msun) — not because rho was
+  nulled. Also fixed the sibling test_lobe_interior_source_no_band_split
+  docstring (same stale "SITE 4 does NOT fire" phrasing) for internal
+  consistency even though the finding only named the class docstring +
+  corridor test — leaving one stale SITE-4 reference next to the freshly
+  corrected ones would have been an obvious residual inconsistency.
+  Verified via search_for_pattern (only remaining "SITE 4" mention is
+  explicitly "former"), ast.parse, and a live pytest run of the class
+  (2 passed) since the finding's own numeric claims (w_trust=28.746,
+  rho=0.175, w-band [0.2476,1.2379]) needed a green re-run to trust, not
+  just a docstring-consistency check.
