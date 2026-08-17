@@ -27,10 +27,10 @@ The surrogate is a purely additive speed layer that must never answer where
 the engine would refuse and must stay accurate where it does answer.  This
 tool measures both properties without ever trusting the surrogate's own
 labels: the fall-through causes are attributed by calling the surrogate's OWN
-guard predicates (`surrogate._tube_serves` / `surrogate._exterior_polar_serves`,
-one source of truth), and the held-out envelope error uses a fresh
-`ChangRefsdalChannels.evaluate` oracle (FINDINGS F002 -- never the surrogate's
-own reconstruction).
+guard predicates (`surrogate._tube_serves` /
+`surrogate._exterior_polar_serves`, one source of truth), and the held-out
+envelope error uses a fresh `ChangRefsdalChannels.evaluate` oracle (FINDINGS
+F002 -- never the surrogate's own reconstruction).
 
 Separation of concerns: every function here is pure computation returning
 plain dicts/dataclasses; artifact loading and its size stat live in `run`, and
@@ -556,7 +556,8 @@ def characterize_sample(
         # tier-2 population: the certificate refuses it and it stays
         # classified by classify_fallthrough below.
         from cogwheel.lensing.chang_refsdal.geometry import macro_matrix
-        real_images = np.asarray(geom.images)  # already real-only (find_images)
+        # already real-only (find_images)
+        real_images = np.asarray(geom.images)
         source = np.array([y1, y2], dtype=float)
         matrix = macro_matrix(gamma, 0.0, 0.0)
         w_lo = float(w_grid.min())  # band floor == exp(log_w_min)

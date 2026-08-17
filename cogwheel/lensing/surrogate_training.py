@@ -482,13 +482,15 @@ def _branch_speed_profile(gamma: float, branch: int, theta_lo: float,
 
 
 def _speed_slope(gamma: float, branch: int, theta: float) -> float:
-    """Slope of the squared caustic speed: ``g(theta) = y'(theta) . y''(theta)``.
+    """Slope of the squared caustic speed:
+    ``g(theta) = y'(theta) . y''(theta)``.
 
     Equals ``(1/2) d|y'|**2 / dtheta``.  It is real-analytic in ``theta``
     through a cusp (the caustic's non-smoothness lives in arc length, not in
     the angular parameter -- Professor) and crosses zero upward (``g' > 0``)
     at each speed minimum, so its root pins the cusp angle.  Uses the exact
-    analytic derivatives (`geometry.caustic_derivatives`); no finite difference.
+    analytic derivatives (`geometry.caustic_derivatives`); no finite
+    difference.
     """
     y_prime, y_double_prime = geometry.caustic_derivatives(
         gamma, theta, branch=branch)
@@ -497,7 +499,8 @@ def _speed_slope(gamma: float, branch: int, theta: float) -> float:
 
 
 def _radial_slope(gamma: float, branch: int, theta: float) -> float:
-    """Slope of the squared caustic radius: ``h(theta) = y(theta) . y'(theta)``.
+    """Slope of the squared caustic radius:
+    ``h(theta) = y(theta) . y'(theta)``.
 
     Equals ``(1/2) d|y|**2 / dtheta``.  Its UPWARD zero crossings mark the
     smooth local minima of the source-plane distance ``|y|`` from the origin.
@@ -516,7 +519,8 @@ def _radial_slope(gamma: float, branch: int, theta: float) -> float:
 
 def _refine_cusp_angle(gamma: float, branch: int,
                        theta_lo: float, theta_hi: float) -> float:
-    """Analytic cusp angle: the root of ``y'.y'' = 0`` in ``[theta_lo, theta_hi]``.
+    """Analytic cusp angle: the root of ``y'.y'' = 0`` in
+    ``[theta_lo, theta_hi]``.
 
     A caustic cusp is the point where the parametric speed ``|y'(theta)|``
     reaches zero, i.e. where ``g = _speed_slope`` crosses zero.  A single
@@ -606,8 +610,9 @@ def _find_cusps(thetas: np.ndarray, speed: np.ndarray, periodic: bool, *,
             # be measured wrap-aware (house idiom ``abs((a-b+pi)%2pi-pi)``);
             # the linear form below computes ~1.5*pi for the theta=0 cusp whose
             # window straddles the wrap point, killing its two adjacent arcs.
-            span = abs((thetas[i] - thetas[lo] + np.pi) % (2 * np.pi) - np.pi) \
-                + abs((thetas[hi] - thetas[i] + np.pi) % (2 * np.pi) - np.pi)
+            span = (
+                abs((thetas[i] - thetas[lo] + np.pi) % (2 * np.pi) - np.pi)
+                + abs((thetas[hi] - thetas[i] + np.pi) % (2 * np.pi) - np.pi))
         else:
             span = abs(thetas[i] - thetas[lo]) + abs(thetas[hi] - thetas[i])
         delta = max(min_halfwidth, width_safety * 0.5 * span)
@@ -723,11 +728,12 @@ def _make_arc(gamma: float, branch: int, t_lo: float, w_lo: float,
     # magnitude |dot| measures fold-opening transversality, which scales as
     # ~1.5*gamma; it is NOT a cusp-proximity proxy, so it must NOT be
     # magnitude-filtered -- doing so was the F041 regression, the same category
-    # error as the retired _PROBE_ETA.  The exact-zero tripwire below only skips
-    # the measure-zero pathology where the fold-opening direction is exactly
-    # tangent to the serve normal (sign undefined).  The fallback fractions
-    # exist solely to step past LensDomainError skips; the two-image side is a
-    # global property of the fold arc, so the sign is invariant across them.
+    # error as the retired _PROBE_ETA.  The exact-zero tripwire below only
+    # skips the measure-zero pathology where the fold-opening direction is
+    # exactly tangent to the serve normal (sign undefined).  The fallback
+    # fractions exist solely to step past LensDomainError skips; the two-image
+    # side is a global property of the fold arc, so the sign is invariant
+    # across them.
     span = inner_hi - inner_lo
     sign: int | None = None
     for frac in (0.5, 0.35, 0.65, 0.2, 0.8):
@@ -914,8 +920,8 @@ def stable_gamma_bands(band: tuple[float, float], parity: int, *,
     `band_caustic_structure` consistency guard are bisected; slivers
     narrower than ``min_width`` that still straddle a change are DROPPED
     (refusal-conservative: those gammas receive no chart and fall through
-    to the exact engine, mirroring the ``gamma = 1`` guard band) and returned in the
-    second list so the caller can record them.
+    to the exact engine, mirroring the ``gamma = 1`` guard band) and returned
+    in the second list so the caller can record them.
 
     When ``refine_near_one_window > 0``, every topology-stable band whose
     nearer edge lies within that window of the parity boundary ``gamma = 1``
@@ -1571,8 +1577,8 @@ def _branch_inradius_candidates(gamma: float, branch: int, theta_lo: float,
             continue
         candidates.append(float(np.hypot(src[0], src[1])))
     # (b) Smooth interior minima: upward zero crossings of h = y . y' that are
-    #     clear of a cusp dip (both endpoint speeds above 0.2 * median, the same
-    #     dip fraction `_find_cusps` uses to size cusp windows).
+    #     clear of a cusp dip (both endpoint speeds above 0.2 * median, the
+    #     same dip fraction `_find_cusps` uses to size cusp windows).
     median_speed = float(np.median(speed))
     h_vals: list[float] = []
     for theta in thetas:
@@ -1607,13 +1613,14 @@ def _closed_form_inradius(gamma: float, parity: int, n: int) -> float:
     """Caustic inradius (closest approach to the origin) from exact geometry.
 
     The minimum closed-form ``|y|`` over the refined cusp angles and refined
-    smooth interior minima of every caustic branch (`_branch_inradius_candidates`):
-    the astroid is a single periodic branch over ``[0, 2 pi)``; the macro-saddle
-    deltoid is two lobes, each with two square-root branches over its critical
-    wedge.  The quadratic curvature at a minimum gives ~1e-9 relative accuracy,
-    replacing the discrete-sample ``min |y|`` which biases high by the sample
-    spacing.  Returns ``0.0`` only if no branch carries enough in-domain samples
-    (the caller's cloud guard already rejects that degenerate case).
+    smooth interior minima of every caustic branch
+    (`_branch_inradius_candidates`): the astroid is a single periodic branch
+    over ``[0, 2 pi)``; the macro-saddle deltoid is two lobes, each with two
+    square-root branches over its critical wedge.  The quadratic curvature at
+    a minimum gives ~1e-9 relative accuracy, replacing the discrete-sample
+    ``min |y|`` which biases high by the sample spacing.  Returns ``0.0``
+    only if no branch carries enough in-domain samples (the caller's cloud
+    guard already rejects that degenerate case).
     """
     candidates: list[float] = []
     if parity == 1:
@@ -1854,9 +1861,10 @@ def _exclude_ghost_dominated(gamma: float, center: tuple[float, float],
 
     * If the call raises `GhostDomainError` (no ghost pair exists) the point
       is retainable — KERNEL_SUM is ghost-free and splineable there.
-    * If the call succeeds but ``Im(tau_c) < channels._GHOST_DECAY_IM_THRESHOLD``
-      (the ghost exists yet refuses to decay, so its oscillation contaminates
-      ``E_ks`` irreparably), the tile is excluded.
+    * If the call succeeds but
+      ``Im(tau_c) < channels._GHOST_DECAY_IM_THRESHOLD`` (the ghost exists
+      yet refuses to decay, so its oscillation contaminates ``E_ks``
+      irreparably), the tile is excluded.
     * Domain refusals from `_from_caustic_fixed` / `geometry.ghost_kernel` are
       treated conservatively as retainable — the engine can serve the tile.
 
@@ -2587,9 +2595,9 @@ class _SaddleLobeAdmission:
                 # Exterior membership: reject the tile if the probe is INSIDE
                 # the lobe (|winding| ~ 1) for ANY band gamma -- the inverse of
                 # the interior admission's "inside for EVERY loop" test.  A
-                # near-boundary probe that the non-convex deltoid still encloses
-                # (rho_lobe just above 1 in a concave sector) is correctly
-                # excluded here.
+                # near-boundary probe that the non-convex deltoid still
+                # encloses (rho_lobe just above 1 in a concave sector) is
+                # correctly excluded here.
                 if abs(_winding_number(loop - probe)) >= 0.5:
                     return False
             nearest = float(np.hypot(
@@ -2758,8 +2766,8 @@ def _wedge_interior_tiles(gamma: float, r_extent: float, n_per_side: int
     exactly where the asymmetry is largest; see `_wedge_theta_waist`).  The low
     column ``theta_wedge in [0, theta_waist]`` carries ``axis_origin='low'``
     (near cusp at ``0``, ``d = theta``); the high column ``theta_wedge in
-    [theta_waist, pi/2]`` carries ``axis_origin='high'`` (near cusp at ``pi/2``,
-    ``d = pi/2 - theta``).
+    [theta_waist, pi/2]`` carries ``axis_origin='high'`` (near cusp at
+    ``pi/2``, ``d = pi/2 - theta``).
 
     The angular columns span the cusp EDGES with NO exclusion strip: unlike the
     degenerate astroid CENTRE (``r = 0``, where ``theta_wedge`` is undefined --
@@ -2994,10 +3002,11 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
     # correct choice is u = sqrt(eta): the fold's singular sqrt-branch
     # (magnification ~ 1/sqrt(eta)) is smooth in u, and u^2 = eta linearizes
     # the Airy transition region.  Concretely, the envelope's dependence on
-    # eta enters through DeltaTau ~ eta^{3/2}, giving xi ~ (w * eta^{3/2})^{2/3}
-    # = w^{2/3} * eta; at fixed w, xi is linear in eta = u^2, so uniform-in-u
-    # places nodes quadratically in eta -- denser near the caustic (small eta)
-    # where the Airy fringe structure varies fastest.
+    # eta enters through DeltaTau ~ eta^{3/2}, giving
+    # xi ~ (w * eta^{3/2})^{2/3} = w^{2/3} * eta; at fixed w, xi is linear in
+    # eta = u^2, so uniform-in-u places nodes quadratically in eta -- denser
+    # near the caustic (small eta) where the Airy fringe structure varies
+    # fastest.
     #
     # Near CUSPS this breaks: the Pearcey catastrophe's control (x, y) takes
     # over and u = sqrt(eta) is no longer the correct uniformizing coordinate.
@@ -3124,10 +3133,11 @@ def _build_farfield_chart(*, gamma_band: tuple[float, float], parity: int,
     else:
         # Macro-saddle exterior (parity == -1) no longer flows through
         # `_build_farfield_chart`: WP2 routes it through the lobe-local
-        # exterior tiler (`_lobe_exterior_tiles` / `_build_lobe_exterior_chart`)
-        # which owns its own cusp-adapted u = d**(2/3) map via
-        # `_lobe_cusp_axis_map`.  Any residual non-positive-parity caller here
-        # falls back to the raw-theta angular grid.
+        # exterior tiler (`_lobe_exterior_tiles` /
+        # `_build_lobe_exterior_chart`) which owns its own cusp-adapted
+        # u = d**(2/3) map via `_lobe_cusp_axis_map`.  Any residual
+        # non-positive-parity caller here falls back to the raw-theta angular
+        # grid.
         theta_to_u = None
         u_grid = None
     try:
@@ -3326,12 +3336,13 @@ def _build_wedge_chart(*, gamma_band: tuple[float, float], parity: int,
     astroid interior; a macro-saddle call is a programming error (the saddle
     interior is charted per lobe by `_build_lobe_chart`).
     ``w_nodes_per_decade`` overrides the ``w``-axis node density for THIS chart
-    only; ``None`` falls back to ``config.w_nodes_per_decade``.  ``axis_origin``
-    (``'low'`` / ``'high'`` / ``None``) is the near-cusp side for the chart's
-    cusp-adapted angular map; it is single-sourced from the tile (the waist-split
-    tiler / subdivider) and threaded UNCHANGED into `from_wedge_engine`, which
-    asserts it agrees with its own midpoint-vs-waist classification (guarding
-    train/serve skew).  ``None`` lets the engine derive the origin itself.
+    only; ``None`` falls back to ``config.w_nodes_per_decade``.
+    ``axis_origin`` (``'low'`` / ``'high'`` / ``None``) is the near-cusp side
+    for the chart's cusp-adapted angular map; it is single-sourced from the
+    tile (the waist-split tiler / subdivider) and threaded UNCHANGED into
+    `from_wedge_engine`, which asserts it agrees with its own
+    midpoint-vs-waist classification (guarding train/serve skew).  ``None``
+    lets the engine derive the origin itself.
 
     Returns
     -------
@@ -4040,10 +4051,10 @@ def train(*, outdir: str | Path,
         w_range = box.w_range(parity)
         # The fold-arc partition can change at discrete gammas (cusp/wall
         # metamorphoses on the deltoid); tube grids are rectangular, so the
-        # band is bisected into topology-stable sub-bands.  With min_gamma_band=0.0,
-        # bisection continues to float resolution and no slivers are dropped; any
-        # topology-straddling band resolves once narrow enough for all three sample
-        # gammas to agree.
+        # band is bisected into topology-stable sub-bands.  With
+        # min_gamma_band=0.0, bisection continues to float resolution and no
+        # slivers are dropped; any topology-straddling band resolves once
+        # narrow enough for all three sample gammas to agree.
         sub_bands, dropped = stable_gamma_bands(
             band, parity, n_samples=config.n_caustic_samples,
             min_width=config.min_gamma_band,
@@ -4187,7 +4198,8 @@ def _wedge_child_boxes(
     child_half_r = 0.5 * float(half_r)
 
     # Angular split at the u-midpoint mapped back to theta on the parent's own
-    # cusp-adapted map (u_fine[0] == 0 by construction), NOT the theta midpoint.
+    # cusp-adapted map (u_fine[0] == 0 by construction), NOT the theta
+    # midpoint.
     theta_fine, u_fine = _wedge_cusp_axis_map(theta_lo, theta_hi, axis_origin)
     u_mid = 0.5 * (float(u_fine[0]) + float(u_fine[-1]))
     theta_split = float(np.interp(u_mid, u_fine, theta_fine))
@@ -4297,13 +4309,13 @@ def _subdivide_tile(
     Extracts the single skeleton that `_subdivide_farfield_tile` and
     `_subdivide_wedge_tile` duplicated (iterate candidate children,
     `_load_or_build` each, `_gate_chart` it, pack-or-record, accumulate a
-    ``children_summary``) and adds the ONE piece both lacked: bounded recursion.
-    A child that STILL fails the eps bar is itself subdivided -- until it clears
-    or the halving chain reaches ``max_depth`` (`MAX_SUBDIVISION_DEPTH`), at
-    which point it is recorded as a ladder-served gap exactly as before.  The
-    achieved subdivision depth is reported per child and rolled up into
-    ``max_achieved_depth`` so a runaway is visible and the census can attribute
-    cleared-vs-still-gated windows.
+    ``children_summary``) and adds the ONE piece both lacked: bounded
+    recursion.  A child that STILL fails the eps bar is itself subdivided --
+    until it clears or the halving chain reaches ``max_depth``
+    (`MAX_SUBDIVISION_DEPTH`), at which point it is recorded as a ladder-served
+    gap exactly as before.  The achieved subdivision depth is reported per
+    child and rolled up into ``max_achieved_depth`` so a runaway is visible
+    and the census can attribute cleared-vs-still-gated windows.
 
     The two regions differ ONLY in parameters, never in control flow:
 
@@ -4526,17 +4538,18 @@ def _subdivide_farfield_tile(
 
     The bounded recursion now lives once in `_subdivide_tile`: a still-gated
     child is itself halved until it clears or the chain reaches
-    `MAX_SUBDIVISION_DEPTH`, at which point it is a ladder-served gap exactly as
-    the historic single-level behavior recorded it.  A far-field tile whose
+    `MAX_SUBDIVISION_DEPTH`, at which point it is a ladder-served gap exactly
+    as the historic single-level behavior recorded it.  A far-field tile whose
     children ALL pass at the first halving triggers no recursion and produces a
     depth-1 report byte-identical to the pre-refactor output plus the additive
     ``achieved_depth`` / ``max_achieved_depth`` fields.
 
-    Parameters mirror the pre-refactor signature exactly (call sites unchanged).
-    ``interior_admission`` remains vestigial since WP1 (interior tiles are no
-    longer subdivided) and is never dereferenced.  ``exterior_admission`` /
-    ``source_magnitude_max`` select the directional exterior re-admission path;
-    ``None`` (default) keeps the byte-identical scalar-reach floor.
+    Parameters mirror the pre-refactor signature exactly (call sites
+    unchanged).  ``interior_admission`` remains vestigial since WP1 (interior
+    tiles are no longer subdivided) and is never dereferenced.
+    ``exterior_admission`` / ``source_magnitude_max`` select the directional
+    exterior re-admission path; ``None`` (default) keeps the byte-identical
+    scalar-reach floor.
 
     Returns
     -------
@@ -4621,18 +4634,18 @@ def _subdivide_wedge_tile(
     now a thin wrapper over the shared `_subdivide_tile` skeleton.
 
     The astroid-interior counterpart of `_subdivide_farfield_tile`, in the
-    WEDGE chart's own caustic-relative ``(r, u)`` coordinates.  The radial split
-    is at the plain ``r`` midpoint; the ANGULAR split is at the ``u``-MIDPOINT
-    mapped back to ``theta_wedge`` on the parent's own cusp-adapted map
-    (`_wedge_cusp_axis_map`, the SAME map `from_wedge_engine` fits and serves)
-    -- NEVER the ``theta`` midpoint -- so the two angular children have UNEQUAL
-    ``theta`` widths (the near-cusp child narrower), which is the point of the
-    ``u`` axis.  Each child inherits the parent's ``axis_origin`` verbatim,
-    rebuilds via `_build_wedge_chart`, and re-gates on ``config.interior_eps_max``
-    via `_gate_chart('interior', ...)`.  There is NO admission predicate: every
-    child is a sub-box of an already-admitted interior tile and is always built,
-    which is what selects the wedge-interior report style in the shared
-    skeleton (``admit_child=None``).
+    WEDGE chart's own caustic-relative ``(r, u)`` coordinates.  The radial
+    split is at the plain ``r`` midpoint; the ANGULAR split is at the
+    ``u``-MIDPOINT mapped back to ``theta_wedge`` on the parent's own
+    cusp-adapted map (`_wedge_cusp_axis_map`, the SAME map `from_wedge_engine`
+    fits and serves) -- NEVER the ``theta`` midpoint -- so the two angular
+    children have UNEQUAL ``theta`` widths (the near-cusp child narrower),
+    which is the point of the ``u`` axis.  Each child inherits the parent's
+    ``axis_origin`` verbatim, rebuilds via `_build_wedge_chart`, and re-gates
+    on ``config.interior_eps_max`` via `_gate_chart('interior', ...)`.  There
+    is NO admission predicate: every child is a sub-box of an already-admitted
+    interior tile and is always built, which is what selects the
+    wedge-interior report style in the shared skeleton (``admit_child=None``).
 
     The bounded recursion now lives once in `_subdivide_tile`: a still-gated
     child is itself halved (u-midpoint angular split preserved at every level)
@@ -5047,7 +5060,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     coordinate_radius_min, reach_max = _coordinate_radius_bounds(band, parity)
     # The far-field inner edge abuts the region-adjacent LOBE-EDGE shell, so
     # size it with ``min_eta_max`` (F081).  For a single-arc astroid band
-    # ``min_eta_max == max_eta_max``, so the positive-parity value is unchanged.
+    # ``min_eta_max == max_eta_max``, so the positive-parity value is
+    # unchanged.
     physical_exclusion_radius = reach_max + min_eta_max
     # Additive scalar/directional caustic-fixed inner edge for BOTH parities:
     # ``rho = 1 + |y| - coordinate_radius_min`` is the exact inverse of the
@@ -5109,20 +5123,20 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # lobe-local ``(rho_lobe, theta_local)`` coordinates (see the
     # ``'lobe_exterior'`` packing block below), so this origin-centred
     # far-field-window machinery is POSITIVE-PARITY ONLY.  For parity != 1 the
-    # block is skipped and ``exterior_tiles`` / ``region_exclusion_rho`` fall to
-    # the ``else`` default; the saddle exterior is packed separately.
+    # block is skipped and ``exterior_tiles`` / ``region_exclusion_rho`` fall
+    # to the ``else`` default; the saddle exterior is packed separately.
     if 'exterior' in regions and parity == 1:
         exterior_tiles: list | None = None
         ghost_drop_count = [0]
         if parity == 1:
             exterior_admission = _interior_admission(
                 band, 1, reach_scalar, config, eta_max=max_eta_max)
-            # Cusp-align the exterior ``theta_c`` columns to the SAME source-plane
-            # astroid cusp rays as the interior (WP1 defect 1): the exterior
-            # ``rho > 1`` arm is a theta-independent affine push-out of
-            # ``r_caustic``, so it inherits the interior's slope kinks.  Reuse the
-            # band's ``gamma_mid`` (already computed above); cusp rays are
-            # gamma-dependent, so never recompute at a band edge.
+            # Cusp-align the exterior ``theta_c`` columns to the SAME
+            # source-plane astroid cusp rays as the interior (WP1 defect 1):
+            # the exterior ``rho > 1`` arm is a theta-independent affine
+            # push-out of ``r_caustic``, so it inherits the interior's slope
+            # kinks.  Reuse the band's ``gamma_mid`` (already computed above);
+            # cusp rays are gamma-dependent, so never recompute at a band edge.
             cusp_angles = _cusp_source_angles(
                 gamma_mid, config.n_caustic_samples)
             exterior_tiles = _farfield_exterior_tiles(
@@ -5135,30 +5149,31 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 min(center[0] - half[0]
                     for center, half, _, _ in exterior_tiles)
                 if exterior_tiles else exclusion_rho)
-        # caustic-relative inner edge (WP1 defect 1).  Derive it from the NARROWED
-        # served region ``region_exclusion_rho`` -- NOT the pre-narrowing outer
-        # rho-band -- so the certified-ppGO trim below reads ``w_trust`` /
-        # ``w_ceiling`` from the rho-band cell the region actually covers.  The
-        # positive-parity per-column admission (above) can pull the served inner
-        # edge closer to the caustic than the scalar exclusion disk; reading the
-        # farther-out cell would report an easier (lower-``w_cert``) certification
-        # than the inner columns actually enjoy, capping/dropping charts where ppGO
-        # is not in fact certified.  ``caustic_rho`` is the ONE authoritative
-        # converter into the scalar-reach ppGO gauge; feed it the physical ``|y|``
-        # recovered by inverting the additive exterior gauge
-        # (``rho = 1 + |y| - coordinate_radius_min`` => ``|y| = rho - 1 +
+        # caustic-relative inner edge (WP1 defect 1).  Derive it from the
+        # NARROWED served region ``region_exclusion_rho`` -- NOT the
+        # pre-narrowing outer rho-band -- so the certified-ppGO trim below
+        # reads ``w_trust`` / ``w_ceiling`` from the rho-band cell the region
+        # actually covers.  The positive-parity per-column admission (above)
+        # can pull the served inner edge closer to the caustic than the scalar
+        # exclusion disk; reading the farther-out cell would report an easier
+        # (lower-``w_cert``) certification than the inner columns actually
+        # enjoy, capping/dropping charts where ppGO is not in fact certified.
+        # ``caustic_rho`` is the ONE authoritative converter into the
+        # scalar-reach ppGO gauge; feed it the physical ``|y|`` recovered by
+        # inverting the additive exterior gauge (``rho = 1 + |y| -
+        # coordinate_radius_min`` => ``|y| = rho - 1 +
         # coordinate_radius_min``).  Deriving from the narrowed region gives a
         # smaller/closer inner edge and hence a not-easier ppGO cell --
-        # conservatism
-        # compounds, never over-accepts.  Macro saddles (parity != 1) keep the HEAD
-        # scalar-reach edge: their additive exterior gauge collapses to scalar
-        # reach, so ``region_exclusion_rho == exclusion_rho`` and the physical
-        # exclusion radius is already the authoritative inner edge.  Both branches
+        # conservatism compounds, never over-accepts.  Macro saddles
+        # (parity != 1) keep the HEAD scalar-reach edge: their additive
+        # exterior gauge collapses to scalar reach, so
+        # ``region_exclusion_rho == exclusion_rho`` and the physical exclusion
+        # radius is already the authoritative inner edge.  Both branches
         # nonetheless obtain ``rho`` through ``caustic_rho`` so the ppGO gauge
-        # lives
-        # in exactly ONE place (``_scalar_caustic_reach == caustic_geometry(gamma,
-        # 0)[0]`` bit-exact, so the saddle result is byte-identical to the former
-        # hand-rolled ``physical_exclusion_radius / reach_scalar``).
+        # lives in exactly ONE place (``_scalar_caustic_reach ==
+        # caustic_geometry(gamma, 0)[0]`` bit-exact, so the saddle result is
+        # byte-identical to the former hand-rolled
+        # ``physical_exclusion_radius / reach_scalar``).
         ppgo_exclusion_rho = caustic_rho(
             gamma_mid,
             region_exclusion_rho - 1.0 + coordinate_radius_min,
@@ -5166,17 +5181,17 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         # -- Exterior far-field: ONE fixed [w_floor, w_trust] window (S1-3) --
         # Build S1-3 replaces the per-mass-stratum ``w`` partitioning of the
         # exterior with a SINGLE fixed window ``[w_floor(region),
-        # w_trust(region)]`` that contains every in-region draw's chart w-segment
-        # by construction (band-split serving is live).  ``w_floor`` is the S1-2
-        # physics threshold (`_farfield_region_w_floor`); ``w_trust`` is the
-        # ppGO-trimmed top (`_farfield_region_window`).  The geometry-admitted tile
-        # loop (`_farfield_tiles`) is UNCHANGED -- tiles are admitted by geometry,
-        # never by mass -- but the whole exterior region is now tiled ONCE over
-        # the union source extent (largest ``|y|`` at the smallest reachable lens
-        # mass), not once per stratum.  The certified-ppGO trim uses
-        # ``ppgo_exclusion_rho`` derived (above) from the region's OWN served inner
-        # edge, so the drop certifies the rho-band the region actually covers and
-        # never over-clears.
+        # w_trust(region)]`` that contains every in-region draw's chart
+        # w-segment by construction (band-split serving is live).  ``w_floor``
+        # is the S1-2 physics threshold (`_farfield_region_w_floor`);
+        # ``w_trust`` is the ppGO-trimmed top (`_farfield_region_window`).  The
+        # geometry-admitted tile loop (`_farfield_tiles`) is UNCHANGED -- tiles
+        # are admitted by geometry, never by mass -- but the whole exterior
+        # region is now tiled ONCE over the union source extent (largest
+        # ``|y|`` at the smallest reachable lens mass), not once per stratum.
+        # The certified-ppGO trim uses ``ppgo_exclusion_rho`` derived (above)
+        # from the region's OWN served inner edge, so the drop certifies the
+        # rho-band the region actually covers and never over-clears.
         ext_boundary = _stratum_ppgo_boundary(
             parity, gamma_mid, ppgo_exclusion_rho, ppgo_map)
         ext_ceiling = _stratum_ppgo_ceiling(
@@ -5196,11 +5211,11 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             'n_rho': config.n_rho, 'n_theta_c': config.n_theta_c,
             'ghost_excluded_tiles': ghost_drop_count[0]}
         if parity == 1 and not exterior_tiles:
-            # Loud zero-admission (WP1): no ``theta_c`` column clears the caustic +
-            # tube shell inside the prior box, so no exterior chart is built and
-            # those draws fall to the tube / interior / serving ladder.  (Restoring
-            # the scalar test makes the gamma 0.80-0.90 band collapse HERE -- the
-            # coverage defect this WP repairs.)
+            # Loud zero-admission (WP1): no ``theta_c`` column clears the
+            # caustic + tube shell inside the prior box, so no exterior chart
+            # is built and those draws fall to the tube / interior / serving
+            # ladder.  (Restoring the scalar test makes the gamma 0.80-0.90
+            # band collapse HERE -- the coverage defect this WP repairs.)
             exterior_region_report.update(
                 {'window': None, 'admitted_tiles': 0,
                  'window_action': 'zero_admission',
@@ -5213,9 +5228,9 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 source_magnitude_max=y_outer_region)
             exterior_region_report['window_action'] = window_action
             if window is None:
-                # No exterior chart: 'drop' (ppGO serves the whole band) or 'empty'
-                # (degenerate w_floor >= w_trust window).  Loud record; those draws
-                # fall to the tube / interior / serving ladder.
+                # No exterior chart: 'drop' (ppGO serves the whole band) or
+                # 'empty' (degenerate w_floor >= w_trust window).  Loud record;
+                # those draws fall to the tube / interior / serving ladder.
                 exterior_region_report.update(
                     {'window': None, 'admitted_tiles': 0, **window_report})
             else:
@@ -5228,13 +5243,14 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     _farfield_window_contains_draws(box, window))
                 # Per-column admitted set (`_farfield_exterior_tiles`); every
                 # tile's inner edge already clears the caustic + tube shell and
-                # lies inside the prior box for its direction.  (Positive parity
-                # only -- the saddle exterior is charted lobe-locally below.)
+                # lies inside the prior box for its direction.  (Positive
+                # parity only -- the saddle exterior is charted lobe-locally
+                # below.)
                 tiles = exterior_tiles
-                # Per-window node reprovision (w-axis ONLY): probe the innermost
-                # tile (largest w_floor, hardest fit) for the minimal w-node
-                # density N_rec still clearing the eps bar; the rho/theta_c tiling
-                # density is HELD.
+                # Per-window node reprovision (w-axis ONLY): probe the
+                # innermost tile (largest w_floor, hardest fit) for the minimal
+                # w-node density N_rec still clearing the eps bar; the
+                # rho/theta_c tiling density is HELD.
                 n_rec = int(config.w_nodes_per_decade)
                 reprovision_report: dict = {'status': 'no_admitted_tile',
                                             'n_rec': n_rec}
@@ -5252,8 +5268,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                         gamma=gamma_mid, center=center, half=half,
                         gamma_band=band)
                     # Positive-parity exterior tiles never use the MINUS_GHOST
-                    # label (that was the retired saddle origin-polar path); the
-                    # key is packed False so the far-field builder's
+                    # label (that was the retired saddle origin-polar path);
+                    # the key is packed False so the far-field builder's
                     # ``force_minus_ghost`` consumer stays byte-identical.
                     force_minus_ghost = False
                     admitted.append({
@@ -5274,7 +5290,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                     'reprovision': reprovision_report, **window_report})
                 if not contained:
                     # True by construction of the clip; a violation signals a
-                    # window/clip inconsistency -- flagged loudly, not silently.
+                    # window/clip inconsistency -- flagged loudly, not
+                    # silently.
                     exterior_region_report['containment_violation'] = True
         chart_reports.append(exterior_region_report)
     else:
@@ -5287,23 +5304,24 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     # origin-relative rho).  For ``gamma > 1`` the exterior shell is instead
     # charted in the SAME lobe-local ``(rho_lobe, theta_local)`` frame as the
     # lobe interior, but over the EXTERIOR band ``rho_lobe in (1, rho_outer]``
-    # (`_lobe_exterior_tiles`), admitted by `_SaddleLobeAdmission.admits_exterior`
-    # (outside the lobe by winding, clear of the ``eta_max`` tube shell, NO
-    # inter-lobe corridor test).  Only the canonical ``+y1`` lobe is charted
-    # (`_SADDLE_LOBE_CENTERS[1:]``, ``si = 0``): the D2 reflection fold maps any
-    # source -- including the whole inter-lobe corridor -- into the ``+y1``
-    # half-plane, exactly as the lobe-interior branch does.  ``rho_outer`` is
-    # the scalar-reach far-zone bound ``rho_outer_region`` already computed for
-    # the retired origin-polar tiler (no new coverage constant).  Tiles carry
-    # the ``FARFIELD_KERNEL_SUM`` label (2-image exterior) via
-    # ``_build_lobe_exterior_chart`` in the build loop below.
-    # Shared saddle lobe admissions (INS-1-002): the lobe_exterior packing
-    # and lobe_interior sites both consume ``_saddle_lobe_admissions`` with the
-    # SAME eta_max (the region-adjacent LOBE-EDGE shell, ``min_eta_max``; F081).
-    # Its per-lobe nearest-caustic-distance test is already per-segment, so only
-    # the scalar shell changes.  That call runs 2 lobes x 3 band gammas of
-    # caustic-point + winding-loop sweeps, so compute it ONCE per band and reuse
-    # it at both sites rather than twice.
+    # (`_lobe_exterior_tiles`), admitted by
+    # `_SaddleLobeAdmission.admits_exterior` (outside the lobe by winding,
+    # clear of the ``eta_max`` tube shell, NO inter-lobe corridor test).  Only
+    # the canonical ``+y1`` lobe is charted (`_SADDLE_LOBE_CENTERS[1:]``,
+    # ``si = 0``): the D2 reflection fold maps any source -- including the
+    # whole inter-lobe corridor -- into the ``+y1`` half-plane, exactly as the
+    # lobe-interior branch does.  ``rho_outer`` is the scalar-reach far-zone
+    # bound ``rho_outer_region`` already computed for the retired origin-polar
+    # tiler (no new coverage constant).  Tiles carry the
+    # ``FARFIELD_KERNEL_SUM`` label (2-image exterior) via
+    # ``_build_lobe_exterior_chart`` in the build loop below.  Shared saddle
+    # lobe admissions (INS-1-002): the lobe_exterior packing and lobe_interior
+    # sites both consume ``_saddle_lobe_admissions`` with the SAME eta_max (the
+    # region-adjacent LOBE-EDGE shell, ``min_eta_max``; F081).  Its per-lobe
+    # nearest-caustic-distance test is already per-segment, so only the scalar
+    # shell changes.  That call runs 2 lobes x 3 band gammas of caustic-point +
+    # winding-loop sweeps, so compute it ONCE per band and reuse it at both
+    # sites rather than twice.
     saddle_lobe_admissions = (
         _saddle_lobe_admissions(band, config, eta_max=min_eta_max)
         if parity != 1 and ({'lobe_interior', 'lobe_exterior'} & set(regions))
@@ -5387,25 +5405,27 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         if 'lobe_interior' in regions:
             # --- Saddle (gamma > 1): per-lobe deltoid interiors
             # (frozen WP7, S2-2).
-            # The macro-saddle caustic is two disjoint 3-cusp deltoid lobes off the
-            # origin on the shear axis; neither encloses the origin, so the
-            # origin-centred astroid admission does not apply.  Each lobe gets its
-            # OWN interior family in a lobe-local frame centred on that lobe's
-            # source-plane deltoid centroid, admitted by per-lobe winding number,
-            # tube-shell nearest-distance, and the inter-lobe corridor exclusion
-            # (`_SaddleLobeAdmission`); the lobe-local theta tile edges align to
-            # the lobe's three cusp rays and no tile straddles the inter-lobe
-            # equidistance (perpendicular-bisector) line.
+            # The macro-saddle caustic is two disjoint 3-cusp deltoid lobes off
+            # the origin on the shear axis; neither encloses the origin, so the
+            # origin-centred astroid admission does not apply.  Each lobe gets
+            # its OWN interior family in a lobe-local frame centred on that
+            # lobe's source-plane deltoid centroid, admitted by per-lobe
+            # winding number, tube-shell nearest-distance, and the inter-lobe
+            # corridor exclusion (`_SaddleLobeAdmission`); the lobe-local theta
+            # tile edges align to the lobe's three cusp rays and no tile
+            # straddles the inter-lobe equidistance (perpendicular-bisector)
+            # line.
             #
             # These lobe-local tiles are packed into ``admitted`` with
-            # ``region='lobe_interior'`` and their owning ``_SaddleLobeAdmission``
-            # (S2-3 serve wiring): the build loop trains each through
-            # ``_build_lobe_chart`` / ``from_lobe_engine`` in lobe-local
-            # ``(rho_lobe, theta_local)`` coordinates and the persisted lobe frame
-            # (centroid, boundary) maps a served node back to its true physical
-            # source, so the lobe interiors are now served (not just recorded).
-            # Saddle lobe admissions (widest tube shell, band's max eta_max):
-            # reuse the once-computed shared result (INS-1-002).
+            # ``region='lobe_interior'`` and their owning
+            # ``_SaddleLobeAdmission`` (S2-3 serve wiring): the build loop
+            # trains each through ``_build_lobe_chart`` / ``from_lobe_engine``
+            # in lobe-local ``(rho_lobe, theta_local)`` coordinates and the
+            # persisted lobe frame (centroid, boundary) maps a served node back
+            # to its true physical source, so the lobe interiors are now served
+            # (not just recorded).  Saddle lobe admissions (widest tube shell,
+            # band's max eta_max): reuse the once-computed shared result
+            # (INS-1-002).
             lobe_admissions = saddle_lobe_admissions
             # WP2: chart only the canonical +y1 lobe (lens_center=π).  The
             # D2 reflection fold (|y1|, |y2|) in `_lobe_serves` /
@@ -5422,21 +5442,23 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 lobe_tiles = _lobe_interior_tiles(
                     lobe, lobe_cusps, config.n_farfield_tiles_per_side)
                 interior_admitted += len(lobe_tiles)
-                # Pack each admitted lobe tile into the served build set carrying
-                # its owning ``_SaddleLobeAdmission`` (S2-3 serve wiring): the build
-                # loop routes ``region == 'lobe_interior'`` tiles through
-                # ``_build_lobe_chart`` / ``from_lobe_engine`` in lobe-local
-                # ``(rho_lobe, theta_local)`` coordinates, so the lobe-centroid
-                # offset now flows through the serve pipeline.  ``si = lobe_index``
-                # disambiguates the two lobes' per-chart tags.
+                # Pack each admitted lobe tile into the served build set
+                # carrying its owning ``_SaddleLobeAdmission`` (S2-3 serve
+                # wiring): the build loop routes ``region == 'lobe_interior'``
+                # tiles through ``_build_lobe_chart`` / ``from_lobe_engine`` in
+                # lobe-local ``(rho_lobe, theta_local)`` coordinates, so the
+                # lobe-centroid offset now flows through the serve pipeline.
+                # ``si = lobe_index`` disambiguates the two lobes' per-chart
+                # tags.
                 centroid_mag = float(np.hypot(
                     lobe.centroid[0], lobe.centroid[1]))
                 r_deltoid_max = float(np.max(lobe.boundary_r))
                 for center, half, i, j in lobe_tiles:
                     rho_lobe_max = float(center[0]) + float(half[0])
                     # Union spatial extent for the frequency cap: the farthest
-                    # physical source magnitude reachable inside this lobe-local
-                    # tile (centroid offset + outer directional boundary radius).
+                    # physical source magnitude reachable inside this
+                    # lobe-local tile (centroid offset + outer directional
+                    # boundary radius).
                     y_max_tile = centroid_mag + rho_lobe_max * r_deltoid_max
                     admitted.append({
                         'si': si, 'i': i, 'j': j,
@@ -5465,20 +5487,21 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
     else:
         if 'wedge_interior' in regions:
             # Positive-parity astroid interior in WEDGE caustic-relative
-            # coordinates (WP1): the origin-enclosing astroid interior is charted
-            # by ``InteriorWedgeChart`` (built via ``from_wedge_engine``) instead
-            # of the retired far-field ``ffin`` tiling.  ``r`` is normalised by the
-            # directional caustic reach and ``theta_wedge = atan2(|y2|, |y1|)``
-            # spans one canonical quadrant ``[0, pi/2]`` (the astroid D2 fold maps
-            # the other three quadrants onto it).  The wedge tiler is a MINIMAL
-            # single-angular-column, uniform-radial-rows family; DD-product
-            # ``w``-capping and the arc-length ``theta_wedge -> s`` map are applied
-            # INSIDE ``from_wedge_engine`` per tile, and no cusp-alignment or
+            # coordinates (WP1): the origin-enclosing astroid interior is
+            # charted by ``InteriorWedgeChart`` (built via
+            # ``from_wedge_engine``) instead of the retired far-field ``ffin``
+            # tiling.  ``r`` is normalised by the directional caustic reach and
+            # ``theta_wedge = atan2(|y2|, |y1|)`` spans one canonical quadrant
+            # ``[0, pi/2]`` (the astroid D2 fold maps the other three quadrants
+            # onto it).  The wedge tiler is a MINIMAL single-angular-column,
+            # uniform-radial-rows family; DD-product ``w``-capping and the
+            # arc-length ``theta_wedge -> s`` map are applied INSIDE
+            # ``from_wedge_engine`` per tile, and no cusp-alignment or
             # directional admission geometry is needed -- the caustic-relative
             # frame absorbs the caustic shape.  ``coordinate_radius_min`` /
             # ``reach_max`` are the band-level bounds already computed above
-            # (bit-identical to ``np.min(admission.radius_grid)``, so no per-band
-            # ``_interior_admission`` object is built here).
+            # (bit-identical to ``np.min(admission.radius_grid)``, so no
+            # per-band ``_interior_admission`` object is built here).
             # near-origin: the hardest interior region (Build 8h-a)
             int_rho = 0.0
             int_boundary = _stratum_ppgo_boundary(
@@ -5487,9 +5510,10 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                 parity, gamma_mid, int_rho, ppgo_map)
             for si, (m_lo, m_hi) in enumerate(strata):
                 y_extent = float(_lens_prior._source_scale(m_lo))
-                # The directional interior reaches the full caustic at ``rho=1``,
-                # capped conservatively by the stratum source support divided by
-                # the smallest physical directional radius in the band.
+                # The directional interior reaches the full caustic at
+                # ``rho=1``, capped conservatively by the stratum source
+                # support divided by the smallest physical directional radius
+                # in the band.
                 grid_rho_extent = min(
                     1.0, float(y_extent) / coordinate_radius_min,
                 )
@@ -5509,16 +5533,18 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
                             'ppGO certified over the whole stratum w-band'})
                     continue
                 int_w_range = trimmed_w_range
-                # Cap the wedge radial extent one tube-shell inside the caustic so
-                # the Airy caustic edge (r -> 1) is left to the tube chart; a
-                # non-positive extent yields no tiles (ladder-served interior).
+                # Cap the wedge radial extent one tube-shell inside the caustic
+                # so the Airy caustic edge (r -> 1) is left to the tube chart;
+                # a non-positive extent yields no tiles (ladder-served
+                # interior).
                 r_extent = min(
                     grid_rho_extent, 1.0 - max_eta_max / coordinate_radius_min)
-                # Locate the caustic waist at the SAME band-representative gamma
-                # `from_wedge_engine` uses internally (median of the log-reach
-                # gamma grid over this band), so the tiler's angular split boundary
-                # and the engine's per-tile near-cusp classification agree exactly
-                # (no train/serve skew -- the engine asserts on disagreement).
+                # Locate the caustic waist at the SAME band-representative
+                # gamma `from_wedge_engine` uses internally (median of the
+                # log-reach gamma grid over this band), so the tiler's angular
+                # split boundary and the engine's per-tile near-cusp
+                # classification agree exactly (no train/serve skew -- the
+                # engine asserts on disagreement).
                 gamma_rep = float(np.median(
                     _log_reach_gamma_axis(band, config.n_gamma, 'gamma')))
                 tiles = _wedge_interior_tiles(
@@ -5570,8 +5596,9 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         interior_report['serve_note'] = (
             'lobe-local tiles admitted + cusp-aligned and PACKED into served '
             'charts; trained via from_lobe_engine in (rho_lobe, theta_local) '
-            'coordinates with the persisted lobe frame (centroid + directional '
-            'boundary) mapping served nodes to their true physical source')
+            'coordinates with the persisted lobe frame (centroid + '
+            'directional boundary) mapping served nodes to their true '
+            'physical source')
     if interior_skip is not None:
         interior_report['interior_skipped'] = interior_skip
     elif interior_admitted == 0:
@@ -5647,8 +5674,9 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             # storing the INTERIOR_SACR_C tau_c-demodulated envelope on a
             # ``LobeInteriorChart``.  Gated on the SAME interior eps bar as the
             # origin-centred interior path, but the held-out probe maps through
-            # the LOBE frame (`_lobe_heldout_samples`), never the origin-centred
-            # `_from_caustic_fixed`.  ``si`` disambiguates the two lobes' tags.
+            # the LOBE frame (`_lobe_heldout_samples`), never the
+            # origin-centred `_from_caustic_fixed`.  ``si`` disambiguates the
+            # two lobes' tags.
             lobe = tile['lobe']
             lobe_tag = f'chart_{label}_s{si}_fflobe_{i}_{j}'
             lobe_path = outdir / f'{lobe_tag}.npz'
@@ -5716,15 +5744,16 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         if region == 'wedge_interior':
             # Positive-parity astroid-interior tile (WP1): trained in WEDGE
             # caustic-relative ``(r, theta_wedge)`` coordinates via
-            # ``from_wedge_engine`` (inside ``_build_wedge_chart``), storing the
-            # ``INTERIOR_SACR_C`` ``tau_c``-demodulated envelope on an
-            # ``InteriorWedgeChart``.  Gated on the SAME interior eps bar as the
-            # origin-centred / lobe interior paths; the held-out probe maps
+            # ``from_wedge_engine`` (inside ``_build_wedge_chart``), storing
+            # the ``INTERIOR_SACR_C`` ``tau_c``-demodulated envelope on an
+            # ``InteriorWedgeChart``.  Gated on the SAME interior eps bar as
+            # the origin-centred / lobe interior paths; the held-out probe maps
             # through the chart's own wedge frame (``chart.wedge_map`` +
-            # ``_from_wedge_fixed``), never the retired ``_from_caustic_fixed``.
-            # A gated or carrier-flipped wedge tile is a ladder-served gap (NO
-            # subdivision -- the far-field subdivider is origin-centred and
-            # cannot resubdivide a caustic-relative box; mirrors the lobe path).
+            # ``_from_wedge_fixed``), never the retired
+            # ``_from_caustic_fixed``.  A gated or carrier-flipped wedge tile
+            # is a ladder-served gap (NO subdivision -- the far-field
+            # subdivider is origin-centred and cannot resubdivide a
+            # caustic-relative box; mirrors the lobe path).
             wedge_tag = f'chart_{label}_s{si}_ffwedge_{i}_{j}'
             wedge_path = outdir / f'{wedge_tag}.npz'
 
@@ -5956,8 +5985,8 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
             # Interpolator hygiene: the exterior far-field tile straddles a
             # critical-basin (``tau_c``) flip, so a single spline cannot
             # represent the phase-kinked envelope.  Resolve by
-            # reseat-via-SUBDIVISION -- halve the tile so each sub-tile lands in
-            # one nearest-caustic basin -- recorded loudly.  A flip is
+            # reseat-via-SUBDIVISION -- halve the tile so each sub-tile lands
+            # in one nearest-caustic basin -- recorded loudly.  A flip is
             # generically absent for well-separated exterior tiles, so this is
             # the exceptional path.
             flip_report = {'name': tag, 'parity': parity, 'file': str(path),

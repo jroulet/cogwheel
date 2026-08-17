@@ -145,8 +145,8 @@ _CUSP_NODE_DEDUP_TOL = 1e-9
 # --- Far-field smooth interpolation coordinate (retained for tube/training) --
 # The ``(s, d)`` coordinate is RETAINED for the TUBE chart (unchanged).
 # The EXTERIOR serve path uses ExteriorPolarChart in polar
-# ``(rho, theta_c)`` coordinates via `_to_caustic_fixed` / `_from_caustic_fixed`
-# -- single-valued, cusp-safe, and self-contained.
+# ``(rho, theta_c)`` coordinates via `_to_caustic_fixed` /
+# `_from_caustic_fixed` -- single-valued, cusp-safe, and self-contained.
 
 # Samples per gamma row in the caustic arc-length map; matches the shipped
 # 1e-tube precedent (`surrogate_training._TUBE_ARC_MAP_SIZE = 2001`), whose
@@ -429,7 +429,8 @@ def _to_caustic_fixed(gamma: float, y1_eig: float, y2_eig: float
 
 def _to_exterior_fixed(gamma: float, y1_eig: float, y2_eig: float
                        ) -> tuple[float, float]:
-    """Folded caustic-fixed ``(rho, theta_c)`` of an eigenframe source position.
+    """Folded caustic-fixed ``(rho, theta_c)`` of an eigenframe
+    source position.
 
     Folds through the D₂ symmetry (|y1|, |y2|) so ``theta_c`` lands in the
     canonical first quadrant ``[0, π/2]``, where the exterior-polar chart is
@@ -510,7 +511,8 @@ class _WedgeCausticMap:
 
 
 def _wedge_theta_waist(gamma: float) -> float:
-    """Locate the astroid caustic waist ``argmin_theta r_caustic(gamma, theta)``.
+    """Locate the astroid caustic waist
+    ``argmin_theta r_caustic(gamma, theta)``.
 
     The astroid's two cusps sit at the wedge edges ``theta_wedge = 0`` and
     ``pi/2``, where the directional caustic reach ``r_caustic`` is largest;
@@ -3019,9 +3021,9 @@ def _tube_f_ref(w_grid: np.ndarray, gamma: float,
     # thread the source -- must refuse cleanly HERE rather than propagate into
     # `geometry.macro_matrix` / `_frame_delays`, where `numpy.linalg` raises
     # LinAlgError ("Array must not contain infs or NaNs"), which is NOT a
-    # `geometry.LensDomainError` and so escapes the try/except below.  Returning
-    # None lets `_tube_serves` decline the chart cleanly (its documented
-    # default-NaN contract) instead of crashing the serve path.
+    # `geometry.LensDomainError` and so escapes the try/except below.
+    # Returning None lets `_tube_serves` decline the chart cleanly (its
+    # documented default-NaN contract) instead of crashing the serve path.
     if not np.all(np.isfinite(source)):
         return None
     try:
@@ -3090,13 +3092,13 @@ def _tube_serves(chart: TubeChart, gamma: float, log_w_min: float,
 
     ``y1_eig`` / ``y2_eig`` are the eigenframe source position.  A tube
     chart now stores the BEAT-FREE RESIDUAL ``r = E / F_ref``, so serving
-    requires re-modulating by ``F_ref`` at the query source (`_evaluate_chart`);
-    this guard therefore declines any query where the SAME `_tube_f_ref`
-    reference is unbuildable (fewer than four images, no merging pair, a
-    degenerate fold), exactly mirroring the build-side refusal so the
-    exact ladder takes over instead of serving ``r`` unmodulated.  A caller
-    that does not thread the source (defaults non-finite) declines every
-    tube chart cleanly.
+    requires re-modulating by ``F_ref`` at the query source
+    (`_evaluate_chart`); this guard therefore declines any query where the
+    SAME `_tube_f_ref` reference is unbuildable (fewer than four images, no
+    merging pair, a degenerate fold), exactly mirroring the build-side
+    refusal so the exact ladder takes over instead of serving ``r``
+    unmodulated.  A caller that does not thread the source (defaults
+    non-finite) declines every tube chart cleanly.
 
     ``require_fref`` (keyword-only, default ``True``) gates that F_ref probe.
     The production serve path (`select_chart`) leaves it ``True`` so behaviour
@@ -4234,11 +4236,11 @@ class LensAmplificationSurrogate:
         ``INTERIOR_SACR_C`` ``tau_c``-demodulated envelope.  The bulk exterior
         is a single two-real-image region: the image count is read at the first
         successful node and asserted equal to
-        `_MACRO_SADDLE_EXTERIOR_IMAGE_COUNT`; a later node reporting a different
-        count straddles a region boundary and is recorded refused rather than
-        fitted.  A node that refuses at any ``w`` or returns a non-finite
-        envelope is recorded refused (in lobe-local coordinates) and left as
-        zeros.
+        `_MACRO_SADDLE_EXTERIOR_IMAGE_COUNT`; a later node reporting a
+        different count straddles a region boundary and is recorded refused
+        rather than fitted.  A node that refuses at any ``w`` or returns a
+        non-finite envelope is recorded refused (in lobe-local coordinates)
+        and left as zeros.
 
         The persisted chart is a `LobeExteriorChart`, which drops the
         inter-lobe corridor frame (``other_centroid`` / ``corridor_half``): the
@@ -4730,13 +4732,14 @@ class LensAmplificationSurrogate:
                                 shape: tuple[int, int, int, int],
                                 envelope_real: np.ndarray,
                                 envelope_imag: np.ndarray) -> dict:
-        """Build the provenance dict for a caustic-relative wedge-interior chart.
+        """Build the provenance dict for a caustic-relative
+        wedge-interior chart.
 
-        The wedge counterpart of `_build_provenance` / `_build_lobe_provenance`.
-        The spatial ranges are the WEDGE-FIXED ``(r, theta_wedge)`` axis bounds;
-        the ``axis_schema`` tag records the wedge-caustic-relative convention so
-        a stale absolute-coordinate interior artifact is distinguishable (and
-        hard-refused) at load.
+        The wedge counterpart of `_build_provenance` /
+        `_build_lobe_provenance`.  The spatial ranges are the WEDGE-FIXED
+        ``(r, theta_wedge)`` axis bounds; the ``axis_schema`` tag records the
+        wedge-caustic-relative convention so a stale absolute-coordinate
+        interior artifact is distinguishable (and hard-refused) at load.
         """
         hasher = hashlib.sha1()
         hasher.update(np.ascontiguousarray(envelope_real).tobytes())
