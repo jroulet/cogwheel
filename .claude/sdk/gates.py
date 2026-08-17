@@ -373,7 +373,7 @@ def prompt_user_approval(
 
 
 def _gate_wait(what: str, dir_path: Path, poll: int = 5, beat: int = 240,
-               max_beat: int = 3600):
+               max_beat: int = 900):
     """Poll a decision gate, EMITTING A HEARTBEAT so the build reads as alive.
 
     A build blocked on a human decision is not stale — it is waiting. But the
@@ -398,12 +398,14 @@ def _gate_wait(what: str, dir_path: Path, poll: int = 5, beat: int = 240,
             print(f"[file-based] still waiting for {what} "
                   f"({waited // 60}m elapsed) — build is alive, not stale",
                   flush=True)
-            # BACK OFF. A fixed 4-minute beat emitted 270 lines across an
-            # 18-hour wait (2026-07-31) — each one a driver notification. The
-            # watchdog only needs the log to move before its 1200s threshold;
-            # after that, rarer is strictly better. Doubling to an hourly
-            # ceiling gives ~12 beats over 18h instead of 270, while still
-            # placing the first one at 4 minutes.
+            # BACK OFF, but never past the watchdog. A fixed 4-minute beat
+            # emitted 270 lines across an 18-hour wait (2026-07-31); doubling
+            # thins that out. The ceiling MUST stay below the watchdog's
+            # 1200s staleness threshold: an earlier 3600s ceiling let the
+            # beat gap exceed 1200s after the third doubling, and the
+            # watchdog killed a healthy build mid-escalation-wait
+            # (measured 2026-08-16). 900s keeps a 300s margin and still
+            # cuts the 18-hour wait to ~74 beats instead of 270.
             interval = min(interval * 2, max_beat)
             next_beat = waited + interval
 

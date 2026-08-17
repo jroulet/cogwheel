@@ -193,6 +193,23 @@ INTER_MESSAGE_TIMEOUT_SECONDS: Optional[int] = (
 # agent, where a multi-minute message gap really does indicate a wedge.
 PROFESSOR_INTER_MESSAGE_TIMEOUT = 1800
 
+# The Architect's plan-composition turn is a single long text-only message:
+# no tool calls, so nothing reaches the log for the turn's whole duration.
+# Measured 2026-08-17: a healthy planning turn went quiet past the
+# watchdog's 1200s staleness threshold and the build was killed mid-plan.
+# Planning (and the in-DAG Librarian/Dreamer skill turns, same shape) get a
+# generous per-message ceiling; the keepalive slicing in
+# _iter_query_with_timeout keeps the log mtime fresh inside the gap, so
+# the watchdog only fires when the orchestrator ITSELF is dead.
+PLANNING_INTER_MESSAGE_TIMEOUT = 3600
+
+# While awaiting the next stream message, emit a keepalive log line every
+# this many seconds (must stay well below the watchdog's 1200s threshold).
+# The keepalive proves the orchestrator event loop is alive, not that the
+# model is progressing — progress detection stays with the per-message
+# timeout, which raises and routes into the existing retry machinery.
+KEEPALIVE_SLICE_SECONDS = 240
+
 
 
 # ── Infrastructural agent-death retry ────────────────────────────────────────
@@ -1210,7 +1227,9 @@ class BuildOrchestrator:
         result_text = ""
         all_text_blocks: list[str] = []
         session_id = None
-        async for message in query(prompt=architect_task, options=options):
+        async for message in self._iter_query_with_timeout(
+                query(prompt=architect_task, options=options), agent_id,
+                timeout=PLANNING_INTER_MESSAGE_TIMEOUT):
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
@@ -1292,7 +1311,9 @@ class BuildOrchestrator:
         result_text = ""
         all_text_blocks: list[str] = []
         session_id = None
-        async for message in query(prompt=prompt, options=options):
+        async for message in self._iter_query_with_timeout(
+                query(prompt=prompt, options=options), agent_id,
+                timeout=PLANNING_INTER_MESSAGE_TIMEOUT):
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
@@ -3291,7 +3312,9 @@ class BuildOrchestrator:
 
         result_text = ""
         session_id = None
-        async for message in query(prompt=task_prompt, options=options):
+        async for message in self._iter_query_with_timeout(
+                query(prompt=task_prompt, options=options), skill_id,
+                timeout=PLANNING_INTER_MESSAGE_TIMEOUT):
             result_text, session_id = self._handle_message(
                 skill_id, message, result_text, session_id,
             )
@@ -3369,16 +3392,39 @@ class BuildOrchestrator:
             await queue.put(sentinel)
 
         drain_task = asyncio.create_task(_drain())
+
+        async def _get_with_keepalive():
+            # Wait in slices, logging a keepalive per expired slice: a long
+            # healthy turn (plan composition, a text-only consolidation
+            # turn) yields NO messages and NO tool-call log lines, so the
+            # log mtime — the watchdog's only liveness signal — goes stale
+            # and a healthy build gets killed (measured 2026-08-17,
+            # architect planning turn, 1201s quiet). The keepalive is
+            # BOUNDED by effective_timeout, so a genuine transport wedge
+            # still surfaces as the same TimeoutError as before.
+            if effective_timeout is None:
+                return await queue.get()
+            waited = 0.0
+            while True:
+                slice_s = min(KEEPALIVE_SLICE_SECONDS,
+                              effective_timeout - waited)
+                try:
+                    return await asyncio.wait_for(
+                        queue.get(), timeout=slice_s)
+                except asyncio.TimeoutError:
+                    waited += slice_s
+                    if waited >= effective_timeout:
+                        raise
+                    self._log(
+                        f"  [{agent_id}] turn in progress — no message "
+                        f"for {int(waited)}s (keepalive; ceiling "
+                        f"{effective_timeout}s)"
+                    )
+
         try:
             while True:
                 try:
-                    if effective_timeout is None:
-                        item = await queue.get()
-                    else:
-                        item = await asyncio.wait_for(
-                            queue.get(),
-                            timeout=effective_timeout,
-                        )
+                    item = await _get_with_keepalive()
                 except asyncio.TimeoutError:
                     self._log(
                         f"  [{agent_id}] no message for "

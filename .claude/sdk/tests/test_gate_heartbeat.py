@@ -64,11 +64,28 @@ class GateEmitsAHeartbeat(unittest.TestCase):
 
     def test_the_beat_BACKS_OFF_on_a_very_long_wait(self):
         # A fixed 4-minute beat emitted 270 notifications across an 18-hour
-        # wait. Keep the first beat early, then double to an hourly ceiling.
+        # wait. Back off — but the ceiling must stay BELOW the watchdog's
+        # 1200s staleness threshold: the earlier hourly ceiling let the beat
+        # gap exceed 1200s and the watchdog killed a healthy build
+        # mid-escalation-wait (measured 2026-08-16). ~74 beats over 18h is
+        # the price of staying alive; 270 was the flood.
         out = _run_gate(18 * 3600)
         n = len(out.strip().splitlines())
-        self.assertLess(n, 25, f"{n} beats over 18h is a notification flood")
+        self.assertLess(n, 100, f"{n} beats over 18h is a notification flood")
         self.assertGreater(n, 8, f"{n} beats over 18h is too quiet to trust")
+
+    def test_no_beat_gap_ever_exceeds_the_watchdog_threshold(self):
+        # THE invariant the 2026-08-16 kill exposed: whatever the backoff
+        # does, consecutive beats must land closer together than the
+        # watchdog's 1200s staleness threshold, or a long wait dies.
+        out = _run_gate(18 * 3600)
+        minutes = [int(line.split("(")[1].split("m")[0])
+                   for line in out.strip().splitlines()]
+        gaps = [b - a for a, b in zip(minutes, minutes[1:])]
+        self.assertTrue(gaps, "need at least two beats to measure a gap")
+        self.assertLess(max(gaps) * 60, 1200,
+                        f"max beat gap {max(gaps)}m would outlast the "
+                        f"1200s watchdog")
 
     def test_the_flood_is_what_the_old_cadence_did(self):
         # Contrast control: the pre-backoff rule, at the same duration.
