@@ -1,5 +1,6 @@
 ---
 section: Backlog
+depends_on: [lensing_deltoid_farfield_coordinate_redesign]
 ---
 
 - **NEXT-SESSION ORDER 7a/7 — THE TRAINING CAMPAIGN, demand-first
