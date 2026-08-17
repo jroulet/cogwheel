@@ -3000,7 +3000,21 @@ Tag conventions:
   form. FALSIFICATION (not calibration): the F083 ladder — the
   uniformized axis must beat or match the brute-force 48-s-node
   baseline (eps 0.0237) at fewer nodes; adaptive refinement against
-  the held-out bar engages ONLY if the closed form under-predicts; (2) raise engine_budget to match (the 24-node build
+  the held-out bar engages ONLY if the closed form under-predicts.
+  NO-EXPLOSION GATE (owner vision, 2026-08-17: after converging on the
+  right representations + coordinates there must be NO explosion in
+  collocation points): the right-coordinate node count is DERIVABLE
+  (Nyquist x spline factor, closed form from the cascade), so add a
+  standing tiling-census check — any region whose proposed nodes exceed
+  its information-content estimate by more than a small stated factor
+  is BY DEFINITION a coordinate/representation defect, flagged before
+  any engine call (the part0-guard pattern applied to the collocation
+  budget). Also record for a follow-up fragment the REPRESENTATION
+  endgame: charts should store the RESIDUAL against the best analytic
+  representation (the arm's error — small AND smooth; the Born rung's
+  carrier+residual architecture), not the bare envelope; the beat the
+  s' coordinate uniformizes, a residual representation removes
+  entirely; (2) raise engine_budget to match (the 24-node build
   already trips 400); (3) fix `_heldout_eps`'s silent-skip blind spot
   (unserved held-out points must be REPORTED as coverage, never
   silently dropped) and record the ~40% arc-end shell that cannot serve
