@@ -1,16 +1,30 @@
 # Live session state (2026-08-17 ~10:40 EDT) — post-compaction re-orientation
 
-RUNNING: build `tube_beat_free_representation` (FOURTH launch, recovery).
-Log /tmp/tube_beat_free_representation_20260817_110226.log, PID 1281203,
-approval dir /tmp/tube_beat_free_representation_approval, monitor armed.
-(Launch 2: watchdog killed a healthy quiet planning turn — fixed 21a1abd,
-keepalive slices + gate-wait beat cap. Launch 3: Architect emitted the
-full plan but with Python-style '" + "' string concatenation inside a
-JSON value; parse gate died — fixed 49ba729, repair fallback verified
-against the actual failed transcript + architect.md strict-JSON rule.
-Launch 4 architect should replan fast from its serena memory checkpoint.
-NEXT BUILD'S BRIEF IS READY: .claude/handoff/c3_band_split_zero_refusal.md.)
-At plan-ready: review per the brief
+HAND-FINISH IN PROGRESS: build `tube_beat_free_representation` launch 5
+ran the full DAG — Inspector PASS (after driver escalation rulings: fix
+INS-5-001/002 caller threading, accept INS-3-PARSE with driver-side
+verification), Professor PASS — then the TREE GATE went RED (9F+5E, all
+legacy tube fixtures in test_lensing_surrogate.py hitting the new F_ref
+gate; the build terminated WITHOUT committing; work preserved in tree +
+refs/sdk/coder_checkpoint). Driver recovery: fixer subagent repaired the
+fixtures (assertions/golden literals byte-identical) and re-pointed the
+2 overlap-band precedence tests as structural probes (require_fref=False
+tube leg; new fragment
+todo.d/lensing_tube_exterior_double_match_dead_branch.md files the
+dead-branch question); test_lensing_surrogate.py 128/128 serial AND
+xdist. NOW RUNNING: driver full-gate re-run
+(/tmp/driver_gate_rerun_beat_free.log) + F083 (n_theta, eps) extraction.
+THEN: driver commit of the whole build tree (pathspec-sweep; the
+build's pre-staged index entries and baseline-untracked test files must
+be included — the orchestrator's own commit would have excluded them),
+hand-run /doc-sync + /dream (build stranded pre-commit), quote (n_theta,
+eps) in the completion record, close the todo.d fragment, push.
+Launch-5 SDK fixes landed for future builds: keepalives, JSON repair,
+verification revision feedback, test_dev continuation, Librarian wrap,
+--resume-plan (approved plan archived:
+.claude/handoff/tube_beat_free_approved_plan.json).
+NEXT BUILD'S BRIEF IS READY: .claude/handoff/c3_band_split_zero_refusal.md.
+If a future launch needs a plan: review per the brief
 `.claude/handoff/tube_beat_free_representation.md` (recovery note at the
 bottom; the (nodes, eps) falsification quote is unconditional acceptance;
 >24-node escalation tripwire; finish-not-rewrite; parsimony on test
