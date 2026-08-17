@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "856f82db87e50d47a8649c7f847585aa6849cb52",
-  "timestamp": "2026-08-17T06:59:17Z",
+  "commit": "02cb87f4bb10bb25b9c0e04e632b8ed4338c8a09",
+  "timestamp": "2026-08-17T07:08:18Z",
   "touched_files": [
     "cogwheel/lensing/born_residual_chart.py",
     "cogwheel/lensing/chang_refsdal/__init__.py",
@@ -14,6 +14,7 @@
     "cogwheel/lensing/likelihood.py",
     "cogwheel/lensing/marginalized_likelihood.py",
     "cogwheel/lensing/ppgo_map.py",
+    "cogwheel/lensing/serve_route_census.py",
     "cogwheel/lensing/surrogate.py",
     "cogwheel/lensing/surrogate_census.py",
     "cogwheel/lensing/surrogate_training.py",

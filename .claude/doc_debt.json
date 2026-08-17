@@ -1,0 +1,5 @@
+{
+  "recorded": "2026-08-17T07:08:16Z",
+  "reason": "spec/doc discipline deferred for an SDK build",
+  "owed": ["","  * New module cogwheel/lensing/serve_route_census.py added but SPEC.md not updated. Add it to the spec."]
+}
