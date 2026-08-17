@@ -1,12 +1,15 @@
 # Live session state (2026-08-17 ~10:40 EDT) — post-compaction re-orientation
 
-RUNNING: build `tube_beat_free_representation` (THIRD launch, recovery).
-Log /tmp/tube_beat_free_representation_20260817_103643.log, PID 1259398,
+RUNNING: build `tube_beat_free_representation` (FOURTH launch, recovery).
+Log /tmp/tube_beat_free_representation_20260817_110226.log, PID 1281203,
 approval dir /tmp/tube_beat_free_representation_approval, monitor armed.
-(Launch 2 was killed by the watchdog during a healthy quiet Architect
-planning turn; fixed in 21a1abd — gate-wait beat capped at 900s,
-planning/skill turns now route through _iter_query_with_timeout with
-240s keepalive slices; the watchdog-starvation fragment is CLOSED.)
+(Launch 2: watchdog killed a healthy quiet planning turn — fixed 21a1abd,
+keepalive slices + gate-wait beat cap. Launch 3: Architect emitted the
+full plan but with Python-style '" + "' string concatenation inside a
+JSON value; parse gate died — fixed 49ba729, repair fallback verified
+against the actual failed transcript + architect.md strict-JSON rule.
+Launch 4 architect should replan fast from its serena memory checkpoint.
+NEXT BUILD'S BRIEF IS READY: .claude/handoff/c3_band_split_zero_refusal.md.)
 At plan-ready: review per the brief
 `.claude/handoff/tube_beat_free_representation.md` (recovery note at the
 bottom; the (nodes, eps) falsification quote is unconditional acceptance;
