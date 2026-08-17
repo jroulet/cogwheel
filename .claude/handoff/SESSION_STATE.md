@@ -1,12 +1,13 @@
-# Live session state (2026-08-17 ~10:05 EDT) — post-compaction re-orientation
+# Live session state (2026-08-17 ~10:40 EDT) — post-compaction re-orientation
 
-RUNNING: build `tube_beat_free_representation` (SECOND launch, recovery).
-Log /tmp/tube_beat_free_representation_20260817_094933.log, PID 1242756,
+RUNNING: build `tube_beat_free_representation` (THIRD launch, recovery).
+Log /tmp/tube_beat_free_representation_20260817_103643.log, PID 1259398,
 approval dir /tmp/tube_beat_free_representation_approval, monitor armed.
-Currently in Phase 1 planning (long quiet Architect turn — if the
-watchdog killed it, relaunch from the same brief AND extend
-`todo.d/sdk_escalation_wait_starves_watchdog.md` to cover planning-turn
-keepalives). At plan-ready: review per the brief
+(Launch 2 was killed by the watchdog during a healthy quiet Architect
+planning turn; fixed in 21a1abd — gate-wait beat capped at 900s,
+planning/skill turns now route through _iter_query_with_timeout with
+240s keepalive slices; the watchdog-starvation fragment is CLOSED.)
+At plan-ready: review per the brief
 `.claude/handoff/tube_beat_free_representation.md` (recovery note at the
 bottom; the (nodes, eps) falsification quote is unconditional acceptance;
 >24-node escalation tripwire; finish-not-rewrite; parsimony on test
