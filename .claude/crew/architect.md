@@ -145,6 +145,11 @@ open-ended for the Coder.
    Inspector does that afterwards anyway.
 5. Output the plan as a **raw JSON object** in your final message. No files,
    no ExitPlanMode. The orchestrator parses it automatically.
+   **STRICT JSON**: every string value is ONE literal. Never write a long
+   value as Python-style concatenation (`"part one. " + "part two"`) —
+   `+` between literals is not JSON, and it sent a complete plan to the
+   parse-failure gate on 2026-08-17. Long guidance strings are fine as a
+   single literal with `\n` escapes.
 
 ## Zero-work-package routes
 

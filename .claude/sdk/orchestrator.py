@@ -3985,6 +3985,22 @@ class BuildOrchestrator:
             is_test_only=data.get("is_test_only", False),
         )
 
+    @staticmethod
+    def _repair_json_string_concatenation(json_str: str) -> str:
+        """Collapse Python-style string concatenation inside JSON values.
+
+        The Architect occasionally writes a long string value as
+        ``"part one. " + "part two"`` — implicit-concatenation muscle
+        memory from Python. ``+`` between literals is not JSON, and on
+        2026-08-17 it sent a COMPLETE plan (9k output tokens, $9.80 of
+        consultation) to the parse-failure gate. In JSON an unescaped
+        quote is always a string delimiter (quotes inside values arrive
+        escaped), so collapsing ``" + "`` — whitespace and newlines
+        allowed around the ``+`` — joins the fragments without touching
+        quoted code inside values.
+        """
+        return re.sub(r'(?<!\\)"\s*\+\s*"', '', json_str)
+
     def _try_parse_json_plan(self, text: str) -> Plan | None:
         """Try to extract a JSON plan from text."""
         try:
@@ -4001,7 +4017,17 @@ class BuildOrchestrator:
                 if "work_packages" in data:
                     return self._parse_plan_from_dict(data)
             except json.JSONDecodeError:
-                pass
+                repaired = self._repair_json_string_concatenation(json_str)
+                if repaired != json_str:
+                    try:
+                        data = json.loads(repaired)
+                        if "work_packages" in data:
+                            self._log(
+                                "  (plan JSON repaired: collapsed "
+                                "string-literal concatenation)")
+                            return self._parse_plan_from_dict(data)
+                    except json.JSONDecodeError:
+                        pass
         return None
 
     def _parse_plan(self, architect_output: str, fallback_text: str = "") -> Plan:
