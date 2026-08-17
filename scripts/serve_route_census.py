@@ -7,7 +7,7 @@ writes its JSON report; with ``--with-artifact PATH`` it loads a trained
 `LensAmplificationSurrogate.load` path and threads it through so the
 ``surrogate`` route becomes reachable (the 7b ACCEPTANCE census).  All
 computation lives in the census module; this wrapper only parses arguments,
-loads the artifact, calls `run`, prints the 7-label route breakdown and dumps
+loads the artifact, calls `run`, prints the 8-label route breakdown and dumps
 the JSON.  It performs NO amplitude-engine evaluation of its own -- both the
 surrogate load and its `serve` path are engine-free (spline lookup, no
 wave-optics amplitude).
@@ -24,7 +24,7 @@ from cogwheel.lensing.surrogate import LensAmplificationSurrogate
 
 
 def _print_breakdown(report: dict) -> None:
-    """Print the 7-label route breakdown and the residual 3-way split."""
+    """Print the 8-label route breakdown and the residual 3-way split."""
     n_samples = report['n_samples']
     print(f'serve-route census ({report["header"]["mode"]} mode): '
           f'{n_samples} draws')

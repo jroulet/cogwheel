@@ -3,7 +3,7 @@
 WHAT
 ----
 `run` draws full-reach lens prior samples and classifies each draw into
-EXACTLY ONE of seven mutually-exclusive serve routes -- the analytic rung
+EXACTLY ONE of eight mutually-exclusive serve routes -- the analytic rung
 that WOULD answer it (or the exact-wave engine that would have to) -- WITHOUT
 ever evaluating a wave-optics amplitude.  It then aggregates the draw-level
 routes into ``(region x gamma-band x w-band)`` cells and splits the
@@ -74,12 +74,13 @@ from cogwheel.lensing.chang_refsdal import geometry
 # Route vocabulary
 # ---------------------------------------------------------------------------
 
-#: The seven MECE draw-level serve routes, listed in label-enumeration order.
+#: The eight MECE draw-level serve routes, listed in label-enumeration order.
 #: The DECISION order (a first-admitting waterfall) is DIFFERENT and is
 #: documented on `classify_draw`: ``engine_refused`` is decided first, then
 #: ``surrogate`` (artifact mode only), ``saddle_c3``, ``born_analytic``, and
-#: finally the per-node pass resolves ``ppgo_above_ceiling`` /
-#: ``analytics_engine_hosted`` / ``engine_residual``.
+#: finally the per-node pass resolves ``wave_refused`` / ``engine_residual``
+#: / ``ppgo_above_ceiling`` / ``analytics_engine_hosted`` (in that
+#: precedence order -- see `classify_draw`).
 SERVE_ROUTES: tuple[str, ...] = (
     'surrogate',
     'ppgo_above_ceiling',
@@ -87,6 +88,7 @@ SERVE_ROUTES: tuple[str, ...] = (
     'born_analytic',
     'analytics_engine_hosted',
     'engine_residual',
+    'wave_refused',
     'engine_refused',
 )
 
@@ -94,16 +96,22 @@ SERVE_ROUTES: tuple[str, ...] = (
 #: ``geometric`` = stationary-phase asymptote; ``fold`` / ``ghost_ppgo`` /
 #: ``pearcey`` = the three uniform-asymptotic arms of
 #: ``operator._uniform_arm_value``, tried in that order; ``exact_wave`` = a
-#: node that would fall through to the forbidden exact-wave engine.
+#: node that would fall through to the exact-wave engine (true engine
+#: demand, only reachable at ``w <= W_CEILING_SCHWINGER_QD``); ``refused`` =
+#: an above-QD-ceiling wave-branch node BOTH arms decline -- a deterministic
+#: production refuser (``SchwingerCertificationError``, ``lnL = -inf``; no
+#: exact engine exists above the ceiling), NOT engine demand.
 ROUTE_KINDS: tuple[str, ...] = (
-    'geometric', 'fold', 'ghost_ppgo', 'pearcey', 'exact_wave',
+    'geometric', 'fold', 'ghost_ppgo', 'pearcey', 'exact_wave', 'refused',
 )
 
-#: The three uniform-arm KINDS a served above-ceiling node can carry (the
-#: subset of `ROUTE_KINDS` produced by ``operator._uniform_arm_value``).  A
-#: draw is ``ppgo_above_ceiling`` iff every node is served AND at least one
-#: node's KIND is in this set.
-_ABOVE_CEILING_ARM_KINDS: frozenset[str] = frozenset(
+#: The three uniform-arm KINDS a served wave node can carry (the subset of
+#: `ROUTE_KINDS` produced by ``operator._uniform_arm_value``).  Production
+#: offers the arms to EVERY wave node above the DD ceiling (both the
+#: ``(60, 150]`` mpmath band and the above-QD-ceiling regime).  A draw is
+#: ``ppgo_above_ceiling`` iff every node is served AND at least one node's
+#: KIND is in this set.
+_UNIFORM_ARM_KINDS: frozenset[str] = frozenset(
     {'fold', 'ghost_ppgo', 'pearcey'})
 
 #: The Born weak-deflection exterior floor: ``caustic_rho > _BORN_RHO_FLOOR``
@@ -334,7 +342,7 @@ def _w_band_of(log_w_max: float, w_dd: float, w_qd: float) -> str:
 
 def _resolve_arm_kind(mods: _ProductionModules, w: float, source: np.ndarray,
                       gamma: float) -> str:
-    """Which uniform arm answers a served above-ceiling node (label only).
+    """Which uniform arm answers a served wave node (label only).
 
     ``operator._uniform_arm_value`` returns the first certified value but not
     which arm produced it; this re-probes the SAME arms in the SAME
@@ -354,20 +362,37 @@ def _resolve_arm_kind(mods: _ProductionModules, w: float, source: np.ndarray,
 def _classify_nodes(mods: _ProductionModules, *, gamma: float,
                     source: np.ndarray, w_grid: np.ndarray,
                     delta_min: float, eta: float) -> tuple[str, ...]:
-    """Route each frequency node through the analytic serving ladder.
+    """Route each frequency node through the PRODUCTION band ladder.
 
-    For each node ``w`` the authoritative `operator.select_branch` gate
-    decides geometric vs wave (positive parity supplies the measured
-    cancellation exponent ``L = w|y'|``; the macro saddle passes ``inf``,
-    which leaves that leg vacuous -- exactly as the production per-node
-    routers do).  A geometric node is served by the stationary-phase
-    asymptote; a wave node above the QD ceiling is offered
-    ``operator._uniform_arm_value`` (fold -> ghost+ppGO -> Pearcey); a wave
-    node at or below the ceiling, or one no arm certifies, is exact-wave
-    demand.  Each node is wrapped in the refusal-plus-degeneracy except tuple
+    Mirrors the operator's per-node serving ladder exactly (the
+    ``operator.py`` node loop, ~:923 / :1231):
+
+    * ``w <= W_CEILING_SCHWINGER`` (DD ceiling, 60): production sends the
+      node straight to the DD exact engine -- no arms, no geometric
+      asymptote -- so the node is unconditionally exact-wave demand.
+    * ``60 < w <= W_CEILING_SCHWINGER_QD`` (QD ceiling, 150): production
+      offers ``operator._uniform_arm_value`` (fold -> ghost+ppGO ->
+      Pearcey) FIRST; decliners fall to the exact mpmath engine, so an
+      arm-declined node is exact-wave demand.
+    * ``w > 150``: the authoritative `operator.select_branch` gate decides
+      geometric vs wave (positive parity supplies the measured cancellation
+      exponent ``L = w|y'|``; the macro saddle passes ``inf``, which leaves
+      that leg vacuous -- exactly as the production per-node routers do).
+      A geometric node is served by the stationary-phase asymptote; a wave
+      node is offered the arms; a wave node BOTH arms decline is a
+      DETERMINISTIC production refuser (``SchwingerCertificationError``,
+      ``lnL = -inf`` -- no exact engine exists above the QD ceiling) and is
+      labelled ``'refused'``, never exact-wave demand.
+
+    ``select_branch`` is consulted ONLY above the QD ceiling: at or below
+    it production runs the band ladder unconditionally, so a geometric (or
+    refused) label there would be unfaithful.
+
+    Each node is wrapped in the refusal-plus-degeneracy except tuple
     (``ZeroDivisionError`` included: ``caustic_rho`` raises it at ``gamma ==
     0``, not a domain error), and a degenerate node routes to exact-wave
-    demand -- the conservative direction.
+    demand -- the conservative (demand-overcounting) direction, kept even
+    above the QD ceiling where the ladder outcome is indeterminate.
 
     Returns the per-node `ROUTE_KINDS` vector (one entry per frequency node).
     """
@@ -382,19 +407,24 @@ def _classify_nodes(mods: _ProductionModules, *, gamma: float,
     for w_value in w_grid:
         w = float(w_value)
         try:
-            exponent = (math.inf if saddle_host
-                        else mods.cancellation_exponent(w, source, gamma, 0.0))
-            if mods.select_branch(w, delta_min, exponent, eta) == 'geometric':
-                kinds.append('geometric')
-                continue
-            # Wave branch: only above the QD ceiling is a uniform arm offered;
-            # at or below it the node is exact-wave demand (Schwinger
-            # territory, whose door this census never opens).
-            if w > mods.w_ceiling_qd and mods.uniform_arm_value(
-                    w, source, gamma) is not None:
-                kinds.append(_resolve_arm_kind(mods, w, source, gamma))
-                continue
-            kinds.append('exact_wave')
+            if w > mods.w_ceiling_qd:
+                exponent = (math.inf if saddle_host
+                            else mods.cancellation_exponent(
+                                w, source, gamma, 0.0))
+                if mods.select_branch(
+                        w, delta_min, exponent, eta) == 'geometric':
+                    kinds.append('geometric')
+                elif mods.uniform_arm_value(w, source, gamma) is not None:
+                    kinds.append(_resolve_arm_kind(mods, w, source, gamma))
+                else:
+                    kinds.append('refused')
+            elif w > mods.w_ceiling_dd:
+                if mods.uniform_arm_value(w, source, gamma) is not None:
+                    kinds.append(_resolve_arm_kind(mods, w, source, gamma))
+                else:
+                    kinds.append('exact_wave')
+            else:
+                kinds.append('exact_wave')
         except node_except:
             kinds.append('exact_wave')
     return tuple(kinds)
@@ -442,15 +472,24 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
        predicate alone: ``kappa == beta == 0`` (fixed here), ``gamma != 0``
        and ``caustic_rho > 2`` (the production Born intercept's coverage
        predicate, minus the chart-box test that demand mode has no chart for).
-    5. per-node pass -> ``ppgo_above_ceiling`` (all nodes served, at least one
-       via an above-ceiling uniform arm), ``analytics_engine_hosted`` (all
-       nodes served, none needing an above-ceiling arm) or ``engine_residual``
-       (any node is exact-wave demand).
+    5. per-node pass, resolved in this precedence: ``wave_refused`` (any node
+       is an above-QD-ceiling deterministic refuser -- production raises
+       ``SchwingerCertificationError`` and the draw's ``lnL`` is ``-inf``, so
+       it is a production REFUSAL, not engine demand), then
+       ``engine_residual`` (any node is exact-wave demand), then
+       ``ppgo_above_ceiling`` (all nodes served, at least one via a uniform
+       arm) and ``analytics_engine_hosted`` (all nodes served, no arm
+       needed).
 
-    The per-node pass is reached ONLY after intercepts 1-4 decline; because
-    every whole-band intercept is decided at the worst-case band-floor
-    ``w_lo``, a whole-band analytic serve and an exact-wave node never coexist
-    for the same draw, so the labels stay MECE (asserted below).
+    The per-node pass is reached ONLY after intercepts 1-4 decline, so
+    ``wave_refused`` can never absorb a draw a whole-band intercept would
+    serve first; within the node pass it precedes ``engine_residual``
+    because production's any-refuser -> whole-grid-refusal is DETERMINISTIC
+    (no engine exists above the ceiling), while an exact-wave node is merely
+    potential engine demand.  Because every whole-band intercept is decided
+    at the worst-case band-floor ``w_lo``, a whole-band analytic serve and an
+    exact-wave (or refused) node never coexist for the same draw, so the
+    labels stay MECE (asserted below).
     """
     w_grid = mods.dimensionless_frequency(f_grid, m_lens_msun, 0.0)
     log_w = np.log(w_grid)
@@ -506,12 +545,13 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     delta_min = mods.real_delay_min_separation(source, matrix)
     kinds = _classify_nodes(mods, gamma=gamma, source=source, w_grid=w_grid,
                             delta_min=delta_min, eta=eta)
-    needs_exact = 'exact_wave' in kinds
-    used_above_ceiling = any(k in _ABOVE_CEILING_ARM_KINDS for k in kinds)
+    used_arm = any(k in _UNIFORM_ARM_KINDS for k in kinds)
 
-    if needs_exact:
+    if 'refused' in kinds:
+        route = 'wave_refused'
+    elif 'exact_wave' in kinds:
         route = 'engine_residual'
-    elif used_above_ceiling:
+    elif used_arm:
         route = 'ppgo_above_ceiling'
     else:
         route = 'analytics_engine_hosted'
@@ -583,6 +623,10 @@ def aggregate_cells(results: list[DrawResult]) -> dict[str, dict[str, Any]]:
 
 def residual_demand(results: list[DrawResult]) -> dict[str, Any]:
     """Split the ``engine_residual`` population by caustic-relative reach.
+
+    Only true engine demand is split: ``wave_refused`` draws are production
+    refusals (``lnL = -inf``), not demand, and are EXCLUDED here by the
+    ``route == 'engine_residual'`` filter.
 
     Three-way split keyed on ``caustic_rho`` (NEVER ``rho_lobe``): Born-chart
     demand (``rho > 2``), near-caustic / tube (``1 < rho <= 2``) and interior
@@ -682,7 +726,8 @@ def run(config: ServeRouteCensusConfig | None = None,
                 'prior-mass fraction times n_samples.'),
             'serve_routes_decision_order': [
                 'engine_refused', 'surrogate', 'saddle_c3', 'born_analytic',
-                'ppgo_above_ceiling|analytics_engine_hosted|engine_residual'],
+                'wave_refused|engine_residual|ppgo_above_ceiling'
+                '|analytics_engine_hosted'],
             'serve_routes': list(SERVE_ROUTES),
             'route_kinds': list(ROUTE_KINDS),
             'w_band_edges': {

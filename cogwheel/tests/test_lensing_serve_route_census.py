@@ -6,7 +6,7 @@ no numerical tolerance to certify.  Three properties are load-bearing and
 are pinned here:
 
 1. MECE routing (`MeceSmallRunTestCase`).  Every draw lands in EXACTLY one
-   of the seven `SERVE_ROUTES` labels: the reported ``route_counts`` has
+   of the eight `SERVE_ROUTES` labels: the reported ``route_counts`` has
    exactly those keys, sums to ``n_samples`` (exhaustiveness), and -- with
    no artifact attached -- emits zero ``surrogate`` (that route is
    artifact-mode-only).  The independent oracle is a from-scratch re-tally
@@ -68,7 +68,8 @@ from cogwheel.lensing.chang_refsdal import geometry
 # ---------------------------------------------------------------------------
 
 #: Draw count for the shared demand run (small but enough to populate
-#: ``engine_residual`` and at least one analytic-intercept route).
+#: ``engine_residual``, the ``wave_refused`` production-refusal route and at
+#: least one analytic-intercept route).
 N_SAMPLES = 150
 
 #: RNG seed -- fixed so the shared report is deterministic across classes.
@@ -217,7 +218,7 @@ class _CensusTestCase(TestCase):
 # ---------------------------------------------------------------------------
 
 class MeceSmallRunTestCase(_CensusTestCase):
-    """Every draw lands in exactly one of the seven `SERVE_ROUTES` labels."""
+    """Every draw lands in exactly one of the eight `SERVE_ROUTES` labels."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -229,9 +230,10 @@ class MeceSmallRunTestCase(_CensusTestCase):
         self._comparisons += 1
 
     def test_every_record_route_is_a_serve_route(self) -> None:
-        """No per-draw record carries a label outside the 7-set."""
+        """No per-draw record carries a label outside the 8-set."""
         routes = frozenset(SERVE_ROUTES := src.SERVE_ROUTES)
-        self.assertEqual(len(routes), 7, 'SERVE_ROUTES is not a 7-label set')
+        self.assertEqual(len(routes), 8, 'SERVE_ROUTES is not an 8-label set')
+        self.assertIn('wave_refused', routes)
         for record in self.report['records']:
             self.assertIn(
                 record['route'], routes,
@@ -274,6 +276,18 @@ class MeceSmallRunTestCase(_CensusTestCase):
         """Demand mode (no artifact) never emits the ``surrogate`` route."""
         self.assertEqual(self.report['route_counts']['surrogate'], 0)
         self.assertEqual(self.report['header']['mode'], 'demand')
+        self._comparisons += 1
+
+    def test_wave_refused_route_is_populated(self) -> None:
+        """The production-refusal route is reachable at this scale.
+
+        Reachability makes the residual-exclusion guard bite: with
+        ``wave_refused`` draws present, `ResidualPartitionTestCase`'s
+        ``residual_demand['total'] == route_counts['engine_residual']``
+        equality would go red if refusals were ever folded back into the
+        engine-demand residual.
+        """
+        self.assertGreater(self.report['route_counts']['wave_refused'], 0)
         self._comparisons += 1
 
 
@@ -625,7 +639,127 @@ class SaddleFiniteHugeEstimateRefusesTestCase(_CensusTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 6. Self-falsification -- prove each guard above can go red
+# 6. Production band-ladder fixtures (audit witnesses)
+# ---------------------------------------------------------------------------
+
+#: Mass (Msun) at the top of the lens prior for the ladder fixtures: the
+#: band ceiling ``w_hi ~ 444`` clears the QD ceiling (150) so the
+#: above-ceiling rungs are live, while the band floor ``w_lo ~ 8.7`` stays
+#: in DD-engine territory -- one draw spans all three ladder rungs.
+_LADDER_MASS_MSUN = 3500.0
+
+#: Source polar angle (rad) for the ladder fixtures (the audit's 30 deg).
+_LADDER_ANGLE_RAD = math.radians(30.0)
+
+
+class ProductionBandLadderTestCase(_CensusTestCase):
+    """Per-node kinds follow the production band ladder (audit witnesses).
+
+    Two hand-placed ``gamma = 0.5``, ``M = 3500`` draws (w band ~ [8.7, 444])
+    pin the three audited ladder invariants:
+
+    * REFUSAL CONFLATION: an interior draw (``caustic_rho = 0.5``) whose
+      above-QD-ceiling wave nodes BOTH arms decline is a DETERMINISTIC
+      production refusal (``SchwingerCertificationError``, ``lnL = -inf`` --
+      no exact engine exists above 150), so the census labels those nodes
+      ``refused`` and the draw ``wave_refused`` -- even though it also
+      carries exact_wave nodes (the precedence pin: refusal beats
+      ``engine_residual``, keeping refusals out of the sizing residual).
+    * ARM THRESHOLD: the mixed tube-shell draw (``caustic_rho = 1.5``, the
+      audit's witness v-a) shows arm-served nodes in the mpmath band
+      ``(60, 150]``, mirroring production's arms-first offer there; every
+      ``w <= 60`` node stays exact_wave (production has no arms below the
+      DD ceiling).
+    * SELECT_BRANCH BELOW CEILING: no node at or below the QD ceiling is
+      labelled ``geometric`` (or ``refused``) -- production consults
+      ``select_branch`` only above 150.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        mods, f_grid, _ = _classify_env()
+        cls.mods = mods
+        cls.w_grid = np.asarray(mods.dimensionless_frequency(
+            f_grid, _LADDER_MASS_MSUN, 0.0), dtype=float)
+        cls.results = {}
+        for label, rho in (('interior_armless', 0.5), ('tube_mixed', 1.5)):
+            y1, y2 = _source_at_rho(0.5, rho, _LADDER_ANGLE_RAD)
+            cls.results[label] = _classify_probe(
+                0.5, y1, y2, m_lens_msun=_LADDER_MASS_MSUN)
+
+    def _kinds(self, label: str) -> np.ndarray:
+        """Node-kind vector as an array, length-checked against the grid."""
+        kinds = np.array(self.results[label].node_route_kinds)
+        self.assertEqual(kinds.size, self.w_grid.size)
+        return kinds
+
+    def test_band_spans_all_three_ladder_rungs(self) -> None:
+        """Premise guard: the fixture w band crosses BOTH ceilings."""
+        self.assertLessEqual(self.w_grid.min(), self.mods.w_ceiling_dd)
+        self.assertGreater(self.w_grid.max(), self.mods.w_ceiling_qd)
+        self._comparisons += 1
+
+    def test_armless_above_ceiling_draw_is_wave_refused(self) -> None:
+        """The w_hi~444 interior draw classifies wave_refused, not residual.
+
+        Its ``refused`` nodes all sit above the QD ceiling, and exact_wave
+        demand coexists in the same draw -- yet the deterministic refusal
+        takes precedence, so the draw is excluded from the campaign-sizing
+        residual.
+        """
+        kinds = self._kinds('interior_armless')
+        self.assertEqual(
+            self.results['interior_armless'].route, 'wave_refused',
+            'armless above-ceiling draw was not routed to wave_refused -- '
+            'a production refusal is being conflated with engine demand')
+        refused = kinds == 'refused'
+        self.assertTrue(refused.any())
+        self.assertTrue(
+            (self.w_grid[refused] > self.mods.w_ceiling_qd).all(),
+            "'refused' at or below the QD ceiling: no deterministic "
+            'refusal exists there (an engine does)')
+        self.assertIn('exact_wave', kinds)  # precedence, not vacuity
+        self._comparisons += 1
+
+    def test_mixed_draw_arms_serve_the_mpmath_band(self) -> None:
+        """Witness v-a: the corrected node map arm-serves (60, 150] nodes."""
+        kinds = self._kinds('tube_mixed')
+        mid = ((self.w_grid > self.mods.w_ceiling_dd)
+               & (self.w_grid <= self.mods.w_ceiling_qd))
+        self.assertTrue(mid.any())
+        self.assertTrue(
+            np.isin(kinds[mid], tuple(src._UNIFORM_ARM_KINDS)).any(),
+            'no arm-served node in (60, 150]: the census is not mirroring '
+            "production's arms-first mpmath band")
+        self.assertEqual(self.results['tube_mixed'].route, 'engine_residual')
+        self._comparisons += 1
+
+    def test_no_select_branch_at_or_below_the_qd_ceiling(self) -> None:
+        """No 'geometric'/'refused' label at w <= 150 in either fixture."""
+        below = self.w_grid <= self.mods.w_ceiling_qd
+        for label in self.results:
+            kinds = self._kinds(label)
+            self.assertFalse(
+                np.isin(kinds[below], ('geometric', 'refused')).any(),
+                f'{label}: select_branch consulted at or below the QD '
+                'ceiling -- production band-ladder violation')
+            self._comparisons += 1
+
+    def test_dd_band_nodes_are_unconditional_engine_demand(self) -> None:
+        """Every w <= 60 node is exact_wave in both fixtures (no arms there)."""
+        low = self.w_grid <= self.mods.w_ceiling_dd
+        self.assertTrue(low.any())
+        for label in self.results:
+            kinds = self._kinds(label)
+            self.assertTrue(
+                (kinds[low] == 'exact_wave').all(),
+                f'{label}: a w<=60 node escaped the DD engine -- production '
+                'offers no arm or asymptote below the DD ceiling')
+            self._comparisons += 1
+
+
+# ---------------------------------------------------------------------------
+# 7. Self-falsification -- prove each guard above can go red
 # ---------------------------------------------------------------------------
 
 class SelfFalsificationTestCase(TestCase):
