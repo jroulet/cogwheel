@@ -3053,6 +3053,35 @@ Tag conventions:
   census and the deltoid redesign.
 
 
+- **TUBE BEAT-FREE REPRESENTATION — demodulate by BOTH fold carriers;
+  the theta node count collapses** `[→ spec]` — owner direction
+  2026-08-17, redirecting the graduation follow-up. The graduation
+  build's measurement PROVED the coordinate was not the bottleneck:
+  30 delay-uniformized nodes (eps ~0.145) barely beat 24 arc-length
+  nodes (0.146), because the arc's beat structure was already
+  near-uniform — no parametrization removes a beat. The stored envelope
+  oscillates as cos(w * Delta_tau) because TWO carriers e^{i w tau_pm}
+  are demodulated by ONE. Fix the REPRESENTATION: demodulate by both
+  fold carriers (the switched-channel machinery already carries
+  resolved pairs this way; Delta_tau is closed form from the cascade —
+  fully analytic), storing a beat-free residual whose structure does
+  not scale with w. Expected: theta nodes collapse to the
+  smooth-variation scale (~5-10), passing the F083 bar (0.0237) at a
+  FRACTION of the 48-node brute baseline — the no-explosion vision
+  realized for the tube. Also owed in this build (the graduation
+  build's Professor-flagged gaps, deferred at its commit): (a) the
+  unguarded ValueError that crashes the graduated builder on every
+  real production arc (verified four bands) — root-cause and fix;
+  (b) the F083 falsification actually RUN (the accuracy half, not the
+  tautological node-count half). The Nyquist-count machinery and the
+  n_theta_cap become the SECONDARY safety net under the beat-free
+  representation, not the primary mechanism; do not raise the cap to
+  chase the bar. Schema: the two-carrier demodulation changes the
+  stored envelope definition -> envelope-definition tag + contracts
+  fragment (the FARFIELD_KERNEL_SUM_MINUS_GHOST precedent). Blocks
+  tube training and the (f_max, f_floor) sweep.
+
+
 - **THE TUBE MAP IS BUILT AT ONE GAMMA AND USED ACROSS A BAND** `[→ spec]` —
   measured 2026-07-30. `_build_tube_chart` builds `theta_to_s` once at
   `rep_gamma = float(np.median(gamma_grid))` and stores it on the chart;
@@ -3102,6 +3131,33 @@ Tag conventions:
   ACCEPTANCE: drift at both band edges falls to the map's own round-trip
   tolerance; tube held-out eps at fixed node count does not regress; the serve
   cost delta is measured and stated.
+
+
+- **wave_refused MUST GO TO ZERO — physics-based extrapolation covers
+  everywhere above the ceiling** `[→ spec]` — owner directive
+  2026-08-17: the corrected demand census quantifies 12.03% of prior
+  mass as deterministic production refusals (above-150 wave nodes both
+  arms decline -> SchwingerCertificationError, lnL = -inf). NOT
+  acceptable: above w = 150 the physics gets EASIER (geometric limit);
+  refusal there is a machinery gap. Two named defects: (1) the
+  `_ppgo_above_ceiling` intercept gates on the BAND FLOOR
+  (`w_lo * min_delta_tau >= RHO_END` with physical w_lo <= 8.67), so a
+  draw whose above-150 nodes are individually resolved fails the
+  whole-band gate — the serve must become PER-NODE (serve the resolved
+  above-ceiling nodes analytically, the low band by engine/chart:
+  band-split, the same architecture as the Born w_trust split and the
+  c3 band-split fragment); (2) the residual armless population is the
+  uniform arms' certification declining in the high-w near-caustic
+  corner — the extension work the existing fragments
+  [[lensing_ppgo_extrapolation_beyond_engine_reach]] (its refined,
+  post-refutation form) and the saddle-envelope-negligible route point
+  at; consolidate rather than duplicate. Census shape: concentrated in
+  wedge_interior astroid gamma 0.55-0.9 (4.29% of prior in one band).
+  ACCEPTANCE: the demand census's wave_refused route reads ZERO (or
+  the measure-zero named-refusal set only) after the per-node
+  above-ceiling serving + arm extension land; 7b inherits this bar —
+  a refused draw is not a served draw. Sequence: with/after the c3
+  band-split build (shared band-split machinery); before 7b.
 
 
 - **THE WEDGE ANGULAR AXIS IS CUSP-SINGULAR — and the arc-length remap makes it
