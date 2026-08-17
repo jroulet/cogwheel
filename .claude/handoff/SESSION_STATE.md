@@ -1,8 +1,12 @@
 # Live session state (2026-08-17 ~16:55 EDT)
 
-RUNNING: build `c3_band_split_zero_refusal` (queue item 2).
-Log /tmp/c3_band_split_zero_refusal_20260817_165153.log, PID 1469803,
-approval dir /tmp/c3_band_split_zero_refusal_approval, monitor armed.
+RUNNING: build `c3_band_split_zero_refusal` (queue item 2, SECOND
+launch). Log /tmp/c3_band_split_zero_refusal_20260817_170038.log,
+PID 1473217, approval dir /tmp/c3_band_split_zero_refusal_approval,
+monitor armed. (Launch 1 died tool-less: build 5's leaked serena child
+squatted port 8323 and the readiness probe false-passed — fixed b52a2e4:
+setsid+killpg stop, loud pre-spawn port refusal, reaper orphan-on-port
+rule.)
 Brief: .claude/handoff/c3_band_split_zero_refusal.md (verified facts at
 6a3f43c; tripwire scoped to the engine-reachable overlap band w<=150).
 Acceptance: census wave_refused -> ZERO (or named measure-zero set),
