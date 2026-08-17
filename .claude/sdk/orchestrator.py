@@ -283,6 +283,11 @@ class BuildOrchestrator:
     auto_approve: bool = False
     approval_dir: str | None = None
     serena_url: str | None = None
+    #: Path to a crash-recovery plan.json to load INSTEAD of running the
+    #: Architect (--resume-plan). Verification + approval gates still run;
+    #: a verification failure falls back to a fresh replan via the normal
+    #: revision loop. Zero-cost recovery for a launch that died post-plan.
+    resume_plan_path: str | None = None
 
     # Runtime state
     phase: Phase = field(default=Phase.PLANNING, init=False)
@@ -898,10 +903,19 @@ class BuildOrchestrator:
                 max_plan_attempts = 3
                 user_feedback = ""
                 for attempt in range(1, max_plan_attempts + 1):
-                    self.plan = await self._run_phase_1(
-                        revision_feedback=user_feedback,
-                        skip_professor=skip_professor,
-                    )
+                    if self.resume_plan_path and attempt == 1:
+                        self._log(
+                            f"Resuming plan from {self.resume_plan_path} "
+                            "(Architect skipped)")
+                        _plan_data = json.loads(
+                            Path(self.resume_plan_path).read_text(
+                                encoding="utf-8"))
+                        self.plan = self._parse_plan_from_dict(_plan_data)
+                    else:
+                        self.plan = await self._run_phase_1(
+                            revision_feedback=user_feedback,
+                            skip_professor=skip_professor,
+                        )
 
                     failures, missing_turns = verify_plan(
                         self.plan, require_professor=not skip_professor)

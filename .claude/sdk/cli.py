@@ -89,6 +89,13 @@ def main():
         help="Project root (default: git root or cwd)",
     )
     build_parser.add_argument(
+        "--resume-plan", metavar="PATH", default=None,
+        help="Load a previously produced plan JSON (the crash-recovery "
+             "plan.json format) and SKIP the Architect. The plan still "
+             "passes the verification and approval gates. Zero-cost "
+             "recovery when a prior launch died after planning.",
+    )
+    build_parser.add_argument(
         "--approval-dir", metavar="DIR", default=None,
         help="File-based plan approval: write plan to DIR/plan.json, wait for "
              "DIR/plan_approved or DIR/plan_rejected. Used by in-session /build.",
@@ -312,6 +319,7 @@ def _run_build(args):
         auto_approve=args.yes,
         approval_dir=args.approval_dir,
         serena_url=args.serena_url,
+        resume_plan_path=args.resume_plan,
     )
 
     try:
