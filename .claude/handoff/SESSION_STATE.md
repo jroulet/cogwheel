@@ -1,0 +1,45 @@
+# Live session state (2026-08-17 ~10:05 EDT) — post-compaction re-orientation
+
+RUNNING: build `tube_beat_free_representation` (SECOND launch, recovery).
+Log /tmp/tube_beat_free_representation_20260817_094933.log, PID 1242756,
+approval dir /tmp/tube_beat_free_representation_approval, monitor armed.
+Currently in Phase 1 planning (long quiet Architect turn — if the
+watchdog killed it, relaunch from the same brief AND extend
+`todo.d/sdk_escalation_wait_starves_watchdog.md` to cover planning-turn
+keepalives). At plan-ready: review per the brief
+`.claude/handoff/tube_beat_free_representation.md` (recovery note at the
+bottom; the (nodes, eps) falsification quote is unconditional acceptance;
+>24-node escalation tripwire; finish-not-rewrite; parsimony on test
+reconciliation).
+
+DRIVER LOOP: file-based gates (touch plan_approved / write plan_rejected
+or escalation_fix with diff-verified rulings); on terminal: verify
+commit, run driver acceptance, close fragments, PUSH origin/claude-dev,
+launch the next build.
+
+QUEUE (each fires on its predecessor; briefs/fragments carry the detail):
+1. beat-free build lands -> commit/close -> push.
+2. c3 band-split + wave_refused-to-zero build
+   (todo.d/lensing_saddle_c3_band_split_serving.md +
+   todo.d/lensing_wave_refused_to_zero.md — shared band-split machinery).
+3. Cheap serve-route census re-run (scripts/serve_route_census.py)
+   -> refreshed demand map (current one:
+   .claude/handoff/demand_census_corrected_10k.json).
+4. (f_max, f_floor) joint sweep on beat-free charts — runner
+   /tmp/f_fraction_sweep.py, priced ~2.6-2.8h, w<=60 cap; F083 killed
+   the old constants' provenance.
+5. Demand-sized tiling design under the no-explosion gate
+   (todo.d/lensing_training_campaign.md, rewritten demand-first).
+6. Residual training campaign (cost estimate FIRST, monitored).
+7. Certified-map retrain (F080 edge-biased binding + fan-asymmetry
+   question) + deltoid far-field redesign
+   (todo.d/lensing_deltoid_farfield_coordinate_redesign.md, after the
+   f-constants).
+8. 7b acceptance census (--with-artifact; zero engine-served AND zero
+   wave_refused per the owner bar).
+
+PARKED: Tidier backlog (60 files), Librarian queue — close-out batch.
+STANDING RULES IN FORCE: cost estimate before engine runs; pairing gate
+before oracle claims; diff-verify escalation-fix claims; no bare git
+commit during builds; push at milestones; test parsimony at plan gates;
+analytics-first / no-explosion / symmetry doctrines (owner).
