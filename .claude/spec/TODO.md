@@ -3014,6 +3014,34 @@ Tag conventions:
   cost delta is measured and stated.
 
 
+- **TUBE THETA NODE DENSITY LAW — derive the count from the envelope's
+  own structure scale; then re-derive (f_max, f_floor) on resolved
+  charts** `[→ spec]` — F083: the theta axis is in the RIGHT coordinate
+  (arc length, 1e-tube) but carries a bare count (`n_theta = 7`) that
+  under-resolves the envelope's measured w-driven structure (~0.17 rad
+  at w ~ 52; ~36 nodes/rad needed; 48 nodes take gamma=0.4 astroid eps
+  from 0.40 to 0.0237). The collocation doctrine's second half: placement
+  AND density from local scales. Build: (1) derive the density law —
+  candidate: nodes per radian proportional to the demodulated envelope's
+  angular frequency, computable from the caustic geometry's delay
+  variation along the arc times w_max (closed form via the step-1
+  cascade; MEASURE the constant against the F083 ladder), with adaptive
+  refinement against the held-out bar as the fallback if the closed form
+  under-predicts; (2) raise engine_budget to match (the 24-node build
+  already trips 400); (3) fix `_heldout_eps`'s silent-skip blind spot
+  (unserved held-out points must be REPORTED as coverage, never
+  silently dropped) and record the ~40% arc-end shell that cannot serve
+  (nearest-point crosses the cusp — decide: shrink the constructed
+  shell to the servable region, or route those queries to the adjacent
+  arc's chart via the fold machinery); (4) THEN re-run the joint
+  (f_max, f_floor) sweep (runner ready at /tmp/f_fraction_sweep.py,
+  priced ~2.6-2.8 h at production density, w capped 60) on resolved
+  charts — `_DEFAULT_F_MAX = 0.40` has no valid measurement behind it
+  (F083) and `f_floor = 0.16` is already measured unsupported. Blocks
+  tube training in the demand-sized campaign; independent of the demand
+  census and the deltoid redesign.
+
+
 - **THE WEDGE ANGULAR AXIS IS CUSP-SINGULAR — and the arc-length remap makes it
   WORSE. Fix is `u ~ theta^(2/3)`** `[→ spec]` — Professor review + measurement,
   2026-08-06. CONSOLIDATES three earlier fragments that reached wrong diagnoses
@@ -3644,6 +3672,24 @@ teja-force skill + gw with the rest of the hardening.
   interactive path. Label them distinctly (`Driver:` / `Owner:`), or record
   the provenance in the file and echo it. Cheap; the value is that an audit
   can tell delegated calls from human ones.
+
+
+- **THE ESCALATION WAIT'S KEEPALIVE BACKS OFF PAST THE WATCHDOG
+  THRESHOLD — a healthy waiting build gets killed** `[housekeeping]` —
+  measured 2026-08-15 (serve_route_census, first launch): escalation
+  written 08:46; the wait loop's "still waiting" log lines appeared at
+  4 m, 12 m, 28 m (exponential-ish backoff), then nothing; the watchdog
+  killed the build at 09:34 — log stale 1201 s — while it was alive and
+  legitimately waiting for a driver decision that could not arrive (the
+  driver was down on a spend limit). Same defect class as the silent
+  tree gate (fixed 2026-08-14 with the Popen heartbeat): a healthy
+  long-running phase whose log goes quiet reads as a stall. FIX: cap the
+  escalation-wait keepalive interval well under the staleness threshold
+  (e.g. print every 300 s, or touch the log mtime), in gates.py's
+  file-based wait loop. Do NOT lengthen the watchdog threshold instead —
+  real stalls must still die. Apply the verify-watchdog discipline after
+  touching the wait loop (extend the probe if it can cheaply simulate an
+  escalation wait).
 
 
 - **THE PLAN GATE HAS NO WIDTH CHECK** `[housekeeping]` — 2026-07-30. AGENTS.md

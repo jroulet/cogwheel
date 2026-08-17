@@ -4490,3 +4490,45 @@ and the `u = d**(2/3)` map anchors there. A cusp genuinely interior to the
 tile beyond the tolerance still raises `ValueError` (unreachable in the
 current tiler per Professor review, so the raise stays a guard, not a live
 path). See `completed.d/2026-08-15_lobe_cusp_axis_edge_tolerance.md`.
+
+## F083
+**The tube theta axis is w-under-resolved by design (bare count vs
+measured structure), the shipped `_DEFAULT_F_MAX = 0.40` was never
+supported by a valid measurement, and the D2 fold is exonerated
+(2026-08-17, driver diagnosis after the f-sweep density A/B stop).**
+
+Decomposition on the worst held-out point (gamma=0.4 astroid, identity
+path, HEAD): chart-vs-true-geometry mapping error 0.0000; served-vs-
+label interpolation error 0.4016 — pure spline failure. Mechanism: at
+w = 52 the demodulated envelope swings 5.3x with 8 real-part extrema
+over a 1.34-rad arc (~0.17-rad structure); production's 7 theta nodes at
+~0.2-rad spacing produce textbook nodal error (~0 at nodes, 0.19-0.44
+between). n_theta ladder: 6 -> 0.40, 12 -> 0.30, 24 -> 0.15,
+48 -> 0.0237 (< the 5e-2 bar; ~36 nodes/rad needed at w~52). The D2
+gauge-image fold serve needs NO change — all large errors are
+identity-path and the one folded probe lands in the same nodal hump.
+
+PROVENANCE FICTION: no first-bad commit exists. The pre-F079 tree fails
+identically (0.4177 on the byte-identical surviving arc); the "healthy"
+a4c3fc1 SHA fails with today's harness; the ORIGINAL sweep harness at
+its own SHA fails its own grid (0.416 at gamma=0.2, 1.299 at 0.28);
+gamma=0.4 was never in any sweep grid; the committed sweep script's
+n_gamma=1 is rejected by that same SHA's >=4-node axis validation, so it
+cannot have produced eps values. `_DEFAULT_F_MAX = 0.40` was
+Professor-pinned (1b0a38c) two days before the grid update and consumed
+into production with no valid measurement behind it — the stale-premise
+class, embodied in a constant.
+
+ALSO: ~40% of the constructed tube shell near arc ends is never served
+(the query's nearest caustic point crosses the cusp to the ADJACENT arc
+at eta < eta_floor -> decline), and `_heldout_eps` SILENTLY SKIPS
+unserved points (17/30 served at gamma=0.4) — eps is measured only on
+the served interior, hiding both the coverage hole and its own blind
+spot.
+
+CONSEQUENCE: the tube theta node count must be a DERIVED density (arc
+length x w-driven envelope structure scale, or adaptive refinement
+against the held-out bar with engine_budget raised), not a bare
+n_theta; the (f_max, f_floor) sweep re-runs only on theta-resolved
+charts; f_floor = 0.16 already measured unsupported (flat eps to 0.03,
+zero refusals). Blocks tube training; does not touch the demand census.
