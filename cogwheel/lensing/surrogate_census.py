@@ -336,8 +336,15 @@ def classify_fallthrough(
     for chart in surrogate.charts:
         if isinstance(chart, _surrogate.TubeChart):
             relaxed = dataclasses.replace(chart, cusp_windows=())
+            # `require_fref=False`: this diagnostic asks the STRUCTURAL
+            # question -- did the cusp window alone block an arc-servable
+            # sample -- so the serve-time F_ref-buildability probe (which a
+            # synthetic census source need not satisfy) must not pre-empt the
+            # attribution.  Threading the eigenframe source still lets the
+            # arc/theta gates use the true geometry.
             if _surrogate._tube_serves(relaxed, gamma, log_w_min, log_w_max,
-                                       eta, theta, image_count):
+                                       eta, theta, image_count,
+                                       y1_eig, y2_eig, require_fref=False):
                 return 'cusp-window'
 
     # refusal-ball: an exterior-polar chart blocked ONLY by its exclusion ball.

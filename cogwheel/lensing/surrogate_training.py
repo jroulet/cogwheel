@@ -64,7 +64,7 @@ from cogwheel.lensing.surrogate import (
     _from_lobe_fixed, _lobe_boundary_radius, LobeInteriorChart,
     LobeExteriorChart, InteriorWedgeChart, _from_wedge_fixed,
     _wedge_theta_waist, _wedge_cusp_axis_map, _lobe_cusp_axis_map,
-    _uniform_axis, CarrierDiscontinuityError)
+    _uniform_axis, CarrierDiscontinuityError, _tube_f_ref)
 
 #: Engine refusals treated conservatively as "do not serve here" during
 #: training.  Extends the 8a surrogate refusal vocabulary with the point-mass
@@ -2971,6 +2971,13 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
     representative (median) gamma via `_tube_arc_length_map` and stored on
     the chart (``theta_to_s``); the same map is read at serve time.
 
+    The stored value tensor is the BEAT-FREE RESIDUAL ``r(w) = E(w) /
+    F_ref(w)`` (`_tube_f_ref`), not the raw beating envelope ``E(w)``; the
+    chart is stamped with the ``TUBE_BEAT_FREE_AIRY`` envelope-definition
+    tag (the `TubeChart.from_values` default).  A grid point is refused --
+    left as zeros and counted -- when EITHER the engine refuses the envelope
+    OR the uniform-Airy reference is undefined there.
+
     Returns the chart, the number of engine calls, and the number of refused
     grid points (left as zeros in the value tensor).
     """
@@ -3030,8 +3037,20 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
                 if env is None:
                     refused += 1
                     continue
-                env_real[:, i_g, i_u, i_t] = env.real
-                env_imag[:, i_g, i_u, i_t] = env.imag
+                # Store the BEAT-FREE RESIDUAL r = E / F_ref, not the raw
+                # beating envelope E.  A node the engine serves but whose
+                # uniform-Airy reference is undefined (fewer than four
+                # images, no merging pair, a degenerate fold) is refused and
+                # left as zeros -- the SAME convention as an engine refusal;
+                # F_ref is NEVER defaulted to 1 (that would silently store a
+                # raw-envelope tensor under the residual tag).
+                fref = _tube_f_ref(w_grid, float(gamma), source)
+                if fref is None:
+                    refused += 1
+                    continue
+                residual = env / fref
+                env_real[:, i_g, i_u, i_t] = residual.real
+                env_imag[:, i_g, i_u, i_t] = residual.imag
     chart = TubeChart.from_values(
         gamma_grid=gamma_grid, u_grid=u_grid, theta_grid=theta_grid,
         log_w_grid=log_w_grid, envelope_real=env_real, envelope_imag=env_imag,
@@ -3384,8 +3403,17 @@ def _heldout_eps(chart: TubeChart | ExteriorPolarChart | LobeInteriorChart
     """Max relative envelope error of a chart over held-out geometry points.
 
     Serves each ``(gamma, y1, y2)`` through the full guard stack of a one-chart
-    surrogate and compares to a fresh engine reference; unserved points are
-    skipped.  Returns ``nan`` when no held-out point is served.
+    surrogate and compares to a fresh engine reference.  This is a pure
+    ACCURACY metric over the points the chart actually serves: a held-out point
+    the one-chart guard stack declines is SKIPPED, not charged, because in the
+    full surrogate the exact ladder covers it -- a chart declining a point the
+    ladder serves is a routing hand-off, not a system coverage failure, so it
+    has no place in an accuracy eps (INS-4-001).  A point with NO reference
+    (engine refusal, far-field ghost gate, or non-finite envelope) is likewise
+    skipped, since with no ground truth there is no error to measure.  Returns
+    ``nan`` only when NO held-out point yields a comparison at all (``errors``
+    empty -- every point declined or referenceless), preserving the
+    ``nan``-iff-nothing-measured sentinel the callers key on.
 
     The reference envelope and its normalization depend on the chart's
     ENVELOPE LABEL, matching the label each chart is trained on (Build 8g-b):
@@ -3449,9 +3477,20 @@ def _heldout_eps(chart: TubeChart | ExteriorPolarChart | LobeInteriorChart
             eta=partition.caustic_distance, theta=partition.critical_theta,
             image_count=int(partition.real_mask.sum()))
         if not served:
+            # Valid finite reference (all no-reference paths `continue`d
+            # above) that this one-chart guard stack declines: SKIP it.  In
+            # the full surrogate the exact ladder serves this point, so the
+            # decline is a routing hand-off, not an accuracy failure of the
+            # chart -- charging it would poison an accuracy metric with a
+            # coverage question the ladder already answers (INS-4-001).
             continue
         errors.append(float(np.max(np.abs(emulated - env_true)) / denom))
-    return max(errors) if errors else float('nan')
+    # nan-iff-nothing-measured: a band where every held-out point is declined
+    # or referenceless yields no comparison (``errors`` empty) and returns nan,
+    # preserving the sentinel the callers key on.
+    if not errors:
+        return float('nan')
+    return max(errors)
 
 
 def _reprovision_w_nodes(*, band: tuple[float, float], parity: int,

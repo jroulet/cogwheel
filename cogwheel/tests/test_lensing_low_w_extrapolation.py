@@ -24,10 +24,16 @@ suite < 2s.
 """
 from __future__ import annotations
 
+import functools
+import math
 import unittest
 
 import numpy as np
 
+from cogwheel.lensing import surrogate as surrogate_module
+from cogwheel.lensing import surrogate_training
+from cogwheel.lensing.chang_refsdal import geometry
+from cogwheel.lensing.chang_refsdal._airy_fold import _merging_fold_pair
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels, farfield_w_floor, _FARFIELD_KERNEL_FAMILY,
     FARFIELD_DIFFRACTIVE, FARFIELD_KERNEL_SUM,
@@ -79,6 +85,106 @@ W_ABOVE = np.array([W_MAX * 2.0])
 #: Load-bearing threshold for self-falsification: the unclamped BSpline
 #: extrapolation must differ from the clamped value by at least this.
 LOAD_BEARING_THRESHOLD = 1e-10
+
+
+#: Sample density for `_find_real_tube_source`'s arc scan -- matches the
+#: density validated by the sibling derivations in
+#: ``test_lensing_surrogate.py`` / ``test_lensing_tube_d2_fold.py``.
+_REAL_SOURCE_N_SAMPLES = 200
+
+#: Off-axis floor: a source with either eigenframe component smaller than
+#: this sits too close to the tube's own symmetry axis for `_tube_f_ref`
+#: to build reliably across the fixture's ``w`` band.
+_REAL_SOURCE_MIN_COMP = 0.05
+
+#: Search band containing ``QUERY_GAMMA`` (0.45), passed to
+#: `band_caustic_structure`.  Positive parity (astroid).
+_QUERY_BAND = (0.4, 0.5)
+
+
+@functools.lru_cache(maxsize=None)
+def _find_real_tube_source(gamma_query: float, band: tuple[float, float],
+                           parity: int) -> tuple[float, float]:
+    """Find a genuine, off-axis, F_ref-buildable source near ``gamma_query``.
+
+    INS-1-002: the beat-free `TubeChart` serve contract
+    (`surrogate._tube_serves`'s F_ref-buildability gate, and
+    `surrogate._evaluate_chart`'s unconditional post-multiply by
+    `surrogate._tube_f_ref`) requires a REAL 4-image fold geometry to be
+    rebuildable AT THE QUERIED SOURCE -- independent of whatever arbitrary
+    synthetic envelope or axis grids the fixture chart carries.  Querying
+    the synthetic chart at the arbitrary on-axis ``(y1, y2) = (0, 0)`` (as
+    this file did at HEAD) therefore either declines (a NaN F_ref, so
+    ``serve`` returns ``served=False``) or crashes (`_evaluate_chart`
+    raises ``RuntimeError('Tube F_ref unbuildable at a served query')``).
+
+    This scans `surrogate_training`'s OWN arc-detection machinery
+    (`band_caustic_structure` / `_tube_training_arcs` / `_tube_source`) --
+    the same real production geometry a genuine tube-chart build would walk
+    -- for an off-axis fold source whose `_merging_fold_pair` is resolvable
+    and whose `_tube_f_ref` is finite over the fixture's ``ln w`` band, so
+    the synthetic chart can be queried at a point that is real and
+    buildable while its (arbitrary) synthetic envelope stays as authored.
+
+    Args:
+        gamma_query: shear at which to build the geometry (also the
+            representative gamma for the arc scan).
+        band: ``(gamma_lo, gamma_hi)`` search band containing
+            ``gamma_query``, passed to `band_caustic_structure`.
+        parity: ``+1`` (astroid) or ``-1`` (deltoid).
+
+    Returns:
+        ``(y1_eig, y2_eig)`` -- a genuine, off-axis, F_ref-buildable source
+        in the shear eigenframe at ``gamma_query``.
+
+    Raises:
+        AssertionError: no candidate on the scanned arc cleared every gate.
+    """
+    matrix = geometry.macro_matrix(gamma_query)
+    structure = surrogate_training.band_caustic_structure(
+        band, parity, n_samples=_REAL_SOURCE_N_SAMPLES)
+    arc = surrogate_training._tube_training_arcs(structure, parity)[0]
+    r_min = surrogate_training._min_curvature_radius(
+        band, arc, _REAL_SOURCE_N_SAMPLES)
+    eta_max = surrogate_training.TrainingConfig().f_max * r_min
+    w_lin = np.exp(LOG_W_GRID)
+    best: tuple[float, float] | None = None
+    best_gap = -math.inf
+    for theta in np.linspace(arc.theta_lo, arc.theta_hi,
+                             _REAL_SOURCE_N_SAMPLES):
+        source = surrogate_training._tube_source(
+            gamma_query, float(theta), eta_max, arc.branch, arc.inward_sign)
+        if min(abs(float(source[0])),
+               abs(float(source[1]))) < _REAL_SOURCE_MIN_COMP:
+            continue
+        try:
+            images = geometry.find_images(source, matrix)
+        except geometry.LensDomainError:
+            continue
+        if len(images) != 4:
+            continue
+        pair = _merging_fold_pair(images, source, matrix)
+        if pair is None:
+            continue
+        if surrogate_module._tube_f_ref(w_lin, gamma_query, source) is None:
+            continue
+        gap = float(pair[1] - pair[0])
+        if gap > best_gap:
+            best_gap = gap
+            best = (float(source[0]), float(source[1]))
+    if best is None:
+        raise AssertionError(
+            f'no F_ref-buildable real tube source found for '
+            f'gamma={gamma_query}, band={band}, parity={parity} -- pick a '
+            'different validated (band, parity) or widen the scan.')
+    return best
+
+
+#: A genuine off-axis 4-image F_ref-buildable eigenframe source at
+#: ``QUERY_GAMMA`` -- every serve / `_evaluate_chart` call below queries the
+#: synthetic chart HERE (not the old on-axis ``(0, 0)``) so the beat-free
+#: F_ref gate admits it.  ``beta=0`` keeps the eigenframe == physical frame.
+QUERY_Y1, QUERY_Y2 = _find_real_tube_source(QUERY_GAMMA, _QUERY_BAND, PARITY)
 
 
 def _build_synthetic_chart() -> TubeChart:
@@ -140,7 +246,7 @@ class FlatExtrapolationTestCase(_LowWExtrapolationTestCase):
         """serve() returns served=True for frequencies entirely below w_min."""
         w_query = W_BELOW.copy()
         _, served, _ = self.surrogate.serve(
-            w_query, gamma=QUERY_GAMMA, y1=0.0, y2=0.0, beta=0.0,
+            w_query, gamma=QUERY_GAMMA, y1=QUERY_Y1, y2=QUERY_Y2, beta=0.0,
             eta=QUERY_ETA, theta=QUERY_THETA, image_count=IMAGE_COUNT)
         self.assertTrue(served, 'serve must return served=True for w < w_min')
         self._record()
@@ -151,12 +257,14 @@ class FlatExtrapolationTestCase(_LowWExtrapolationTestCase):
         log_w_min = np.array([LOG_W_GRID[0]])
         env_at_min = _evaluate_chart(
             self.chart, gamma=QUERY_GAMMA, eta=QUERY_ETA,
-            theta=QUERY_THETA, log_w_query=log_w_min)
+            theta=QUERY_THETA, log_w_query=log_w_min,
+            y1_eig=QUERY_Y1, y2_eig=QUERY_Y2)
         # Evaluate at several w < w_min
         log_w_below = np.log(W_BELOW)
         env_below = _evaluate_chart(
             self.chart, gamma=QUERY_GAMMA, eta=QUERY_ETA,
-            theta=QUERY_THETA, log_w_query=log_w_below)
+            theta=QUERY_THETA, log_w_query=log_w_below,
+            y1_eig=QUERY_Y1, y2_eig=QUERY_Y2)
         # Each below-w_min value must be exactly equal to env_at_min
         for i, w in enumerate(W_BELOW):
             with self.subTest(w=w):
@@ -171,7 +279,7 @@ class FlatExtrapolationTestCase(_LowWExtrapolationTestCase):
         """serve() works when w_array spans below AND inside the band."""
         w_mixed = np.array([W_MIN / 3, W_MIN, W_MIN * 2, W_MIN * 5])
         env, served, _ = self.surrogate.serve(
-            w_mixed, gamma=QUERY_GAMMA, y1=0.0, y2=0.0, beta=0.0,
+            w_mixed, gamma=QUERY_GAMMA, y1=QUERY_Y1, y2=QUERY_Y2, beta=0.0,
             eta=QUERY_ETA, theta=QUERY_THETA, image_count=IMAGE_COUNT)
         self.assertTrue(served, 'Mixed band spanning below w_min must serve')
         # The first element (below w_min) must equal the second (at w_min)
@@ -189,7 +297,8 @@ class FlatExtrapolationTestCase(_LowWExtrapolationTestCase):
         log_w_test = np.array([LOG_W_GRID[0], LOG_W_GRID[-1]])
         env = _evaluate_chart(
             self.chart, gamma=QUERY_GAMMA, eta=QUERY_ETA,
-            theta=QUERY_THETA, log_w_query=log_w_test)
+            theta=QUERY_THETA, log_w_query=log_w_test,
+            y1_eig=QUERY_Y1, y2_eig=QUERY_Y2)
         # Direct spline evaluation (no clamping needed — these are in-band)
         theta_inframe = QUERY_THETA - float(self.chart.theta_grid[0])
         s_val = float(np.interp(QUERY_THETA, self.chart.theta_to_s[0],
@@ -200,7 +309,17 @@ class FlatExtrapolationTestCase(_LowWExtrapolationTestCase):
         imag_direct = _contract_tensor_spline(
             self.chart.imag_coeffs, self.chart.knots,
             QUERY_GAMMA, float(np.sqrt(QUERY_ETA)), s_val, log_w_test)
-        expected = real_direct + 1j * imag_direct
+        # Beat-free contract: `_evaluate_chart` stores the RESIDUAL
+        # r = E / F_ref and re-modulates by `_tube_f_ref` at the raw query
+        # source, so the oracle must apply the SAME reference (both w's are
+        # in-band, hence no clamp).  This still isolates the clamp: the only
+        # thing under test is that in-band w's pass through untouched.
+        source_q = np.array([QUERY_Y1, QUERY_Y2], dtype=float)
+        fref = surrogate_module._tube_f_ref(
+            np.exp(log_w_test), QUERY_GAMMA, source_q)
+        self.assertIsNotNone(
+            fref, 'fixture query source must be F_ref-buildable')
+        expected = (real_direct + 1j * imag_direct) * fref
         np.testing.assert_array_equal(
             env, expected,
             err_msg='In-band values must be unchanged by the clamp')

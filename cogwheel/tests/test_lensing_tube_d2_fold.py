@@ -83,6 +83,7 @@ Pinned invariants (one pin each):
    saddle-band geometry; no census-count or coverage test pins it precisely.
 """
 import dataclasses
+import functools
 import math
 import pathlib
 import unittest
@@ -104,6 +105,7 @@ from cogwheel.lensing.surrogate import (
     LensAmplificationSurrogate,
     TubeChart,
     _theta_into_frame,
+    _tube_f_ref,
     _tube_theta_inframe,
 )
 from cogwheel.lensing.surrogate_training import (
@@ -114,8 +116,11 @@ from cogwheel.lensing.surrogate_training import (
     _min_curvature_radius,
     _saddle_lobe_admissions,
     _SaddleLobeAdmission,
+    _tube_source,
     _tube_training_arcs,
 )
+from cogwheel.lensing.chang_refsdal import geometry
+from cogwheel.lensing.chang_refsdal._airy_fold import _merging_fold_pair
 
 #: Directory for diagnostic plots (created lazily; plotting is best-effort
 #: and never gates an assertion).
@@ -158,6 +163,86 @@ SADDLE_GAMMA_QUERY = 1.25      # inside [1.1, 1.4]
 ASTROID_BAND = (0.35, 0.45)
 SADDLE_BAND = (1.1, 1.15)
 N_CAUSTIC_SAMPLES = 200
+
+#: Real caustic bands used SOLELY to derive a genuine 4-image interior
+#: source for the F_ref-buildability gate (`surrogate._tube_serves` /
+#: `_evaluate_chart`) -- independent of each fixture chart's synthetic
+#: (arbitrary sinusoidal) envelope, and of its gamma/theta/eta training box,
+#: which the F_ref gate never consults (`_tube_f_ref` depends only on
+#: ``(gamma, source)``).  Centred on the respective query gamma so the
+#: derived source is valid there.
+_ASTROID_SOURCE_BAND = (0.30, 0.40)
+_SADDLE_SOURCE_BAND = (1.20, 1.30)
+
+#: Minimum magnitude of BOTH eigenframe source components (mirrors
+#: ``test_lensing_tube_beat_free._OFFAXIS_MIN_COMP``): an on-axis source
+#: makes a D2 sign reflection coincide with the raw source, which would let
+#: an octant-equality test pass vacuously even with a reflection-sign bug.
+_SOURCE_MIN_COMP = 0.05
+
+
+@functools.lru_cache(maxsize=None)
+def _find_d2_source(gamma_query: float, band: tuple[float, float],
+                    parity: int) -> tuple[float, float]:
+    """A genuine 4-image interior source, off both eigenframe axes, whose
+    ``F_ref`` builds across ``LOG_W_GRID`` at ``gamma_query``.
+
+    The new `surrogate._tube_serves` buildability gate and the
+    `_evaluate_chart` residual-to-envelope multiplication (checklist-5b)
+    both require the eigenframe query source to correspond to a real
+    4-image geometry with a valid merging fold pair; this file's tube
+    fixtures carry synthetic envelopes with no such constraint on their own
+    query source, so the D2 octant tests need an independently-derived
+    physical source.  Scans a real fold arc detected on ``band`` (the same
+    detection machinery `surrogate_training._tube_training_arcs` uses for
+    training) for the largest-gap node clearing `_SOURCE_MIN_COMP` on BOTH
+    eigenframe components.  Memoised: the same physical source is reused by
+    every test in this module that needs it.
+    """
+    matrix = geometry.macro_matrix(gamma_query)
+    structure = band_caustic_structure(band, parity,
+                                       n_samples=N_CAUSTIC_SAMPLES)
+    arc = _tube_training_arcs(structure, parity)[0]
+    r_min = _min_curvature_radius(band, arc, N_CAUSTIC_SAMPLES)
+    eta_max = TrainingConfig().f_max * r_min
+    w_lin = np.exp(LOG_W_GRID)
+    best: tuple[float, float] | None = None
+    best_gap = -math.inf
+    for theta in np.linspace(arc.theta_lo, arc.theta_hi, N_CAUSTIC_SAMPLES):
+        source = _tube_source(gamma_query, float(theta), eta_max,
+                              arc.branch, arc.inward_sign)
+        if min(abs(float(source[0])), abs(float(source[1]))) < _SOURCE_MIN_COMP:
+            continue
+        try:
+            images = geometry.find_images(source, matrix)
+        except geometry.LensDomainError:
+            continue
+        if len(images) != 4:
+            continue
+        pair = _merging_fold_pair(images, source, matrix)
+        if pair is None:
+            continue
+        if _tube_f_ref(w_lin, gamma_query, source) is None:
+            continue
+        gap = float(pair[1] - pair[0])
+        if gap > best_gap:
+            best_gap = gap
+            best = (float(source[0]), float(source[1]))
+    if best is None:
+        raise AssertionError(
+            'fixture premise lost: no off-axis 4-image interior source with'
+            f' buildable F_ref found for gamma={gamma_query} on {band}.')
+    return best
+
+
+def _astroid_d2_source() -> tuple[float, float]:
+    """Real ``(y1, y2)`` eigenframe source for `ASTROID_GAMMA_QUERY`."""
+    return _find_d2_source(ASTROID_GAMMA_QUERY, _ASTROID_SOURCE_BAND, 1)
+
+
+def _saddle_d2_source() -> tuple[float, float]:
+    """Real ``(y1, y2)`` eigenframe source for `SADDLE_GAMMA_QUERY`."""
+    return _find_d2_source(SADDLE_GAMMA_QUERY, _SADDLE_SOURCE_BAND, -1)
 
 
 def _smooth_tensor(gamma_grid: np.ndarray, u_grid: np.ndarray,
@@ -235,20 +320,26 @@ def _octant_physical_theta(theta0: float, sign_y1: float,
 
 
 def _serve_at_octants(surrogate: LensAmplificationSurrogate, *, gamma: float,
-                      theta0: float, image_count: int
+                      theta0: float, image_count: int, y1_mag: float,
+                      y2_mag: float
                       ) -> dict[tuple[float, float], tuple[np.ndarray, bool]]:
     """Serve the SAME physical query at all four eigenframe sign octants.
 
     ``beta = 0`` so the eigenframe signs equal ``sign(y1), sign(y2)``; each
     octant is handed the physical gauge angle its geometry would report
     (`_octant_physical_theta`).  ``eta`` is D2-invariant and passes as-is.
+    ``(y1_mag, y2_mag)`` are the ABSOLUTE component magnitudes of a genuine
+    4-image interior source (`_find_d2_source`) -- the F_ref-buildability
+    gate needs a real fold geometry, and D2 symmetry of the lens equation
+    guarantees every sign reflection of a valid source is itself a valid
+    4-image source at the same gamma (checklist-5b).
     Returns ``{(sign_y1, sign_y2): (E_array, served)}``.
     """
     out: dict[tuple[float, float], tuple[np.ndarray, bool]] = {}
     for sign_y1, sign_y2 in OCTANTS:
         theta_phys = _octant_physical_theta(theta0, sign_y1, sign_y2)
         env, served, _definition = surrogate.serve(
-            W_ARRAY, gamma=gamma, y1=sign_y1 * 1.0, y2=sign_y2 * 1.0,
+            W_ARRAY, gamma=gamma, y1=sign_y1 * y1_mag, y2=sign_y2 * y2_mag,
             beta=0.0, eta=QUERY_ETA, theta=theta_phys, image_count=image_count)
         out[(sign_y1, sign_y2)] = (env, served)
     return out
@@ -480,18 +571,18 @@ class IncumbentIdentityBitEqualityTestCase(_TubeD2TestCase):
     """
 
     def test_fundamental_serve_is_bit_identical_to_incumbent(self) -> None:
-        for name, surrogate, gamma, theta0, image_count in (
+        for name, surrogate, gamma, theta0, image_count, (y1, y2) in (
                 ('astroid', _astroid_surrogate(), ASTROID_GAMMA_QUERY,
-                 ASTROID_THETA0, 2),
+                 ASTROID_THETA0, 2, _astroid_d2_source()),
                 ('saddle', _saddle_surrogate(), SADDLE_GAMMA_QUERY,
-                 SADDLE_THETA0, 4)):
+                 SADDLE_THETA0, 4, _saddle_d2_source())):
             env_now, served_now, _ = surrogate.serve(
-                W_ARRAY, gamma=gamma, y1=1.0, y2=1.0, beta=0.0,
+                W_ARRAY, gamma=gamma, y1=y1, y2=y2, beta=0.0,
                 eta=QUERY_ETA, theta=theta0, image_count=image_count)
             with mock.patch.object(surrogate_module, '_tube_theta_inframe',
                                    _identity_only_inframe):
                 env_old, served_old, _ = surrogate.serve(
-                    W_ARRAY, gamma=gamma, y1=1.0, y2=1.0, beta=0.0,
+                    W_ARRAY, gamma=gamma, y1=y1, y2=y2, beta=0.0,
                     eta=QUERY_ETA, theta=theta0, image_count=image_count)
             self._count(2)
             self.assertTrue(served_now and served_old,
@@ -512,9 +603,11 @@ class TubeD2ServeEqualityTestCase(_TubeD2TestCase):
     """
 
     def _check(self, name: str, surrogate: LensAmplificationSurrogate,
-               gamma: float, theta0: float, image_count: int) -> None:
+               gamma: float, theta0: float, image_count: int,
+               y1_mag: float, y2_mag: float) -> None:
         results = _serve_at_octants(surrogate, gamma=gamma, theta0=theta0,
-                                    image_count=image_count)
+                                    image_count=image_count, y1_mag=y1_mag,
+                                    y2_mag=y2_mag)
         base, base_served = results[(+1.0, +1.0)]
         self._count()
         self.assertTrue(base_served, f'{name}: fundamental octant must serve')
@@ -529,12 +622,131 @@ class TubeD2ServeEqualityTestCase(_TubeD2TestCase):
                 f'(max abs diff {np.max(np.abs(env - base)):.3e})')
 
     def test_astroid_d2_serve_equality(self) -> None:
+        y1, y2 = _astroid_d2_source()
         self._check('astroid', _astroid_surrogate(), ASTROID_GAMMA_QUERY,
-                    ASTROID_THETA0, 2)
+                    ASTROID_THETA0, 2, abs(y1), abs(y2))
 
     def test_saddle_d2_serve_equality(self) -> None:
+        y1, y2 = _saddle_d2_source()
         self._check('saddle', _saddle_surrogate(), SADDLE_GAMMA_QUERY,
-                    SADDLE_THETA0, 4)
+                    SADDLE_THETA0, 4, abs(y1), abs(y2))
+
+
+class TubeRawSourceRemodulationSpyTestCase(_TubeD2TestCase):
+    """New pin: ``F_ref`` is recomputed at the RAW eigenframe query source.
+
+    Distinct from -- and narrower than -- the D2 output-equality pin
+    (`TubeD2ServeEqualityTestCase`, which asserts the four octants agree on
+    the reconstructed physical ``E``).  This pin spies on the
+    ``surrogate._tube_f_ref`` binding the serve path calls and asserts, for a
+    query in a NON-fundamental D2 octant (negative ``y1_eig``), that
+    ``_tube_f_ref`` is invoked with the RAW signed eigenframe
+    ``(y1_eig, y2_eig)`` -- NOT the theta-folded ``(u, s)`` interpolation
+    coordinate and NOT the fundamental-octant reflection
+    ``(|y1_eig|, |y2_eig|)``.  Because ``F_ref`` is exactly D2-invariant
+    (even in each source component), the theta-fold is applied ONLY to the
+    residual interpolation coordinate, while the demodulation reference is
+    rebuilt at the raw D2-invariant source.  A regression that folded the
+    source BEFORE ``_tube_f_ref`` would still round-trip at the fundamental
+    octant but silently corrupt off-fundamental serves; the captured-source
+    assertion catches exactly that (its teeth are the negative-vs-folded
+    first component).
+
+    The second method proves the rebuilt ``F_ref`` is actually CONSUMED
+    (``E = r * F_ref``) rather than computed and discarded: scaling the
+    reference by a constant scales the served envelope by the same constant.
+    """
+
+    #: Non-fundamental octant with a negative FIRST eigenframe component.
+    _OCTANT = (-1.0, +1.0)
+
+    def _serve_nonfundamental(self, f_ref_impl):
+        """Serve the astroid fixture at ``_OCTANT`` with ``surrogate._tube_f_ref``
+        replaced by ``f_ref_impl`` (a spy/wrapper).  Returns
+        ``(env, served, y1_mag, y2_mag)``.  The physical source is derived
+        (and its ``F_ref`` cached) BEFORE the patch so the derivation never
+        goes through the spy.
+        """
+        y1_mag = abs(_astroid_d2_source()[0])
+        y2_mag = abs(_astroid_d2_source()[1])
+        theta_phys = _octant_physical_theta(ASTROID_THETA0, *self._OCTANT)
+        surrogate = _astroid_surrogate()
+        with mock.patch.object(surrogate_module, '_tube_f_ref', f_ref_impl):
+            env, served, _definition = surrogate.serve(
+                W_ARRAY, gamma=ASTROID_GAMMA_QUERY,
+                y1=self._OCTANT[0] * y1_mag, y2=self._OCTANT[1] * y2_mag,
+                beta=0.0, eta=QUERY_ETA, theta=theta_phys, image_count=2)
+        return env, served, y1_mag, y2_mag
+
+    def test_tube_f_ref_called_with_raw_eigenframe_source(self) -> None:
+        spy = mock.MagicMock(side_effect=_tube_f_ref)
+        env, served, y1_mag, y2_mag = self._serve_nonfundamental(spy)
+        self.assertTrue(served, 'non-fundamental octant must serve')
+        # Isolate the `_evaluate_chart` re-modulation call: it passes the
+        # query band (W_ARRAY, size 12), whereas the `_tube_serves` gate
+        # probes the chart's own 5-node w grid -- both, per the shipped code,
+        # pass the same raw source, but the spec pins the serve-layer call.
+        eval_calls = [c for c in spy.call_args_list
+                      if np.asarray(c.args[0]).size == W_ARRAY.size]
+        self.assertTrue(
+            eval_calls,
+            '_tube_f_ref never called over the query w band -- the '
+            '_evaluate_chart re-modulation did not run')
+        raw = np.array([self._OCTANT[0] * y1_mag, self._OCTANT[1] * y2_mag])
+        folded = np.abs(raw)
+        # Fixture premise: the octant is genuinely non-fundamental.
+        self.assertLess(raw[0], 0.0,
+                        'fixture premise lost: octant is not non-fundamental')
+        for call in eval_calls:
+            self._count()
+            source = np.asarray(call.args[2], dtype=float)
+            self.assertTrue(
+                np.array_equal(source, raw),
+                f'F_ref rebuilt at {source}, not the RAW eigenframe {raw}')
+            self.assertLess(
+                source[0], 0.0,
+                'F_ref reference lost the negative eigenframe component '
+                '(source was folded/absoluted before demodulation)')
+            self.assertFalse(
+                np.array_equal(source, folded),
+                'F_ref rebuilt at the folded fundamental image '
+                f'{folded} -- source was folded before demodulation')
+
+    def test_tube_f_ref_return_is_consumed_multiplicatively(self) -> None:
+        # Baseline serve through the real reference (wrapped, not altered).
+        base_spy = mock.MagicMock(side_effect=_tube_f_ref)
+        env_base, served_base, _y1, _y2 = self._serve_nonfundamental(base_spy)
+        self.assertTrue(served_base, 'baseline non-fundamental serve failed')
+
+        scale = 3.0
+
+        def scaled(w_grid, gamma, source):
+            # Calls the top-level imported real `_tube_f_ref` (the module
+            # attribute is patched, this name is not -> no recursion).
+            fref = _tube_f_ref(w_grid, gamma, source)
+            return None if fref is None else scale * fref
+
+        env_scaled, served_scaled, _y1b, _y2b = \
+            self._serve_nonfundamental(scaled)
+        self._count()
+        self.assertTrue(
+            served_scaled,
+            'scaling F_ref must not change the serve decision (still non-None)')
+        # E = r * F_ref: the residual r is unaffected by scaling F_ref, so the
+        # served envelope must scale by exactly `scale`.
+        self._count()
+        self.assertTrue(
+            np.allclose(env_scaled, scale * env_base, rtol=1e-10, atol=0.0),
+            'served envelope did not scale with F_ref -- E = r * F_ref '
+            'consumption is broken (max rel dev '
+            f'{np.max(np.abs(env_scaled - scale * env_base)):.3e})')
+        # Teeth: had F_ref been discarded (E = r), the two serves would be
+        # identical.
+        self._count()
+        self.assertFalse(
+            np.allclose(env_scaled, env_base, rtol=1e-6, atol=0.0),
+            'scaling F_ref left the envelope unchanged -- F_ref is not '
+            'consumed on the serve path')
 
 
 class HalfRingHoleClosureTestCase(_TubeD2TestCase):
@@ -548,12 +760,14 @@ class HalfRingHoleClosureTestCase(_TubeD2TestCase):
     """
 
     def _check(self, name: str, surrogate: LensAmplificationSurrogate,
-               gamma: float, theta0: float, image_count: int) -> None:
+               gamma: float, theta0: float, image_count: int,
+               y1_mag: float, y2_mag: float) -> None:
         with mock.patch.object(surrogate_module, '_tube_theta_inframe',
                                _identity_only_inframe):
             results = _serve_at_octants(surrogate, gamma=gamma,
                                         theta0=theta0,
-                                        image_count=image_count)
+                                        image_count=image_count,
+                                        y1_mag=y1_mag, y2_mag=y2_mag)
         _env, base_served = results[(+1.0, +1.0)]
         self._count()
         self.assertTrue(
@@ -569,12 +783,14 @@ class HalfRingHoleClosureTestCase(_TubeD2TestCase):
                 f'-- the F079 closure pin has no teeth')
 
     def test_astroid_hole_reopens_without_image_search(self) -> None:
+        y1, y2 = _astroid_d2_source()
         self._check('astroid', _astroid_surrogate(), ASTROID_GAMMA_QUERY,
-                    ASTROID_THETA0, 2)
+                    ASTROID_THETA0, 2, abs(y1), abs(y2))
 
     def test_saddle_hole_reopens_without_image_search(self) -> None:
+        y1, y2 = _saddle_d2_source()
         self._check('saddle', _saddle_surrogate(), SADDLE_GAMMA_QUERY,
-                    SADDLE_THETA0, 4)
+                    SADDLE_THETA0, 4, abs(y1), abs(y2))
 
 
 class TubeTrainingArcSelectionTestCase(_TubeD2TestCase):

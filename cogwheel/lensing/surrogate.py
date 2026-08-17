@@ -103,7 +103,9 @@ from cogwheel.lensing.chang_refsdal import (
     ChangRefsdalChannels, farfield_envelope_from_partition, geometry)
 from cogwheel.lensing.chang_refsdal.channels import (
     FARFIELD_KERNEL_SUM, KNOWN_FARFIELD_DEFINITIONS, INTERIOR_SACR_C,
-    KNOWN_INTERIOR_DEFINITIONS)
+    KNOWN_INTERIOR_DEFINITIONS, _frame_delays)
+from cogwheel.lensing.chang_refsdal._airy_fold import (
+    airy_fold_value, _merging_fold_pair, _soft_axis_cubic, _fold_amplitudes)
 from cogwheel.lensing.chang_refsdal.geometry import LensDomainError
 from cogwheel.lensing.chang_refsdal._schwinger import (
     SchwingerCertificationError)
@@ -286,6 +288,25 @@ _KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_NEW})
 # key -- hard-refuses at load rather than being served on the wrong axis.
 _WEDGE_AXIS_SCHEMA = 'wedge_caustic_relative_v3'
 _KNOWN_WEDGE_AXIS_SCHEMAS = frozenset({_WEDGE_AXIS_SCHEMA})
+
+
+# Tube (near-caustic fold) envelope-definition tag.  The tube chart no longer
+# stores the raw beating envelope ``E(w)`` (which oscillates as
+# ``cos(w Delta_tau)`` because the two merging-fold-pair carriers are
+# demodulated by a single critical carrier).  It stores a BEAT-FREE RESIDUAL
+# ``r(w) = E(w) / F_ref(w)``, where ``F_ref`` is a NON-VANISHING uniform-Airy
+# demodulation reference built from the merging fold pair with ``q = p`` (the
+# shipped ``q = 0`` fold amplitude vanishes at the Airy zeros ``xi = 2.338,
+# 4.088, ...``; setting ``q = p`` makes ``|F_ref|^2`` proportional to
+# ``w^{1/3} Ai^2 + w^{-1/3} Ai'^2`` which never vanishes by the Airy
+# Wronskian).  A stale artifact that stored the raw envelope carries no such
+# tag (or a mismatched one) and hard-refuses at load rather than being served
+# as if it were a residual -- a residual chart reconstructs
+# ``E = r * F_ref`` at serve time, so serving a raw-envelope tensor under the
+# residual reconstruction would double-apply / omit the carrier and return a
+# finite-but-wrong amplification.
+TUBE_BEAT_FREE_AIRY = 'tube_beat_free_airy_v1'
+_KNOWN_TUBE_ENVELOPE_DEFINITIONS = frozenset({TUBE_BEAT_FREE_AIRY})
 
 
 # Real-image count of a macro-saddle deltoid-lobe INTERIOR (``gamma > 1``).
@@ -2649,7 +2670,9 @@ class TubeChart:
         increasing).  A query ``theta`` is mapped to the spline's ``s``
         coordinate by ``np.interp(theta, theta_fine, s_fine)``.
     real_coeffs, imag_coeffs : np.ndarray
-        Cubic B-spline coefficient tensors, axes ``(log w, gamma, u, s)``.
+        Cubic B-spline coefficient tensors, axes ``(log w, gamma, u, s)``,
+        fit to the BEAT-FREE RESIDUAL ``r(w) = E(w) / F_ref(w)`` (see
+        ``envelope_definition``), NOT the raw beating envelope ``E(w)``.
     knots : tuple of np.ndarray
         Knot vectors ``(t_logw, t_gamma, t_u, t_s)`` (the fourth built in
         arc length ``s``).
@@ -2664,6 +2687,11 @@ class TubeChart:
     cusp_windows : tuple of (float, float)
         ``(theta_cusp, delta_theta)`` exclusion windows: a query with
         ``|theta - theta_cusp| < delta_theta`` falls through.
+    envelope_definition : str
+        Envelope-definition tag (``TUBE_BEAT_FREE_AIRY``).  The stored
+        tensors are the beat-free residual ``r = E / F_ref``; a loaded
+        artifact whose tag is absent or unknown hard-refuses at load rather
+        than being served as if it were a raw-envelope tensor.
     """
 
     gamma_grid: np.ndarray
@@ -2679,6 +2707,7 @@ class TubeChart:
     eta_floor: float
     eta_max: float
     cusp_windows: tuple
+    envelope_definition: str = TUBE_BEAT_FREE_AIRY
 
     @classmethod
     def from_values(cls, *, gamma_grid: np.ndarray, u_grid: np.ndarray,
@@ -2688,7 +2717,9 @@ class TubeChart:
                     eta_floor: float, eta_max: float,
                     cusp_windows: tuple | None = None,
                     s_grid: np.ndarray | None = None,
-                    theta_to_s: np.ndarray | None = None) -> 'TubeChart':
+                    theta_to_s: np.ndarray | None = None,
+                    envelope_definition: str = TUBE_BEAT_FREE_AIRY
+                    ) -> 'TubeChart':
         """Build a tube chart by fitting splines to a value tensor.
 
         Parameters
@@ -2697,10 +2728,15 @@ class TubeChart:
             1-D strictly increasing training axes (``u = sqrt(eta)``).
             ``theta_grid`` holds the fold-arc angle nodes.
         envelope_real, envelope_imag : np.ndarray
-            Shape ``(n_w, n_gamma, n_u, n_theta)`` real/imag envelope
-            values (sampled at the ``theta_grid`` nodes).
+            Shape ``(n_w, n_gamma, n_u, n_theta)`` real/imag values of the
+            BEAT-FREE RESIDUAL ``r(w) = E(w) / F_ref(w)`` (sampled at the
+            ``theta_grid`` nodes), NOT the raw beating envelope ``E(w)``.
         image_count, parity : int or None
             Region labels.
+        envelope_definition : str, optional
+            Envelope-definition tag stamped onto the chart (default
+            ``TUBE_BEAT_FREE_AIRY``); a loaded artifact whose tag is absent
+            or unknown hard-refuses.
         eta_floor, eta_max : float
             Caustic-distance band served ``[eta_floor, eta_max]``.
         cusp_windows : tuple of (float, float), optional
@@ -2743,13 +2779,16 @@ class TubeChart:
             envelope_real, envelope_imag)
         return cls._assemble(
             gamma_grid, u_grid, theta_grid, log_w_grid, real_c, imag_c, knots,
-            image_count, parity, eta_floor, eta_max, cusp_windows, theta_to_s)
+            image_count, parity, eta_floor, eta_max, cusp_windows, theta_to_s,
+            envelope_definition=envelope_definition)
 
     @classmethod
     def _assemble(cls, gamma_grid, u_grid, theta_grid, log_w_grid,
                   real_coeffs, imag_coeffs, knots, image_count, parity,
                   eta_floor, eta_max, cusp_windows,
-                  theta_to_s=None) -> 'TubeChart':
+                  theta_to_s=None,
+                  envelope_definition: str = TUBE_BEAT_FREE_AIRY
+                  ) -> 'TubeChart':
         """Assemble a chart from prebuilt coefficient tensors and knots.
 
         ``theta_to_s`` is the ``(2, N_map)`` arc-length axis map; when
@@ -2777,7 +2816,8 @@ class TubeChart:
             parity=None if parity is None else int(parity),
             eta_floor=float(eta_floor),
             eta_max=float(eta_max),
-            cusp_windows=windows)
+            cusp_windows=windows,
+            envelope_definition=str(envelope_definition))
 
 
 def _check_value_shape(value_real: np.ndarray, value_imag: np.ndarray,
@@ -2911,15 +2951,161 @@ def _theta_into_frame(theta: float, frame_lo: float) -> float:
     return frame_lo + (theta - frame_lo) % (2.0 * np.pi)
 
 
+def _tube_f_ref(w_grid: np.ndarray, gamma: float,
+                source: np.ndarray) -> np.ndarray | None:
+    """Non-vanishing uniform-Airy demodulation reference ``F_ref(w)``.
+
+    Builds the beat-free reference whose division removes the merging
+    fold-pair beat from the SACR-C tube envelope: ``r(w) = E(w) / F_ref(w)``
+    is smooth in ``w`` where the raw envelope oscillates as
+    ``cos(w Delta_tau)``.  ``F_ref`` is the uniform Airy fold form
+    (`airy_fold_value`) built from the SAME merging pair the envelope beats
+    over, re-referenced to the critical carrier ``tau_c = virtual_delay -
+    t_min`` so that ``E / F_ref`` carries NO leftover ``w``-carrier, and
+    evaluated with ``q = p`` (NOT the shipped ``q = 0``): the shipped
+    derivative amplitude makes ``|F_ref|`` vanish at the Airy zeros
+    ``xi = 2.338, 4.088, ...``, whereas ``q = p`` gives ``|F_ref|^2``
+    proportional to ``w^{1/3} Ai^2 + w^{-1/3} Ai'^2``, which never vanishes
+    by the Airy Wronskian.
+
+    This is the SINGLE authoritative reference used by BOTH the tube build
+    (`surrogate_training._build_tube_chart`, which stores ``E / F_ref``) and
+    the tube serve (`_evaluate_chart`, which re-modulates the interpolated
+    residual by ``F_ref`` at the query source).  It lives in this lower
+    module so both sides call ONE helper -- no duplicated convention, no
+    split brain.  ``F_ref`` is exactly D2-invariant (the Fermat delays,
+    ``xi``, ``p``, ``q`` and ``sigma`` are even in the source components
+    because `macro_matrix` is diagonal and the potential is even in ``x``),
+    so the serve side evaluates it at the RAW eigenframe query source with
+    no theta-folding.
+
+    Frame consistency (load-bearing): the mean-delay carrier ``tau_bar`` and
+    the critical carrier ``tau_c`` are BOTH taken in the ``t_min``-relative
+    frame used by `ChangRefsdalChannels.evaluate` -- the authoritative
+    ``t_min`` is read from `channels._frame_delays` and subtracted from
+    both.  ``E`` and ``F_ref`` therefore share a frame and their ratio is
+    beat-free.  (``t_min`` cancels analytically between the two carriers, so
+    the reference is in fact frame-independent; the subtraction is kept
+    explicit to mirror the engine and to read ``t_min`` from the one
+    authoritative source.)
+
+    ``Delta_tau`` is NEVER re-derived here -- it is read from the shared
+    `_merging_fold_pair` (DRY with the amplitude engine, and inheriting its
+    cusp-tie refusal).
+
+    Parameters
+    ----------
+    w_grid : np.ndarray
+        Strictly-positive dimensionless-frequency nodes.
+    gamma : float
+        External shear magnitude (macro frame ``beta = kappa = 0``).
+    source : np.ndarray
+        Shape ``(2,)`` source position in the lens plane.
+
+    Returns
+    -------
+    np.ndarray or None
+        Complex ``F_ref`` sampled on ``w_grid``, or ``None`` when the
+        reference is undefined: a non-finite query ``source``, fewer than
+        four real images, no admissible merging fold pair, a non-positive
+        delay separation, a degenerate fold (``|b3| <= _B3_MIN`` or a
+        vanishing hard eigenvalue, via `_fold_amplitudes`), a geometry
+        refusal, or a non-finite result.
+    """
+    w_grid = np.asarray(w_grid, dtype=float)
+    source = np.asarray(source, dtype=float)
+    # Input-finiteness guard (robustness): a non-finite query source -- e.g.
+    # the default NaN eigenframe coordinates a caller passes when it does not
+    # thread the source -- must refuse cleanly HERE rather than propagate into
+    # `geometry.macro_matrix` / `_frame_delays`, where `numpy.linalg` raises
+    # LinAlgError ("Array must not contain infs or NaNs"), which is NOT a
+    # `geometry.LensDomainError` and so escapes the try/except below.  Returning
+    # None lets `_tube_serves` decline the chart cleanly (its documented
+    # default-NaN contract) instead of crashing the serve path.
+    if not np.all(np.isfinite(source)):
+        return None
+    try:
+        matrix = geometry.macro_matrix(float(gamma), 0.0, 0.0)
+        images, _absolute_delays, t_min = _frame_delays(source, matrix)
+        # Only the four-image caustic interior has a genuine merging fold
+        # pair; an exterior (two-image) node has no beat to demodulate.
+        # Mirrors `_airy_fold.fold_amplification`'s image-count refusal.
+        if len(images) != 4:
+            return None
+        caustic = geometry.nearest_caustic_point(
+            float(gamma), 0.0, source, kappa=0.0)
+        virtual_delay = geometry.delay(caustic.image, source, matrix)
+    except geometry.LensDomainError:
+        return None
+
+    pair = _merging_fold_pair(images, source, matrix)
+    if pair is None:
+        return None
+    tau_plus, tau_minus = pair
+    delta_tau = tau_minus - tau_plus
+    if not (delta_tau > 0.0):
+        return None
+
+    b3 = _soft_axis_cubic(caustic.image, caustic.soft_axis)
+    if b3 is None:
+        return None
+    amplitudes = _fold_amplitudes(caustic.hard_eigenvalue, b3)
+    if amplitudes is None:
+        return None
+    p_amplitude, _q_shipped, sigma = amplitudes
+
+    # t_min-relative carriers, matching ChangRefsdalChannels.evaluate.
+    tau_bar = 0.5 * (tau_plus + tau_minus) - t_min
+    critical_delay = virtual_delay - t_min
+
+    # xi = (3 w Delta_tau / 4)^{2/3}, positive on the two-real-image side.
+    xi = (3.0 * w_grid * delta_tau / 4.0) ** (2.0 / 3.0)
+
+    # q = p (NOT the shipped q = 0) so the reference never vanishes at the
+    # Airy zeros; re-reference each node by exp(-i w tau_c) into the
+    # envelope's demodulation frame.
+    airy_values = np.array(
+        [airy_fold_value(float(w), tau_bar, float(xi_w),
+                         p_amplitude, p_amplitude, sigma)
+         for w, xi_w in zip(w_grid, xi)],
+        dtype=complex)
+    fref = airy_values * np.exp(-1j * w_grid * critical_delay)
+    if not np.all(np.isfinite(fref)):
+        return None
+    return fref
+
+
 def _tube_serves(chart: TubeChart, gamma: float, log_w_min: float,
                  log_w_max: float, eta: float, theta: float,
-                 image_count: int) -> bool:
+                 image_count: int,
+                 y1_eig: float = float('nan'),
+                 y2_eig: float = float('nan'),
+                 *, require_fref: bool = True) -> bool:
     """Whether a tube chart serves this candidate (guard-stack steps 1,5,6).
 
     The gauge angle is matched against the trained arc through the exact
     D2 gauge-image search `_tube_theta_inframe` (identity image first),
     so a mirror-image source serves from the same chart while every
     incumbent-served query keeps its exact spline coordinate.
+
+    ``y1_eig`` / ``y2_eig`` are the eigenframe source position.  A tube
+    chart now stores the BEAT-FREE RESIDUAL ``r = E / F_ref``, so serving
+    requires re-modulating by ``F_ref`` at the query source (`_evaluate_chart`);
+    this guard therefore declines any query where the SAME `_tube_f_ref`
+    reference is unbuildable (fewer than four images, no merging pair, a
+    degenerate fold), exactly mirroring the build-side refusal so the
+    exact ladder takes over instead of serving ``r`` unmodulated.  A caller
+    that does not thread the source (defaults non-finite) declines every
+    tube chart cleanly.
+
+    ``require_fref`` (keyword-only, default ``True``) gates that F_ref probe.
+    The production serve path (`select_chart`) leaves it ``True`` so behaviour
+    is byte-identical.  The census fall-through diagnostic
+    (`surrogate_census.classify_fallthrough`) passes ``require_fref=False``:
+    it asks the STRUCTURAL question "did the tube's cusp window alone block an
+    otherwise arc-servable sample?", for which F_ref buildability -- a
+    serve-time reference concern that a synthetic census source need not
+    satisfy -- is orthogonal and must not pre-empt the attribution.
     """
     # (1) certified-box containment on gamma and log w.
     if not (chart.gamma_grid[0] <= gamma <= chart.gamma_grid[-1]):
@@ -2953,6 +3139,20 @@ def _tube_serves(chart: TubeChart, gamma: float, log_w_min: float,
         # gates instead).
         residual = delta_theta
         if abs((theta - theta_cusp + np.pi) % two_pi - np.pi) < residual:
+            return False
+    # F_ref-buildability gate: the stored tensor is the beat-free residual
+    # r = E / F_ref, so a query the reference cannot be built for must NOT
+    # be served (that would return r * 1, a raw residual with no envelope).
+    # Probe the SAME `_tube_f_ref` the serve path re-modulates with, over
+    # the chart's own w grid (the buildability domain covering any clamped
+    # query band).  A node that refused at build refuses here too -- same
+    # 4-image / merging-pair / |b3| conditions -- so build and serve agree
+    # and the exact ladder takes over.  ``require_fref=False`` skips this
+    # serve-time reference probe for the census structural cusp-window
+    # diagnostic (see the docstring and `classify_fallthrough`).
+    if require_fref:
+        source_q = np.array([y1_eig, y2_eig], dtype=float)
+        if _tube_f_ref(np.exp(chart.log_w_grid), gamma, source_q) is None:
             return False
     return True
 
@@ -3310,7 +3510,8 @@ def select_chart(charts, *, gamma: float, log_w_min: float, log_w_max: float,
     # (7) priority: tube > far-field > lobe-interior > wedge-interior.
     for chart in charts:
         if isinstance(chart, TubeChart) and _tube_serves(
-                chart, gamma, log_w_min, log_w_max, eta, theta, image_count):
+                chart, gamma, log_w_min, log_w_max, eta, theta, image_count,
+                y1_eig, y2_eig):
             return chart
     for chart in charts:
         if isinstance(chart, ExteriorPolarChart) and _exterior_polar_serves(
@@ -3353,9 +3554,16 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
     charts); a wedge-interior chart contracts on ``(r, v2)`` where ``v2``
     is either the raw ``theta_wedge`` or the cusp-adapted ``u`` coordinate
     mapped from ``theta_wedge`` via the chart's stored ``theta_to_u`` map.
-    ``y1_eig`` / ``y2_eig`` are the eigenframe source, required for an
-    `ExteriorPolarChart`, `LobeInteriorChart`, or `InteriorWedgeChart`
-    and ignored for a tube chart.
+    ``y1_eig`` / ``y2_eig`` are the eigenframe source, required for every
+    chart type: an `ExteriorPolarChart`, `LobeInteriorChart`, or
+    `InteriorWedgeChart` uses them to place the query in the chart's fixed
+    coordinates, and a `TubeChart` (which now stores the BEAT-FREE RESIDUAL
+    ``r = E / F_ref``) additionally uses them to recompute ``F_ref`` at the
+    RAW query source via `_tube_f_ref` and re-modulate ``E = r * F_ref``.
+    Because ``F_ref`` is D2-invariant (even in each source component) the
+    tube recomputation uses the raw ``(y1_eig, y2_eig)`` with NO theta-fold
+    -- the fold is applied only to the ``(u, s)`` residual-interpolation
+    coordinate, never to the demodulation reference.
 
     A caller reaches this only after `select_chart` picked ``chart``; for an
     exterior-polar chart that means `_to_caustic_fixed` already succeeded on
@@ -3432,6 +3640,28 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
     imag = _contract_tensor_spline(chart.imag_coeffs, chart.knots,
                                    gamma, v1, v2, log_w_clamped)
     result = real + 1j * imag
+    if isinstance(chart, TubeChart):
+        # The stored tensor is the BEAT-FREE RESIDUAL r = E / F_ref; recover
+        # the physical envelope E = r * F_ref by re-modulating with the SAME
+        # uniform-Airy reference the build divided out (`_tube_f_ref`, the one
+        # authoritative helper -- no split brain).  F_ref is exactly
+        # D2-invariant, so it is evaluated at the RAW eigenframe query source
+        # with NO theta-folding (the theta-fold via theta_to_s stays ONLY the
+        # residual's (u, s) interpolation coordinate).  Evaluate at the CLAMPED
+        # w so a build node round-trips exactly (build stored
+        # r(w_i) = E(w_i) / F_ref(w_i)) and the low-w extrapolation keeps its
+        # phase cancellation (ExteriorPolar carrier precedent, INS-1-001).
+        source_q = np.array([y1_eig, y2_eig], dtype=float)
+        fref = _tube_f_ref(np.exp(log_w_clamped), gamma, source_q)
+        if fref is None:
+            # Unreachable after `_tube_serves`, which probes this exact
+            # reference over a covering w range; a None here is an internal
+            # gate/serve divergence and must fail loudly rather than serve the
+            # bare residual.
+            raise RuntimeError(
+                'Tube F_ref unbuildable at a served query; `_tube_serves` '
+                'should have declined it before `_evaluate_chart`.')
+        result = result * fref
     if isinstance(chart, ExteriorPolarChart) and chart.carrier_rate != 0.0:
         w_query = np.exp(log_w_clamped)
         result *= np.exp(1j * chart.carrier_rate * w_query)
@@ -4962,6 +5192,22 @@ def _validate_lobe_axis_schema(tag, artifact_label: str) -> str:
         tag, _KNOWN_LOBE_AXIS_SCHEMAS, f'Lobe-interior {artifact_label}')
 
 
+def _validate_tube_envelope_definition(tag, artifact_label: str) -> str:
+    """Hard-refuse a tube chart with an absent or unknown envelope tag.
+
+    Thin wrapper over `_validate_axis_schema` binding the tube known set.
+    The tube chart stores a beat-free residual ``r = E / F_ref`` and
+    reconstructs ``E = r * F_ref`` at serve time; a stale artifact that
+    stored the raw beating envelope ``E`` carries no ``TUBE_BEAT_FREE_AIRY``
+    tag (or a mismatched one) and must hard-refuse here rather than be
+    reconstructed under the residual convention, which would double-apply or
+    omit the demodulation reference and return a finite-but-wrong
+    amplification.
+    """
+    return _validate_axis_schema(
+        tag, _KNOWN_TUBE_ENVELOPE_DEFINITIONS, f'Tube {artifact_label}')
+
+
 def _chart_to_npz(chart, index: int) -> dict:
     """Flatten one chart into ``chart{index}_*`` npz arrays."""
     prefix = f'chart{index}_'
@@ -4969,6 +5215,7 @@ def _chart_to_npz(chart, index: int) -> dict:
         meta = {'kind': 'tube', 'image_count': chart.image_count,
                 'parity': chart.parity, 'eta_floor': chart.eta_floor,
                 'eta_max': chart.eta_max,
+                'envelope_definition': chart.envelope_definition,
                 'cusp_windows': [[tc, dt] for tc, dt in chart.cusp_windows]}
         axes = (chart.log_w_grid, chart.gamma_grid, chart.u_grid,
                 chart.theta_grid)
@@ -5072,6 +5319,12 @@ def _chart_from_npz(data, index: int):
     imag_coeffs = data[prefix + 'im_coeffs']
     log_w_grid, gamma_grid, p1_grid, p2_grid = axes
     if meta['kind'] == 'tube':
+        # A tube chart stores the beat-free residual r = E / F_ref; a stale
+        # raw-envelope artifact carries no TUBE_BEAT_FREE_AIRY tag and
+        # hard-refuses here rather than being reconstructed under the
+        # residual convention.
+        definition = _validate_tube_envelope_definition(
+            meta.get('envelope_definition'), f'chart {index}')
         return TubeChart._assemble(
             gamma_grid=gamma_grid, u_grid=p1_grid, theta_grid=p2_grid,
             log_w_grid=log_w_grid, real_coeffs=real_coeffs,
@@ -5079,7 +5332,8 @@ def _chart_from_npz(data, index: int):
             image_count=meta['image_count'], parity=meta['parity'],
             eta_floor=meta['eta_floor'], eta_max=meta['eta_max'],
             cusp_windows=[tuple(win) for win in meta['cusp_windows']],
-            theta_to_s=data[prefix + 'theta_to_s'])
+            theta_to_s=data[prefix + 'theta_to_s'],
+            envelope_definition=definition)
     if meta['kind'] == 'lobe':
         # Additive lobe branch: a lobe chart demands the lobe axis
         # schema, so a mislabeled/old artifact hard-refuses here rather than

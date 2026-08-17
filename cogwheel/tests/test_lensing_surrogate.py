@@ -130,6 +130,7 @@ from cogwheel.lensing.surrogate import (
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood, LensedBinningError,
     dimensionless_frequency)
+from cogwheel.lensing.chang_refsdal._airy_fold import _merging_fold_pair
 # --------------------------------------------------------------------------
 # Training boxes (chosen to lie wholly inside ONE image-count region with
 # caustic distance bounded away from zero -- the surrogate's contract).
@@ -2218,22 +2219,128 @@ def _multichart_fixture() -> LensAmplificationSurrogate:
         [pos_tube, pos_ff, sad_tube], provenance)
 
 
+#: Sample density for `_find_real_tube_source`'s arc scan -- matches the
+#: density already validated (and load-tested for speed) by the sibling
+#: derivation in ``test_lensing_tube_d2_fold.py``.
+_REAL_SOURCE_N_SAMPLES = 200
+
+#: An off-axis floor (INS-1-001): a source with either eigenframe component
+#: smaller than this can sit too close to the tube's own symmetry axis for
+#: `_tube_f_ref` to build reliably across the fixture's ``w`` band.
+_REAL_SOURCE_MIN_COMP = 0.05
+
+
+@functools.lru_cache(maxsize=None)
+def _find_real_tube_source(gamma_query: float, band: tuple[float, float],
+                           parity: int) -> tuple[float, float]:
+    """Find a genuine, off-axis, F_ref-buildable source near ``gamma_query``.
+
+    INS-1-001: the beat-free `TubeChart` serve contract
+    (`surrogate._tube_serves`'s F_ref-buildability gate, and
+    `surrogate._evaluate_chart`'s unconditional post-multiply by
+    `surrogate._tube_f_ref`) requires a REAL 4-image fold geometry to be
+    rebuildable AT THE QUERIED SOURCE -- independent of whatever arbitrary
+    synthetic envelope, cusp windows, or axis grids a fixture chart carries.
+    A synthetic-chart test that queries with an arbitrary/non-physical
+    ``(y1_eig, y2_eig)`` (as every pre-INS-1-001 test here did) therefore
+    either declines (a NaN F_ref) or crashes (`_tube_f_ref` solving on a
+    ``[nan, nan]`` source raises `numpy.linalg.LinAlgError`, uncaught).
+
+    This scans `surrogate_training`'s OWN arc-detection machinery
+    (`band_caustic_structure` / `_tube_training_arcs` / `_tube_source`) --
+    the same real production geometry a genuine tube-chart build would walk
+    -- for a genuine off-axis fold source whose `_merging_fold_pair` is
+    resolvable and whose `_tube_f_ref` is finite over the fixture's
+    ``ln w`` band, so every synthetic multi-chart fixture below can be
+    queried at a point that is real and buildable while its (arbitrary)
+    synthetic envelope/labels stay exactly as authored.  ``(gamma, band,
+    parity)`` triples are memoized -- each call rescans an ``O(n_samples)``
+    theta grid, so results are cached rather than re-derived per test.
+
+    Args:
+        gamma_query: shear at which to build the geometry (also used as the
+            representative gamma for the arc scan).
+        band: ``(gamma_lo, gamma_hi)`` search band containing ``gamma_query``,
+            passed to `band_caustic_structure`.
+        parity: ``+1`` (astroid) or ``-1`` (deltoid).
+
+    Returns:
+        ``(y1_eig, y2_eig)`` -- a genuine, off-axis, F_ref-buildable source
+        in the shear eigenframe at ``gamma_query``.
+
+    Raises:
+        AssertionError: no candidate on the scanned arc cleared every gate
+            (would indicate the band/parity choice itself is unusable, not
+            a fixture bug -- callers should pick a different validated
+            band rather than loosen this scan).
+    """
+    matrix = geometry.macro_matrix(gamma_query)
+    structure = surrogate_training.band_caustic_structure(
+        band, parity, n_samples=_REAL_SOURCE_N_SAMPLES)
+    arc = surrogate_training._tube_training_arcs(structure, parity)[0]
+    r_min = surrogate_training._min_curvature_radius(
+        band, arc, _REAL_SOURCE_N_SAMPLES)
+    eta_max = surrogate_training.TrainingConfig().f_max * r_min
+    w_lin = np.exp(MC_LOG_W_GRID)
+    best: tuple[float, float] | None = None
+    best_gap = -math.inf
+    for theta in np.linspace(arc.theta_lo, arc.theta_hi,
+                             _REAL_SOURCE_N_SAMPLES):
+        source = surrogate_training._tube_source(
+            gamma_query, float(theta), eta_max, arc.branch, arc.inward_sign)
+        if min(abs(float(source[0])), abs(float(source[1]))) < _REAL_SOURCE_MIN_COMP:
+            continue
+        try:
+            images = geometry.find_images(source, matrix)
+        except geometry.LensDomainError:
+            continue
+        if len(images) != 4:
+            continue
+        pair = _merging_fold_pair(images, source, matrix)
+        if pair is None:
+            continue
+        if surrogate_module._tube_f_ref(w_lin, gamma_query, source) is None:
+            continue
+        gap = float(pair[1] - pair[0])
+        if gap > best_gap:
+            best_gap = gap
+            best = (float(source[0]), float(source[1]))
+    if best is None:
+        raise AssertionError(
+            f'no F_ref-buildable real tube source found for '
+            f'gamma={gamma_query}, band={band}, parity={parity} -- pick a '
+            'different validated (band, parity) or widen the scan.')
+    return best
+
+
 #: Multi-chart query set (TEST 13): each entry is
 #: ``(label, kwargs, expected_chart_index_or_None)``.  ``expected`` is the
 #: 0-based index into ``surrogate.charts`` the guard stack MUST select, or
 #: ``None`` for a deliberate fall-through.  Spans tube-only, far-field-only,
 #: the tube/far-field OVERLAP band, a cusp window, the gamma-guard band,
 #: out-of-box, and a NEGATIVE-theta saddle-wedge query (unwrap path).
+#: INS-1-001: `pos_tube_only`/`pos_overlap_tube_wins` are queried at a REAL,
+#: F_ref-buildable eigenframe source (`_find_real_tube_source`, gamma=0.35)
+#: instead of the arbitrary ``(0.70, 0.30)`` literal -- the tube serve
+#: contract now requires a genuine 4-image fold geometry to rebuild F_ref
+#: at serve time.  ``pos_farfield_only`` keeps the arbitrary literal: it is
+#: never routed to the tube chart (its ``eta`` is above ``MC_ETA_MAX``), so
+#: it never reaches the F_ref gate and stays a pure ExteriorPolarChart probe.
+_POS_TUBE_Y1, _POS_TUBE_Y2 = _find_real_tube_source(0.35, (0.3, 0.4), 1)
+
+#: Same rationale for the saddle (deltoid, parity=-1) tube probe.
+_SAD_TUBE_Y1, _SAD_TUBE_Y2 = _find_real_tube_source(1.25, (1.2, 1.3), -1)
+
 MC_QUERIES = (
     ('pos_tube_only',
-     dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.008, theta=0.70,
-          image_count=2), 0),
+     dict(gamma=0.35, y1=_POS_TUBE_Y1, y2=_POS_TUBE_Y2, beta=0.0, eta=0.008,
+          theta=0.70, image_count=2), 0),
     ('pos_farfield_only',
      dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.10, theta=0.70,
           image_count=2), 1),
     ('pos_overlap_tube_wins',
-     dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.03, theta=0.70,
-          image_count=2), 0),
+     dict(gamma=0.35, y1=_POS_TUBE_Y1, y2=_POS_TUBE_Y2, beta=0.0, eta=0.03,
+          theta=0.70, image_count=2), 0),
     ('pos_cusp_fall_through',
      dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.01, theta=0.20,
           image_count=2), None),
@@ -2244,7 +2351,7 @@ MC_QUERIES = (
      dict(gamma=5.0, y1=0.30, y2=0.20, beta=0.0, eta=0.03, theta=0.70,
           image_count=2), None),
     ('sad_negtheta_tube_unwrap',
-     dict(gamma=1.25, y1=0.35, y2=0.20, beta=0.0, eta=0.01,
+     dict(gamma=1.25, y1=_SAD_TUBE_Y1, y2=_SAD_TUBE_Y2, beta=0.0, eta=0.01,
           theta=2.0 * np.pi - 0.19, image_count=4), 2),
     ('sad_farfield_exact_fallthrough',
      dict(gamma=1.25, y1=0.35, y2=0.20, beta=0.0, eta=0.10,
@@ -2268,9 +2375,59 @@ def _select_for_query(sur: LensAmplificationSurrogate, kwargs: dict):
         image_count=kwargs['image_count'], y1_eig=y1_eig, y2_eig=y2_eig)
 
 
+def _structural_select_for_query(sur: LensAmplificationSurrogate,
+                                 kwargs: dict):
+    """`select_chart`'s precedence scan with the tube F_ref gate bypassed.
+
+    The beat-free contract makes a PHYSICAL tube/exterior-polar double match
+    unsatisfiable (tube F_ref needs a 4-image caustic-interior source;
+    exterior-polar needs rho > 1 -- exterior), so the selection-PRECEDENCE
+    tests probe the structural band/window overlap instead: same chart order
+    and same per-kind guards as production `select_chart`, with
+    ``require_fref=False`` (the census's attribution-isolation flag) on the
+    tube leg ONLY.  The multi-chart fixture carries only tube and
+    exterior-polar charts, so the scan covers exactly those two kinds.
+    """
+    log_w = np.log(MC_W_ARRAY)
+    log_w_min, log_w_max = float(log_w.min()), float(log_w.max())
+    y1_eig, y2_eig = _rotate_to_eigenframe(kwargs['y1'], kwargs['y2'],
+                                           kwargs['beta'])
+    for chart in sur.charts:
+        if (isinstance(chart, surrogate_module.TubeChart)
+                and surrogate_module._tube_serves(
+                    chart, kwargs['gamma'], log_w_min, log_w_max,
+                    kwargs['eta'], kwargs['theta'], kwargs['image_count'],
+                    y1_eig, y2_eig, require_fref=False)):
+            return chart
+    for chart in sur.charts:
+        if (isinstance(chart, surrogate_module.ExteriorPolarChart)
+                and surrogate_module._exterior_polar_serves(
+                    chart, kwargs['gamma'], log_w_min, log_w_max,
+                    kwargs['eta'], kwargs['image_count'], y1_eig, y2_eig)):
+            return chart
+    return None
+
+
 def _serve_for_query(sur: LensAmplificationSurrogate, kwargs: dict):
     """``sur.serve(...)`` for a query dict (returns ``(E_array, served, definition)``)."""
     return sur.serve(MC_W_ARRAY, **kwargs)
+
+
+def _inverse_rotate_from_eigenframe(y1_eig: float, y2_eig: float,
+                                    beta: float) -> tuple[float, float]:
+    """Invert `surrogate._rotate_to_eigenframe`: physical-frame preimage.
+
+    `_rotate_to_eigenframe` applies the orthogonal rotation ``R(beta)``; its
+    inverse is ``R(beta)^T = R(-beta)``, i.e. swap the sign convention on
+    the off-diagonal terms.  Used to place a query's PHYSICAL ``(y1, y2)``
+    so that, after `serve`'s own `_rotate_to_eigenframe` call at the given
+    ``beta``, it lands exactly on a target eigenframe source obtained from
+    `_find_real_tube_source` (which is expressed directly in the eigenframe).
+    """
+    cos_b, sin_b = math.cos(beta), math.sin(beta)
+    y1 = cos_b * y1_eig - sin_b * y2_eig
+    y2 = sin_b * y1_eig + cos_b * y2_eig
+    return y1, y2
 
 
 # ==========================================================================
@@ -2344,17 +2501,27 @@ class ChartSelectionTestCase(SurrogateTestCase):
 
     def test_overlap_band_is_a_genuine_double_match_tube_wins(self):
         """In the overlap band BOTH the positive tube and positive far-field
-        charts individually serve the query, yet `select_chart` returns the
-        tube -- so the partition is enforced by priority, not by disjoint
-        support."""
+        charts individually claim the query's structural bands, yet the
+        precedence scan returns the tube -- so the partition is enforced by
+        priority, not by disjoint support.  STRUCTURAL probe: the beat-free
+        contract makes a PHYSICAL double match unsatisfiable (tube F_ref
+        needs a 4-image interior source; exterior-polar needs rho > 1), so
+        the tube leg passes ``require_fref=False`` and the query sits at an
+        ff-servable exterior source."""
         _label, kwargs, _expected = MC_QUERIES[2]  # pos_overlap_tube_wins
+        # A physical double match is unsatisfiable under the beat-free
+        # contract (tube: 4-image interior; exterior-polar: rho > 1) -- the
+        # probe is structural by design, at the exterior source the ff chart
+        # serves.
+        kwargs = dict(kwargs, y1=0.70, y2=0.30)
         log_w = np.log(MC_W_ARRAY)
         y1_eig, y2_eig = _rotate_to_eigenframe(kwargs['y1'], kwargs['y2'],
                                                kwargs['beta'])
         pos_tube, pos_ff = self.sur.charts[0], self.sur.charts[1]
         tube_serves = surrogate_module._tube_serves(
             pos_tube, kwargs['gamma'], float(log_w.min()), float(log_w.max()),
-            kwargs['eta'], kwargs['theta'], kwargs['image_count'])
+            kwargs['eta'], kwargs['theta'], kwargs['image_count'],
+            y1_eig, y2_eig, require_fref=False)
         ff_serves = surrogate_module._exterior_polar_serves(
             pos_ff, kwargs['gamma'], float(log_w.min()), float(log_w.max()),
             kwargs['eta'], kwargs['image_count'], y1_eig, y2_eig)
@@ -2362,7 +2529,7 @@ class ChartSelectionTestCase(SurrogateTestCase):
         self.assertTrue(tube_serves and ff_serves,
                         'overlap band is not a genuine double match -- '
                         're-tune eta bands')
-        selected = _select_for_query(self.sur, kwargs)
+        selected = _structural_select_for_query(self.sur, kwargs)
         self.n_checks += 1
         self.assertIs(selected, pos_tube,
                       'tube priority did not win the overlap band')
@@ -2388,11 +2555,18 @@ class ChartSelectionTestCase(SurrogateTestCase):
 
     def test_shrinking_tube_band_flips_overlap_selection(self):
         """Self-falsification: shrinking the positive tube ``eta_max`` below
-        the overlap query drops the tube out of the band, so `select_chart`
-        must flip from the tube (index 0) to the far-field (index 1).  A
-        selection that could never change would be untestable."""
+        the overlap query drops the tube out of the band, so the precedence
+        scan must flip from the tube (index 0) to the far-field (index 1).  A
+        selection that could never change would be untestable.  STRUCTURAL
+        probe (`_structural_select_for_query`): only the tube's F_ref gate is
+        bypassed, so the flip is driven purely by the eta band."""
         _label, kwargs, _expected = MC_QUERIES[2]  # eta = 0.03
-        baseline = _select_for_query(self.sur, kwargs)
+        # A physical double match is unsatisfiable under the beat-free
+        # contract (tube: 4-image interior; exterior-polar: rho > 1) -- the
+        # probe is structural by design, at the exterior source the ff chart
+        # serves.
+        kwargs = dict(kwargs, y1=0.70, y2=0.30)
+        baseline = _structural_select_for_query(self.sur, kwargs)
         self.n_checks += 1
         self.assertIs(baseline, self.sur.charts[0],
                       'precondition: baseline overlap query must serve tube')
@@ -2401,7 +2575,7 @@ class ChartSelectionTestCase(SurrogateTestCase):
         mutated = LensAmplificationSurrogate(
             [shrunk_tube, self.sur.charts[1], self.sur.charts[2]],
             self.sur.provenance)
-        flipped = _select_for_query(mutated, kwargs)
+        flipped = _structural_select_for_query(mutated, kwargs)
         self.n_checks += 1
         self.assertIs(flipped, mutated.charts[1],
                       'shrinking the tube band did not flip selection to the '
@@ -2654,6 +2828,45 @@ IDENTITY_GOLDEN = {
 }
 
 
+#: Shear bands for `_arc_tube_source`, one per arc-fixture query gamma
+#: (astroid, parity=+1; each band brackets its query gamma).
+_ARC_SOURCE_BANDS = {0.35: (0.30, 0.40), 0.40: (0.35, 0.45),
+                     0.45: (0.40, 0.50)}
+
+
+def _arc_tube_source(gamma_q: float) -> tuple[float, float]:
+    """Real, F_ref-buildable eigenframe source for an arc-fixture query.
+
+    INS-1-001: the beat-free tube serve re-modulates the stored residual by
+    `surrogate._tube_f_ref` at the query source, so every direct
+    `_evaluate_chart` call on a synthetic chart must thread a genuine
+    4-image fold source (the default-NaN source is unbuildable and raises).
+    Delegates to the memoized `_find_real_tube_source` scan at the query's
+    own gamma; the synthetic chart's arbitrary envelope/axes stay as
+    authored.
+    """
+    return _find_real_tube_source(gamma_q, _ARC_SOURCE_BANDS[gamma_q], 1)
+
+
+def _arc_expected_fref(chart: surrogate_module.TubeChart, gamma_q: float,
+                       y1_eig: float, y2_eig: float) -> np.ndarray:
+    """The exact ``F_ref`` factor `_evaluate_chart` re-modulates with.
+
+    Replicates the production serve's clamp-then-exponentiate of
+    ``ARC_LOG_W_QUERY`` onto the chart's w grid, so an expected value built
+    as ``residual_array * fref`` (FULL-ARRAY multiply -- numpy's vectorized
+    complex product is not bit-identical to a scalar product) reproduces the
+    served bits exactly.
+    """
+    log_w_clamped = np.clip(ARC_LOG_W_QUERY, chart.log_w_grid[0],
+                            chart.log_w_grid[-1])
+    fref = surrogate_module._tube_f_ref(
+        np.exp(log_w_clamped), gamma_q,
+        np.array([y1_eig, y2_eig], dtype=float))
+    assert fref is not None, 'arc-fixture source must be F_ref-buildable'
+    return fref
+
+
 def _nonaffine_map(theta_lo: float, theta_hi: float,
                    n_map: int = 513) -> tuple[np.ndarray, np.ndarray]:
     """A deliberately NON-AFFINE ``theta -> s`` map on ``[theta_lo, theta_hi]``.
@@ -2892,8 +3105,9 @@ class ChartSplinesInArcLengthTestCase(SurrogateTestCase):
     the spline contracted at the arc-length image ``s = interp(theta, map)``
     (path a) to machine precision, and DIFFER by a stated non-trivial margin
     from a naive contraction at raw ``theta`` (path b).  Both paths use the
-    SAME production contraction primitive (`_contract_tensor_spline`); only
-    the fourth coordinate differs, isolating the coordinate choice.
+    SAME production contraction primitive (`_contract_tensor_spline`) and the
+    SAME beat-free re-modulation factor (`_arc_expected_fref`, INS-1-001);
+    only the fourth coordinate differs, isolating the coordinate choice.
     """
 
     #: Query thetas interior to the arc (avoid the cusp window at theta_lo).
@@ -2904,6 +3118,11 @@ class ChartSplinesInArcLengthTestCase(SurrogateTestCase):
         self.chart, self.theta_fine, self.s_fine = _smooth_in_s_tube_chart(
             0.2, 1.2)
         self.gamma_q, self.eta_q = 0.40, 0.02
+        # INS-1-001: real F_ref-buildable source + the exact re-modulation
+        # factor the serve applies, so expected values are residual * fref.
+        self.y1_eig, self.y2_eig = _arc_tube_source(self.gamma_q)
+        self.fref = _arc_expected_fref(self.chart, self.gamma_q,
+                                       self.y1_eig, self.y2_eig)
 
     def _contract(self, coeffs: np.ndarray, v2: float) -> np.ndarray:
         """Production contraction at fixed ``(gamma, sqrt(eta), v2)``."""
@@ -2922,7 +3141,8 @@ class ChartSplinesInArcLengthTestCase(SurrogateTestCase):
             with self.subTest(theta=theta):
                 served = surrogate_module._evaluate_chart(
                     self.chart, gamma=self.gamma_q, eta=self.eta_q,
-                    theta=theta, log_w_query=ARC_LOG_W_QUERY)
+                    theta=theta, log_w_query=ARC_LOG_W_QUERY,
+                    y1_eig=self.y1_eig, y2_eig=self.y2_eig)
                 theta_inframe = surrogate_module._theta_into_frame(
                     theta, float(self.chart.theta_grid[0]))
                 v2_arc = float(np.interp(theta_inframe, self.chart.theta_to_s[0],
@@ -2930,10 +3150,10 @@ class ChartSplinesInArcLengthTestCase(SurrogateTestCase):
                 v2_theta = theta_inframe
                 value_a = (self._contract(self.chart.real_coeffs, v2_arc)
                            + 1j * self._contract(self.chart.imag_coeffs,
-                                                 v2_arc))
+                                                 v2_arc)) * self.fref
                 value_b = (self._contract(self.chart.real_coeffs, v2_theta)
                            + 1j * self._contract(self.chart.imag_coeffs,
-                                                 v2_theta))
+                                                 v2_theta)) * self.fref
                 scale = float(np.max(np.abs(served)))
                 # (a) The served value IS the arc-length contraction.
                 self.n_checks += 1
@@ -3012,12 +3232,15 @@ class TubeChartMapSerializationTestCase(SurrogateTestCase):
         max_delta = 0.0
         for gamma_q, eta_q, theta in self.QUERIES:
             with self.subTest(config=(gamma_q, eta_q, theta)):
+                # INS-1-001: same real F_ref-buildable source on both sides;
+                # the identical re-modulation cancels in the bit comparison.
+                y1_eig, y2_eig = _arc_tube_source(gamma_q)
                 before = surrogate_module._evaluate_chart(
                     self.chart, gamma=gamma_q, eta=eta_q, theta=theta,
-                    log_w_query=ARC_LOG_W_QUERY)
+                    log_w_query=ARC_LOG_W_QUERY, y1_eig=y1_eig, y2_eig=y2_eig)
                 after = surrogate_module._evaluate_chart(
                     rchart, gamma=gamma_q, eta=eta_q, theta=theta,
-                    log_w_query=ARC_LOG_W_QUERY)
+                    log_w_query=ARC_LOG_W_QUERY, y1_eig=y1_eig, y2_eig=y2_eig)
                 self.n_checks += 1
                 np.testing.assert_array_equal(
                     before, after,
@@ -3081,14 +3304,16 @@ class ArcLengthSelfFalsificationTestCase(SurrogateTestCase):
         chart, theta_fine, s_fine = _smooth_in_s_tube_chart(0.2, 1.2)
         perturbed = dataclasses.replace(
             chart, theta_to_s=np.vstack([theta_fine, s_fine * 1.05]))
+        # INS-1-001: same real F_ref-buildable source on both sides.
+        y1_eig, y2_eig = _arc_tube_source(0.40)
         max_delta = 0.0
         for theta in (0.5, 0.7, 0.9):
             good = surrogate_module._evaluate_chart(
                 chart, gamma=0.40, eta=0.02, theta=theta,
-                log_w_query=ARC_LOG_W_QUERY)
+                log_w_query=ARC_LOG_W_QUERY, y1_eig=y1_eig, y2_eig=y2_eig)
             bad = surrogate_module._evaluate_chart(
                 perturbed, gamma=0.40, eta=0.02, theta=theta,
-                log_w_query=ARC_LOG_W_QUERY)
+                log_w_query=ARC_LOG_W_QUERY, y1_eig=y1_eig, y2_eig=y2_eig)
             max_delta = max(max_delta, float(np.max(np.abs(good - bad))))
         self.n_checks += 1
         self.assertGreater(
@@ -3140,11 +3365,20 @@ class CoordinateChangeAccuracyTestCase(SurrogateTestCase):
         self.chart, self.theta_fine, self.s_fine = _accuracy_tube_chart(
             0.2, 1.2, ACCURACY_N_THETA)
         self.gamma_q, self.eta_q = 0.40, 0.02
+        # INS-1-001: real F_ref-buildable source; the serve re-modulates the
+        # fitted residual by fref, so the analytic target (and the raw-theta
+        # control) carry the SAME factor -- the residual stays pure
+        # interpolation error and the oracle stays surrogate-independent
+        # (fref multiplies both sides of every relative comparison).
+        self.y1_eig, self.y2_eig = _arc_tube_source(self.gamma_q)
+        self.fref = _arc_expected_fref(self.chart, self.gamma_q,
+                                       self.y1_eig, self.y2_eig)
 
     def _target(self, s_q: float) -> np.ndarray:
         """Analytic complex target over ``ARC_LOG_W_QUERY`` at arc length s."""
         return _analytic_smooth_in_s(
-            ARC_LOG_W_QUERY, self.gamma_q, float(np.sqrt(self.eta_q)), s_q)
+            ARC_LOG_W_QUERY, self.gamma_q, float(np.sqrt(self.eta_q)),
+            s_q) * self.fref
 
     def test_served_matches_analytic_target_within_fit_error(self):
         """Served F reproduces the analytic envelope to < 5% on a cusp-free
@@ -3165,15 +3399,17 @@ class CoordinateChangeAccuracyTestCase(SurrogateTestCase):
                 scale = float(np.max(np.abs(target)))
                 served = surrogate_module._evaluate_chart(
                     self.chart, gamma=self.gamma_q, eta=self.eta_q,
-                    theta=theta, log_w_query=ARC_LOG_W_QUERY)
+                    theta=theta, log_w_query=ARC_LOG_W_QUERY,
+                    y1_eig=self.y1_eig, y2_eig=self.y2_eig)
                 rel_arc = float(np.max(np.abs(served - target)) / scale)
-                # Positive control: contract the SAME chart at raw theta.
+                # Positive control: contract the SAME chart at raw theta
+                # (same fref factor as the served value and the target).
                 raw = (surrogate_module._contract_tensor_spline(
                     self.chart.real_coeffs, self.chart.knots, self.gamma_q,
                     u_q, theta_inframe, ARC_LOG_W_QUERY)
                     + 1j * surrogate_module._contract_tensor_spline(
                         self.chart.imag_coeffs, self.chart.knots, self.gamma_q,
-                        u_q, theta_inframe, ARC_LOG_W_QUERY))
+                        u_q, theta_inframe, ARC_LOG_W_QUERY)) * self.fref
                 rel_raw = float(np.max(np.abs(raw - target)) / scale)
                 self.n_checks += 1
                 self.assertLess(
@@ -3219,6 +3455,13 @@ class IdentityDefaultBackCompatTestCase(SurrogateTestCase):
     theta_grid[0]``), then reconstruct served ``F`` and compare against the
     `IDENTITY_GOLDEN` ``float.hex`` literals (NO ``git show HEAD``, NO helper
     oracle -- the literals themselves are the frozen incumbent behaviour).
+
+    INS-1-001 (beat-free representation): the stored tensor is now the
+    residual layer, and the serve re-modulates it by `_tube_f_ref` at the
+    (threaded, real) query source.  The literals still pin the residual
+    contraction bit-for-bit; the expected served value is the FROZEN literal
+    array times the SAME ``fref`` factor (`_arc_expected_fref`, full-array
+    multiply to match numpy's vectorized product bits).
     """
 
     def test_identity_default_builds_the_identity_map(self):
@@ -3241,12 +3484,21 @@ class IdentityDefaultBackCompatTestCase(SurrogateTestCase):
         max_delta = 0.0
         for (gamma_q, eta_q, theta), probes in IDENTITY_GOLDEN.items():
             with self.subTest(config=(gamma_q, eta_q, theta)):
+                y1_eig, y2_eig = _arc_tube_source(gamma_q)
                 served = surrogate_module._evaluate_chart(
                     chart, gamma=gamma_q, eta=eta_q, theta=theta,
-                    log_w_query=ARC_LOG_W_QUERY)
+                    log_w_query=ARC_LOG_W_QUERY,
+                    y1_eig=y1_eig, y2_eig=y2_eig)
+                # Expected = frozen residual literals * the serve's own fref
+                # (full-array multiply -- bit-parity with the serve path).
+                fref = _arc_expected_fref(chart, gamma_q, y1_eig, y2_eig)
+                residual = np.zeros(ARC_LOG_W_QUERY.size, dtype=complex)
                 for w_idx, real_hex, imag_hex in probes:
-                    want = complex(float.fromhex(real_hex),
-                                   float.fromhex(imag_hex))
+                    residual[w_idx] = complex(float.fromhex(real_hex),
+                                              float.fromhex(imag_hex))
+                expected = residual * fref
+                for w_idx, real_hex, imag_hex in probes:
+                    want = complex(expected[w_idx])
                     got = complex(served[w_idx])
                     self.n_checks += 1
                     self.assertEqual(
@@ -3268,11 +3520,18 @@ class IdentityDefaultBackCompatTestCase(SurrogateTestCase):
         fails, so the golden pin is non-vacuous."""
         chart = _identity_default_tube_chart()
         gamma_q, eta_q, theta = next(iter(IDENTITY_GOLDEN))
+        y1_eig, y2_eig = _arc_tube_source(gamma_q)
         served = surrogate_module._evaluate_chart(
             chart, gamma=gamma_q, eta=eta_q, theta=theta,
-            log_w_query=ARC_LOG_W_QUERY)
-        w_idx, real_hex, _imag_hex = IDENTITY_GOLDEN[(gamma_q, eta_q, theta)][0]
-        perturbed = float.fromhex(real_hex) * 1.001
+            log_w_query=ARC_LOG_W_QUERY, y1_eig=y1_eig, y2_eig=y2_eig)
+        w_idx, real_hex, imag_hex = IDENTITY_GOLDEN[(gamma_q, eta_q, theta)][0]
+        # The expected served real part (literal * fref, as in the golden
+        # pin), perturbed by 0.1% -- the pin must detect the move.
+        fref = _arc_expected_fref(chart, gamma_q, y1_eig, y2_eig)
+        residual = np.zeros(ARC_LOG_W_QUERY.size, dtype=complex)
+        residual[w_idx] = complex(float.fromhex(real_hex),
+                                  float.fromhex(imag_hex))
+        perturbed = float((residual * fref)[w_idx].real) * 1.001
         self.n_checks += 1
         self.assertNotAlmostEqual(
             float(served[w_idx].real), perturbed, places=6,
@@ -5136,7 +5395,7 @@ class TubeCuspWindowExclusionTestCase(SurrogateTestCase):
     def _serves(self, theta_q: float) -> bool:
         return surrogate_module._tube_serves(
             self.pos_tube, 0.35, self.log_w_min, self.log_w_max,
-            0.01, float(theta_q), 2)
+            0.01, float(theta_q), 2, _POS_TUBE_Y1, _POS_TUBE_Y2)
 
     def test_inside_full_window_refuses(self):
         """theta within ``delta_theta`` of the cusp -> refused (full window)."""
@@ -5190,12 +5449,13 @@ class TubeCuspWindowExclusionSelfFalsificationTestCase(SurrogateTestCase):
         self.assertFalse(
             surrogate_module._tube_serves(
                 self.pos_tube, 0.35, self.log_w_min, self.log_w_max,
-                0.01, theta_q, 2),
+                0.01, theta_q, 2, _POS_TUBE_Y1, _POS_TUBE_Y2),
             'fixture broken: in-window query already admitted')
         self.n_checks += 1
         bare = dataclasses.replace(self.pos_tube, cusp_windows=())
         served = surrogate_module._tube_serves(
-            bare, 0.35, self.log_w_min, self.log_w_max, 0.01, theta_q, 2)
+            bare, 0.35, self.log_w_min, self.log_w_max, 0.01, theta_q, 2,
+            _POS_TUBE_Y1, _POS_TUBE_Y2)
         self.n_checks += 1
         self.assertTrue(served,
                         'with no cusp windows the in-window query must serve '
@@ -5533,8 +5793,12 @@ class LobeExteriorSelfFalsificationTestCase(SurrogateTestCase):
 #: ``gamma < 1`` -- the parity==1 region the deltoid-exterior change must not
 #: touch.  ``eta`` spans tube-only, exterior-only and the overlap band.
 LX_ASTROID_PROBES = (
-    dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.008, theta=0.70,
-         image_count=2),   # tube-only
+    # INS-1-001: the tube-only probe must carry a REAL F_ref-buildable
+    # eigenframe source (same one as MC_QUERIES' pos_tube_only) -- the tube
+    # serve gate declines an arbitrary-literal source, which would leave
+    # this probe unserved and the byte-identity vacuous.
+    dict(gamma=0.35, y1=_POS_TUBE_Y1, y2=_POS_TUBE_Y2, beta=0.0, eta=0.008,
+         theta=0.70, image_count=2),   # tube-only
     dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.0, eta=0.10, theta=0.70,
          image_count=2),   # exterior-polar only
     dict(gamma=0.35, y1=0.70, y2=0.30, beta=0.7, eta=0.03, theta=0.70,
