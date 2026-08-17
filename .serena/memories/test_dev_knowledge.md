@@ -741,3 +741,30 @@
   full-suite collect-only count; confirm it predates your build (grep the
   missing symbol at HEAD) and flag for the owner to retire/relocate rather
   than treat it as a regression you caused.
+
+## 2026-08-17 (driver fixture-repair session — consolidated from tube_test_investigation)
+- LEGACY SYNTHETIC FIXTURES GO STALE WHEN A SERVE GATE GAINS A
+  SOURCE-DEPENDENT TERM: fixtures that bypass the production builders keep
+  encoding pre-gate expected values and break (or silently mis-measure)
+  once serving consults the source. The fix pattern is to THREAD A REAL
+  production-derived source through the fixture and RE-DERIVE expected
+  values through the LIVE serve path, keeping golden literals bit-identical
+  — third instance of the rebuild-with-real-data family (see the
+  OPTIONAL-TO-MANDATORY NPZ KEY and guard-bypass entries); prefer this over
+  mock-patching the gate whenever a real source is obtainable.
+- STRUCTURAL-PROBE FLAG FOR SELECTION PRECEDENCE: when the precedence
+  branch under test requires a physical double-match that is unsatisfiable
+  with real inputs, disable the physical requirement via the builder's
+  structural flag (`require_fref=False`) rather than fabricating physics —
+  it isolates the selection-order logic as its own testable invariant.
+- A CONSTANT FRAME/ORIGIN OFFSET IS INVISIBLE TO NODE-EXACT ROUND-TRIPS:
+  it round-trips EXACTLY at build nodes yet leaks a slowly-growing
+  OFF-node error — pair every node round-trip suite with an off-node
+  (inter-node midpoint, interpolation-only, no extrapolation past end
+  nodes) sweep against a normalized error bar; that sweep is what catches
+  frame-consistency bugs (e.g. tau_bar vs tau_c) the round-trip cannot.
+- DERIVE THE SERVABLE SUB-DOMAIN FROM THE LIVE GATE PREDICATE, never a
+  pinned literal (drift -> spurious fail on a non-servable region OR
+  spurious pass on a padded one), and guard held-out accuracy sweeps with
+  refused_count == 0 so a sample landing on a zero-filled/refused node
+  cannot silently contribute a garbage measurement.

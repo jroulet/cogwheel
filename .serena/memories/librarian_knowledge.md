@@ -109,9 +109,20 @@
   alone, read any "carried forward"/caveat subsection in that fragment —
   a target symbol can still exist because it was deliberately repurposed
   for a different later step, not because the original step is unfinished.
-- No `changelog.d` directory exists in this repo's `.claude/spec/` —
-  these internal lensing dev builds use only `completed.d`/`todo.d`
-  (COMPLETED.md/TODO.md), not CHANGELOG.md generation.
+- CHANGELOG FRAGMENT DIRECTORY IS THE ONE EXCEPTION TO THE `.claude/spec/`
+  RULE (corrected 2026-08-17; an earlier entry here wrongly said no
+  changelog surface exists in this repo): `changelog.d/` lives at the REPO
+  ROOT, sibling to `cogwheel/`/`scripts/` — it IS the surface
+  `render_fragments.py` reads for CHANGELOG.md
+  (`SURFACES["changelog"]["frag_dir"] = "changelog.d"`), while every OTHER
+  fragment surface (todo.d/completed.d/spec_changelog.d/
+  contracts_changelog.d) lives under `.claude/spec/`. Fragments mistakenly
+  written to `.claude/spec/changelog.d/` sit committed but silently
+  un-rendered — the script never scans there and still reports "all
+  surfaces up to date" (it only vouches for surfaces it actually scans).
+  Two agent commits made exactly this mistake (found 2026-08-17). If
+  CHANGELOG.md ever looks stale despite a clean render, compare
+  `git ls-files changelog.d` vs `git ls-files .claude/spec/changelog.d`.
 - SPEC.md replacements involving `\|` pipe-escape characters must be done
   via Python's `str.replace` called through the shell — Serena regex mode
   double-escapes backslashes on return, causing "No matches" or corrupt
