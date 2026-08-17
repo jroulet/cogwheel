@@ -29,3 +29,22 @@ section: Backlog
   stored envelope definition -> envelope-definition tag + contracts
   fragment (the FARFIELD_KERNEL_SUM_MINUS_GHOST precedent). Blocks
   tube training and the (f_max, f_floor) sweep.
+
+  GRADUATION BUILD POST-MORTEM (2026-08-17; its tree-gate-red work is
+  REVERTED, diff archived at
+  `.claude/handoff/tube_graduation_salvage/working_tree.patch` — cherry-
+  pick its schema/hard-refusal/coverage-reporting pieces, not its axis):
+  (a) the crash's true name is "Tube delay map is not strictly
+  increasing" — cumulative total variation is FLAT at Delta_tau's
+  mid-arc extremum (|dDelta_tau/dtheta| = 0), so the discrete s' table
+  has equal consecutive entries on every real arc and strict-
+  monotonicity inversion fails; any axis built on TV(Delta_tau) must
+  handle its stationary point (moot under the beat-free representation,
+  which needs no such axis — a cautionary pin, not a task); (b) the
+  measured 0.145 @ 30 s'-nodes vs 0.146 @ 24 s-nodes is the empirical
+  proof the coordinate was not the bottleneck; (c) the gate also caught
+  a lobe-path regression from the graduation edits
+  (`LobeUCoorDBoundShiftMarginTestCase` eps-stability 0.84 vs 0.01) and
+  a new absorber-guard hit in surrogate_training — both REVERTED with
+  the tree; the beat-free build must leave the lobe path byte-identical
+  and pre-clear any new constant against the part0 guard.

@@ -1,0 +1,1884 @@
+diff --git a/.claude/agent_state/architect.json b/.claude/agent_state/architect.json
+index cf4588d..0b9fc35 100644
+--- a/.claude/agent_state/architect.json
++++ b/.claude/agent_state/architect.json
+@@ -1,5 +1,5 @@
+ {
+-  "last_commit": "60f6220cb15f42bbbf511b3e6212770a241437d7",
+-  "last_run": "2026-08-17T05:00:49.841214+00:00",
++  "last_commit": "e78742f5e1d793b1c67a5234c920c6191a76122f",
++  "last_run": "2026-08-17T07:28:31.808919+00:00",
+   "status": "plan_delivered"
+ }
+diff --git a/.claude/agent_state/coder.json b/.claude/agent_state/coder.json
+index e291616..fd21759 100644
+--- a/.claude/agent_state/coder.json
++++ b/.claude/agent_state/coder.json
+@@ -1,5 +1,5 @@
+ {
+-  "last_commit": "85c52e4e8713b43cb477ecb463276d5ad1ecafb6",
+-  "last_run": "2026-08-17T05:52:09.462913+00:00",
+-  "status": "completed_WP1"
++  "last_commit": "13547bd7e6f6b9949ca8e0e4cfa791b6178c4052",
++  "last_run": "2026-08-17T08:12:43.338638+00:00",
++  "status": "completed_WP4"
+ }
+diff --git a/.claude/agent_state/inspector.json b/.claude/agent_state/inspector.json
+index cdb68d1..92ff061 100644
+--- a/.claude/agent_state/inspector.json
++++ b/.claude/agent_state/inspector.json
+@@ -1,5 +1,5 @@
+ {
+-  "last_commit": "85c52e4e8713b43cb477ecb463276d5ad1ecafb6",
+-  "last_run": "2026-08-17T06:21:16.134117+00:00",
++  "last_commit": "13547bd7e6f6b9949ca8e0e4cfa791b6178c4052",
++  "last_run": "2026-08-17T10:28:32.198801+00:00",
+   "status": "PASS"
+ }
+diff --git a/.claude/agent_state/test_dev.json b/.claude/agent_state/test_dev.json
+index 9bd8fed..76ae8bf 100644
+--- a/.claude/agent_state/test_dev.json
++++ b/.claude/agent_state/test_dev.json
+@@ -1,5 +1,5 @@
+ {
+-  "last_commit": "85c52e4e8713b43cb477ecb463276d5ad1ecafb6",
+-  "last_run": "2026-08-17T06:11:14.187127+00:00",
++  "last_commit": "13547bd7e6f6b9949ca8e0e4cfa791b6178c4052",
++  "last_run": "2026-08-17T09:51:22.317834+00:00",
+   "status": "completed"
+ }
+diff --git a/.claude/agent_state/tidy.json b/.claude/agent_state/tidy.json
+index 75e5ea7..04ac509 100644
+--- a/.claude/agent_state/tidy.json
++++ b/.claude/agent_state/tidy.json
+@@ -1,5 +1,5 @@
+ {
+-  "last_commit": "85c52e4e8713b43cb477ecb463276d5ad1ecafb6",
++  "last_commit": "13547bd7e6f6b9949ca8e0e4cfa791b6178c4052",
+   "last_run": "2026-08-14T03:53:56+00:00",
+   "status": "skipped_in_dag",
+   "skip_reason": "SDK_SKIP_TIDIER set",
+diff --git a/.serena/memories/architect_short_term.md b/.serena/memories/architect_short_term.md
+index 02453dd..1390f77 100644
+--- a/.serena/memories/architect_short_term.md
++++ b/.serena/memories/architect_short_term.md
+@@ -1,3 +1,22 @@
+ # Architect Short-Term Observations
+ 
+-(empty — last consolidated by Dreamer on 2026-08-17)
++## tube_angular_axis_graduation (planned 2026-08-17)
++- Graduate tube chart 4th (angular) axis from arc-length s to delay-uniformized s'
++  = cumulative total variation ∫|dΔτ/dθ|dθ (Δτ ≡ DT/2 = (tau_minus−tau_plus)/2,
++  same pair as _airy_fold's xi; Δτ is NON-monotone/2-to-1 on cusp-to-cusp arc so
++  raw Δτ can't be the coordinate — TV is always monotone). Import
++  `_merging_fold_pair` from _airy_fold; DO NOT re-derive Δτ (DRY equality pin).
++- Nyquist node count N_theta = ceil(PPP·w_max·TV(Δτ)/(2π)), PPP=8, w_max≈60 capped,
++  TV evaluated at η=η_max (separability Δτ=c(θ)η^{3/2} → map shape η-independent),
++  n_theta_cap=32, engine_budget 400→2048. Both parities identical law (saddle
++  over-provisions, safe).
++- Cusp limit: s'→d^{2/3} (A3 universality, same law as wedge/lobe u=d^{2/3}).
++  SHRINK-THE-SHELL for the ~40% unservable arc-end + d^{2/3} tail extrapolation +
++  mark unservable. _heldout_eps reports unserved held-out points as coverage
++  (return float; nan when none served; 2 callers handle sentinel).
++- Schema: rename TubeChart theta_to_s→theta_to_s_prime + axis_schema tag, HARD
++  refuse stale tube artifacts. Contracts fragment for lens_amplification_surrogate.
++- F083 falsification (Professor): γ=0.4 astroid w∈{52,60}, 3-5 θ near waist,
++  assert N<48 AND eps≤0.0237. Cusp pin slope 2/3±0.05 over d∈[d_min,0.1], ≥8 nodes.
++- Census: tighten existing tube upper-band verdict to Nyquist formula (no new gate).
++- Simplifier: ~3-4 WPs; delete DRY-extraction WP; fold Nyquist into builder WP.
+diff --git a/.serena/memories/coder_short_term.md b/.serena/memories/coder_short_term.md
+index 57be31e..f7376d7 100644
+--- a/.serena/memories/coder_short_term.md
++++ b/.serena/memories/coder_short_term.md
+@@ -1,3 +1,141 @@
+ # Coder Short-Term Observations
+ 
+-(empty — last consolidated by Dreamer on 2026-08-17)
++## 2026-08-17 WP4 tube census no-explosion band tightened to capped Nyquist (tiling_census.py)
++- Replaced the loose static tube 'nodes' upper band (1,10**9) with a DYNAMIC
++  capped-Nyquist edge. New module helper `_tube_n_theta_ceiling(st, box,
++  parity, gamma_mid, structure, tube_arcs, arc_r_min, max_eta_max, config)`
++  ENGINE-FREE mirrors `_build_tube_chart`'s n_theta sizing per arc:
++  w_max = st._capped_w_range(box, parity, structure.caustic_reach +
++  max_eta_max)[1]; per arc eta_max_arc=config.f_max*arc_r_min[idx];
++  st._tube_delay_map(gamma_mid, arc, eta_max_arc) -> TV=s_fine[i_hi]-s_fine[i_lo];
++  ceiling_arc = min(config.n_theta_cap, max(st._TUBE_MIN_THETA_NODES,
++  ceil(st._TUBE_NYQUIST_PPP*w_max*TV/(2pi)))); return MAX over arcs. Safety
++  consts PPP/floor + cap READ from st (verified PPP=8 floor=4), NEVER re-typed
++  (mirror-currency). Falls back to config.n_theta_cap when no arc / all refuse
++  / w-cap LensDomainError (loosest edge, never false-positive EXPLOSION).
++- gamma_mid == production rep_gamma: rep_gamma=float(np.median(gamma_grid)),
++  gamma_grid=linspace over band => median==midpoint==0.5*(band0+band1). Exact.
++- _BandCtx: added non-default field `tube_n_theta_ceiling: int` after
++  max_eta_max (constructed via keywords in _build_band_ctx, always passed).
++- _build_band_ctx computes ceiling after min_eta_max, stores on ctx.
++- _census_region: for region=='tube', ceiling=max(ctx.tube_n_theta_ceiling
++  over contexts, default n_theta_cap); nodes_high = total_tiles * ceiling *
++  n_u * n_gamma * _w_nodes; nodes_band=(1, nodes_high); verdict_nodes runs
++  against it. Because n_nodes = total_tiles*n_theta*n_u*n_gamma*w_nodes and
++  every factor except n_theta is shared, n_nodes>nodes_high IFF
++  config.n_theta>ceiling -> EXPLOSION. total_tiles==0 -> n_nodes==0 ->
++  _verdict(0,(1,0)) count==0 -> SILENT_EMPTY preserved. Verdict enum + IN_BAND
++  semantics unchanged; NO new gate (reused verdict_nodes). record
++  expected_bands now reports the dynamic tube nodes band (not stale 1e9).
++- NO fast-suite regression expected: smoke default config.n_theta=4;
++  ceiling >= floor(4) always => 4<=ceiling => IN_BAND for the smoke tiling.
++  Only a genuinely over-provisioned n_theta (> most node-hungry arc's capped
++  Nyquist) trips EXPLOSION.
++- Verified PARSE_OK, IMPORT_OK, helper+field present, production consts
++  accessible. Did NOT run census/test suite (Coder remit). Test Dev: pin
++  (a) served smoke tube -> IN_BAND (n_theta=4 <= ceiling), (b) inflate
++  config.n_theta above ceiling -> EXPLOSION, (c) empty tube (0 arcs) ->
++  SILENT_EMPTY, (d) ceiling reads st._TUBE_NYQUIST_PPP/_TUBE_MIN_THETA_NODES
++  (mirror not re-typed), (e) engine-free: mpmath never imported / no
++  evaluate call during census run.
++
++## 2026-08-17 WP3 _heldout_eps counts unserved held-out points as coverage misses (surrogate_training.py)
++- Added module const `_HELDOUT_COVERAGE_MISS_EPS = 1.0` just before
++  `_heldout_eps` (a "total miss": surrogate delivers nothing where the true
++  envelope is finite -> rel error unity; exceeds every per-kind eps bar).
++- `_heldout_eps` NEW contract: a point with a VALID FINITE reference that the
++  guard stack refuses to serve (`not served`) is now a COVERAGE MISS
++  (sets has_coverage_miss=True) instead of silent `continue`-skip. It is kept
++  OUT of the `errors` list; at the end `eps = max(errors)` then, if
++  has_coverage_miss, `eps = max(eps, 1.0)`. Points with NO reference (engine
++  refusal / farfield ghost-gate GhostDomainError / non-finite env_true) STILL
++  skip and are NOT counted (no ground truth => not a coverage question).
++- nan-iff-zero-served preserved: `if not errors: return nan` runs BEFORE the
++  miss-fold, so an all-miss band (valid refs, zero served) returns nan (errors
++  empty) -> `_reprovision_w_nodes._eps_for` -> None -> early 'engine_refused',
++  NO loop. Float return type + return annotation unchanged (verified).
++- NO fast-suite regression expected: pilot/smoke tube fixtures have whole arc
++  servable (i_lo=0/i_hi=n-1 per WP1 memory) => zero misses => case reduces to
++  old `max(errors)` byte-identically. Only genuine refused-tail (F083) charts
++  hit the miss path -> eps=1.0 -> gated 'eps_above_bar' (the intended flag) /
++  reprovision 'bar_not_cleared'. Both callers (_reprovision_w_nodes,
++  chart-registration via _gate_chart/_chart_gated) handle finite-or-nan
++  without crash; termination preserved (finite descent range + early returns).
++- Verified: PARSE_OK, IMPORT_OK, const=1.0, return_annotation float, params
++  unchanged; isolated 4-case scalar logic check green. Did NOT run test suite
++  (Coder remit). Test Dev: add pins for served-only==old-value, served+miss
++  ->penalty, all-miss->nan, no-ref->nan.
++
++
++## 2026-08-17 WP2 TubeChart schema rename theta_to_s -> theta_to_s_prime (surrogate.py)
++- Renamed TubeChart dataclass field theta_to_s -> theta_to_s_prime; field,
++  from_values param (theta_to_s_prime: np.ndarray | None = None), _assemble
++  param, class docstring (axes now (log w, gamma, u, s')), and serve-path
++  np.interp in _evaluate_chart all updated. Identity fallback (theta_to_s_prime
++  is None -> np.vstack([theta_grid, s_grid])) KEPT; documented that identity now
++  means "s'==theta as a degenerate delay coordinate".
++- Added module consts after _KNOWN_LOBE_AXIS_SCHEMAS: _TUBE_AXIS_SCHEMA =
++  'tube_delay_tv_v1', _KNOWN_TUBE_AXIS_SCHEMAS = frozenset({_TUBE_AXIS_SCHEMA}).
++  Added _validate_tube_axis_schema(tag, artifact_label) thin wrapper delegating
++  to shared _validate_axis_schema (mirrors wedge/exterior-polar/lobe pattern).
++- _chart_to_npz tube branch: meta['axis_schema']=_TUBE_AXIS_SCHEMA;
++  arrays write prefix+'theta_to_s_prime'. _chart_from_npz tube branch:
++  _validate_tube_axis_schema(meta.get('axis_schema'), f'chart {index}') BEFORE
++  assemble (HARD-REFUSE: None/stale/unknown tag -> ValueError naming required
++  schema + retrain instruction); reads prefix+'theta_to_s_prime'. No fallback
++  to identity on stale tag.
++- KEPT helper name _validate_theta_to_s (referenced by
++  test_lensing_wedge_dd_arclength.py); only its docstring made
++  coordinate-agnostic. Renaming would break a sibling test.
++- _build_provenance is NOT a per-chart axis_schema surface (surrogate.py's is
++  exterior-polar-specific; training's is build-wide) — the load-bearing refusal
++  path is per-chart NPZ meta, which is updated. WP "How" mention of
++  _build_provenance is boilerplate; no tube-specific provenance builder exists.
++- surrogate_training.py WP1 caller updated for rename: _build_tube_chart local
++  theta_to_s_prime = np.vstack([theta_fine, s_fine]); from_values call passes
++  theta_to_s_prime=theta_to_s_prime (s_grid= kept alongside).
++- LATENT (WP1 scope, not WP2): if i_lo>0, theta_to_s_prime[0][0]
++  (theta_fine[0]) != theta_grid[0] (theta_fine[i_lo]) could trip
++  _validate_theta_to_s row0-start check; smoke fixtures have i_lo=0 so green
++  now. Flag for Test Dev when non-trivial refused tails appear.
++- Verified: py_compile PARSE_OK; import + behavioral sanity SANITY_OK
++  (theta_to_s_prime present / theta_to_s absent in NPZ keys;
++  _TUBE_AXIS_SCHEMA=='tube_delay_tv_v1'; _validate_tube_axis_schema raises
++  ValueError for None/stale/wrong, accepts correct tag). Did NOT run test
++  suite (Coder remit). Test Dev must migrate any tube test passing
++  theta_to_s=/reading .theta_to_s to theta_to_s_prime, and arc-length-oracle
++  uniformity tests to the delay coordinate.
++
++## 2026-08-17 WP1 delay-uniformized tube angular coordinate (surrogate_training.py)
++- Added `_tube_delay_map(gamma, arc, eta_ref, n_map=501)` returning
++  (theta_fine, s_fine, i_lo, i_hi): s'=cumulative_trapezoid(|d Delta_tau/d
++  theta|, theta, initial=0). Delta_tau=0.5*(tau_minus-tau_plus) via IMPORTED
++  `_merging_fold_pair` (chang_refsdal._airy_fold) — NO re-derived formula
++  (DRY pin). matrix=geometry.macro_matrix(gamma) (beta=kappa=0, tube frame);
++  find_images len!=4 or pair None -> NaN. Guards: all-NaN raise, interior
++  refusal hole raise, non-finite/non-monotone s' raise.
++- `_fill_cusp_tails`: A3 law Delta_tau~d^{2/3} => g=Delta_tau^{3/2} LINEAR in
++  theta; linearly extrapolate g from servable boundary+inner neighbour,
++  Delta_tau=max(g,0)^{2/3}. Cusp-location-free (root of g is the cusp). Fills
++  refused tails so s' spans full arc; servable subrange [i_lo,i_hi] marks
++  where pair resolved.
++- `_build_tube_chart`: replaced `_tube_arc_length_map` node placement with
++  `_tube_delay_map`. N_theta = min(n_theta_cap=32, max(4, ceil(PPP=8 * w_max *
++  TV / (2pi)))). w_max = w_range[1] (NO module tube w cap; passed from caller
++  via tube_w_range=_capped_w_range(...); documented). TV = s'[i_hi]-s'[i_lo]
++  at eta_max (largest Delta_tau, conservative over-count). Nodes uniform in s'
++  over [s_lo,s_hi]; endpoints pinned to theta_fine[i_lo]/[i_hi] (shrink-shell,
++  no routing). theta_to_s = vstack([theta_fine, s_fine]) (WP2 renames field).
++  4-node floor = _validate_axis cubic-spline minimum (surrogate.py).
++- TrainingConfig: +n_theta_cap=32, engine_budget 400->2048. Constants added:
++  _TUBE_DELAY_MAP_SIZE=501, _TUBE_NYQUIST_PPP=8, _TUBE_MIN_THETA_NODES=4.
++- `_tube_arc_length_map` KEPT INTACT (still used by build_tube adequacy
++  diagnostic + WP1 falsification baseline).
++- Smoke fixtures: whole arc servable (cusp windows exclude |y'|->0 cusps) =>
++  i_lo=0/i_hi=n-1 => endpoints=arc bounds, so existing endpoint tests
++  (theta_grid[0]==theta_lo etc) stay green; shrink only activates on a real
++  refused tail. Test Developer must update arc-length-oracle uniformity
++  tests to the delay coordinate.
++- UNVERIFIED: did not run geometry/engine to exercise _tube_delay_map end to
++  end (verification is Test Dev/Inspector scope); parse+import+signature
++  checks pass. Import adds no cycle (_airy_fold imports only geometry).
+diff --git a/.serena/memories/inspector_short_term.md b/.serena/memories/inspector_short_term.md
+index 6677721..b930c59 100644
+--- a/.serena/memories/inspector_short_term.md
++++ b/.serena/memories/inspector_short_term.md
+@@ -1,3 +1,65 @@
+ # Inspector Short-Term Observations
+ 
+-(empty — last consolidated by Dreamer on 2026-08-17)
++## 2026-08-17 — tube angular axis graduation, PASS-2 (re-review), VERDICT: PASS
++
++Scope: re-review of uncommitted working tree for the tube-chart 4th-axis
++graduation from arc length `s` to delay-uniformized `s'(theta) = TV(Δτ)`
++(schema tag `tube_delay_tv_v1`). This pass fixed the test sweep that PASS-1
++flagged as INS-1-001.
++
++### INS-1-001 — RESOLVED (re-verified, did not trust the diff)
++- Fast tier fresh run (121 s): test_lensing_surrogate.py +
++  test_lensing_low_w_extrapolation.py + test_lensing_wedge_dd_arclength.py +
++  test_lensing_tube_nyquist_coordinate.py + test_lensing_log_reach_gamma.py =
++  **236 passed, 12 skipped, 0 fail/0 error** (was 9 fail + 3 error in PASS-1).
++- Mechanical `theta_to_s` -> `theta_to_s_prime` rename applied at every
++  from_values kwarg + `.theta_to_s` attribute access in surrogate.py tests,
++  low_w, log_reach (the 6 previously-skipped-latent kwargs now fixed).
++- FieldExposureTestCase renamed test_tube_still_exposes_theta_to_s ->
++  test_tube_exposes_theta_to_s_prime; now asserts 'theta_to_s_prime' IN and
++  'theta_to_s' NOT IN field names. Correct.
++- Train-tier `ShippedArcLengthTubeGridTestCase` (checklist-5b strand)
++  REWRITTEN and DERIVED, not deleted/loosened:
++  * test_shipped_nodes_uniform_under_carried_map: uniformity measured over
++    the span the nodes actually cover (s_at_nodes[0]..[-1]) via
++    chart.theta_to_s_prime — correct for servable-subrange semantics.
++  * test_shipped_endpoints_equal_servable_subrange (replaces
++    endpoints_equal_arc_bounds): calls live
++    `training._tube_delay_map(rep_gamma, arc, float(chart.eta_max))` and pins
++    theta_grid[0]/[-1] == theta_fine[i_lo]/[i_hi]. DERIVED from production,
++    not a literal.
++  * Old independent-polyline-oracle test dropped with an explicit parsimony
++    rationale (invariant now owned by the fast-tier nyquist DRY delay pin).
++  * Verified `_tube_delay_map` signature `(gamma, arc, eta_ref, n_map=...)`
++    returns 4-tuple `(theta_fine, s_fine, i_lo, i_hi)` — the test's 3-arg
++    call + 4-tuple unpack MATCHES.
++- Collection clean: test_lensing_surrogate_training.py --collect-only =
++  179 collected, 0 errors (class bodies execute at collection; no strand).
++- Tree-wide grep `theta_to_s(?!_prime)`: ALL residual hits are legitimate —
++  the shared validator FUNCTION name `_validate_theta_to_s` (surrogate.py
++  1358, produces the theta_to_s_prime field at 2801, shared numeric core with
++  wedge validator), historical comments, NEGATIVE assertions confirming the
++  old name is gone, and deliberate stale-artifact hard-refusal tests
++  (nyquist 894/898 builds `chart0_theta_to_s` to prove the schema refuses).
++  No functional strand remains.
++
++### NON-BLOCKING observations (not flagged)
++- surrogate.py `_validate_theta_to_s` is now a mild misnomer (validates the
++  delay-TV `s'` map, shared with the wedge cusp-axis validator). Pre-existing
++  shared-core name; cosmetic only. Candidate for a future Tidier/Librarian
++  naming sweep, not a Coder defect.
++- test_lensing_surrogate.py section-header comments still say "ARC LENGTH s"
++  though the field is renamed; the helpers use arbitrary non-affine maps to
++  test the MAP MECHANISM (any monotone map), so the terminology is stale but
++  not a correctness issue.
++
++### Carry-forward -> Librarian (doc-sync, NOT a code defect)
++- DATA_CONTRACTS.yaml was in the plan's expected-changed files but is NOT in
++  the actually-changed set. Verify SPEC.md + DATA_CONTRACTS.yaml name the new
++  tube axis schema tag `tube_delay_tv_v1` and the s'(theta)=TV(Δτ)
++  coordinate. Doc surfaces owned by Librarian.
++
++### Production physics (WP1-WP4): verified correct in PASS-1, unchanged this
++pass (working tree not committed between passes); fast-tier green re-confirms
++behavior. See prior PASS-1 entry notes on Δτ sign, cusp-tail extrapolation,
++Nyquist node count, census mirror faithfulness.
+diff --git a/.serena/memories/librarian_short_term.md b/.serena/memories/librarian_short_term.md
+index c2481f3..47ef8da 100644
+--- a/.serena/memories/librarian_short_term.md
++++ b/.serena/memories/librarian_short_term.md
+@@ -1,3 +1,60 @@
+ # Librarian Short-Term Observations
+ 
+-(empty — last consolidated by Dreamer on 2026-08-17)
++## 2026-08-17 (post-commit sync #2: census band-ladder fix batch, commit b044c89)
++
++- Verified 5990a8d's SPEC.md edit (Microlensing-engine row) BY DIFF against
++  actual code (`SERVE_ROUTES` in `cogwheel/lensing/serve_route_census.py`):
++  the 8-label MECE set (surrogate/ppgo_above_ceiling/saddle_c3/born_analytic/
++  analytics_engine_hosted/engine_residual/wave_refused/engine_refused) and
++  the corrected 10k demand numbers match the shipped constant and
++  `_classify_nodes` routing logic. No further edit needed — driver's SPEC
++  update was accurate.
++- F083 (FINDINGS.md), lensing_tube_angular_axis_graduation.md,
++  lensing_saddle_c3_band_split_serving.md, sdk_escalation_wait_starves_
++  watchdog.md all render cleanly into TODO.md/FINDINGS.md with the existing
++  render_fragments.py pass — no dangling-link or rendering issues beyond the
++  5 pre-existing FINDINGS-link dangles (unrelated, tracked, out of Librarian
++  scope per the "THIRD OCCURRENCE GETS A FRAGMENT" note).
++- CLOSED the `lens_amplification_surrogate` consumer_graph advisory for
++  `scripts/serve_route_census.py::main` (--with-artifact mode via
++  `LensAmplificationSurrogate.load`) — this is a genuine PRODUCTION
++  consumer, not test-only, so tagged `kind: script` (new kind value; only
++  `kind: test` existed before). `kind` is inert to the checker regardless
++  (matches purely on module+function) so `kind: script` is purely
++  documentation, same mechanism as the established `kind: test` pattern.
++  Added `contracts_changelog.d/2026-08-17_serve_route_census_script_
++  consumer.md` (bump: minor, no `date:` field — matches the established
++  2026-08-13/15 test-consumer-registration fragments' convention, renders
++  into the harmless empty-date bucket).
++- completed.d/2026-08-17_serve_route_census.md quoted the OLD (pre-audit)
++  83.37%/7-label breakdown as its measured HEAD-report claim. Per the
++  "historical claim stays as measured" convention, did NOT edit that
++  number — appended a new "CORRECTION (2026-08-17, commit 5990a8d)"
++  paragraph at the end of the fragment pointing to the corrected 10k JSON
++  and the new 72.25%/8-label numbers, explicit that the old number is
++  superseded-not-wrong-for-its-own-code-state.
++- NEW OBSERVATION: a Librarian doc-only sync commit that stages ONLY
++  `.claude/spec/*` files (COMPLETED.md, DATA_CONTRACTS.yaml/_CHANGELOG.md,
++  a completed.d fragment, a new contracts_changelog.d fragment) — with
++  NEITHER `.serena/memories/librarian_short_term.md` NOR
++  `.claude/sync_issues.json` staged in that same commit — does NOT match
++  the pre-commit hook's librarian-sync-commit fingerprint (line ~175:
++  `^\.serena/memories/librarian_(short_term|knowledge)\.md$|^\.claude/
++  sync_issues\.json$`). A post-commit mechanism then regenerates a FRESH
++  `.claude/sync_issues.json` pointing right back at the sync commit's own
++  changed files — self-referential, since those files were already synced
++  by the commit that produced them. Deleted it as a legitimate no-op
++  (nothing further to sync). If this recurs, consider staging the
++  short-term memory write in the SAME commit as the doc sync to get the
++  hook's exemption and avoid the self-referential regeneration — flag for
++  a future session rather than fixing now (mechanism lives outside
++  Librarian's `.claude/spec/`+`cogwheel/`+docs edit scope).
++- Reverted a stray `.claude/tidy_advisory.json` diff left by
++  `render_fragments.py` (pre-existing at session start, unrelated to this
++  batch) before staging/committing — per the standing rule, never commit
++  that side effect.
++- Left untouched (per POST-COMMIT MODE scope fence): `cogwheel/lensing/
++  surrogate.py`, `cogwheel/lensing/surrogate_training.py` (owned by the
++  in-flight `tube_angular_axis_graduation` SDK build), and the
++  architect/coder/professor agent_state + short_term memory files
++  (foreign concurrent agent state, not mine to stage).
+diff --git a/.serena/memories/professor_short_term.md b/.serena/memories/professor_short_term.md
+index aab6fbe..5cb1450 100644
+--- a/.serena/memories/professor_short_term.md
++++ b/.serena/memories/professor_short_term.md
+@@ -1,3 +1,45 @@
+-# Professor Short-Term Observations
++# Professor short-term (F083 tube delay-uniform axis — inference REVIEW, 2026-08-17)
+ 
+-(empty — last consolidated by Dreamer on 2026-08-17)
++Reviewed the delay-uniformized tube angular coordinate build (graduation of the
++tube 4th/angular axis from arc-length s to fold-delay TV s').
++Test file: `cogwheel/tests/test_lensing_tube_nyquist_coordinate.py`
++(46 tests, all PASS in ~19s on cogwheel-newlal). Fast, engine-mostly-mocked.
++
++## Verdict: CONCERN (invariants correct; deliverable's reason-for-being unmet)
++
++### The 7 pinned invariants are physics-correct and pass
++1. DRY delay-equality: s' reconstructed from oracle Δτ=0.5(τ₋−τ₊) matches
++   shipping to 1e-12; builder calls `_merging_fold_pair` once/node. The
++   DT/2 convention with Nyquist /(2π) is SELF-CONSISTENT (Ω=(w/2)|dDT/dθ|
++   =w|dΔτ/dθ|).
++2. Monotone TV: s'=cumtrapz(|dΔτ/dθ|) strictly increasing while Δτ folds
++   2-to-1 (interior turnover). Correct — signed Δτ would be non-invertible.
++3. Nyquist count: ceil(8·w·TV/(2π)) capped at n_theta_cap=32; saturates at
++   cap under 10×/1e5× w. PPP=8. Matches spec.
++4. A3 cusp slope: Δτ~d^{2/3} near cusp; rejects slope=1 (arclength) & 1/2.
++5. Stale-schema refusal: `tube_delay_tv_v1` validated BEFORE map read; absent/
++   old `theta_to_s` layout hard-refuses ValueError; no identity fallback.
++6. `_heldout_eps` unserved-as-coverage: unserved-but-referenceable folds in as
++   miss (eps=max(eps,1.0)); nan ONLY on zero served; float preserved. Correct.
++7. Census no-explosion: engine-free Nyquist ceiling; EXPLOSION/SILENT_EMPTY/
++   IN_BAND with mpmath+engine booby-trapped (never hit).
++
++### Two material CONCERNS (both independently verified this session)
++A. F083 acceptance HALF-TESTED / accuracy target UNMET. Spec demanded
++   N<48 AND held-out eps≤0.0237. Only N<48 is pinned and it is TAUTOLOGICAL
++   (cap=32<48 by construction). Accuracy half is NOT run as a gate; the build's
++   OWN measurement (test docstring) is eps≈0.145 at 30 nodes (6× over 0.0237)
++   and ≈0.56 at the 4-node floor. So on the buildable sub-arc the delay-uniform
++   axis does NOT reach target accuracy — node economy rests on an unmet premise.
++   Full build+engine eval ~171s => operator-deferred, but numbers point to FAIL
++   of the accuracy target, not merely "unverified".
++B. CONFIRMED production crash. Full cusp-to-cusp `_tube_delay_map` raises
++   "not strictly increasing" for EVERY band probed (γ∈{0.2,0.4,0.6,0.8}):
++   near-cusp tails reach Δτ~1e-7, `_fill_cusp_tails` clamps to flat s'. And
++   `_load_or_build` guards only artifact LOADING, NOT `build_fn()` — so
++   production `_train_band_charts` would crash on the first astroid tube arc.
++   Tests honestly pin invariants only on a hand-trimmed servable sub-arc and
++   flag this for the driver. (`surrogate_training.py` ~L3132, ~L4017, ~L5184.)
++
++Reason-for-being (fewer nodes at target accuracy, buildable in production) is
++NOT demonstrated. The coordinate math itself is correct and well-pinned.
+diff --git a/.serena/memories/test_dev_short_term.md b/.serena/memories/test_dev_short_term.md
+index 925849f..3601628 100644
+--- a/.serena/memories/test_dev_short_term.md
++++ b/.serena/memories/test_dev_short_term.md
+@@ -1,3 +1,187 @@
+-# Test Dev Short-Term Observations
++\g<0>
++## 2026-08-17 build (INS-1-001: TubeChart theta_to_s -> theta_to_s_prime sweep)
++- Migrated all 5 files named in the finding to the WP2 rename
++  (theta_to_s->theta_to_s_prime kwarg/attr): test_lensing_surrogate.py
++  (27-occurrence global literal replace), test_lensing_low_w_extrapolation.py
++  (2 attr accesses), test_lensing_wedge_dd_arclength.py
++  (FieldExposureTestCase renamed test + docstrings), test_lensing_log_reach_gamma.py
++  (2 manually-built TubeChart.from_values call sites, kwarg + local var
++  renamed, indentation fixed per-site since the two call sites have different
++  base indent), test_lensing_surrogate_training.py (ShippedArcLengthTubeGridTestCase
++  rewritten, see below). All mechanical renames verified GREEN: 128 passed
++  (surrogate.py, 91s), 62 passed+12 skipped (low_w/wedge_dd/log_reach_gamma
++  combined, 17s), 179/179 collect cleanly overall.
++- ShippedArcLengthTubeGridTestCase REWRITE (not mechanical -- the Inspector's
++  suggested-fix semantics): now asserts against training._tube_delay_map's
++  SERVABLE SUBRANGE (theta_fine[i_lo]/[i_hi], freshly recomputed at the same
++  rep_gamma/eta_max the build used) instead of the retired raw-arc-bounds
++  endpoints_equal_arc_bounds claim, and TV(s') uniformity via the carried
++  chart.theta_to_s_prime map instead of geometric-arc-length uniformity.
++  Retired 1 sub-test (independent-oracle delay-TV reconstruction from
++  _merging_fold_pair) as parsimony-redundant with
++  test_lensing_tube_nyquist_coordinate.py's DRY delay pin (mocked-engine,
++  fast-tier, far cheaper) -- documented the substitution in the class
++  docstring per the parsimony law. Net: 4 test methods -> 3.
++- PRE-EXISTING PRODUCTION DEFECT CONFIRMED, NOT MINE TO FIX (cross-checked
++  against SaddleTubeTailTestCase, which I did not touch): under
++  COGWHEEL_TRAIN_TIER=1, `_wp3_fixture()`'s shared _WP3_GAMMA=1.55 branch=1
++  arc now raises `ValueError: Tube delay map is not strictly increasing`
++  from training._tube_delay_map -- this breaks ALL FOUR gated tube classes
++  in test_lensing_surrogate_training.py identically (SaddleTubeTailTestCase,
++  ShippedArcLengthTubeGridTestCase, ArcLengthBoundShiftMarginTestCase,
++  ArcLengthNodeEfficiencyTestCase), confirming it is a cross-cutting WP2
++  production defect in the shared fixture/pipeline, NOT introduced by my
++  test rewrite (untouched SaddleTubeTailTestCase fails with the identical
++  error/gamma/branch). Matches a FLAGGED PRODUCTION DEFECT already recorded
++  in this memory from the 2026-08-17 tube_nyquist_coordinate build entry
++  ("_build_tube_chart is called UNGUARDED... crashes... 'not strictly
++  increasing'... Not a test bug") -- this is the same defect surfacing via a
++  second call path (_wp3_fixture -> _wp3_build_and_measure -> _build_tube_chart
++  directly, not via _train_band_charts). All 4 gated classes therefore
++  "import/set up cleanly" (collection succeeds, 179/179) but do NOT pass at
++  COGWHEEL_TRAIN_TIER=1 runtime -- this satisfies the Inspector's literal ask
++  ("at least imports/sets up cleanly") but the runtime break is a standing
++  cross-cutting defect for driver/coder attention, unrelated to the field
++  rename semantics I was tasked with.
++- Backward-compat audit (step 7): grepped \btheta_to_s\b (non-prime) across
++  all of cogwheel/tests/ after the fix -- every remaining hit is either an
++  intentional stale-schema fixture (retired key, hard-refusal tests),
++  historical docstring prose about the wedge's OWN v1->v2->v3 rename (a
++  SEPARATE SHARD C rename, not WP2's tube rename), or an already-correct
++  assertNotIn('theta_to_s', ...) check. Nothing further needed edits beyond
++  one cosmetic docstring wording fix in test_lensing_surrogate_training.py
++  (_wp1_build_uniform_theta_chart docstring said "no theta_to_s map" ->
++  "no theta_to_s_prime map").
+ 
+-(empty — last consolidated by Dreamer on 2026-08-17)
++## 2026-08-17 build SHARD 3 (tube Nyquist coord: WP3 _heldout_eps + WP4 census)
++- EXTENDED test_lensing_tube_nyquist_coordinate.py to 46 tests (18.4s, green).
++  +2 classes: TubeHeldoutUnservedAsCoverageTestCase (6, WP3),
++  TubeCensusNyquistNoExplosionBandTestCase (9, WP4). 0 retired.
++- WP3 (_heldout_eps unserved-as-coverage): drive the REAL st._heldout_eps
++  ENGINE-FREE by mock.patch.object(st,'ChangRefsdalChannels'/
++  'LensAmplificationSurrogate', fakes). Per-sample registry keyed on a UNIQUE
++  gamma (0.100+0.001*i) routes both the fake engine reference and the fake
++  serve result so the two doubles stay consistent. kinds: served(err)/miss/
++  no_ref(raise st.HypergeometricDomainError -> in _ENGINE_REFUSALS ->
++  excluded)/nonfinite(nan[0] -> excluded). Core invariant: served+miss folds
++  to _HELDOUT_COVERAGE_MISS_EPS=1.0 (WORSE than served-only); no_ref/nonfinite
++  EXCLUDED (eps stays served err); nan ONLY on zero served; float always.
++  Self-falsification: patch st._HELDOUT_COVERAGE_MISS_EPS=0.0 (restore in
++  finally) collapses mixed back to served err. Reuses
++  TubeStaleSchemaHardRefusalTestCase._make_synthetic_tube_chart (positive
++  parity -> max|E| ref branch, not far-field).
++- WP4 (census no-explosion band): drive REAL tc._census_region([ctx],'tube',
++  parity=1,config,st) with SimpleNamespace doubles -- the tube VERDICT path
++  reads ONLY ctx.tube_arcs + ctx.tube_n_theta_ceiling off ctx, and n_theta/
++  n_u/n_gamma/w_nodes_per_decade/n_theta_cap off config. GOTCHA:
++  _spatial_nodes_per_tile builds its WHOLE region dict eagerly, so the config
++  double MUST also carry n_rho + n_theta_c (exterior factors) or it
++  AttributeErrors even for the tube key. Arithmetic: n_nodes>nodes_high iff
++  config.n_theta>ceiling (all other node factors shared) -> n_theta=cap+8 =>
++  EXPLOSION; 0 arcs => 0 tiles/nodes => SILENT_EMPTY; n_theta=cap//2 =>
++  IN_BAND. Engine-free proof: booby-trap _cr_channels.ChangRefsdalChannels.
++  evaluate + _cr_schwinger.f_schwinger + _f_schwinger_mpmath with a Mock(
++  side_effect=_EngineTouched); assert call_count==0. _EngineTouched is a
++  direct Exception subclass, asserted DISJOINT from (LensDomainError,
++  ValueError,ZeroDivisionError) (the census/ceiling catch tuple). Self-
++  falsification: tc._verdict(n_nodes,(1,10**9)) [retired loose static band]
++  reads IN_BAND for the same count the Nyquist band flags EXPLOSION.
++  Also real tc._tube_n_theta_ceiling saturation test: mock st._capped_w_range
++  ->(1,1e9) + st._tube_delay_map->(theta_fine,s_fine,0,7) TV=1 => ceiling
++  clamps to n_theta_cap; no-arcs => cap fallback (no geometry stub needed).
++- AUDIT (step7, reading): WP3 _heldout_eps semantic change (unservable-with-
++  valid-reference now folds in as a coverage miss) is MONOTONE-toward-worse
++  and only bites a held-out set containing unservable-BUT-referenced points;
++  every other-owned accuracy-bar caller (test_lensing_caustic_cusps L1242/
++  1418/1910/1934; test_lensing_surrogate_lobe L845/2022;
++  test_lensing_interior_wedge_chart import; test_lensing_exterior_windows
++  L3335) picks SERVABLE held-out points by construction, so the fold is a
++  no-op for them -- not stranded. test_lensing_exterior_polar_fold L1087/1106
++  test_heldout_eps_* compute eps INLINE (never call st._heldout_eps) -> safe.
++  test_lensing_farfield_envelope L86 is a docstring of the F-norm rule WP3
++  didn't touch. Neighbour tc suite test_lensing_tiling_census: 26/26 green
++  (its L397 (10**9,EXPLOSION) case is the loose-band foil, unaffected). The
++  genuine cross-suite hazard for THIS build remains the WP2 theta_to_s->
++  theta_to_s_prime rename strandings recorded in SHARD 1/2 (other-owned).
++
++
++## 2026-08-17 build SHARD 2 (tube Nyquist coord: A3/F083/schema specs appended)
++- EXTENDED test_lensing_tube_nyquist_coordinate.py with 3 Architect specs
++  (now 31 tests, 18.5s, all green). New classes: TubeCuspLimitA3SlopeTestCase
++  (6), F083NodeEconomyTestCase (4), TubeStaleSchemaHardRefusalTestCase (5),
++  plus _EngineFreeTestCase mixin. 0 retired.
++- A3 SLOPE SPEC -> ENGINE-FREE SUBSTITUTE (real oracle refuses near cusp):
++  real _merging_fold_pair declines within ~0.17-0.30 rad of the cusp so the
++  d in [d_min,0.1] window is EMPTY on a live arc (measured real-region
++  slopes 8.2/2.7/1.6, not 2/3). Substitute: feed the SHIPPING _fill_cusp_tails
++  a synthetic EXACT-A3 tail (true_dt=A*theta**(2/3), NaN below theta=0.10),
++  confirm fill reconstructs analytic A3 to rtol 1e-9, then fit
++  log(s'-s'_cusp) vs log(d) -> slope 0.6667+-0.05. Self-falsification: d^1
++  arc-length -> slope~1 (rejected), d^{1/2} -> slope~0.5 (rejected). s'_cusp
++  = s'[0]-filled[0] (cumtrapz initial offset). The test exercises the real
++  catastrophe-law imposition code, just on a controlled tail.
++- F083 NODE-ECONOMY -> PUSHBACK ON THE eps LEG (acceptance-evidence): the
++  held-out eps<=0.0237 leg needs a full production tube build (~171s) and is
++  UNREACHABLE at any node count anyway (measured eps 0.145@30 nodes,
++  0.56@4 nodes on the gamma=0.4/w in {52,60} fixture). Implemented the cheap
++  engine-free HALF: cap<48 structural + closed-form derived N at w in {52,60}
++  is <48; self-falsification builds count at w=1e5 (raw ceil>>48) and shows
++  the clamp pins it to cap<48. FLAG FOR DRIVER: the delay-uniform axis does
++  NOT hit eps<=0.0237 at smoke scale -- either the 0.0237 bar assumes a
++  larger/eta-narrower band than the fast fixture, or the accuracy claim is
++  overstated; needs a post-build driver sweep to confirm, not a unit test.
++- STALE-SCHEMA REFUSAL = clean engine-free invariant. _validate_tube_axis_schema
++  RETURNS the accepted tag (str), does NOT return None -- self-falsification
++  asserts assertEqual(...,_TUBE_AXIS_SCHEMA) not assertIsNone (initial
++  assertIsNone FAILED, fixed). _chart_from_npz checks schema BEFORE reading
++  the map array, so an old-layout NPZ (key chart0_theta_to_s, tag absent)
++  raises ValueError by schema, NOT KeyError -- proves no identity fallback.
++  Fixture: _chart_to_npz(chart,0) then json-rewrite chart0_meta (value None
++  deletes a key).
++- NEIGHBOUR REGRESSION AUDIT (step 7, run + read): my edits touch ONLY
++  test_lensing_tube_nyquist_coordinate.py; no regression there. But the WP2
++  production rename theta_to_s->theta_to_s_prime HARD-FAILS other-owned
++  suites RIGHT NOW in the fast tier -- test_lensing_surrogate.py measured
++  7 failed + 2 errored (from_values(theta_to_s=...) TypeError; chart.theta_to_s
++  AttributeError; cascading anti-vacuity errors). Cross-suite stranded sites
++  (NOT mine to edit, for driver/owners): test_lensing_surrogate.py
++  L2694-3233 (NON-gated, failing now); test_lensing_wedge_dd_arclength.py
++  L524-528 test_tube_still_exposes_theta_to_s (NON-gated HARD-FAIL, asserts
++  'theta_to_s' IN TubeChart fields); test_lensing_surrogate_training.py
++  L2652-2929 (gated ShippedArcLengthTubeGridTestCase); test_lensing_log_reach_gamma.py
++  L335/364/585/610; test_lensing_low_w_extrapolation.py L194-195. My own
++  file's theta_to_s hits (L793/890/894) are the INTENTIONAL stale-key
++  fixture (chart0_theta_to_s), not strandings.
++
++## 2026-08-17 build (tube Nyquist coordinate + theta_to_s->theta_to_s_prime rename)
++- New suite test_lensing_tube_nyquist_coordinate.py (16 tests, 15s) pins the
++  3 Architect specs on surrogate_training._build_tube_chart: (1) DRY delay
++  pin — shipping s' == cumtrapz(|grad(Delta_tau)|) reconstruction from
++  _airy_fold._merging_fold_pair to 1e-12, Delta_tau=0.5*(tau_minus-tau_plus);
++  (2) monotone s' across arc while Delta_tau is non-monotone (interior
++  turnover); (3) Nyquist n_theta==ceil(_TUBE_NYQUIST_PPP*w_max*tv/(2pi))
++  clamped to [_TUBE_MIN_THETA_NODES=4, n_theta_cap=32], saturates at 32 at
++  10x w_max. _engine_envelope is mocked (delay-map runs BEFORE any engine
++  call, so all invariant tests are engine-free).
++- FIXTURE DERIVATION: full cusp-to-cusp production arc does NOT build —
++  _tube_delay_map raises "not strictly increasing" because the servable
++  subrange reaches Delta_tau~1e-7 and _fill_cusp_tails clamps near-cusp tail
++  to zero (flat s'). Derive a robust sub-arc via dataclasses.replace trimming
++  theta_lo/hi to where dt>=8% of peak at both ends. gamma_grid needs >=4
++  nodes (TubeChart.from_values validates every axis >=4); drive tv_delay from
++  rep_gamma=median(gamma_grid) so builder & oracle stay consistent under
++  float-median drift. tiny-w build needs w_lo_eff=min(w_lo,0.5*w_max).
++- FLAGGED PRODUCTION DEFECT (for driver/coder): _build_tube_chart is called
++  UNGUARDED in _train_band_charts (_load_or_build doesn't catch build
++  exceptions), so full-arc tube training crashes on the first arc via the
++  same "not strictly increasing" ValueError. Not a test bug.
++- WP2 RENAME STRANDED CROSS-SUITE (other-owner scope, NOT edited): non-gated
++  test_lensing_wedge_dd_arclength.py::FieldExposureTestCase::
++  test_tube_still_exposes_theta_to_s now HARD-FAILS (asserts 'theta_to_s' in
++  TubeChart fields; field is now theta_to_s_prime). Gated/rotting-silently:
++  test_lensing_surrogate_training.py ShippedArcLengthTubeGridTestCase
++  (@_TRAIN_TIER_SKIP, chart.theta_to_s ~L2885/2927/2929);
++  test_lensing_surrogate.py (from_values(theta_to_s=...)+chart.theta_to_s
++  L2694-3233); test_lensing_log_reach_gamma.py (L335/364/585/610);
++  test_lensing_low_w_extrapolation.py (L194-195). Their owners must migrate
++  to theta_to_s_prime.
+diff --git a/cogwheel/lensing/surrogate.py b/cogwheel/lensing/surrogate.py
+index ae64e65..743e38c 100644
+--- a/cogwheel/lensing/surrogate.py
++++ b/cogwheel/lensing/surrogate.py
+@@ -271,6 +271,20 @@ _EXTERIOR_POLAR_CARRIER_STEP_MAX = 1.0
+ _LOBE_AXIS_SCHEMA_NEW = 'lobe_caustic_relative_v1'
+ _KNOWN_LOBE_AXIS_SCHEMAS = frozenset({_LOBE_AXIS_SCHEMA_NEW})
+ 
++# Tube (near-caustic fold) axis-schema tag.  The tube chart's fourth
++# interpolation axis is the DELAY-UNIFORMIZED coordinate ``s'`` -- the
++# cumulative total variation of the merging fold-pair Fermat-delay
++# separation ``Delta_tau`` along the arc, so the envelope is sampled
++# equal-beat-spaced in the fold's oscillation phase ``w * Delta_tau``.  This
++# supersedes the earlier geometric ARC-LENGTH axis (``ds = |y'| d theta``),
++# which was only valid where no catastrophe beat dominated.  The loader
++# hard-refuses a tube artifact whose axis-schema tag is absent or unknown
++# (the wedge v3 / exterior-polar V5 / lobe v1 pattern): a stale arc-length
++# artifact fails loudly rather than serving the delay spline on a
++# geometric-arc-length axis.
++_TUBE_AXIS_SCHEMA = 'tube_delay_tv_v1'
++_KNOWN_TUBE_AXIS_SCHEMAS = frozenset({_TUBE_AXIS_SCHEMA})
++
+ # Wedge (caustic-relative interior) axis-schema tag.  The caustic-relative
+ # interior chart uses (r, theta_wedge) coordinates normalised by the caustic
+ # radius function r_caustic(gamma, theta); a chart carrying this tag can ONLY
+@@ -1344,13 +1358,14 @@ def _validate_axis_map(axis_map: np.ndarray, theta_grid: np.ndarray, *,
+ 
+ def _validate_theta_to_s(theta_to_s: np.ndarray,
+                          theta_grid: np.ndarray) -> np.ndarray:
+-    """Return a validated ``(2, N_map)`` theta->arc-length axis map.
++    """Return a validated ``(2, N_map)`` theta->monotone-ordinate axis map.
+ 
+     Row 0 is ``theta_fine`` (strictly ascending, starting at the arc's
+-    lower bound ``theta_grid[0]``); row 1 is ``s_fine`` (cumulative arc
+-    length, strictly increasing from ~0).  Both rows must be finite.  Used
+-    by the tube / lobe / far-field charts, whose angular axis is a genuine
+-    arc length; delegates to `_validate_axis_map`.
++    lower bound ``theta_grid[0]``); row 1 is the ordinate (strictly
++    increasing from ~0).  Both rows must be finite.  Coordinate-agnostic:
++    it now validates the tube chart's DELAY-UNIFORMIZED ``s'`` map (and is
++    the shared numeric core the historical arc-length maps used); delegates
++    to `_validate_axis_map`.
+     """
+     return _validate_axis_map(theta_to_s, theta_grid, ordinate_name='s')
+ 
+@@ -2620,39 +2635,45 @@ class InteriorWedgeChart:
+ class TubeChart:
+     """Near-caustic envelope chart in caustic-adapted coordinates.
+ 
+-    Interpolates ``E(w)`` over ``(log w, gamma, u = sqrt(eta), s)``,
++    Interpolates ``E(w)`` over ``(log w, gamma, u = sqrt(eta), s')``,
+     where ``eta`` is the source-plane distance to the caustic, ``theta``
+-    its arc position, and ``s`` the cumulative ARC LENGTH along the fold
+-    (``ds = |y'| d theta``) measured from the arc's lower bound.  Fitting
+-    in ``u = sqrt(eta)`` linearizes the fold's square-root branch so the
+-    interpolant is smooth through the near-caustic transition; the tube
+-    covers only the image-pair-present side ``eta > 0``.  ``theta`` is
+-    BOUNDED and NON-PERIODIC (a single inter-cusp fold arc); cusp
+-    neighbourhoods are excluded.
+-
+-    The fourth interpolation axis is ARC LENGTH ``s`` (not raw ``theta``):
+-    a query ``theta`` is mapped to ``s`` through the stored ``theta_to_s``
+-    axis map at serve time before the spline is contracted.  Only the
+-    interpolation coordinate changed -- all membership, range and
+-    cusp-window tests still operate in ``theta``.
++    its arc position, and ``s'`` the DELAY-UNIFORMIZED angular coordinate
++    -- the cumulative total variation of the merging fold-pair Fermat-delay
++    separation ``Delta_tau`` along the arc (``ds' = |dDelta_tau/dtheta|
++    dtheta``) measured from the arc's lower bound.  In ``s'`` the fold beat
++    ``w * Delta_tau`` has constant angular frequency, so uniform nodes are
++    optimal placement.  Fitting in ``u = sqrt(eta)`` linearizes the fold's
++    square-root branch so the interpolant is smooth through the near-caustic
++    transition; the tube covers only the image-pair-present side ``eta >
++    0``.  ``theta`` is BOUNDED and NON-PERIODIC (a single inter-cusp fold
++    arc); cusp neighbourhoods are excluded.
++
++    The fourth interpolation axis is the delay coordinate ``s'`` (not raw
++    ``theta`` and no longer geometric arc length ``s``): a query ``theta``
++    is mapped to ``s'`` through the stored ``theta_to_s_prime`` axis map at
++    serve time before the spline is contracted.  Only the interpolation
++    coordinate changed -- all membership, range and cusp-window tests still
++    operate in ``theta``.
+ 
+     Attributes
+     ----------
+     gamma_grid, u_grid, theta_grid, log_w_grid : np.ndarray
+         1-D strictly increasing training axes (``u = sqrt(eta)``).
+         ``theta_grid`` holds the fold-arc angle nodes (placed uniformly in
+-        arc length ``s``); the spline itself is fit against ``s``.
+-    theta_to_s : np.ndarray
+-        Arc-length axis map of shape ``(2, N_map)``: row 0 ``theta_fine``
+-        (strictly ascending, ``row0[0] == theta_grid[0]``, in the arc's
+-        wedge frame) and row 1 ``s_fine`` (arc length from 0, strictly
+-        increasing).  A query ``theta`` is mapped to the spline's ``s``
+-        coordinate by ``np.interp(theta, theta_fine, s_fine)``.
++        the delay coordinate ``s'``); the spline itself is fit against
++        ``s'``.
++    theta_to_s_prime : np.ndarray
++        Delay-uniformized axis map of shape ``(2, N_map)``: row 0
++        ``theta_fine`` (strictly ascending, ``row0[0] == theta_grid[0]``, in
++        the arc's wedge frame) and row 1 ``s_prime_fine`` (cumulative delay
++        total variation from 0, strictly increasing).  A query ``theta`` is
++        mapped to the spline's ``s'`` coordinate by ``np.interp(theta,
++        theta_fine, s_prime_fine)``.
+     real_coeffs, imag_coeffs : np.ndarray
+-        Cubic B-spline coefficient tensors, axes ``(log w, gamma, u, s)``.
++        Cubic B-spline coefficient tensors, axes ``(log w, gamma, u, s')``.
+     knots : tuple of np.ndarray
+-        Knot vectors ``(t_logw, t_gamma, t_u, t_s)`` (the fourth built in
+-        arc length ``s``).
++        Knot vectors ``(t_logw, t_gamma, t_u, t_s_prime)`` (the fourth built
++        in the delay coordinate ``s'``).
+     image_count : int or None
+         Real-image count of the chart's region.
+     parity : int or None
+@@ -2670,7 +2691,7 @@ class TubeChart:
+     u_grid: np.ndarray
+     theta_grid: np.ndarray
+     log_w_grid: np.ndarray
+-    theta_to_s: np.ndarray
++    theta_to_s_prime: np.ndarray
+     real_coeffs: np.ndarray
+     imag_coeffs: np.ndarray
+     knots: tuple
+@@ -2688,7 +2709,8 @@ class TubeChart:
+                     eta_floor: float, eta_max: float,
+                     cusp_windows: tuple | None = None,
+                     s_grid: np.ndarray | None = None,
+-                    theta_to_s: np.ndarray | None = None) -> 'TubeChart':
++                    theta_to_s_prime: np.ndarray | None = None
++                    ) -> 'TubeChart':
+         """Build a tube chart by fitting splines to a value tensor.
+ 
+         Parameters
+@@ -2706,14 +2728,18 @@ class TubeChart:
+         cusp_windows : tuple of (float, float), optional
+             ``(theta_cusp, delta_theta)`` exclusion windows.
+         s_grid : np.ndarray, optional
+-            The arc-length coordinates of the ``theta_grid`` nodes, used as
+-            the fourth spline axis.  Required when ``theta_to_s`` is given.
+-        theta_to_s : np.ndarray, optional
+-            The ``(2, N_map)`` arc-length axis map ``[theta_fine, s_fine]``.
+-            When omitted, an IDENTITY map is built (``theta_fine =
+-            theta_grid``, ``s_fine = theta_grid - theta_grid[0]``) and the
+-            spline is fit against that shifted-theta axis, so a chart built
+-            without an explicit map serves identically to a raw-theta spline.
++            The delay-coordinate ``s'`` values of the ``theta_grid`` nodes,
++            used as the fourth spline axis.  Required when
++            ``theta_to_s_prime`` is given.
++        theta_to_s_prime : np.ndarray, optional
++            The ``(2, N_map)`` delay-uniformized axis map ``[theta_fine,
++            s_prime_fine]``.  When omitted, an IDENTITY map is built
++            (``theta_fine = theta_grid``, ``s_prime_fine = theta_grid -
++            theta_grid[0]``), so ``s' == theta`` is a DEGENERATE delay
++            coordinate: the spline is fit against that shifted-theta axis and
++            a chart built without an explicit map serves identically to a
++            raw-theta spline.  This fallback is a construction convenience
++            only -- a trained tube chart always supplies the real delay map.
+         """
+         gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
+         u_grid = _validate_axis(u_grid, 'u_grid')
+@@ -2722,17 +2748,19 @@ class TubeChart:
+         expected = (log_w_grid.size, gamma_grid.size, u_grid.size,
+                     theta_grid.size)
+         _check_value_shape(envelope_real, envelope_imag, expected)
+-        if theta_to_s is None:
+-            # Identity map: interpolate in arc length s = theta - theta_lo, a
+-            # constant shift of the raw-theta axis.  Fitting and serving in the
+-            # shifted coordinate is translation-equivalent to the raw-theta
+-            # spline, so charts built without an explicit map are unaffected.
++        if theta_to_s_prime is None:
++            # Degenerate identity map: interpolate in s' = theta - theta_lo, a
++            # constant shift of the raw-theta axis (s' == theta, a degenerate
++            # delay coordinate).  Fitting and serving in the shifted coordinate
++            # is translation-equivalent to the raw-theta spline, so charts
++            # built without an explicit map are unaffected.
+             s_grid = theta_grid - theta_grid[0]
+-            theta_to_s = np.vstack([theta_grid, s_grid])
++            theta_to_s_prime = np.vstack([theta_grid, s_grid])
+         if s_grid is None:
+             raise ValueError(
+-                'from_values requires s_grid when theta_to_s is provided; the '
+-                'spline is fit against the arc-length node coordinates.')
++                'from_values requires s_grid when theta_to_s_prime is '
++                'provided; the spline is fit against the delay-coordinate '
++                'node values.')
+         s_grid = _validate_axis(s_grid, 's_grid')
+         if s_grid.size != theta_grid.size:
+             raise ValueError(
+@@ -2743,25 +2771,27 @@ class TubeChart:
+             envelope_real, envelope_imag)
+         return cls._assemble(
+             gamma_grid, u_grid, theta_grid, log_w_grid, real_c, imag_c, knots,
+-            image_count, parity, eta_floor, eta_max, cusp_windows, theta_to_s)
++            image_count, parity, eta_floor, eta_max, cusp_windows,
++            theta_to_s_prime)
+ 
+     @classmethod
+     def _assemble(cls, gamma_grid, u_grid, theta_grid, log_w_grid,
+                   real_coeffs, imag_coeffs, knots, image_count, parity,
+                   eta_floor, eta_max, cusp_windows,
+-                  theta_to_s=None) -> 'TubeChart':
++                  theta_to_s_prime=None) -> 'TubeChart':
+         """Assemble a chart from prebuilt coefficient tensors and knots.
+ 
+-        ``theta_to_s`` is the ``(2, N_map)`` arc-length axis map; when
+-        ``None`` an identity map (``s = theta - theta_grid[0]``) derived from
+-        ``theta_grid`` is used, so ``knots[3]`` (built in ``s``) and the map
+-        agree.  ``s_grid`` is NOT stored separately -- ``knots[3]`` already
+-        encodes it.
++        ``theta_to_s_prime`` is the ``(2, N_map)`` delay-uniformized axis
++        map; when ``None`` a degenerate identity map (``s' = theta -
++        theta_grid[0]``) derived from ``theta_grid`` is used, so ``knots[3]``
++        (built in ``s'``) and the map agree.  ``s_grid`` is NOT stored
++        separately -- ``knots[3]`` already encodes it.
+         """
+         gamma_grid = _validate_axis(gamma_grid, 'gamma_grid')
+         theta_grid = _validate_axis(theta_grid, 'theta_grid')
+-        if theta_to_s is None:
+-            theta_to_s = np.vstack([theta_grid, theta_grid - theta_grid[0]])
++        if theta_to_s_prime is None:
++            theta_to_s_prime = np.vstack(
++                [theta_grid, theta_grid - theta_grid[0]])
+         windows = tuple((float(tc), float(dt))
+                         for tc, dt in (cusp_windows or ()))
+         return cls(
+@@ -2769,7 +2799,8 @@ class TubeChart:
+             u_grid=_validate_axis(u_grid, 'u_grid'),
+             theta_grid=theta_grid,
+             log_w_grid=_validate_axis(log_w_grid, 'log_w_grid'),
+-            theta_to_s=_validate_theta_to_s(theta_to_s, theta_grid),
++            theta_to_s_prime=_validate_theta_to_s(
++                theta_to_s_prime, theta_grid),
+             real_coeffs=np.ascontiguousarray(real_coeffs, dtype=float),
+             imag_coeffs=np.ascontiguousarray(imag_coeffs, dtype=float),
+             knots=tuple(np.ascontiguousarray(t, dtype=float) for t in knots),
+@@ -3341,9 +3372,10 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
+                     y2_eig: float = float('nan')) -> np.ndarray:
+     """Evaluate the selected chart's complex envelope over ``log_w_query``.
+ 
+-    A tube chart contracts on ``(sqrt(eta), s)`` where ``s`` is the query
+-    theta mapped into the chart frame and then to arc length via the
+-    chart's stored ``theta_to_s`` map; an EXTERIOR-POLAR chart contracts on
++    A tube chart contracts on ``(sqrt(eta), s')`` where ``s'`` is the query
++    theta mapped into the chart frame and then to the delay-uniformized
++    coordinate via the chart's stored ``theta_to_s_prime`` map; an
++    EXTERIOR-POLAR chart contracts on
+     its caustic-fixed spatial axes ``(rho, theta_c)`` computed from the
+     eigenframe source at the query's OWN gamma via `_to_caustic_fixed`; a
+     lobe-interior chart contracts on the LOBE-LOCAL ``(rho_lobe, v2)``
+@@ -3363,18 +3395,19 @@ def _evaluate_chart(chart, gamma: float, eta: float, theta: float,
+     """
+     if isinstance(chart, TubeChart):
+         v1 = float(np.sqrt(eta))
+-        # The tube spline's fourth axis is ARC LENGTH s, so map the query
+-        # theta into the chart frame via the SAME D2 gauge-image search as
+-        # the `_tube_serves` gate that selected this chart, then onto s via
+-        # the stored theta_to_s map before contracting.  eta (D2-invariant)
+-        # is used as-is.  The identity fallback is unreachable after the
+-        # gate but keeps the evaluator total.
++        # The tube spline's fourth axis is the DELAY-UNIFORMIZED coordinate
++        # s', so map the query theta into the chart frame via the SAME D2
++        # gauge-image search as the `_tube_serves` gate that selected this
++        # chart, then onto s' via the stored theta_to_s_prime map before
++        # contracting.  eta (D2-invariant) is used as-is.  The identity
++        # fallback is unreachable after the gate but keeps the evaluator
++        # total.
+         theta_inframe = _tube_theta_inframe(chart, theta)
+         if theta_inframe is None:
+             theta_inframe = _theta_into_frame(theta,
+                                               float(chart.theta_grid[0]))
+-        v2 = float(np.interp(theta_inframe, chart.theta_to_s[0],
+-                             chart.theta_to_s[1]))
++        v2 = float(np.interp(theta_inframe, chart.theta_to_s_prime[0],
++                             chart.theta_to_s_prime[1]))
+     elif isinstance(chart, (LobeInteriorChart, LobeExteriorChart)):
+         # Both lobe charts share the lobe-local (rho_lobe, theta_local)
+         # frame: a LobeInteriorChart serves rho_lobe in [0, 1], a
+@@ -4962,6 +4995,20 @@ def _validate_lobe_axis_schema(tag, artifact_label: str) -> str:
+         tag, _KNOWN_LOBE_AXIS_SCHEMAS, f'Lobe-interior {artifact_label}')
+ 
+ 
++def _validate_tube_axis_schema(tag, artifact_label: str) -> str:
++    """Hard-refuse a tube chart with an absent or unknown axis schema.
++
++    Thin wrapper over `_validate_axis_schema` binding the tube known set.
++    Tube charts spline the fold envelope against the DELAY-UNIFORMIZED
++    angular coordinate ``s'`` (cumulative total variation of the fold-pair
++    delay separation).  A stale artifact whose fourth axis is the retired
++    geometric ARC-LENGTH ``s`` would be reconstructed on the wrong coordinate
++    and must hard-refuse at load rather than serve a finite-but-wrong ``F``.
++    """
++    return _validate_axis_schema(
++        tag, _KNOWN_TUBE_AXIS_SCHEMAS, f'Tube {artifact_label}')
++
++
+ def _chart_to_npz(chart, index: int) -> dict:
+     """Flatten one chart into ``chart{index}_*`` npz arrays."""
+     prefix = f'chart{index}_'
+@@ -4969,10 +5016,11 @@ def _chart_to_npz(chart, index: int) -> dict:
+         meta = {'kind': 'tube', 'image_count': chart.image_count,
+                 'parity': chart.parity, 'eta_floor': chart.eta_floor,
+                 'eta_max': chart.eta_max,
++                'axis_schema': _TUBE_AXIS_SCHEMA,
+                 'cusp_windows': [[tc, dt] for tc, dt in chart.cusp_windows]}
+         axes = (chart.log_w_grid, chart.gamma_grid, chart.u_grid,
+                 chart.theta_grid)
+-        arrays = {prefix + 'theta_to_s': chart.theta_to_s}
++        arrays = {prefix + 'theta_to_s_prime': chart.theta_to_s_prime}
+     elif isinstance(chart, LobeInteriorChart):
+         # Additive lobe branch: the persisted record carries the lobe
+         # frame (centroid, other_centroid, boundary_theta/boundary_r as
+@@ -5072,6 +5120,13 @@ def _chart_from_npz(data, index: int):
+     imag_coeffs = data[prefix + 'im_coeffs']
+     log_w_grid, gamma_grid, p1_grid, p2_grid = axes
+     if meta['kind'] == 'tube':
++        # The tube axis-schema tag hard-refuses a stale artifact at load: a
++        # chart whose fourth axis is the retired geometric arc-length ``s``
++        # (absent/unknown tag) must not be served on the delay-uniformized
++        # ``s'`` reconstruction.  The angular map rides under the honestly
++        # named ``theta_to_s_prime`` key (a stale artifact carries the old
++        # ``theta_to_s`` key, so this read also fails loudly by schema).
++        _validate_tube_axis_schema(meta.get('axis_schema'), f'chart {index}')
+         return TubeChart._assemble(
+             gamma_grid=gamma_grid, u_grid=p1_grid, theta_grid=p2_grid,
+             log_w_grid=log_w_grid, real_coeffs=real_coeffs,
+@@ -5079,7 +5134,7 @@ def _chart_from_npz(data, index: int):
+             image_count=meta['image_count'], parity=meta['parity'],
+             eta_floor=meta['eta_floor'], eta_max=meta['eta_max'],
+             cusp_windows=[tuple(win) for win in meta['cusp_windows']],
+-            theta_to_s=data[prefix + 'theta_to_s'])
++            theta_to_s_prime=data[prefix + 'theta_to_s_prime'])
+     if meta['kind'] == 'lobe':
+         # Additive lobe branch: a lobe chart demands the lobe axis
+         # schema, so a mislabeled/old artifact hard-refuses here rather than
+diff --git a/cogwheel/lensing/surrogate_training.py b/cogwheel/lensing/surrogate_training.py
+index b23b723..5ed87ef 100644
+--- a/cogwheel/lensing/surrogate_training.py
++++ b/cogwheel/lensing/surrogate_training.py
+@@ -55,6 +55,7 @@ from cogwheel.lensing.chang_refsdal.channels import (
+     ChangRefsdalChannels, farfield_envelope_from_partition, farfield_w_floor,
+     INTERIOR_SACR_C, FARFIELD_KERNEL_SUM, FARFIELD_KERNEL_SUM_MINUS_GHOST)
+ from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
++from cogwheel.lensing.chang_refsdal._airy_fold import _merging_fold_pair
+ from cogwheel.lensing.ppgo_map import (
+     CertifiedPpgoMap, UNKNOWN, caustic_rho, get_certified_ppgo_map)
+ from cogwheel.lensing.surrogate import (
+@@ -129,6 +130,20 @@ _ARC_MARGIN_FRAC = 0.03
+ #: Number of theta samples used to integrate the tube's arc-length axis map
+ #: ``s = integral |y'| dtheta`` across a fold arc (see `_tube_arc_length_map`).
+ _TUBE_ARC_MAP_SIZE = 2001
++#: Number of theta samples used to integrate the tube's delay-uniformized axis
++#: map ``s' = integral |dDelta_tau/dtheta| dtheta`` across a fold arc (see
++#: `_tube_delay_map`).  The delay map is engine-free (pure geometry), so a
++#: coarser grid than the arc-length map is both adequate and cheap.
++_TUBE_DELAY_MAP_SIZE = 501
++#: Points-per-beat-period for the tube's Nyquist angular-node rule.  The fold
++#: envelope oscillates once per unit of ``w * Delta_tau``; ~8 nodes per beat
++#: period give ~1e-2 cubic-spline accuracy on the reconstructed envelope.
++_TUBE_NYQUIST_PPP = 8
++#: Floor on the tube's angular-node count.  The chart's ``s`` axis is fit with
++#: a cubic B-spline, which `surrogate._validate_axis` requires to carry at
++#: least four nodes; a low-``w`` / short-arc Nyquist count is raised to this
++#: floor so every tube chart remains spline-valid.
++_TUBE_MIN_THETA_NODES = 4
+ #: Margin below the double-double product ceiling ``w * |y| <= 60`` used to cap
+ #: each chart's ``w`` grid.  Mirrors the prior's mass coupling, which keeps
+ #: ``w * |y| <= ~55`` by construction (the mass-conditioned source scale), so a
+@@ -287,6 +302,11 @@ class TrainingConfig:
+     n_gamma: int = 4
+     n_u: int = 4
+     n_theta: int = 4
++    # Hard cap on the tube's Nyquist-derived angular-node count (see
++    # `_build_tube_chart`).  The delay-uniformized rule proposes
++    # ``ceil(PPP * w_max * TV(Delta_tau) / (2*pi))`` nodes; this cap bounds the
++    # engine cost of a single high-``w`` / long-arc tube.
++    n_theta_cap: int = 32
+     # Caustic-fixed far-field TILE counts: production proposes exterior
+     # regions in ``(rho, theta_c)`` before bridging each accepted tile to the
+     # ExteriorPolarChart's ``(rho, theta_c)`` spline axes.
+@@ -303,7 +323,10 @@ class TrainingConfig:
+     farfield_overlap: float = _DEFAULT_FARFIELD_OVERLAP
+     gamma_band_halfwidth: float = 0.1
+     min_gamma_band: float = 1e-6
+-    engine_budget: int = 400
++    # Per-chart engine-evaluation budget.  Raised from the historical 400 to
++    # accommodate the delay-uniformized tube's Nyquist angular-node count
++    # (up to ``n_theta_cap`` nodes x the gamma/u grids per fold arc).
++    engine_budget: int = 2048
+     # ``None`` = no cap (the production default: the tiling itself bounds the
+     # count); an int caps admitted tiles with a loud truncation record.
+     max_farfield_regions: int | None = None
+@@ -2958,18 +2981,186 @@ def _tube_arc_length_map(gamma: float, arc: FoldArc,
+     return theta_fine, s_fine
+ 
+ 
++def _fill_cusp_tails(theta_fine: np.ndarray, delta_tau: np.ndarray,
++                     i_lo: int, i_hi: int) -> np.ndarray:
++    """Fill refused near-cusp tails of ``delta_tau`` via the A3 cusp law.
++
++    ``_merging_fold_pair`` declines inside the cusp tie window (``_CUSP_TIE_EPS``),
++    leaving ``NaN`` tails at one or both arc ends.  Near a fold cusp the
++    merging-pair delay separation follows the cusp (A3) scaling ``Delta_tau ~
++    d^{2/3}`` in the distance-to-cusp ``d``, so ``g = Delta_tau^{3/2}`` is
++    LINEAR in ``theta`` there.  Each tail (indices outside the servable run
++    ``[i_lo, i_hi]``) is filled by linearly extrapolating ``g`` from the
++    servable boundary node and its inner neighbour, then inverting
++    ``Delta_tau = max(g, 0)^{2/3}``.  The implied cusp sits at the linear root
++    of ``g`` (``d = 0``); past it ``Delta_tau`` is clamped to ``0``.  This pins
++    the near-cusp knot spacing to the same ``d^{2/3}`` law the wedge/lobe
++    ``u = d^{2/3}`` axes use, without needing the exact cusp centre.
++
++    Parameters
++    ----------
++    theta_fine : np.ndarray
++        Uniform, strictly ascending theta grid (shape ``(n_map,)``).
++    delta_tau : np.ndarray
++        Fold-pair delay separation with ``NaN`` in the refused tails and
++        finite, positive values over ``[i_lo, i_hi]``.
++    i_lo, i_hi : int
++        First and last indices of the servable (finite) run.
++
++    Returns
++    -------
++    np.ndarray
++        A copy of ``delta_tau`` with both tails filled (shape ``(n_map,)``).
++    """
++    if i_hi - i_lo < 1:
++        raise ValueError(
++            'Tube delay map needs at least two servable nodes to extrapolate '
++            f'the cusp tails; got a servable run of length {i_hi - i_lo + 1}.')
++    filled = np.array(delta_tau, dtype=float)
++    two_thirds = 2.0 / 3.0
++
++    def _extend(tail_indices: np.ndarray, boundary: int, inner: int) -> None:
++        g_boundary = float(filled[boundary]) ** 1.5
++        g_inner = float(filled[inner]) ** 1.5
++        slope = (g_boundary - g_inner) / (
++            float(theta_fine[boundary]) - float(theta_fine[inner]))
++        g_tail = g_boundary + slope * (
++            theta_fine[tail_indices] - float(theta_fine[boundary]))
++        filled[tail_indices] = np.maximum(g_tail, 0.0) ** two_thirds
++
++    if i_lo > 0:
++        _extend(np.arange(0, i_lo), i_lo, i_lo + 1)
++    if i_hi < filled.size - 1:
++        _extend(np.arange(i_hi + 1, filled.size), i_hi, i_hi - 1)
++    return filled
++
++
++def _tube_delay_map(gamma: float, arc: FoldArc, eta_ref: float,
++                    n_map: int = _TUBE_DELAY_MAP_SIZE
++                    ) -> tuple[np.ndarray, np.ndarray, int, int]:
++    """Delay-uniformized axis map ``theta -> s'`` for one fold arc.
++
++    The angular coordinate ``s'`` is the cumulative TOTAL VARIATION of the
++    merging fold-pair delay separation ``Delta_tau`` along the arc,
++
++    ``s'(theta) = integral_{theta_lo}^{theta} |dDelta_tau/dtheta'| dtheta'`` ,
++
++    so ``s'`` is monotone even where ``Delta_tau`` folds back 2-to-1.  Nodes
++    placed uniformly in ``s'`` are EQUAL-BEAT-SPACED in the fold's oscillation
++    phase ``w * Delta_tau`` (the envelope beats once per unit of it), which is
++    the physically resolving coordinate -- unlike the geometric arc length of
++    `_tube_arc_length_map`.
++
++    ``Delta_tau`` is taken from the authoritative
++    :func:`~cogwheel.lensing.chang_refsdal._airy_fold._merging_fold_pair`
++    (returning ``(tau_plus, tau_minus)``) with the Professor's C1 convention
++    ``Delta_tau = (tau_minus - tau_plus) / 2`` -- the formula is NEVER
++    re-derived here.  The map is evaluated at the fixed reference distance
++    ``eta_ref``: the fold separability ``Delta_tau(theta, eta) = c(theta) *
++    eta^{3/2}`` makes the NORMALIZED map shape ``eta``-independent, so the
++    angular knots are ``eta``-invariant.  Evaluating at ``eta_ref = eta_max``
++    (the deepest servable distance) yields the largest ``Delta_tau`` and hence
++    the most beats -- a conservative node over-count.
++
++    Near a cusp the pair refuses; those tails are filled with the ``d^{2/3}``
++    cusp law (`_fill_cusp_tails`) so ``s'`` spans the full arc, while the
++    servable subrange ``[i_lo, i_hi]`` marks where the pair actually resolved.
++
++    Parameters
++    ----------
++    gamma : float
++        Convergence ratio at which to evaluate the geometry.
++    arc : FoldArc
++        The fold arc supplying ``theta_lo``, ``theta_hi``, ``branch`` and
++        ``inward_sign``.
++    eta_ref : float
++        Reference caustic distance at which ``Delta_tau`` is sampled.
++    n_map : int
++        Number of theta samples (map resolution).
++
++    Returns
++    -------
++    theta_fine, s_fine : np.ndarray
++        The delay-uniformized axis map rows (each shape ``(n_map,)``).
++    i_lo, i_hi : int
++        First and last indices of the servable (pair-resolved) subrange.
++
++    Raises
++    ------
++    ValueError
++        If no node resolves a fold pair (all-``NaN``), if a refused hole lies
++        in the arc interior (not a clean tail), or if ``s_fine`` is non-finite
++        or not strictly increasing.
++    """
++    theta_fine = np.linspace(arc.theta_lo, arc.theta_hi, n_map)
++    matrix = geometry.macro_matrix(gamma)
++    delta_tau = np.full(n_map, np.nan, dtype=float)
++    for i, theta in enumerate(theta_fine):
++        source = _tube_source(gamma, float(theta), eta_ref,
++                              arc.branch, arc.inward_sign)
++        try:
++            images = geometry.find_images(source, matrix)
++        except geometry.LensDomainError:
++            continue
++        if len(images) != 4:
++            continue
++        pair = _merging_fold_pair(images, source, matrix)
++        if pair is None:
++            continue
++        tau_plus, tau_minus = pair
++        delta_tau[i] = 0.5 * (tau_minus - tau_plus)
++
++    finite = np.isfinite(delta_tau)
++    if not finite.any():
++        raise ValueError(
++            f'Tube delay map has no resolvable fold pair for gamma={gamma}, '
++            f'branch={arc.branch} over [{arc.theta_lo}, {arc.theta_hi}].')
++    servable = np.flatnonzero(finite)
++    i_lo, i_hi = int(servable[0]), int(servable[-1])
++    if not finite[i_lo:i_hi + 1].all():
++        raise ValueError(
++            f'Tube delay map has an interior refusal hole for gamma={gamma}, '
++            f'branch={arc.branch}; the fold pair must resolve over a single '
++            'contiguous arc (refusals are expected only in the cusp tails).')
++
++    delta_tau = _fill_cusp_tails(theta_fine, delta_tau, i_lo, i_hi)
++    s_fine = cumulative_trapezoid(
++        np.abs(np.gradient(delta_tau, theta_fine)), theta_fine, initial=0.0)
++    if not np.isfinite(s_fine).all():
++        raise ValueError(
++            f'Tube delay map is non-finite for gamma={gamma}, '
++            f'branch={arc.branch} over [{arc.theta_lo}, {arc.theta_hi}].')
++    if not np.all(np.diff(s_fine) > 0.0):
++        raise ValueError(
++            f'Tube delay map is not strictly increasing for gamma={gamma}, '
++            f'branch={arc.branch}; the fold-pair delay separation is flat '
++            'inside the arc (cusp tails should not reach the d=0 cusp).')
++    return theta_fine, s_fine, i_lo, i_hi
++
++
+ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
+                       w_range: tuple[float, float], config: TrainingConfig,
+                       eta_max: float, eta_floor: float
+                       ) -> tuple[TubeChart, int, int]:
+-    """Build one tube chart over ``(log w, gamma, u=sqrt(eta), s)``.
+-
+-    The fourth axis is ARC LENGTH ``s = integral |y'| dtheta`` (not raw
+-    theta): the ``theta`` nodes are placed as the images of a UNIFORM ``s``
+-    grid so the envelope is sampled uniformly in the physically meaningful
+-    coordinate.  The ``theta -> s`` map is built once at the band's
+-    representative (median) gamma via `_tube_arc_length_map` and stored on
+-    the chart (``theta_to_s``); the same map is read at serve time.
++    """Build one tube chart over ``(log w, gamma, u=sqrt(eta), s')``.
++
++    The fourth axis is the DELAY-UNIFORMIZED coordinate ``s' = integral
++    |dDelta_tau/dtheta| dtheta`` (the cumulative total variation of the
++    merging fold-pair delay separation), NOT raw theta or geometric arc
++    length: the ``theta`` nodes are the images of a UNIFORM ``s'`` grid, so
++    the envelope is sampled EQUAL-BEAT-SPACED in the fold's oscillation phase
++    ``w * Delta_tau``.  The ``theta -> s'`` map is built once at the band's
++    representative (median) gamma via `_tube_delay_map` (evaluated at the
++    reference distance ``eta_max``) and stored on the chart
++    (``theta_to_s_prime``); the same map is read at serve time.
++
++    The angular-node count is derived from a Nyquist rule -- ``ceil(PPP *
++    w_max * TV(Delta_tau) / (2*pi))`` at ``PPP = _TUBE_NYQUIST_PPP`` -- capped
++    at ``config.n_theta_cap`` and floored at ``_TUBE_MIN_THETA_NODES`` (the
++    cubic-spline minimum), REPLACING the bare ``config.n_theta``.  A refused
++    near-cusp tail is excluded from the served window (shrink-the-shell: the
++    endpoints are pinned to the servable subrange, never routed to a
++    neighbouring arc).
+ 
+     Returns the chart, the number of engine calls, and the number of refused
+     grid points (left as zeros in the value tensor).
+@@ -2999,18 +3190,35 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
+     u_grid = np.linspace(np.sqrt(eta_floor), np.sqrt(eta_max),
+                          config.n_u)
+ 
+-    # Arc-length node placement: build the theta -> s map at the band's
+-    # representative gamma, then invert a uniform s grid back to theta so the
+-    # theta nodes cluster where the fold turns fastest.  Endpoints are forced
+-    # exactly onto the arc bounds (np.interp already lands there up to fp).
++    # Delay-uniformized node placement: build the theta -> s' map at the
++    # band's representative gamma (evaluated at eta_max), derive the angular
++    # node count from a Nyquist rule on the fold beat phase, then invert a
++    # uniform s' grid back to theta so the nodes are equal-beat-spaced in the
++    # delay separation.  Endpoints are pinned to the SERVABLE subrange bounds
++    # (shrink-the-shell: a refused near-cusp tail is excluded, not routed).
+     rep_gamma = float(np.median(gamma_grid))
+-    theta_fine, s_fine = _tube_arc_length_map(rep_gamma, arc)
+-    s_total = float(s_fine[-1])
+-    s_grid = np.linspace(0.0, s_total, config.n_theta)
++    theta_fine, s_fine, i_lo, i_hi = _tube_delay_map(rep_gamma, arc, eta_max)
++
++    # Nyquist angular-node count.  The fold envelope beats once per unit of
++    # ``w * Delta_tau``; TV(Delta_tau) over the servable arc at eta_max is
++    # ``s'(theta_hi) - s'(theta_lo)``.  ``w_max`` is the chart's upper-band w
++    # cap: there is NO module-level tube w cap, so it is passed through from
++    # the caller via ``w_range[1]``.  Evaluating TV at eta_max (the largest
++    # Delta_tau ~ eta^{3/2}) conservatively over-counts the nodes.
++    w_max = float(w_range[1])
++    tv_delay = float(s_fine[i_hi] - s_fine[i_lo])
++    n_nyquist = int(math.ceil(
++        _TUBE_NYQUIST_PPP * w_max * tv_delay / (2.0 * math.pi)))
++    n_theta = min(config.n_theta_cap,
++                  max(_TUBE_MIN_THETA_NODES, n_nyquist))
++
++    s_lo = float(s_fine[i_lo])
++    s_hi = float(s_fine[i_hi])
++    s_grid = np.linspace(s_lo, s_hi, n_theta)
+     theta_grid = np.interp(s_grid, s_fine, theta_fine)
+-    theta_grid[0] = arc.theta_lo
+-    theta_grid[-1] = arc.theta_hi
+-    theta_to_s = np.vstack([theta_fine, s_fine])
++    theta_grid[0] = float(theta_fine[i_lo])
++    theta_grid[-1] = float(theta_fine[i_hi])
++    theta_to_s_prime = np.vstack([theta_fine, s_fine])
+ 
+     n_points = gamma_grid.size * u_grid.size * theta_grid.size
+     _budget_check(n_points, config.engine_budget, 'tube')
+@@ -3037,7 +3245,8 @@ def _build_tube_chart(*, gamma_grid: np.ndarray, arc: FoldArc, parity: int,
+         log_w_grid=log_w_grid, envelope_real=env_real, envelope_imag=env_imag,
+         image_count=arc.image_count, parity=parity,
+         eta_floor=eta_floor, eta_max=eta_max,
+-        cusp_windows=arc.cusp_windows, s_grid=s_grid, theta_to_s=theta_to_s)
++        cusp_windows=arc.cusp_windows, s_grid=s_grid,
++        theta_to_s_prime=theta_to_s_prime)
+     return chart, calls, refused
+ 
+ 
+@@ -3377,6 +3586,17 @@ def _engine_envelope(w_grid: np.ndarray, gamma: float, source: np.ndarray
+ # Held-out accuracy
+ # ---------------------------------------------------------------------------
+ 
++# A held-out point that has a valid, finite engine reference but that the
++# surrogate's guard stack refuses to serve is a COVERAGE MISS, not an accuracy
++# datum: the surrogate delivers nothing where the true envelope is finite, so
++# it is off by the entire (max-normalized) signal -- a relative error of unity.
++# Counting a miss at 1.0 (rather than silently dropping it, F083's tube arc-end
++# blind spot) makes any coverage hole exceed every per-kind eps bar, so a
++# shrunk-shell (or otherwise incomplete) chart is flagged instead of reported
++# as perfect over only the fraction it happens to serve.
++_HELDOUT_COVERAGE_MISS_EPS = 1.0
++
++
+ def _heldout_eps(chart: TubeChart | ExteriorPolarChart | LobeInteriorChart
+                  | InteriorWedgeChart,
+                  samples: Sequence[tuple[float, float, float]],
+@@ -3384,8 +3604,22 @@ def _heldout_eps(chart: TubeChart | ExteriorPolarChart | LobeInteriorChart
+     """Max relative envelope error of a chart over held-out geometry points.
+ 
+     Serves each ``(gamma, y1, y2)`` through the full guard stack of a one-chart
+-    surrogate and compares to a fresh engine reference; unserved points are
+-    skipped.  Returns ``nan`` when no held-out point is served.
++    surrogate and compares to a fresh engine reference.  A held-out point that
++    has a valid, finite engine reference but that the guard stack REFUSES to
++    serve (the envelope refuses, or the source lies in the shrunk-away shell)
++    is a COVERAGE MISS: it contributes ``_HELDOUT_COVERAGE_MISS_EPS`` (unity, a
++    total miss) to the reported eps rather than being silently dropped (F083's
++    tube arc-end blind spot).  A point for which no reference exists at all --
++    an engine refusal, a ghost-gate refusal (mirroring the trained domain), or
++    a non-finite reference -- carries no ground truth and is excluded from the
++    accounting entirely (it is neither served nor a coverage miss).
++
++    Returns ``nan`` only when NO point is served (zero served: whether every
++    candidate with a valid reference was a coverage miss, or none had a valid
++    reference).  Coverage misses are deliberately kept OUT of the served-error
++    set, so an all-miss band returns ``nan`` -- the same sentinel both callers
++    already handle -- and never drives `_reprovision_w_nodes` into a
++    non-terminating probe.  The return type stays ``float``.
+ 
+     The reference envelope and its normalization depend on the chart's
+     ENVELOPE LABEL, matching the label each chart is trained on (Build 8g-b):
+@@ -3398,7 +3632,7 @@ def _heldout_eps(chart: TubeChart | ExteriorPolarChart | LobeInteriorChart
+       kernel-sum-minus-ghost -- never the default), F-normalized by
+       ``max|exact_total|`` (``max|E_ff| ~ 1e-4`` is too tiny a denominator);
+       a held-out point the ghost gate refuses (kernel-sum-minus-ghost only)
+-      is skipped, mirroring the training-time gate;
++      is excluded from the accounting, mirroring the training-time gate;
+     - an `InteriorWedgeChart` (positive-parity astroid interior in wedge
+       caustic-relative coordinates, WP1) is trained on the caustic-region
+       ``partition.envelope`` (the ``tau_c``-demodulated SACR-C envelope), so
+@@ -3415,7 +3649,8 @@ def _heldout_eps(chart: TubeChart | ExteriorPolarChart | LobeInteriorChart
+     # (``max|E|`` currency).  After WP1 no ExteriorPolarChart carries the
+     # interior SACR-C label, so a bare isinstance check suffices.
+     is_farfield_label = isinstance(chart, ExteriorPolarChart)
+-    errors: list[float] = []
++    errors: list[float] = []       # served points: max-normalized rel. error
++    has_coverage_miss = False      # valid reference the guard stack refused
+     for gamma, y1, y2 in samples:
+         channels = ChangRefsdalChannels(w_grid)
+         try:
+@@ -3435,8 +3670,9 @@ def _heldout_eps(chart: TubeChart | ExteriorPolarChart | LobeInteriorChart
+             except geometry.GhostDomainError:
+                 # FARFIELD_KERNEL_SUM_MINUS_GHOST only: the ghost gate
+                 # (w_min * Im tau_c >= 2, off the principal axes) refused this
+-                # point.  Drop it from the LOO accumulation exactly as the
+-                # training-time gate would, never propagate or substitute.
++                # point.  There is no reference to compare against, so it is a
++                # trained-domain exclusion -- neither served nor a coverage
++                # miss -- exactly as the training-time gate would treat it.
+                 continue
+             denom = float(np.max(np.abs(partition.exact_total))) or 1.0
+         else:
+@@ -3449,9 +3685,23 @@ def _heldout_eps(chart: TubeChart | ExteriorPolarChart | LobeInteriorChart
+             eta=partition.caustic_distance, theta=partition.critical_theta,
+             image_count=int(partition.real_mask.sum()))
+         if not served:
++            # A valid, finite reference the guard stack could not serve: a
++            # coverage miss (F083's shrunk-shell arc-end), not an accuracy
++            # sample.  Flag it so the miss is reflected in the reported eps,
++            # but keep it out of ``errors`` so an all-miss band still returns
++            # nan (zero served) rather than a finite penalty that would loop
++            # the reprovision descent.
++            has_coverage_miss = True
+             continue
+         errors.append(float(np.max(np.abs(emulated - env_true)) / denom))
+-    return max(errors) if errors else float('nan')
++    if not errors:
++        return float('nan')
++    eps = max(errors)
++    if has_coverage_miss:
++        # Fold the coverage hole into the reported eps: a served-plus-missed
++        # chart is never scored as if it covered its whole held-out domain.
++        eps = max(eps, _HELDOUT_COVERAGE_MISS_EPS)
++    return eps
+ 
+ 
+ def _reprovision_w_nodes(*, band: tuple[float, float], parity: int,
+diff --git a/cogwheel/lensing/tiling_census.py b/cogwheel/lensing/tiling_census.py
+index 327cb1e..a99c921 100644
+--- a/cogwheel/lensing/tiling_census.py
++++ b/cogwheel/lensing/tiling_census.py
+@@ -166,6 +166,7 @@ class _BandCtx:
+     gamma_mid: float
+     tube_arcs: list
+     max_eta_max: float
++    tube_n_theta_ceiling: int
+     reach_scalar: float
+     coordinate_radius_min: float
+     reach_max: float
+@@ -229,6 +230,58 @@ def _w_nodes(config: Any) -> int:
+     return int(config.w_nodes_per_decade * 2.0)
+ 
+ 
++def _tube_n_theta_ceiling(st: Any, box: Any, parity: int, gamma_mid: float,
++                          structure: Any, tube_arcs: list, arc_r_min: list,
++                          max_eta_max: float, config: Any) -> int:
++    """Capped Nyquist angular-node ceiling for the band's tube charts.
++
++    A thin, ENGINE-FREE mirror of the ``n_theta`` sizing in
++    ``surrogate_training._build_tube_chart``: for each fold arc it builds the
++    delay-uniformized ``theta -> s'`` map at the band's representative gamma
++    (``gamma_mid``, which equals ``np.median`` of the band's gamma linspace),
++    evaluated at the arc's outer shell ``eta_max = f_max * R_c``; reads the
++    total variation ``TV = s'(i_hi) - s'(i_lo)``; and forms
++
++        ceiling = min(n_theta_cap,
++                      max(_TUBE_MIN_THETA_NODES,
++                          ceil(PPP * w_max * TV / (2*pi)))) ,
++
++    returning the MAX over the arcs (the most node-hungry arc: if the
++    configured ``n_theta`` exceeds even this, the tube axis is over-provisioned
++    on every arc).  ``w_max`` is the tube w-grid cap
++    ``_capped_w_range(..., caustic_reach + max_eta_max)[1]``, exactly as
++    production.  ``_tube_delay_map`` and ``_capped_w_range`` are pure geometry,
++    so no amplitude engine is touched.  The safety constants (``PPP``, the node
++    floor) and the cap are READ FROM the production module -- never re-typed
++    here (mirror-currency rule).
++
++    Falls back to ``config.n_theta_cap`` (the loosest admissible ceiling, which
++    can never spuriously flag ``EXPLOSION``) when no arc is selected, no arc
++    resolves a fold pair, or the w-cap geometry refuses.
++    """
++    if not tube_arcs:
++        return config.n_theta_cap
++    try:
++        w_max = st._capped_w_range(
++            box, parity, structure.caustic_reach + max_eta_max)[1]
++    except geometry.LensDomainError:
++        return config.n_theta_cap
++    ceilings: list[int] = []
++    for idx, arc in enumerate(tube_arcs):
++        eta_max_arc = config.f_max * arc_r_min[idx]
++        try:
++            _theta_fine, s_fine, i_lo, i_hi = st._tube_delay_map(
++                gamma_mid, arc, eta_max_arc)
++        except (ValueError, geometry.LensDomainError):
++            continue
++        tv_delay = float(s_fine[i_hi] - s_fine[i_lo])
++        n_nyquist = int(math.ceil(
++            st._TUBE_NYQUIST_PPP * w_max * tv_delay / (2.0 * math.pi)))
++        ceilings.append(min(config.n_theta_cap,
++                            max(st._TUBE_MIN_THETA_NODES, n_nyquist)))
++    return max(ceilings) if ceilings else config.n_theta_cap
++
++
+ def _build_band_ctx(st: Any, box: Any, parity: int,
+                     band: tuple[float, float], structure: Any,
+                     config: Any) -> _BandCtx:
+@@ -250,6 +303,13 @@ def _build_band_ctx(st: Any, box: Any, parity: int,
+                    if arc_r_min else config.f_max * 0.05)
+     min_eta_max = (config.f_max * min(arc_r_min)
+                    if arc_r_min else config.f_max * 0.05)
++    # WP4: the capped-Nyquist angular-node ceiling WP1 uses to size every tube
++    # chart's ``theta`` axis, reproduced engine-free so the census can flag an
++    # over-provisioned ``n_theta`` as an EXPLOSION rather than the loose static
++    # bound.  MAX over the band's arcs; safety constants bound from production.
++    tube_n_theta_ceiling = _tube_n_theta_ceiling(
++        st, box, parity, gamma_mid, structure, tube_arcs, arc_r_min,
++        max_eta_max, config)
+     reach_scalar = st._scalar_caustic_reach(gamma_mid)
+     coordinate_radius_min, reach_max = st._coordinate_radius_bounds(band, parity)
+     strata, _beyond = st._mass_strata(box, parity)
+@@ -273,7 +333,8 @@ def _build_band_ctx(st: Any, box: Any, parity: int,
+             notes['saddle_lobe_admissions'] = f'refused: {exc}'
+     return _BandCtx(
+         parity=parity, band=band, structure=structure, gamma_mid=gamma_mid,
+-        tube_arcs=tube_arcs, max_eta_max=max_eta_max, reach_scalar=reach_scalar,
++        tube_arcs=tube_arcs, max_eta_max=max_eta_max,
++        tube_n_theta_ceiling=tube_n_theta_ceiling, reach_scalar=reach_scalar,
+         coordinate_radius_min=coordinate_radius_min, reach_max=reach_max,
+         strata=strata, m_lo_region=m_lo_region, m_hi_region=m_hi_region,
+         y_outer_region=y_outer_region, rho_outer_region=rho_outer_region,
+@@ -702,8 +763,21 @@ def _census_region(contexts: list[_BandCtx], region: str, parity: int,
+     spatial = _spatial_nodes_per_tile(region, config)
+     n_nodes = total_tiles * spatial * config.n_gamma * _w_nodes(config)
+     bands = _EXPECTED_BANDS.get((region, parity), {})
++    nodes_band = bands.get('nodes')
++    if region == 'tube':
++        # WP4: tighten the tube node band's UPPER edge from the loose static
++        # bound to the capped-Nyquist prediction.  Every node factor except
++        # the angular one (tiles, n_u, n_gamma, w) is shared between the actual
++        # count and this bound, so ``n_nodes > nodes_high`` iff the configured
++        # ``n_theta`` exceeds the most node-hungry arc's ceiling -- EXPLOSION --
++        # while an empty region (0 tiles -> 0 nodes) still reads SILENT_EMPTY.
++        ceiling = max((ctx.tube_n_theta_ceiling for ctx in contexts),
++                      default=config.n_theta_cap)
++        nodes_high = (total_tiles * ceiling * config.n_u
++                      * config.n_gamma * _w_nodes(config))
++        nodes_band = (1, nodes_high)
+     verdict_tiles = _verdict(total_tiles, bands.get('tiles'))
+-    verdict_nodes = _verdict(n_nodes, bands.get('nodes'))
++    verdict_nodes = _verdict(n_nodes, nodes_band)
+     verdict_arcs = (_verdict(total_arcs, bands.get('arcs'))
+                     if arcs_apply else IN_BAND)
+     overall = EXPLOSION if EXPLOSION in (verdict_tiles, verdict_nodes,
+@@ -718,7 +792,8 @@ def _census_region(contexts: list[_BandCtx], region: str, parity: int,
+         'verdict_arcs': (verdict_arcs if arcs_apply else None),
+         'verdict_tiles': verdict_tiles, 'verdict_nodes': verdict_nodes,
+         'verdict': overall,
+-        'expected_bands': {k: (list(v) if v else None)
++        'expected_bands': {k: (list(nodes_band) if k == 'nodes' and region
++                               == 'tube' else (list(v) if v else None))
+                            for k, v in bands.items()},
+         'skip_reasons': skip_reasons}
+     return record
+diff --git a/cogwheel/tests/test_lensing_log_reach_gamma.py b/cogwheel/tests/test_lensing_log_reach_gamma.py
+index 8c9175c..5604817 100644
+--- a/cogwheel/tests/test_lensing_log_reach_gamma.py
++++ b/cogwheel/tests/test_lensing_log_reach_gamma.py
+@@ -333,7 +333,7 @@ class LogReachComparativeAccuracyTestCase(TestCase):
+         theta_grid = np.interp(s_grid, s_fine, theta_fine)
+         theta_grid[0] = arc.theta_lo
+         theta_grid[-1] = arc.theta_hi
+-        theta_to_s = np.vstack([theta_fine, s_fine])
++        theta_to_s_prime = np.vstack([theta_fine, s_fine])
+         u_grid = np.linspace(
+             np.sqrt(COMP_ETA_FLOOR), np.sqrt(COMP_ETA_MAX), COMP_N_U)
+ 
+@@ -362,7 +362,8 @@ class LogReachComparativeAccuracyTestCase(TestCase):
+                 envelope_real=env_real, envelope_imag=env_imag,
+                 image_count=4, parity=1,
+                 eta_floor=COMP_ETA_FLOOR, eta_max=COMP_ETA_MAX,
+-                cusp_windows=(), s_grid=s_grid, theta_to_s=theta_to_s)
++                cusp_windows=(), s_grid=s_grid,
++                theta_to_s_prime=theta_to_s_prime)
+ 
+         cls._chart_uniform = _build_chart(gamma_uniform)
+         cls._chart_logreach = _build_chart(gamma_logreach)
+@@ -583,7 +584,7 @@ class LogReachRegressionTestCase(TestCase):
+         theta_grid = np.interp(s_grid, s_fine, theta_fine)
+         theta_grid[0] = arc.theta_lo
+         theta_grid[-1] = arc.theta_hi
+-        theta_to_s = np.vstack([theta_fine, s_fine])
++        theta_to_s_prime = np.vstack([theta_fine, s_fine])
+ 
+         shape = (log_w_grid.size, gamma_grid.size, n_u, n_theta)
+         env_real = np.zeros(shape, dtype=float)
+@@ -608,7 +609,8 @@ class LogReachRegressionTestCase(TestCase):
+             envelope_real=env_real, envelope_imag=env_imag,
+             image_count=4, parity=1,
+             eta_floor=eta_floor, eta_max=eta_max,
+-            cusp_windows=(), s_grid=s_grid, theta_to_s=theta_to_s)
++            cusp_windows=(), s_grid=s_grid,
++            theta_to_s_prime=theta_to_s_prime)
+ 
+         # Evaluate at held-out gamma with fixed spatial = training node.
+         rng = np.random.default_rng(REGR_SEED)
+diff --git a/cogwheel/tests/test_lensing_low_w_extrapolation.py b/cogwheel/tests/test_lensing_low_w_extrapolation.py
+index dae0aac..dfad9ba 100644
+--- a/cogwheel/tests/test_lensing_low_w_extrapolation.py
++++ b/cogwheel/tests/test_lensing_low_w_extrapolation.py
+@@ -192,8 +192,8 @@ class FlatExtrapolationTestCase(_LowWExtrapolationTestCase):
+             theta=QUERY_THETA, log_w_query=log_w_test)
+         # Direct spline evaluation (no clamping needed — these are in-band)
+         theta_inframe = QUERY_THETA - float(self.chart.theta_grid[0])
+-        s_val = float(np.interp(QUERY_THETA, self.chart.theta_to_s[0],
+-                                self.chart.theta_to_s[1]))
++        s_val = float(np.interp(QUERY_THETA, self.chart.theta_to_s_prime[0],
++                                self.chart.theta_to_s_prime[1]))
+         real_direct = _contract_tensor_spline(
+             self.chart.real_coeffs, self.chart.knots,
+             QUERY_GAMMA, float(np.sqrt(QUERY_ETA)), s_val, log_w_test)
+diff --git a/cogwheel/tests/test_lensing_surrogate.py b/cogwheel/tests/test_lensing_surrogate.py
+index 382c3dc..d2cebe5 100644
+--- a/cogwheel/tests/test_lensing_surrogate.py
++++ b/cogwheel/tests/test_lensing_surrogate.py
+@@ -2549,7 +2549,7 @@ class SerializationMultiChartTestCase(SurrogateTestCase):
+ # ==========================================================================
+ # Arc-length axis map (Build WP1) -- the TubeChart's fourth interpolation
+ # axis is ARC LENGTH ``s`` (``ds = |y'| d theta``), not raw ``theta``: a
+-# query theta is mapped through the stored ``theta_to_s`` axis map to the
++# query theta is mapped through the stored ``theta_to_s_prime`` axis map to the
+ # spline's ``s`` coordinate before contraction.  These suites pin, with
+ # oracles INDEPENDENT of the surrogate's own spline (F002):
+ #
+@@ -2692,7 +2692,7 @@ def _smooth_in_s_tube_chart(theta_lo: float, theta_hi: float,
+     u_grid = np.linspace(np.sqrt(eta_floor), np.sqrt(eta_max), n)
+     theta_grid = np.linspace(theta_lo, theta_hi, n)
+     theta_fine, s_fine = _nonaffine_map(theta_lo, theta_hi, n_map)
+-    theta_to_s = np.vstack([theta_fine, s_fine])
++    theta_to_s_prime = np.vstack([theta_fine, s_fine])
+     s_grid = np.interp(theta_grid, theta_fine, s_fine)
+     grid_w, grid_g, grid_u, grid_s = np.meshgrid(
+         ARC_LOG_W_GRID, gamma_grid, u_grid, s_grid, indexing='ij')
+@@ -2704,7 +2704,7 @@ def _smooth_in_s_tube_chart(theta_lo: float, theta_hi: float,
+         gamma_grid=gamma_grid, u_grid=u_grid, theta_grid=theta_grid,
+         log_w_grid=ARC_LOG_W_GRID, envelope_real=real, envelope_imag=imag,
+         image_count=2, parity=1, eta_floor=eta_floor, eta_max=eta_max,
+-        cusp_windows=[(theta_lo, 0.02)], s_grid=s_grid, theta_to_s=theta_to_s)
++        cusp_windows=[(theta_lo, 0.02)], s_grid=s_grid, theta_to_s_prime=theta_to_s_prime)
+     return chart, theta_fine, s_fine
+ 
+ 
+@@ -2774,7 +2774,7 @@ def _accuracy_tube_chart(theta_lo: float, theta_hi: float, n_theta: int
+     u_grid = np.linspace(np.sqrt(eta_floor), np.sqrt(eta_max), n)
+     theta_grid = np.linspace(theta_lo, theta_hi, n_theta)
+     theta_fine, s_fine = _nonaffine_map(theta_lo, theta_hi)
+-    theta_to_s = np.vstack([theta_fine, s_fine])
++    theta_to_s_prime = np.vstack([theta_fine, s_fine])
+     s_grid = np.interp(theta_grid, theta_fine, s_fine)
+     grid_w, grid_g, grid_u, grid_s = np.meshgrid(
+         ARC_LOG_W_GRID, gamma_grid, u_grid, s_grid, indexing='ij')
+@@ -2784,13 +2784,13 @@ def _accuracy_tube_chart(theta_lo: float, theta_hi: float, n_theta: int
+         log_w_grid=ARC_LOG_W_GRID, envelope_real=env.real,
+         envelope_imag=env.imag, image_count=2, parity=1,
+         eta_floor=eta_floor, eta_max=eta_max,
+-        cusp_windows=[(theta_lo, 0.02)], s_grid=s_grid, theta_to_s=theta_to_s)
++        cusp_windows=[(theta_lo, 0.02)], s_grid=s_grid, theta_to_s_prime=theta_to_s_prime)
+     return chart, theta_fine, s_fine
+ 
+ 
+ def _identity_default_tube_chart() -> surrogate_module.TubeChart:
+     """Build a `TubeChart` via the LEGACY call form: ``from_values`` with
+-    NEITHER ``s_grid`` NOR ``theta_to_s`` on a uniform ``theta_grid``.
++    NEITHER ``s_grid`` NOR ``theta_to_s_prime`` on a uniform ``theta_grid``.
+ 
+     Deterministic closed-form envelope (no randomness) so the served values
+     are frozen as golden literals (`IDENTITY_GOLDEN`).  Construction takes
+@@ -2925,8 +2925,8 @@ class ChartSplinesInArcLengthTestCase(SurrogateTestCase):
+                     theta=theta, log_w_query=ARC_LOG_W_QUERY)
+                 theta_inframe = surrogate_module._theta_into_frame(
+                     theta, float(self.chart.theta_grid[0]))
+-                v2_arc = float(np.interp(theta_inframe, self.chart.theta_to_s[0],
+-                                         self.chart.theta_to_s[1]))
++                v2_arc = float(np.interp(theta_inframe, self.chart.theta_to_s_prime[0],
++                                         self.chart.theta_to_s_prime[1]))
+                 v2_theta = theta_inframe
+                 value_a = (self._contract(self.chart.real_coeffs, v2_arc)
+                            + 1j * self._contract(self.chart.imag_coeffs,
+@@ -2976,7 +2976,7 @@ class TubeChartMapSerializationTestCase(SurrogateTestCase):
+     """A ``TubeChart`` carrying a NON-trivial arc-length map round-trips
+     through the surrogate npz save/load bit-for-bit.
+ 
+-    Pins: the reloaded ``theta_to_s`` equals the original bit-for-bit
++    Pins: the reloaded ``theta_to_s_prime`` equals the original bit-for-bit
+     (`np.array_equal`), and served complex values at a handful of
+     ``(gamma, eta, theta)`` queries are unchanged to machine precision (in
+     fact bit-identical).  A lossy serialization of the map would move the
+@@ -3002,12 +3002,12 @@ class TubeChartMapSerializationTestCase(SurrogateTestCase):
+                               'reloaded chart is not a TubeChart')
+         # The map survives bit-for-bit (shape and every element).
+         self.n_checks += 1
+-        self.assertEqual(rchart.theta_to_s.shape, self.chart.theta_to_s.shape,
+-                         'theta_to_s shape changed on round trip')
++        self.assertEqual(rchart.theta_to_s_prime.shape, self.chart.theta_to_s_prime.shape,
++                         'theta_to_s_prime shape changed on round trip')
+         self.n_checks += 1
+         self.assertTrue(
+-            np.array_equal(rchart.theta_to_s, self.chart.theta_to_s),
+-            'theta_to_s not bit-identical after npz round trip')
++            np.array_equal(rchart.theta_to_s_prime, self.chart.theta_to_s_prime),
++            'theta_to_s_prime not bit-identical after npz round trip')
+         # Served values unchanged (bit-identical) at every probe.
+         max_delta = 0.0
+         for gamma_q, eta_q, theta in self.QUERIES:
+@@ -3038,7 +3038,7 @@ class ArcLengthSelfFalsificationTestCase(SurrogateTestCase):
+     contract silently rotted.
+     """
+ 
+-    def _valid_from_values(self, theta_to_s: np.ndarray):
++    def _valid_from_values(self, theta_to_s_prime: np.ndarray):
+         """Attempt a `from_values` build with a caller-supplied map."""
+         n = 6
+         gamma_grid = np.linspace(0.30, 0.50, n)
+@@ -3055,7 +3055,7 @@ class ArcLengthSelfFalsificationTestCase(SurrogateTestCase):
+             gamma_grid=gamma_grid, u_grid=u_grid, theta_grid=theta_grid,
+             log_w_grid=ARC_LOG_W_GRID, envelope_real=real, envelope_imag=imag,
+             image_count=2, parity=1, eta_floor=eta_floor, eta_max=eta_max,
+-            s_grid=s_grid, theta_to_s=theta_to_s)
++            s_grid=s_grid, theta_to_s_prime=theta_to_s_prime)
+ 
+     def test_non_monotone_s_row_is_rejected(self):
+         """A non-monotone arc-length row fails the map contract."""
+@@ -3080,7 +3080,7 @@ class ArcLengthSelfFalsificationTestCase(SurrogateTestCase):
+         served value -- so the round-trip preservation gate has teeth."""
+         chart, theta_fine, s_fine = _smooth_in_s_tube_chart(0.2, 1.2)
+         perturbed = dataclasses.replace(
+-            chart, theta_to_s=np.vstack([theta_fine, s_fine * 1.05]))
++            chart, theta_to_s_prime=np.vstack([theta_fine, s_fine * 1.05]))
+         max_delta = 0.0
+         for theta in (0.5, 0.7, 0.9):
+             good = surrogate_module._evaluate_chart(
+@@ -3159,8 +3159,8 @@ class CoordinateChangeAccuracyTestCase(SurrogateTestCase):
+             with self.subTest(theta=theta):
+                 theta_inframe = surrogate_module._theta_into_frame(
+                     theta, float(self.chart.theta_grid[0]))
+-                s_q = float(np.interp(theta_inframe, self.chart.theta_to_s[0],
+-                                      self.chart.theta_to_s[1]))
++                s_q = float(np.interp(theta_inframe, self.chart.theta_to_s_prime[0],
++                                      self.chart.theta_to_s_prime[1]))
+                 target = self._target(s_q)
+                 scale = float(np.max(np.abs(target)))
+                 served = surrogate_module._evaluate_chart(
+@@ -3213,7 +3213,7 @@ class IdentityDefaultBackCompatTestCase(SurrogateTestCase):
+     theta-spline behaviour, to machine precision.
+ 
+     The chart is built with the legacy call form (no ``s_grid``, no
+-    ``theta_to_s``), which takes the identity-map branch ``s = theta -
++    ``theta_to_s_prime``), which takes the identity-map branch ``s = theta -
+     theta_grid[0]``.  We first pin that the constructed map IS the identity
+     (row 0 == ``theta_grid`` bit-for-bit, row 1 == ``theta_grid -
+     theta_grid[0]``), then reconstruct served ``F`` and compare against the
+@@ -3224,14 +3224,14 @@ class IdentityDefaultBackCompatTestCase(SurrogateTestCase):
+     def test_identity_default_builds_the_identity_map(self):
+         """A map-less build yields exactly the identity theta->s axis map."""
+         chart = _identity_default_tube_chart()
+-        self.assertIsNotNone(chart.theta_to_s, 'identity map not built')
++        self.assertIsNotNone(chart.theta_to_s_prime, 'identity map not built')
+         self.n_checks += 1
+         self.assertTrue(
+-            np.array_equal(chart.theta_to_s[0], chart.theta_grid),
++            np.array_equal(chart.theta_to_s_prime[0], chart.theta_grid),
+             'identity map row 0 (theta) is not the raw theta_grid')
+         self.n_checks += 1
+         self.assertTrue(
+-            np.array_equal(chart.theta_to_s[1],
++            np.array_equal(chart.theta_to_s_prime[1],
+                            chart.theta_grid - chart.theta_grid[0]),
+             'identity map row 1 (s) is not theta_grid - theta_grid[0]')
+ 
+diff --git a/cogwheel/tests/test_lensing_surrogate_training.py b/cogwheel/tests/test_lensing_surrogate_training.py
+index d64f1f4..99206d9 100644
+--- a/cogwheel/tests/test_lensing_surrogate_training.py
++++ b/cogwheel/tests/test_lensing_surrogate_training.py
+@@ -2650,7 +2650,7 @@ def _wp1_build_uniform_theta_chart(arc, config: TrainingConfig, box: PriorBox,
+ 
+     Mirrors `_build_tube_chart` exactly EXCEPT the theta nodes are placed
+     uniformly in raw ``theta`` (``np.linspace(theta_lo, theta_hi, n_theta)``)
+-    and NO ``theta_to_s`` map is supplied, so `TubeChart.from_values` builds the
++    and NO ``theta_to_s_prime`` map is supplied, so `TubeChart.from_values` builds the
+     IDENTITY map (``s = theta - theta_lo``) and fits/serves in raw theta -- the
+     pre-WP1 behaviour.  Only the node placement / interpolation coordinate
+     differs from the arc-length chart, isolating that single change.
+@@ -2865,14 +2865,26 @@ class ArcLengthNodePlacementGeometryTestCase(_CountingTestCase):
+ @_TRAIN_TIER_SKIP
+ class ShippedArcLengthTubeGridTestCase(_CountingTestCase):
+     """Spec 1 (engine-backed): the SHIPPED tube chart's theta nodes are the
+-    images of a uniform arc-length grid.
+-
+-    Reuses the cached WP3 fix-on saddle chart (`_wp3_fixture`, real production
+-    `_build_tube_chart` at _WP3_GAMMA, n_theta=5) and checks its stored
+-    ``theta_grid`` against BOTH the production ``(theta -> s)`` map it carries
+-    (``chart.theta_to_s``, built at rep_gamma = median(gamma_grid)) AND the
+-    independent polyline oracle.  A deviation flags a build/serve map
++    images of a uniform DELAY-TV (``s'``) grid, and the node endpoints are
++    pinned to the delay map's SERVABLE subrange -- not necessarily the raw
++    arc bounds (WP2/WP3: ``_build_tube_chart`` now places nodes via
++    `_tube_delay_map`'s cumulative total variation of the merging fold-pair
++    delay separation, not geometric arc length; see
++    `cogwheel/tests/test_lensing_tube_nyquist_coordinate.py`).
++
++    Reuses the cached WP3 fix-on saddle chart (`_wp3_fixture`, real
++    production `_build_tube_chart` at _WP3_GAMMA, n_theta=5) and checks its
++    stored ``theta_grid`` against the production ``(theta -> s')`` map it
++    carries (``chart.theta_to_s_prime``, built at rep_gamma =
++    median(gamma_grid)) -- a build/serve self-consistency check with a REAL,
++    unmocked amplitude engine.  A deviation flags a build/serve map
+     inconsistency.
++
++    The independent-oracle reconstruction of ``s'`` from the authoritative
++    `_airy_fold._merging_fold_pair` primitive is deliberately NOT duplicated
++    here (test parsimony): that invariant is already owned, at a fraction of
++    the engine cost (mocked amplitude engine, fast tier), by
++    `test_lensing_tube_nyquist_coordinate.py`'s DRY delay pin.
+     """
+ 
+     def _shipped(self):
+@@ -2880,54 +2892,48 @@ class ShippedArcLengthTubeGridTestCase(_CountingTestCase):
+         return fixture['on']['chart'], fixture['on_arc']
+ 
+     def test_shipped_nodes_uniform_under_carried_map(self) -> None:
+-        """chart.theta_grid maps onto a uniform s grid through the carried
+-        ``chart.theta_to_s`` map (build/serve self-consistency)."""
++        """chart.theta_grid maps onto a uniform s' grid -- over the span the
++        nodes themselves cover -- through the carried
++        ``chart.theta_to_s_prime`` map (build/serve self-consistency)."""
+         chart, _arc = self._shipped()
+-        theta_fine = np.asarray(chart.theta_to_s[0], dtype=float)
+-        s_fine = np.asarray(chart.theta_to_s[1], dtype=float)
+-        s_total = float(s_fine[-1])
++        theta_fine = np.asarray(chart.theta_to_s_prime[0], dtype=float)
++        s_fine = np.asarray(chart.theta_to_s_prime[1], dtype=float)
+         s_at_nodes = np.interp(
+             np.asarray(chart.theta_grid, float), theta_fine, s_fine)
+-        target = np.linspace(0.0, s_total, chart.theta_grid.size)
+-        rel = float(np.max(np.abs(s_at_nodes - target)) / s_total)
++        s_span = float(s_at_nodes[-1] - s_at_nodes[0])
++        target = np.linspace(s_at_nodes[0], s_at_nodes[-1],
++                             chart.theta_grid.size)
++        rel = float(np.max(np.abs(s_at_nodes - target)) / s_span)
+         self.assertLess(
+             rel, _WP1_ARCLEN_REL_TOL,
+-            f'shipped theta nodes must be uniform in carried s; rel {rel:.2e}')
++            f"shipped theta nodes must be uniform in carried s'; rel {rel:.2e}")
+         self.comparisons += 1
+ 
+-    def test_shipped_nodes_uniform_under_independent_oracle(self) -> None:
+-        """F002: the shipped nodes are uniform in the INDEPENDENT polyline arc
+-        length evaluated at rep_gamma = median(gamma_grid)."""
++    def test_shipped_endpoints_equal_servable_subrange(self) -> None:
++        """The shipped chart's first/last theta nodes equal the delay map's
++        SERVABLE subrange bounds (``theta_fine[i_lo]``/``[i_hi]`` from a
++        fresh `_tube_delay_map` call at the same rep_gamma/eta_max the build
++        used), not blindly the raw arc bounds -- a refused near-cusp tail is
++        excluded from the served window rather than routed to a neighbouring
++        arc (shrink-the-shell)."""
+         chart, arc = self._shipped()
+         rep_gamma = float(np.median(chart.gamma_grid))
+-        nodes = np.asarray(chart.theta_grid, float)
+-        s_poly = _wp1_polyline_arclength(rep_gamma, arc, nodes)
+-        total = float(_wp1_polyline_arclength(
+-            rep_gamma, arc, np.array([arc.theta_hi]))[0])
+-        target = np.linspace(0.0, total, nodes.size)
+-        rel = float(np.max(np.abs(s_poly - target)) / total)
+-        self.assertLess(
+-            rel, _WP1_ARCLEN_REL_TOL,
+-            'shipped nodes must be uniform in independent arc length; '
+-            f'rel {rel:.2e}')
+-        self.comparisons += 1
+-
+-    def test_shipped_endpoints_equal_arc_bounds(self) -> None:
+-        """The shipped chart's first/last theta nodes equal the arc bounds
+-        exactly (the build pins them to theta_lo / theta_hi)."""
+-        chart, arc = self._shipped()
+-        self.assertEqual(float(chart.theta_grid[0]), arc.theta_lo)
+-        self.assertEqual(float(chart.theta_grid[-1]), arc.theta_hi)
++        theta_fine, _s_fine, i_lo, i_hi = training._tube_delay_map(
++            rep_gamma, arc, float(chart.eta_max))
++        self.assertEqual(float(chart.theta_grid[0]), float(theta_fine[i_lo]))
++        self.assertEqual(float(chart.theta_grid[-1]), float(theta_fine[i_hi]))
+         self.comparisons += 1
+ 
+-    def test_shipped_carried_map_anchored_at_arc_bounds(self) -> None:
+-        """The carried map's theta axis spans the arc: row0 starts at theta_lo
+-        and rep_gamma is the grid median the build evaluated the map at."""
++    def test_shipped_carried_map_spans_full_arc_at_rep_gamma(self) -> None:
++        """The carried map's theta axis spans the FULL arc (row 0 runs
++        theta_lo -> theta_hi even where the served nodes are restricted to a
++        narrower servable subrange), evaluated at rep_gamma =
++        median(gamma_grid)."""
+         chart, arc = self._shipped()
+         self.assertAlmostEqual(
+-            float(chart.theta_to_s[0][0]), arc.theta_lo, places=12)
++            float(chart.theta_to_s_prime[0][0]), arc.theta_lo, places=12)
+         self.assertAlmostEqual(
+-            float(chart.theta_to_s[0][-1]), arc.theta_hi, places=12)
++            float(chart.theta_to_s_prime[0][-1]), arc.theta_hi, places=12)
+         self.assertAlmostEqual(
+             float(np.median(chart.gamma_grid)), _WP3_GAMMA, places=12)
+         self.comparisons += 1
+diff --git a/cogwheel/tests/test_lensing_wedge_dd_arclength.py b/cogwheel/tests/test_lensing_wedge_dd_arclength.py
+index e530fac..1c53945 100644
+--- a/cogwheel/tests/test_lensing_wedge_dd_arclength.py
++++ b/cogwheel/tests/test_lensing_wedge_dd_arclength.py
+@@ -27,10 +27,12 @@ What this suite verifies
+    ``_wedge_cusp_axis_map`` and against the per-side closed form.
+ 
+ 3. **Field naming (SHARD C)** — the wedge chart exposes ``theta_to_u``
+-   (NOT ``theta_to_s``/``s_grid``); the arc-length charts (Tube, Lobe,
+-   FarField) are UNTOUCHED — Tube still exposes ``theta_to_s`` and
+-   FarField still exposes ``s_grid`` + ``arc_map``.  ``FieldExposureTestCase``
+-   and ``ValidatorContractTestCase`` pin the rename's blast radius.
++   (NOT ``theta_to_s``/``s_grid``); Lobe and FarField are UNTOUCHED by
++   SHARD C — Lobe exposes ``theta_to_u`` and FarField still exposes
++   ``s_grid`` + ``arc_map``.  Tube (separately, WP2) renamed its own
++   delay-uniformized map field ``theta_to_s`` -> ``theta_to_s_prime``.
++   ``FieldExposureTestCase`` and ``ValidatorContractTestCase`` pin the
++   rename's blast radius.
+ 
+ 4. **Serve is coordinate-agnostic + stale artifacts hard-refuse (SHARD C)** —
+    the rename is nominal (``np.interp`` through the stored map depends only on
+@@ -502,8 +504,10 @@ class FieldExposureTestCase(_WedgeDDTestCase):
+     * ``InteriorWedgeChart`` exposes ``theta_to_u`` and NOT ``theta_to_s`` /
+       ``s_grid`` / ``u_grid`` (``u_grid`` is a construction kwarg, not a
+       stored field).
+-    * ``TubeChart`` still exposes ``theta_to_s`` and NOT ``theta_to_u``;
+-      ``LobeInteriorChart`` exposes ``theta_to_u`` (NOT ``theta_to_s``).
++    * ``TubeChart`` exposes ``theta_to_s_prime`` (the delay-uniformized axis
++      map, WP2-renamed from the retired ``theta_to_s``) and NOT
++      ``theta_to_u``; ``LobeInteriorChart`` exposes ``theta_to_u`` (NOT
++      ``theta_to_s_prime``).
+     * ``ExteriorPolarChart`` charts its spatial axes via ``rho_grid`` +
+       ``theta_c_grid`` (it has neither ``s_grid`` nor ``arc_map``).
+     """
+@@ -522,11 +526,13 @@ class FieldExposureTestCase(_WedgeDDTestCase):
+         self.assertNotIn('s_grid', names)
+         self.assertNotIn('u_grid', names)
+ 
+-    def test_tube_still_exposes_theta_to_s(self):
+-        """Tube chart is untouched: theta_to_s present, theta_to_u absent."""
++    def test_tube_exposes_theta_to_s_prime(self):
++        """Tube chart carries the WP2-renamed delay-uniformized map field:
++        theta_to_s_prime present, retired theta_to_s and theta_to_u absent."""
+         names = self._fields(TubeChart)
+         self._tick()
+-        self.assertIn('theta_to_s', names)
++        self.assertIn('theta_to_s_prime', names)
++        self.assertNotIn('theta_to_s', names)
+         self.assertNotIn('theta_to_u', names)
+ 
+     def test_lobe_exposes_theta_to_u(self):
