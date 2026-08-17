@@ -7,6 +7,50 @@
 
 ---
 
+## 2026-08-17
+
+
+Serve-route demand census corrected (production band-ladder fidelity;
+new wave_refused route) and the 10k corrected demand map recorded: the
+training campaign's true chart demand is 72.25% of the prior,
+concentrated at w <= 60 in the wedge/lobe interiors and tube.
+
+---
+
+
+Lensing: `TubeChart` (near-caustic microlensing surrogate) now stores the
+envelope as a **beat-free residual** `r(w) = E(w) / F_ref(w)` instead of
+the raw envelope `E(w)`. The near-caustic envelope carries two fold-pair
+carriers that interfere as `cos(w * Delta_tau)`, and no reparametrization
+of the interpolation axes removes that beat — dividing out an analytic,
+non-vanishing Airy-uniform two-carrier reference `F_ref(w)` does. This
+collapses the node count needed to clear the accuracy bar from 48 to 10
+(F083, measured on a gamma=0.4 astroid, held-out eps=4.2652e-03 vs the
+0.0237 bar). Every `TubeChart` record now carries an `envelope_definition`
+tag (default `'tube_beat_free_airy_v1'`); an absent or unknown tag
+hard-refuses at load, so a stale pre-beat-free tube artifact cannot
+silently mis-serve as a residual. `serve` reconstructs the physical
+envelope transparently (`E = r * F_ref`); no downstream API changed.
+**Any cached surrogate `.npz` with tube charts trained before this change
+must be regenerated.**
+
+Commit: `69c79b8`
+
+---
+
+## 2026-08-14
+
+
+Fixed F079: `_find_cusps` computed cusp dip-window spans with linear angle
+arithmetic across the periodic wrap, silently dropping both arcs adjacent
+to theta = 0 (half the astroid fold ring had no tube chart). Spans are now
+wrap-aware; `detect_caustic_structure` cross-checks surviving ARC count
+(4 astroid / 6 saddle), not just cusps. The inert, wrong-units cusp-arm
+coverage constants and their `_tube_serves` window shrink are retired; the
+tube gate excludes on the full cusp window.
+
+---
+
 ## 2026-08-13
 
 
