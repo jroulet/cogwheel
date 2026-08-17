@@ -926,3 +926,27 @@
   earlier entry); a build note asserting it "does not exist in
   cogwheel/lensing" was investigating one call site's needs, not the whole
   package — verify absence claims package-wide before recording as fact.
+
+## 2026-08-17 build (tube_beat_free_representation, multi-launch recovery)
+- MODULE-SCOPE FORWARD-REFERENCE CAVEAT (refines the SINGLE-SOURCE A
+  CONVENTION note above): "forward refs resolve at call time — fine"
+  is true INSIDE a function body, but NOT for a call at MODULE SCOPE
+  (e.g. a test file's top-level constant built by calling a helper
+  defined later in the same module). py_compile/AST parsing won't
+  catch the ordering problem; pytest collection raises NameError and
+  aborts the whole file/suite. Move the def above the module-scope
+  call site, or make the constant lazy.
+- DUAL-USE GATE DECOUPLING: when a production admission/serve gate is
+  also probed by a purely STRUCTURAL/diagnostic question (e.g. a census
+  classifying a synthetic, not-necessarily-buildable source), don't
+  force the diagnostic caller to satisfy the full production gate —
+  add a keyword-only override (default preserves production behavior
+  byte-identically) so the diagnostic can bypass the orthogonal
+  buildability check while still exercising the structural logic under
+  test.
+- DRY SINGLE-SOURCE MOVE VERIFICATION: when consolidating a duplicated
+  helper down to one canonical module and re-importing it elsewhere,
+  verify the move with an object-identity check (`a._helper is
+  b._helper`) at runtime, not just "import succeeds" — identity proves
+  there is truly one implementation, not two copies that happen to
+  agree today.

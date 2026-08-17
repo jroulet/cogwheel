@@ -328,7 +328,9 @@
 - `kind: test` ON A DATA_CONTRACTS.yaml CONSUMER ENTRY (convention
   established 2026-08-13) marks a test-only caller registered purely to
   silence `check_consumer_graph` noise — the checker matches on
-  module+function and ignores the extra key, so it is additive and inert.
+  module+function and ignores the extra key, so it is additive and inert
+  (confirmed 2026-08-17: `kind: script` extends the same inert convention
+  to a genuine production, non-test consumer, e.g. a `scripts/*.py` CLI).
   No suppression flag exists in the script or schema; this is the sanctioned
   substitute. Extract the caller list programmatically from
   CONSUMER_GRAPH.json, never by hand from truncated print output.
@@ -411,3 +413,11 @@
   (unlike F0xx FINDINGS numbers) — the same label (e.g. INS-1-001) recurs
   across unrelated builds; don't assume label reuse means doc staleness
   carried forward.
+- HISTORICAL MEASURED-NUMBER CONVENTION: a completed.d fragment's original
+  measured claim stays as-written (never edit the historical number in
+  place) — append a dated "CORRECTION" paragraph alongside it instead.
+- SELF-REFERENTIAL sync_issues.json GOTCHA: a doc-only sync commit that
+  stages only `.claude/spec/*` (not the short-term memory file itself, nor
+  `.claude/sync_issues.json`) can mismatch the pre-commit hook's fingerprint
+  regex for "did the Librarian short-term/knowledge memory get touched",
+  causing `sync_issues.json` to regenerate itself; stage the memory file

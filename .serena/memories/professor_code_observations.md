@@ -691,3 +691,24 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
 - Engine-free guarantee reconfirmed via 4 door sentinels (evaluate,
   f_schwinger, _f_schwinger_mpmath, mpmath.gauss_quadrature) all outside
   the caught refusal tuple; call_count==0 on every door after a real run.
+
+## 2026-08-17 (tube beat-free representation, _tube_f_ref review)
+- ERROR CURRENCY (F_ref vs |exact_total|): an accuracy sweep on the
+  beat-free residual r=E/F_ref must be normalized by F_ref, not by the
+  raw |exact_total| — F_ref (q=p uniform-Airy reference, non-vanishing
+  by construction) stays finite where the raw total can pass through an
+  unrelated old-carrier Airy zero, which would otherwise produce a false
+  failure signature at points uncorrelated with actual interpolation
+  error. Same measurement doubles as both the accuracy-sweep gate and
+  completion-record acceptance evidence.
+- Two distinct "F_ref is None" paths for _tube_f_ref/_tube_serves: a
+  BUILD-side None (no distinct fold partner for the uniform-Airy
+  reference at that point) is benign/expected; a SERVE-side None is a
+  guarded RuntimeError and never legitimate. Do not conflate the two.
+- Reusable audit priority for `_tube_f_ref` correctness: (1) tau-frame
+  cancellation — E and F_ref must share the SAME t_min/tau_c origin, a
+  constant-offset bug round-trips exactly at build nodes and only leaks
+  OFF-node (interp sweep catches it, unit tests at nodes don't — hardest
+  to catch, look here first); (2) zero-fill vs serve-None — serve must
+  not silently interpolate across an isolated zero-filled node; (3) r
+  stays finite/smooth across Airy-zero crossings away from build nodes.

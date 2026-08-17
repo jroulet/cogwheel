@@ -552,3 +552,10 @@
   describe the V4/V5 two-tag set and the 2D rho_u_carrier, fixed by some
   earlier untracked pass. Do not re-open this pair from memory alone;
   re-verify with a fresh grep if it resurfaces.
+
+## 2026-08-17 (tube beat-free recovery, multiple passes)
+- REFUSING-DEFAULT NEW-ARG PATTERN: a serve guard gaining a NEW required
+  input whose DEFAULT triggers refusal (e.g. NaN->decline) fails every
+  un-updated caller SILENTLY (no TypeError, just always-False/refuse) —
+  `find_referencing_symbols` on the guard is mandatory, including
+  census/diagnostic mirrors and direct unit-test callers; sweep EVERY

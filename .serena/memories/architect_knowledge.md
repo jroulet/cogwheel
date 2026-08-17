@@ -755,3 +755,11 @@
   reported per-run; sample-dependent rates are report output, not a design
   invariant (converges with Professor's "must be reported empirically,
   never asserted a priori" ruling).
+
+## 2026-08-17 build (tube_beat_free_representation, multi-launch recovery)
+- ERROR-METRIC CURRENCY (generalizes GATE CURRENCY to error metrics, not
+  just admission gates): an accuracy sweep on an object that is itself an
+  interpolated RESIDUAL (e.g. r=E/F_ref) must normalize by the reference
+  the interpolant controls (F_ref), never by the raw physical total — the
+  raw total can vanish at points unrelated to interpolation error (e.g. an
+  old carrier's Airy zeros), producing a false failure signature.

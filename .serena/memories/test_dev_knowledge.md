@@ -717,3 +717,27 @@
   axis (e.g. cusp axis, angle=0) — place the witness there with a large
   magnitude parameter, not at a generic off-axis point, or the "huge
   estimate" case under test won't actually be huge.
+
+## 2026-08-17 build (tube beat-free / D2 fold / Nyquist coordinate — multi-shard)
+- SPY BINDING TARGET (reusable, hit independently across builds): to
+  intercept a helper the code under test calls, patch the MODULE ATTRIBUTE
+  the calling code actually dereferences (e.g. `mock.patch.object(
+  surrogate_module, '_tube_f_ref', ...)`), not the helper's own defining
+  module — a same-name import elsewhere is a silent no-op.
+- ENGINE-FREE SUBSTITUTION WHEN THE REAL ORACLE REFUSES NEAR A SPEC'S
+  DEMANDED REGION: if a literal spec (e.g. an asymptotic power-law near a
+  cusp) lands where the real production function legitimately refuses,
+  feed the SAME shipping function a synthetic input engineered to land in
+  that region rather than dropping the spec, and confirm it reconstructs
+  the closed form — extends "measure, don't trust the brief" to the case
+  where the oracle is unreachable at the literal spec's demanded point.
+- SHARED EXPENSIVE BUILD PAID ONCE PER FILE: cache a heavy chart build
+  behind a module-level `functools.lru_cache(maxsize=1)` helper shared
+  across multiple TestCase classes in the same file, to keep suite runtime
+  under the ceiling when several specs need the same expensive fixture.
+- STRAY/ORPHAN TEST FILE ACROSS DIVERGENT BRANCHES: an untracked (`??`)
+  test file from a sibling/abandoned design branch can fail at COLLECTION
+  (ImportError for a symbol absent on the current branch) and poison a
+  full-suite collect-only count; confirm it predates your build (grep the
+  missing symbol at HEAD) and flag for the owner to retire/relocate rather
+  than treat it as a regression you caused.
