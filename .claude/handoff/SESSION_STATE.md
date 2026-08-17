@@ -29,14 +29,21 @@ QUEUE (each fires on its predecessor; briefs/fragments carry the detail):
 4. (f_max, f_floor) joint sweep on beat-free charts — runner
    /tmp/f_fraction_sweep.py, priced ~2.6-2.8h, w<=60 cap; F083 killed
    the old constants' provenance.
-5. Demand-sized tiling design under the no-explosion gate
+5. Deltoid far-field redesign
+   (todo.d/lensing_deltoid_farfield_coordinate_redesign.md; needs the
+   f-constants). MOVED BEFORE tiling+campaign (owner, 2026-08-17): the
+   redesign changes the saddle-side charting strategy, so training or
+   tiling the saddle sector first would be retrained-on-arrival — the
+   same never-train-on-coordinates-about-to-change lesson as the killed
+   50h campaign.
+6. Demand-sized tiling design under the no-explosion gate, on FINAL
+   coordinates both parities
    (todo.d/lensing_training_campaign.md, rewritten demand-first).
-6. Residual training campaign (cost estimate FIRST, monitored).
-7. Certified-map retrain (F080 edge-biased binding + fan-asymmetry
-   question) + deltoid far-field redesign
-   (todo.d/lensing_deltoid_farfield_coordinate_redesign.md, after the
-   f-constants).
-8. 7b acceptance census (--with-artifact; zero engine-served AND zero
+7. Residual training campaign (cost estimate FIRST, monitored) — ONE
+   campaign, no planned retrain.
+8. Certified-map retrain (F080 edge-biased binding + fan-asymmetry
+   question) — after the campaign's charts exist.
+9. 7b acceptance census (--with-artifact; zero engine-served AND zero
    wave_refused per the owner bar).
 
 PARKED: Tidier backlog (60 files), Librarian queue — close-out batch.
