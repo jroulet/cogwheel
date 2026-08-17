@@ -73,6 +73,16 @@ def _alive(pid):
         return True
 
 
+def _listens_on(pid, port):
+    """True if the process LISTENs on the given TCP port."""
+    if not port:
+        return False
+    out = subprocess.run(['lsof', '-a', '-p', str(pid), '-iTCP:' + str(port),
+                          '-sTCP:LISTEN', '-t'],
+                         capture_output=True, text=True).stdout
+    return bool(out.strip())
+
+
 def _established(pid):
     """True if the process holds any ESTABLISHED TCP connection."""
     out = subprocess.run(['lsof', '-a', '-p', str(pid), '-iTCP',
@@ -149,7 +159,18 @@ def main():
         if hit:
             reasons.append(f'protected ({sorted(hit)})')
         if age < min_age:
-            reasons.append(f'young ({age // 3600}h)')
+            # Youth does NOT protect an ORPHAN squatting on the pipeline's
+            # own port: it blocks every subsequent launch — the new server
+            # cannot bind, the TCP-accept readiness probe "succeeds"
+            # against the squatter, and the first agent handshakes into a
+            # half-dead session with no MCP tools (measured 2026-08-17:
+            # build 5's leaked serena, 5.5h old, was KEPT as young and
+            # tool-lessed the next build's Architect at $2.91).
+            sdk_port = os.environ.get('SDK_SERENA_PORT', '')
+            port_squatter = (ppid == 1 and any(
+                _listens_on(p, sdk_port) for p in members))
+            if not port_squatter:
+                reasons.append(f'young ({age // 3600}h)')
         if ppid != 1 and _alive(ppid):
             reasons.append(f'parent {ppid} alive')
         if not reasons:

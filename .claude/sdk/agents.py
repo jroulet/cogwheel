@@ -11,6 +11,7 @@ import asyncio
 import inspect
 import logging
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -276,6 +277,18 @@ class SerenaManager:
                 "mcp" if self.transport == "streamable-http" else "sse"
             )
             self.url = f"http://localhost:{self.port}/{endpoint}"
+        # A port already held BEFORE we spawn means a stale serena (a
+        # leaked child from a dead build) is squatting: our server cannot
+        # bind, but the TCP-accept readiness probe below would "succeed"
+        # against the squatter and the first agent would handshake into a
+        # half-dead session with no MCP tools for its whole life
+        # (measured 2026-08-17, c3 launch 1: tool-less Architect, $2.91).
+        # Fail LOUDLY instead — the fix is one reap away.
+        if await self._url_reachable(self.url):
+            raise RuntimeError(
+                f"Port {self.port} is already held before spawn — a stale "
+                f"serena is squatting on it. Run "
+                f".claude/sdk/reap_stale_serena.py --apply and relaunch.")
         python_bin_dir = os.path.dirname(sys.executable)
         self.process = subprocess.Popen(
             [
@@ -293,6 +306,11 @@ class SerenaManager:
             },
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            # Own process group: stop() must be able to kill the WHOLE
+            # uvx -> serena -> pyright chain. Terminating only the uvx
+            # wrapper orphans the python server child to init, where it
+            # keeps the port (the 2026-08-17 leak).
+            start_new_session=True,
         )
         try:
             await self._wait_for_ready()
@@ -364,11 +382,20 @@ class SerenaManager:
         if self.external_url:
             return
         if self.process:
-            self.process.terminate()
+            # Kill the process GROUP (setsid spawn above): terminating only
+            # the uvx wrapper orphans the serena server child, which keeps
+            # the port and tool-lesses the next build's agents.
+            try:
+                os.killpg(self.process.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                self.process.terminate()
             try:
                 self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                self.process.kill()
+                try:
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    self.process.kill()
             self.process = None
 
 
