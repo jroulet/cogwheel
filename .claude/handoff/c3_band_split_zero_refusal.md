@@ -105,6 +105,13 @@ fragments after writing. No new measured constants without provenance
 (SHA + how measured); split points come from the certificate, never
 hardcoded. In-build tests fast/synthetic; census re-run and bulk sweeps
 are driver post-build steps. Escalate on surprise rather than iterate —
-in particular, if the analytic sum above the split misses the engine
-reference anywhere the certificate admits, STOP: that falsifies the
-certificate calibration, not the plumbing.
+in particular, if the analytic sum misses the engine reference anywhere
+the certificate admits WITHIN the engine-reachable band (w <= 150; use
+the DD band w <= 60 for cheap checks — admitting floors ~8.7-28 leave a
+real overlap window), STOP: that falsifies the certificate calibration,
+not the plumbing. ABOVE the ceiling there is NO oracle by construction
+(the engine refuses at w > 150); the warrant there is the certificate's
+w**-3 remainder law + monotonicity (admittance at the split point
+implies admittance everywhere above) — physics-based extrapolation, the
+geometric limit. Do NOT attempt engine comparisons above the ceiling,
+and do NOT treat their impossibility as a finding.
