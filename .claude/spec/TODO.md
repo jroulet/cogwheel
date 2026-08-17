@@ -2975,17 +2975,32 @@ Tag conventions:
   pair's delay separation varies along the arc, so the demodulated
   envelope's angular frequency is `w * |dDelta_tau/ds|` — invisible to
   arc length, uniformized by `ds' ∝ |dDelta_tau/ds| ds` (the
-  fold-family uniformizing coordinate, closed form via the step-1
-  cascade). Build: (1) GRADUATE THE COORDINATE — spline the tube's
-  angular axis in the delay-uniformized `s'` (chart carries the
-  `theta -> s'` table exactly as `theta_to_s` does today; schema bump);
-  uniform nodes in `s'` are well-placed by construction and the count
-  becomes the Nyquist requirement `~ w_max * Delta_tau-span / 2pi`
-  oscillations across the arc — derived, not tuned. MEASURE the
-  constant against the F083 ladder (48 s-nodes -> 0.0237 is the
-  brute-force baseline the uniformized axis must beat or match at
-  fewer nodes); adaptive refinement against the held-out bar stays as
-  the fallback ONLY if the closed form under-predicts; (2) raise engine_budget to match (the 24-node build
+  fold-family uniformizing coordinate). THE TRANSFORMATION IS FULLY
+  ANALYTIC (owner direction 2026-08-17): for a fold,
+  `Delta_tau(theta, eta) = c(theta) * eta^(3/2)` in closed form, with
+  `c(theta)` the local fold-strength coefficient from the step-1
+  cascade — the SAME Delta_tau `_airy_fold` already computes for the
+  Airy argument `xi = (3 w Delta_tau / 4)^(2/3)`. The uniformizing
+  angular coordinate is `s'(theta) ∝ Delta_tau(theta, eta_ref)`
+  (equivalently the integrated fold coefficient), IMPORTED from the
+  same authoritative source as `xi` (the collocation fragment's DRY
+  rule — one Delta_tau; a second derivation is the violation this
+  program exists to prevent). In `s'` the fold-pair beat has constant
+  angular frequency by construction; the node count is the Nyquist
+  requirement `w_max * Delta_tau-span / 2pi` oscillations times a
+  points-per-period factor from cubic-spline approximation theory
+  (~6-8 per period at 1e-2) — NO measured constant anywhere in the
+  coordinate. Build: (1) GRADUATE THE COORDINATE — spline the tube's
+  angular axis in `s'` (chart carries the `theta -> s'` table exactly
+  as `theta_to_s` does today; schema bump). CONSISTENCY PIN (free
+  validation of the derivation): approaching a cusp the fold
+  coefficient's scaling makes `s'` asymptote to the `d^(2/3)` law —
+  the SAME coordinate the wedge/lobe axes already use; pin
+  `s' -> d^(2/3)` at the arc ends as a machine check of the closed
+  form. FALSIFICATION (not calibration): the F083 ladder — the
+  uniformized axis must beat or match the brute-force 48-s-node
+  baseline (eps 0.0237) at fewer nodes; adaptive refinement against
+  the held-out bar engages ONLY if the closed form under-predicts; (2) raise engine_budget to match (the 24-node build
   already trips 400); (3) fix `_heldout_eps`'s silent-skip blind spot
   (unserved held-out points must be REPORTED as coverage, never
   silently dropped) and record the ~40% arc-end shell that cannot serve
