@@ -202,7 +202,7 @@ Flagged three times by the Inspector during the `subdivision_recursion` build
 (INS-1-001) and correctly routed to doc-sync each time; applied here by the
 driver after the tree gate blocked the build's own Librarian phase.
 
-- `0.6.1` (2026-08-01):
+- `0.7.1` (2026-08-01):
 
 `lens_amplification_surrogate` artifact: lobe-interior charts now persist a
 `theta_to_s` axis map (2 × N_map array) under the new
@@ -210,7 +210,7 @@ driver after the tree gate blocked the build's own Librarian phase.
 tag. Legacy V1 charts (no map) load under the old schema tag with
 `theta_to_s=None`. The map is gamma-independent (depends only on tile bounds).
 
-- `0.6.0` (2026-07-31):
+- `0.7.0` (2026-07-31):
 
 ### Far-field surrogate charts use gamma-resolved fold coordinates
 
@@ -227,7 +227,7 @@ wrong-frame artifact. Macro-saddle far-field charts intentionally remain
 unavailable: those queries fall through to the exact engine until a
 per-deltoid-edge design is certified.
 
-- `0.5.0` (2026-07-30):
+- `0.6.0` (2026-07-30):
 
 ### TubeChart records gain a `theta_to_s` arc-length axis map
 
@@ -250,6 +250,20 @@ map `s = theta - theta_lo`, under which splining in `s` is the previous
 
 No trained artifact exists yet, so nothing on disk needs migrating — the
 window in which this is free closes when the first surrogate is trained.
+
+- `0.5.0` ():
+
+Registered `scripts/serve_route_census.py::main` as a consumer entry on
+`lens_amplification_surrogate`, tagged `kind: script`. Unlike the
+`kind: test` entries registered 2026-08-13/15, this is a genuine
+PRODUCTION (non-test) caller: with `--with-artifact PATH`, `main` calls
+`LensAmplificationSurrogate.load` and threads the artifact through `run`
+so the census's `surrogate` route becomes reachable (the order-7b
+acceptance-mode census); the engine-free demand mode (no `--with-artifact`)
+never touches this artifact. Flagged by `sync_derived_docs.py`'s
+`check_consumer_graph` during post-commit doc sync for the
+`serve_route_census` + census band-ladder-fix batch; registering it
+clears the advisory.
 
 - `0.4.0` ():
 

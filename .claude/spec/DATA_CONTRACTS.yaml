@@ -208,6 +208,12 @@ artifacts:
         function: "LensedMarginalizedExtrinsicLikelihood"
       - module: "cogwheel/lensing/surrogate_census.py"
         function: "run"
+      - module: "scripts/serve_route_census.py"
+        function: "main"
+        kind: script
+        # --with-artifact acceptance mode only (via LensAmplificationSurrogate.load);
+        # engine-free demand mode never touches this artifact. Registered
+        # 2026-08-17 to clear the consumer_graph advisory (post-commit sync).
       # Test consumers (kind: test) -- exercise the loader/round-trip
       # contract directly, not production callers. Registered 2026-08-13
       # to clear the consumer_graph advisory (Librarian post-commit sync).

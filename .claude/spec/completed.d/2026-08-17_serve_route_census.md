@@ -28,3 +28,18 @@ train+attach+7b acceptance) remain open in
 attached surrogate artifact is `todo.d/lensing_no_engine_census`
 (order-7b), still pending. Neither todo fragment is closed by this
 entry — only the demand-mode census module itself is done.
+
+**CORRECTION (2026-08-17, commit 5990a8d, census audit — historical
+HEAD-report claim above left as measured, not edited):** the 83.37%
+engine_residual / 15.40% born_analytic / 76.98%-interior-23.02%-tube
+breakdown quoted above was measured against a census that conflated
+above-ceiling wave-node refusals into `engine_residual` and undercounted
+the mpmath-band intercept width (two audited defects). The corrected
+7-defect-fixed run, with an 8th MECE label (`wave_refused`), is
+`.claude/handoff/demand_census_corrected_10k.json`: 72.25%
+engine_residual (wedge_interior 38.7% / lobe_interior 34.7% / tube
+26.6% of residual), 15.40% born_analytic, 12.03% wave_refused, 0.32%
+saddle_c3. See `spec_changelog.d/2026-08-17_census_band_ladder_fix.md`
+and SPEC.md's Microlensing-engine row for the audited mechanism; this
+completed record's own numbers are superseded, not wrong for their own
+(pre-audit) code state.
