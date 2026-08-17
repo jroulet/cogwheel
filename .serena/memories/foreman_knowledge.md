@@ -144,3 +144,9 @@
   the same removed mechanism are the same defect, not a separate finding.
   Verify any numeric claim in the corrected prose (w_trust, thresholds) with
   a fresh pytest run before trusting it, not just internal consistency.
+- DEAD-FIELD REMOVAL VERIFICATION RECIPE (2026-08-17, serve_route_census):
+  before deleting an unused dataclass field + its assignment,
+  `search_for_pattern` the field name file-wide to confirm the two sites are
+  the ONLY occurrences; after removal, re-run the same search (expect zero)
+  plus `ast.parse` + a live import + a `dataclasses.fields()` count check as
+  the mechanical proof the removal was both clean and syntactically valid.

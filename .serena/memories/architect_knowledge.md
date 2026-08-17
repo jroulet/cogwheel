@@ -737,3 +737,21 @@
   Professor + Inspector both PASSed the fix; Librarian confirmed no
   SPEC/DATA_CONTRACTS impact (private-helper guard tolerance, not a public
   contract change).
+
+## 2026-08-15/17 build (serve_route_census)
+- ENGINE-FREE CENSUS MODULE PATTERN: model new engine-free demand/census
+  modules on `tiling_census.py` (lazy imports), never `surrogate_census.py`
+  (imports engine at module load). MECE waterfall taxonomy: decision ORDER
+  can differ from the published label order (put engine_refused first even
+  if it's not first in the label list) — document both explicitly.
+- RESIDUAL/ROUTE SPLITS MUST GAUGE ON caustic_rho, NEVER rho_lobe (F073
+  lineage) — this recurs across builds as the correct partition currency
+  for anything measuring distance-to-caustic outside the astroid interior.
+- ROUTE-EQUALITY PINS (e.g. D2 sign-flip invariance) belong on the route
+  KIND vector, not a lobe/branch index — index identity is parity-fragile,
+  kind identity is the physically invariant object.
+- NEVER HARDCODE AN EMPIRICAL RATE CLAIM (e.g. "engine_refused ~59%") into
+  a plan or docstring as a predicted constant — require it be MEASURED and
+  reported per-run; sample-dependent rates are report output, not a design
+  invariant (converges with Professor's "must be reported empirically,
+  never asserted a priori" ruling).

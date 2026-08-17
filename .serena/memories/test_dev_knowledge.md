@@ -698,3 +698,22 @@
   (here 0.1-0.7 rad, both surrogate_lobe and lobe_subdivision suites) are
   far above the new band — cheap and prevents silently flipping an
   existing regression test into a false negative.
+
+## 2026-08-17 build (serve_route_census)
+- ENGINE-FREE PROOF PATTERN (reusable): booby-trap every exact-wave/engine
+  door (evaluate, f_schwinger, _f_schwinger_mpmath, mpmath fn) with a
+  UNIQUE sentinel Exception that is explicitly NOT a subclass of the
+  production module's caught-refusal tuple; assert both call_count==0 on
+  each door AND sentinel-disjointness from the catch tuple (so a future
+  widening of that tuple that would swallow the sentinel is itself caught).
+- CAUSTIC-REACH FIXTURE TRICK: when no caustic_reach() helper exists,
+  derive it as `1/ppgo_map.caustic_rho(gamma, 1.0, 0.0)`.
+- Route/kind D2-invariance tests should drive the REAL classify_draw via a
+  memoized `_classify_env()` triple (load/frequency-grid/band-edges) shared
+  with run(), never a reimplementation — same "call shipping code" rule
+  applied to route-kind vectors, not just numeric oracles.
+- Gate-bounds-wrong-object regression witnesses (F069/F074 family): the
+  omitted-term/certificate estimate is often MAXIMAL exactly ON a symmetry
+  axis (e.g. cusp axis, angle=0) — place the witness there with a large
+  magnitude parameter, not at a generic off-axis point, or the "huge
+  estimate" case under test won't actually be huge.

@@ -675,3 +675,19 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   test_lensing_lobe_subdivision.py 49 pass in 112s. Heavy full-engine
   training + sampling (COGWHEEL_TRAIN_TIER=1) left operator-deferred, not
   needed for this verdict.
+
+## 2026-08-17 (serve_route_census demand census review, verdict PASS)
+- Direct census eyeball (seed=0, n=150, gauge=caustic_rho not rho_lobe):
+  route_counts sum=150 (MECE); surrogate=0; saddle_c3=1; born_analytic=20;
+  engine_residual=129 (split: near_caustic_tube=28, interior=101,
+  born_chart_demand=0 by construction since rho>2 is skimmed upstream by
+  born_analytic); engine_refused=0 at this scale (must be reported
+  empirically per-run, never asserted a priori — no "~59%" invariant).
+- Saddle finite-but-huge c3 in this census: production
+  ppgo_error_estimate~4.8e15 (finite, not None); safety(20)*est >>
+  bar(1e-3) so the REAL gate refuses (route=engine_residual, not
+  saddle_c3) — confirms the F069/F074 "gate bounds safety*est, not
+  est-is-finite" fix holds under a fresh oracle probe.
+- Engine-free guarantee reconfirmed via 4 door sentinels (evaluate,
+  f_schwinger, _f_schwinger_mpmath, mpmath.gauss_quadrature) all outside
+  the caught refusal tuple; call_count==0 on every door after a real run.

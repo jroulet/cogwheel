@@ -910,3 +910,19 @@
   plus straddle->None, so it was already safe. When auditing a sibling
   family for the same defect shape, check the GUARD STRICTNESS, not just
   whether the function has a similarly-named guard.
+
+## 2026-08-15/17 build (serve_route_census)
+- CensusConfig-style duck typing: `draw_samples(config)` only reads
+  `config.n_samples`/`config.seed` — any frozen dataclass with those two
+  fields works as its argument; don't couple a new census's config type to
+  `surrogate_census.CensusConfig`.
+- `cancellation_exponent` RAISES LensDomainError for gamma>=1 (i.e.
+  1-kappa<=|gamma|) — callers must gate saddle-parity draws (pass math.inf
+  directly, mirroring operator._saddle_grid) rather than calling it
+  unconditionally.
+- CAUTION: don't trust an in-session "X does not exist in module Y" claim
+  without a fresh grep — CancellationError DOES exist in cogwheel/lensing
+  (operator.py's F_op raises it, IS-A RuntimeError, per this same file's
+  earlier entry); a build note asserting it "does not exist in
+  cogwheel/lensing" was investigating one call site's needs, not the whole
+  package — verify absence claims package-wide before recording as fact.

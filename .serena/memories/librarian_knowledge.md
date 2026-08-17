@@ -398,3 +398,16 @@
   linking itself. Describe the syntax without literal brackets (e.g.
   "double-bracketed FINDINGS F0xx") in any fragment about the wiki-link
   convention.
+
+## 2026-08-17 (serve_route_census doc sync)
+- STANDING RULE (confirmed 3x: tiling_census 08-14, saddle_tube_fundamental_
+  training 08-15, serve_route_census 08-17): "new lensing census/training
+  module shipped" is a standing trigger to add a dated inline paragraph to
+  SPEC.md's big Microlensing-engine table row — `sync_derived_docs.py`
+  reporting "N checks, all OK" only verifies mechanical/structural
+  completeness, NOT this narrative depth, so a clean sync run is not
+  evidence the row is current.
+- INS-N-00N inspector finding labels are NOT persistent cross-build IDs
+  (unlike F0xx FINDINGS numbers) — the same label (e.g. INS-1-001) recurs
+  across unrelated builds; don't assume label reuse means doc staleness
+  carried forward.

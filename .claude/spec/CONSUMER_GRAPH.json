@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "generated_by": "scripts/regenerate_consumer_graph.py (jedi.goto + ripgrep)",
-  "generated_at": "2026-08-14",
+  "generated_at": "2026-08-17",
   "loaders": {
     "EventData.from_npz": {
       "artifact": "event_data_npz",
@@ -183,6 +183,10 @@
         {
           "name": "_shard_d_fixture",
           "file": "cogwheel/tests/test_lensing_surrogate_training.py"
+        },
+        {
+          "name": "main",
+          "file": "scripts/serve_route_census.py"
         },
         {
           "name": "run",
