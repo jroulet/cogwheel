@@ -1606,8 +1606,19 @@ class BuildOrchestrator:
             + f"\n\n**IMPORTANT**: If you edit any file under `docs/source/`, "
             f"run the Sphinx docs rebuild command before finishing."
         )
-        await self._run_skill("librarian", librarian_task, max_turns=75)
-        write_state(self.project_root, "librarian", status="completed")
+        try:
+            await self._run_skill("librarian", librarian_task, max_turns=75)
+            write_state(self.project_root, "librarian", status="completed")
+        except (RuntimeError, TimeoutError, asyncio.TimeoutError) as exc:
+            # A Librarian death here is doc-only, but it lands AFTER the
+            # Inspector, Professor, and tree gate have all passed — an
+            # uncaught raise strands maximal completed work (the 2026-08-17
+            # Phase-2 path audit ranked this the top post-gate SPOF). The
+            # commit path already tolerates missing fragments via the SDK
+            # doc-debt deferral; log, leave state un-completed so the
+            # post-commit /doc-sync backlog picks it up, and continue.
+            self._log(f"  Librarian failed ({exc}) — continuing to commit; "
+                      "doc sync deferred to the driver backlog")
 
         # Render canonical files from the fragments the Librarian just wrote,
         # BEFORE the commit, so the generated files and their fragments land
@@ -2650,8 +2661,31 @@ class BuildOrchestrator:
                 # Same turn-floor protection as coders: an under-budgeted
                 # revision-loop test_dev died at error_max_turns and killed
                 # build 8h-a-fin (2026-07-23) with the content nearly done.
-                td_result, _ = await self._run_agent(
-                    'test_dev', td_task, max_turns_override=75)
+                try:
+                    td_result, _ = await self._run_agent(
+                        'test_dev', td_task, max_turns_override=75)
+                except RuntimeError as exc:
+                    if "error_max_turns" not in str(exc):
+                        raise
+                    # The turn FLOOR above was not enough: the revision-loop
+                    # test_dev exhausted 75 turns reconciling heavy suites
+                    # and, with no catch here, killed the whole build
+                    # (tube_beat_free launch 1, 2026-08-16 — Inspector rev 1,
+                    # findings unresolved, all Phase-2 work stranded). Same
+                    # remedy as the fix-coder below: ONE fresh continuation
+                    # over the partial tree, salvaging parseable test state
+                    # first.
+                    self._log("  revision test_dev exhausted max_turns — "
+                              "one fresh continuation with the partial tree")
+                    self._recover_partial_test_state()
+                    td_result, _ = await self._run_agent(
+                        'test_dev',
+                        td_task + "\n\nNOTE: a prior attempt ran out of "
+                        "turns mid-way; the working tree carries its "
+                        "partial test edits. FINISH the remaining "
+                        "findings — do not restart files that are "
+                        "already complete.",
+                        max_turns_override=75)
                 self._collect_change_report(td_result)
                 impl_findings = [
                     f for f in impl_findings if f not in test_findings]
