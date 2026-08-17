@@ -1,4 +1,20 @@
-# Live session state (2026-08-17 ~10:40 EDT) — post-compaction re-orientation
+# Live session state (2026-08-17 ~16:55 EDT)
+
+RUNNING: build `c3_band_split_zero_refusal` (queue item 2).
+Log /tmp/c3_band_split_zero_refusal_20260817_165153.log, PID 1469803,
+approval dir /tmp/c3_band_split_zero_refusal_approval, monitor armed.
+Brief: .claude/handoff/c3_band_split_zero_refusal.md (verified facts at
+6a3f43c; tripwire scoped to the engine-reachable overlap band w<=150).
+Acceptance: census wave_refused -> ZERO (or named measure-zero set),
+saddle_c3 live, byte-exact null-split identity, full fast suite green.
+On terminal: driver acceptance = census re-run (queue item 3) comes
+right after.
+
+CLOSED TODAY: tube_beat_free_representation — F083 quote (n_theta=10,
+eps=4.2652e-03 vs 0.0237 bar), commit 69c79b8; close-out crew passes
+done (Librarian e195e82, Dreamer 2de2b19, Tidier 7243c9b).
+
+# Older re-orientation notes (superseded)
 
 HAND-FINISH IN PROGRESS: build `tube_beat_free_representation` launch 5
 ran the full DAG — Inspector PASS (after driver escalation rulings: fix
