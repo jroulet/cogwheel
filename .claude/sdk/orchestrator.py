@@ -931,6 +931,26 @@ class BuildOrchestrator:
                         self._log("Plan verification failed:")
                         for f in failures:
                             self._log(f"  - {f}")
+                        # Feed the findings BACK to the Architect instead of
+                        # dying: structural verification failures (suite
+                        # ownership overlaps, malformed WPs) are mechanical
+                        # and precisely stated — exactly what the revision
+                        # loop exists for. Measured 2026-08-17: a healthy
+                        # $8.31 plan died here on a one-line shard-split fix
+                        # the Architect was never shown.
+                        if attempt < max_plan_attempts:
+                            user_feedback = (
+                                "Your plan FAILED the orchestrator's "
+                                "structural verification gate (this is "
+                                "automated, not a human review). Fix "
+                                "EXACTLY these findings and resubmit the "
+                                "full corrected plan JSON:\n- "
+                                + "\n- ".join(failures))
+                            self._log(
+                                f"  (revision {attempt + 1}/"
+                                f"{max_plan_attempts}: feeding failures "
+                                "back to the Architect)")
+                            continue
                         raise GateFailure("Plan did not pass verification gate.")
 
                     # Fill in missing max_turns via Architect
