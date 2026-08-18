@@ -22,18 +22,16 @@ SHIPPED THIS SESSION (all pushed, tip 733b7ef):
    Recovery doctrine: driver-split WPs with exact search anchors beat
    monolith wiring WPs (WP2 170-turn flounder -> 5-WP recovery clean).
 
-IN FLIGHT: Librarian post-commit sync (13-commit backlog) + the Born
-completion brief redraft (.claude/handoff/born_farfield_completion.md
-from todo.d/lensing_born_farfield_completion.md — supersedes
-deltoid_farfield_redesign.md). Tidier after Librarian.
-
-DRIVER LOOP: file-based gates (plan_approved / plan_rejected /
-escalation_fix with diff-verified rulings); tree-gate red -> fixer
-subagent with the fixture-vs-production fork rule -> driver gate re-run
--> pathspec'd driver commit (pre-commit hook demands SPEC entry for new
-modules + spec_changelog.d fragment). Timing-tier blind spot: 8-way
-runs deselect timing guards — verify touched files under
-COGWHEEL_STRICT_TIMING too when fixtures change.
+BORN FAR-FIELD: RESOLVED and CLOSED (completed.d record 5c6de27).
+Build 1 (3f3c57d): certificate + carrier-only machinery, measured
+dormant; honest census mirror (born_analytic 14.61%->0 was mirror
+infidelity). Probe (b830b0e): corrected carrier dead at ANY order
+(second-image beat floor). Build 2 (b50c6d4, FIRST fully clean
+in-pipeline commit): trained-floor band-split revived 3.43% to
+born_analytic; GO-carrier rung correctly NOT built (admissible slice
+already c3-served; the rest is chart territory); residual-chart
+representation settled (two-image GO carrier, one definition).
+Honest ledger: engine_residual ~41%, all named chart demand or 2b.
 
 QUEUE:
 5c. born_farfield_completion build — LAUNCH when brief + close-out
