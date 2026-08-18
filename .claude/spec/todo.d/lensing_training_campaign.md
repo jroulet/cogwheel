@@ -7,7 +7,17 @@ depends_on: [lensing_born_farfield_completion, lensing_low_w_diffractive_analyti
   (REWRITTEN 2026-08-15 after the gamma-slice launch was stopped)**
   `[→ spec]` — owner doctrine, verbatim intent: analytics serve first;
   charts exist ONLY where the analytic ladder cannot serve; every axis is
-  sized by the problem's own scales, never a bare count. The stopped
+  sized by the problem's own scales, never a bare count.
+  SADDLE-BOTTOM ANCHOR-RESIDUAL CHARTS (owner, 2026-08-18): the low-w
+  saddle band is INTERIM-hosted by Rung S (direct f_schwinger, census
+  route `diffractive_engine_hosted` — engine demand by construction; 7b
+  cannot pass while it serves). This campaign retires it: train charts
+  storing the residual against the EXACT anchor
+  F(w->0) = -1j*sqrt(mu_macro) (the divergent-series band's one exact
+  analytic object — the Professor's R1/R2 rulings, low-w rung build),
+  demand sized by the census's diffractive_engine_hosted route,
+  optimal-representation clause in force
+  ([[lensing_born_farfield_completion]]). The stopped
   first launch (332-chart gamma slice, killed at 4%) failed this bar
   three ways, all now on record: one 0.04-wide gamma band per parity
   (~4%/~7% of the prior); 7 gamma nodes per sliver band (a count against
