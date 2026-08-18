@@ -3,7 +3,7 @@
 WHAT
 ----
 `run` draws full-reach lens prior samples and classifies each draw into
-EXACTLY ONE of eight mutually-exclusive serve routes -- the analytic rung
+EXACTLY ONE of ten mutually-exclusive serve routes -- the analytic rung
 that WOULD answer it (or the exact-wave engine that would have to) -- WITHOUT
 ever evaluating a wave-optics amplitude.  It then aggregates the draw-level
 routes into ``(region x gamma-band x w-band)`` cells and splits the
@@ -82,14 +82,18 @@ from cogwheel.lensing.chang_refsdal import geometry
 # Route vocabulary
 # ---------------------------------------------------------------------------
 
-#: The eight MECE draw-level serve routes, listed in label-enumeration order.
+#: The ten MECE draw-level serve routes, listed in label-enumeration order.
 #: The DECISION order (a first-admitting waterfall) is DIFFERENT and is
 #: documented on `classify_draw`; it mirrors the PRODUCTION rung order of
 #: ``likelihood._amplification_coefficients``: ``engine_refused`` is decided
 #: first, then ``surrogate`` (artifact mode only), ``ppgo_above_ceiling``
 #: (the above-ceiling band-split rung -- in production it fires BEFORE the
 #: saddle rung), ``saddle_c3`` (whole-band-analytic OR c3 band-split),
-#: ``born_analytic``, and finally the per-node pass resolves
+#: ``born_analytic``, then the low-w diffractive rung splits by parity into
+#: ``diffractive_analytic`` (positive-parity Rung P, an ANALYTIC-side serve)
+#: and ``diffractive_engine_hosted`` (macro-saddle Rung S, an ENGINE-HOSTED
+#: serve -- under the zero-engine-served bar it is engine demand, never an
+#: analytic closure), and finally the per-node pass resolves
 #: ``wave_refused`` / ``engine_residual`` / ``analytics_engine_hosted``
 #: (in that precedence order -- see `classify_draw`).
 SERVE_ROUTES: tuple[str, ...] = (
@@ -97,6 +101,8 @@ SERVE_ROUTES: tuple[str, ...] = (
     'ppgo_above_ceiling',
     'saddle_c3',
     'born_analytic',
+    'diffractive_analytic',
+    'diffractive_engine_hosted',
     'analytics_engine_hosted',
     'engine_residual',
     'wave_refused',
@@ -193,6 +199,9 @@ class _ProductionModules:
     saddle_c3_split_point: Any            # likelihood._saddle_c3_split_point
     saddle_min_image_sep: Any             # likelihood._saddle_min_image_sep
     saddle_min_sep_floor: float           # likelihood._SADDLE_FARFIELD_MIN...
+    farfield_w_floor: Any                 # channels.farfield_w_floor
+    diffractive_w_low: Any                # _diffractive.diffractive_w_low
+    diffractive_refusal_errors: tuple[type[BaseException], ...]  # w_low wall
     macro_matrix: Any                     # geometry.macro_matrix
     select_branch: Any                    # operator.select_branch
     uniform_arm_value: Any                # operator._uniform_arm_value
@@ -217,6 +226,10 @@ def _load_production_modules() -> _ProductionModules:
     from cogwheel.lensing import surrogate_census as sc
     from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels, _schwinger
     from cogwheel.lensing.chang_refsdal import operator as op
+    from cogwheel.lensing.chang_refsdal._diffractive import (
+        DiffractiveDomainError, diffractive_w_low)
+    from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
+    from cogwheel.lensing.chang_refsdal.channels import farfield_w_floor
     from cogwheel.lensing.likelihood import (
         _SADDLE_FARFIELD_MIN_IMAGE_SEP, _saddle_c3_split_point,
         _saddle_farfield_analytic_serves, _saddle_min_image_sep)
@@ -230,6 +243,10 @@ def _load_production_modules() -> _ProductionModules:
         saddle_c3_split_point=_saddle_c3_split_point,
         saddle_min_image_sep=_saddle_min_image_sep,
         saddle_min_sep_floor=float(_SADDLE_FARFIELD_MIN_IMAGE_SEP),
+        farfield_w_floor=farfield_w_floor,
+        diffractive_w_low=diffractive_w_low,
+        diffractive_refusal_errors=(
+            HypergeometricDomainError, DiffractiveDomainError),
         macro_matrix=geometry.macro_matrix,
         select_branch=op.select_branch,
         uniform_arm_value=op._uniform_arm_value,
@@ -558,7 +575,8 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
 
     Decision waterfall (first-admitting), mirroring the PRODUCTION rung
     order of ``likelihood._amplification_coefficients`` (surrogate ->
-    above-ceiling ppGO -> saddle c3 -> Born -> exact engine):
+    above-ceiling ppGO -> saddle c3 -> Born -> low-w diffractive ->
+    exact engine):
 
     1. ``engine_refused`` -- the real geometry partition (or its construction)
        raises a named domain refusal; the source produces ``lnL = -inf`` and
@@ -591,7 +609,16 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
        and ``caustic_rho > 2`` (the production Born intercept's coverage
        predicate, minus the chart-box test that demand mode has no chart
        for).
-    6. per-node pass, resolved in this precedence: ``wave_refused`` (any
+    6. low-w diffractive rung (far-field exterior, ``w_lo < farfield_w_
+       floor``), SPLIT BY PARITY onto opposite ledger sides: ``diffractive_
+       analytic`` for the positive-parity Rung P (analytic ``F_P`` admitted
+       by the ``diffractive_w_low`` truncation certificate -- an ANALYTIC
+       serve), and ``diffractive_engine_hosted`` for the macro-saddle Rung S
+       (exact engine hosting the whole band under the per-draw reachability
+       cap ``min(w_split, W_CEILING_SCHWINGER)`` -- an ENGINE-HOSTED serve,
+       so the 7b zero-engine-served bar counts it as engine demand, NEVER an
+       analytic closure).  ``w_split`` is recorded on the Rung-S result.
+    7. per-node pass, resolved in this precedence: ``wave_refused`` (any
        node is an above-QD-ceiling deterministic refuser -- production
        raises ``SchwingerCertificationError`` and the draw's ``lnL`` is
        ``-inf``, so it is a production REFUSAL, not engine demand), then
@@ -599,7 +626,7 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
        ``analytics_engine_hosted`` (every node served by the engine-hosted
        analytics -- geometric asymptote and/or uniform arms).
 
-    The per-node pass is reached ONLY after intercepts 1-5 decline, so
+    The per-node pass is reached ONLY after intercepts 1-6 decline, so
     ``wave_refused`` is now a DERIVED, named set: intercept 3 absorbs every
     above-ceiling draw whose ceiling gate passes and intercept 4 absorbs
     the c3-served saddles (whole-band AND band-split -- a ``w_hi > 150``
@@ -677,7 +704,62 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     if gamma != 0.0 and rho is not None and rho > _BORN_RHO_FLOOR:
         return _result('born_analytic', ())
 
-    # --- Per-node pass (reached ONLY after intercepts 1-5 decline) ---
+    # --- Intercept 6: low-w diffractive rung (parity-split, WP3) ---------
+    # Mirrors the production diffractive intercept in
+    # ``likelihood._amplification_coefficients`` (ordered LAST among the
+    # analytic intercepts, after Born, by w-band disjointness: it owns the
+    # sub-floor band bottom).  Gated to the FAR-FIELD EXTERIOR (exactly two
+    # real images) and only when the band dips below the per-draw
+    # ``farfield_w_floor`` (else the far-field rungs / engine own the band).
+    # The rung SPLITS BY PARITY onto OPPOSITE sides of the ledger:
+    #   * gamma < 1 (positive parity, Rung P) -> ``diffractive_analytic``:
+    #     the analytic ``F_P`` series admitted by the closed-form truncation
+    #     certificate ``diffractive_w_low`` (an ANALYTIC-side serve).
+    #   * gamma >= 1 (macro saddle, Rung S) -> ``diffractive_engine_hosted``:
+    #     the exact engine hosts the whole band under the per-draw
+    #     reachability cap ``W_reach = min(w_split, W_CEILING_SCHWINGER)``.
+    #     This is engine hosting WITH a certificate, NOT an analytic closure,
+    #     so it lands on the ENGINE-HOSTED side -- under the zero-engine-
+    #     served (7b) bar every Rung-S draw is counted as engine demand.
+    # Both branches call the SAME production certificate helpers
+    # (``diffractive_w_low`` / ``farfield_w_floor`` / ``saddle_c3_split_
+    # point``); the decision logic is never reimplemented here.
+    if int(geom.real_mask.sum()) == 2:
+        w_floor = mods.farfield_w_floor(geom.delays, geom.real_mask)
+        if w_lo < w_floor:
+            if gamma < 1.0:
+                # Rung P admission mirror: the certificate admits an analytic
+                # sub-band iff ``w_low`` is finite and strictly inside the
+                # band (``w_low > w_lo``).  A ``HypergeometricDomainError``
+                # (kernel out of the certified box) is production's
+                # decline-and-fall-through (``return None``); the gamma'-wall
+                # ``DiffractiveDomainError`` is a production refusal near
+                # gamma==1 -- caught here too and declined, the census's
+                # conservative demand-overcounting direction (it can only push
+                # such a sliver into the engine-demand node pass below, never
+                # mislabel it as analytic closure).
+                try:
+                    w_low = mods.diffractive_w_low((y1, y2), gamma, 0.0, 0.0)
+                except mods.diffractive_refusal_errors:
+                    w_low = None
+                if w_low is not None and float(w_low) > w_lo:
+                    return _result('diffractive_analytic', ())
+            else:
+                # Rung S engine-host mirror: reachable iff the band ceiling
+                # fits under the per-draw reachability cap.  ``w_split`` is
+                # the c3 certificate split (``None`` for a merging pair -> no
+                # cap beyond the engine ceiling); recorded so the saddle-
+                # bottom chart demand can be sized (closure #3).
+                w_split = mods.saddle_c3_split_point(real_images, source,
+                                                     matrix)
+                w_reach = (mods.w_ceiling_dd if w_split is None
+                           else min(float(w_split), mods.w_ceiling_dd))
+                if w_hi <= w_reach:
+                    return _result(
+                        'diffractive_engine_hosted', (),
+                        w_split=None if w_split is None else float(w_split))
+
+    # --- Per-node pass (reached ONLY after intercepts 1-6 decline) ---
     delta_min = mods.real_delay_min_separation(source, matrix)
     kinds = _classify_nodes(mods, gamma=gamma, source=source, w_grid=w_grid,
                             delta_min=delta_min, eta=eta)
@@ -866,6 +948,7 @@ def run(config: ServeRouteCensusConfig | None = None,
             'serve_routes_decision_order': [
                 'engine_refused', 'surrogate', 'ppgo_above_ceiling',
                 'saddle_c3', 'born_analytic',
+                'diffractive_analytic|diffractive_engine_hosted',
                 'wave_refused|engine_residual|analytics_engine_hosted'],
             'serve_routes': list(SERVE_ROUTES),
             'route_kinds': list(ROUTE_KINDS),

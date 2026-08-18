@@ -96,12 +96,16 @@ from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels
 from cogwheel.lensing.chang_refsdal.channels import (
     _channel_switch, _physical_kernels, reconstruct_from_envelope,
     reconstruct_farfield, farfield_ghost_term, farfield_w_floor,
-    _FARFIELD_KERNEL_FAMILY, FARFIELD_DIFFRACTIVE,
+    _frame_phase, _FARFIELD_KERNEL_FAMILY, FARFIELD_DIFFRACTIVE,
     FARFIELD_KERNEL_SUM, FARFIELD_KERNEL_SUM_MINUS_GHOST,
     KNOWN_FARFIELD_DEFINITIONS, KNOWN_INTERIOR_DEFINITIONS)
 from cogwheel.lensing.chang_refsdal.geometry import (
     LensDomainError, GhostDomainError, macro_matrix)
-from cogwheel.lensing.chang_refsdal._schwinger import W_CEILING_SCHWINGER_QD
+from cogwheel.lensing.chang_refsdal._schwinger import (
+    W_CEILING_SCHWINGER, W_CEILING_SCHWINGER_QD, SchwingerCertificationError)
+from cogwheel.lensing.chang_refsdal._diffractive import (
+    DiffractiveDomainError, diffractive_amplification, diffractive_w_low)
+from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
 from cogwheel.lensing.chang_refsdal.operator import RHO_END
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
@@ -1789,6 +1793,182 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             return None
         return float(ceiling)
 
+    def _engine_farfield_total(self, lens, sub_w):
+        """Exact amplification total ``F`` at ``sub_w`` via the engine host.
+
+        Thin wrapper over `_evaluate_envelope` that returns only the exact
+        total: in the `FARFIELD_DIFFRACTIVE` gauge the envelope IS ``F``, so
+        no channel subtraction is needed.  The engine self-certifies with
+        its paired N/2N quadrature (``_CERTIFICATION_TOL = 3e-10``); a
+        `SchwingerCertificationError` is that certificate declining, which
+        this maps to ``None`` for a clean fall-through to refusal.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters (``gamma, beta, kappa, y1, y2``).
+        sub_w : np.ndarray
+            Positive dimensionless frequencies to host, 1-D.
+
+        Returns
+        -------
+        np.ndarray or None
+            Exact total ``F`` at ``sub_w``, or ``None`` if the engine's
+            quadrature certificate declined.
+        """
+        try:
+            _partition, _envelope, exact = self._evaluate_envelope(
+                lens, sub_w, pad_w=float(sub_w.max()))
+        except SchwingerCertificationError:
+            return None
+        return exact
+
+    def _low_w_diffractive_serve(self, lens, dense_w, geom, w_lo, w_hi):
+        """Serve the far-field diffractive bottom below ``farfield_w_floor``.
+
+        Replaces the F070 refusal -- below the far-field kernel-sum floor
+        the stored envelope DIVERGES, so the kernel-sum family cannot be
+        served there -- with the two-rung diffractive serve, routed through
+        the one gauge that is finite at ALL ``w``: `FARFIELD_DIFFRACTIVE`
+        (switch ``0`` everywhere, "subtract nothing", the envelope IS the
+        bounded smooth ``F``).  The WHOLE dense band is reconstructed in that
+        single gauge; the chart's upper-band kernel-sum serve is
+        deliberately NOT preserved here (gauge-mixing / chart preservation is
+        deferred to WP2b/WP2c), so this rung either serves the whole band or
+        returns ``None`` -- a byte-identical fall-through to the prior F070
+        refusal path.
+
+        Rung P (positive parity, ``det A > 0`` i.e. ``gamma < 1``): the
+        low-``w`` truncation certificate ``diffractive_w_low`` admits the
+        analytic series ``F_P`` (`diffractive_amplification`) on ``w <
+        w_low``; the exact engine hosts ``[w_low, w_hi]``.  A single
+        `_band_split_mask` at ``w_low`` (analytic below / engine above).
+        The c3/Born nested split at ``w_split`` is deferred to WP2b/WP2c.
+        ``w_low`` is a closed-form certificate, never a measured constant;
+        `_diffractive.diffractive_w_low` honest-verifies the candidate
+        against the actual truncated series at the band boundary before
+        returning it, refusing (returning ``None``) whenever that honest
+        relative truncation error exceeds ``CERTIFICATION_BAR`` -- so
+        admission here is certificate-verified, not merely closed-form.
+
+        Rung S (macro saddle, ``det A < 0`` i.e. ``gamma > 1``): the Fermat
+        moments diverge, so there is NO analytic series.  The exact engine
+        HOSTS the whole low-``w`` band, self-certified by its paired N/2N
+        quadrature.  Reachability is capped PER DRAW at ``W_reach =
+        min(w_split, W_CEILING_SCHWINGER)`` (the cheap direct-double engine
+        ceiling, read from `_schwinger`, never a hardcoded ``60``); a band
+        topping out above ``W_reach`` refuses.  ``w_split`` is the c3
+        certificate split (`_saddle_c3_split_point`), ``None`` for a merging
+        pair (no cap beyond the engine ceiling; the engine's own certificate
+        gates the near-caustic corner).  This is engine hosting WITH a
+        certificate -- a strict improvement over refusal, NOT an analytic
+        closure -- so the census must count it as engine demand (WP3).
+
+        Both rungs demodulate ``F`` by ``geom.t_min`` (READ from the
+        geometry partition, never recomputed) into the frame-invariant
+        far-field envelope ``E = F * exp(+1j w t_min)`` and hand it to
+        `reconstruct_farfield` under `FARFIELD_DIFFRACTIVE`, which
+        re-modulates by ``exp(-1j w t_min)`` and rebuilds the channel
+        kernels exactly as the trained far-field serve mirror does.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters (``gamma, beta, kappa, y1, y2, m_lens_msun,
+            z_lens``).  ``kappa`` and ``beta`` are used AS GIVEN and may be
+            nonzero: Rung P handles ``kappa != 0`` / ``beta != 0`` through
+            the reduced-shear map (``lam = 1 - kappa``; reduced shear
+            ``gamma' = gamma / lam``; the source is rescaled by ``sqrt(lam)``
+            and rotated by ``beta`` into the eigenframe, with a ``1 / lam``
+            amplitude prefactor, so ``F_P -> sqrt(mu_macro)`` as ``w -> 0``)
+            inside `_diffractive.diffractive_amplification` /
+            ``diffractive_w_low``, which receive ``lens['beta']`` and
+            ``lens['kappa']`` verbatim.
+            There is NO upstream ``kappa == 0`` / ``beta == 0`` guard: the
+            sole gate on the calling path (the ``_amplification_coefficients``
+            diffractive intercept, ~L3157-3161) is
+            ``int(geom.real_mask.sum()) == 2`` -- positive-parity image-count
+            selection of the far-field exterior -- and it forwards ``lens``
+            unmodified.  Admission onto the Rung-P analytic sub-band is
+            therefore governed SOLELY by the leading-omitted-term truncation
+            certificate ``diffractive_w_low`` (which self-refuses when the
+            honest truncation error breaches ``CERTIFICATION_BAR``), not by
+            any ``kappa`` / ``beta`` precondition.
+        dense_w : np.ndarray
+            Full dimensionless-frequency grid, 1-D, strictly positive.
+        geom : ChangRefsdalGeometryPartition
+            Geometry-only partition over ``dense_w`` (delays, saddle
+            kernels, real mask, ``t_min``, images) already in hand.
+        w_lo, w_hi : float
+            ``dense_w`` band extremes (``dense_w.min()`` / ``.max()``).
+
+        Returns
+        -------
+        tuple or None
+            ``(delays, k0, k1, geom)`` on a full-band serve, or ``None`` to
+            fall through to the prior F070 refusal path byte-identically.
+        """
+        gamma = float(lens['gamma'])
+        farfield = np.zeros(dense_w.shape, dtype=complex)
+
+        if gamma < 1.0:
+            # Rung P: analytic F_P below the truncation certificate w_low,
+            # exact engine host above it.
+            y = (lens['y1'], lens['y2'])
+            try:
+                w_low = diffractive_w_low(
+                    y, gamma, lens['beta'], lens['kappa'])
+            except HypergeometricDomainError:
+                return None
+            if w_low is None or w_low <= w_lo:
+                # Null case: no admissible analytic sub-band inside the
+                # band.  Refuse exactly as the F070 fall-through did.
+                return None
+            _split, below_low = _band_split_mask(dense_w, w_low)
+            try:
+                for idx in np.flatnonzero(below_low):
+                    farfield[idx] = diffractive_amplification(
+                        float(dense_w[idx]), y, gamma,
+                        lens['beta'], lens['kappa'])
+            except HypergeometricDomainError:
+                return None
+            above_low = ~below_low
+            if above_low.any():
+                host = self._engine_farfield_total(lens, dense_w[above_low])
+                if host is None:
+                    return None
+                farfield[above_low] = host
+        else:
+            # Rung S: no analytic series (divergent Fermat moments); host
+            # the exact engine over the whole band under the per-draw
+            # reachability cap.  ``geom.images`` is ALREADY real-only -- do
+            # NOT index it with the length-4 channel real_mask.
+            source = np.array([lens['y1'], lens['y2']], dtype=float)
+            matrix = macro_matrix(gamma, lens['beta'], lens['kappa'])
+            w_split = _saddle_c3_split_point(
+                np.asarray(geom.images, dtype=float), source, matrix)
+            w_reach = (W_CEILING_SCHWINGER if w_split is None
+                       else min(w_split, W_CEILING_SCHWINGER))
+            if w_hi > w_reach:
+                return None
+            host = self._engine_farfield_total(lens, dense_w)
+            if host is None:
+                return None
+            farfield[:] = host
+
+        # Demodulate F by t_min (READ from geom) into the frame-invariant
+        # far-field envelope and reconstruct via the diffractive serve
+        # mirror.  `_frame_phase` (w t_min reduced mod 2*pi) is the SAME
+        # authoritative phase `reconstruct_farfield` re-modulates with, so
+        # the demod/re-mod pair cancels to machine precision.
+        envelope = farfield * np.exp(1j * _frame_phase(dense_w, geom.t_min))
+        kernels, _total = reconstruct_farfield(
+            dense_w, envelope, geom.delays, geom.saddle_kernels,
+            geom.real_mask, FARFIELD_DIFFRACTIVE, geom.t_min)
+        k0, k1 = self._reduce_dense_kernels(kernels)
+        delays = self._image_delays(lens, geom)
+        return delays, k0, k1, geom
+
     def _surrogate_coefficients(self, par_dic):
         """
         Surrogate fast-path amplification coefficients, or ``None``.
@@ -1985,6 +2165,20 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         if served and definition in _FARFIELD_KERNEL_FAMILY:
             w_floor = farfield_w_floor(geom.delays, geom.real_mask)
             if float(chart_w.min()) < w_floor:
+                # F070 low-w window.  The kernel-sum family DIVERGES below
+                # the floor, so the chart cannot serve here (Build 8h; once
+                # served 468x max|F| wrong).  Attempt the two-rung
+                # diffractive serve instead: analytic ``F_P`` below the
+                # ``w_low`` truncation certificate for positive parity, and
+                # an exact-engine host with a per-draw reachability cap for
+                # macro saddle -- reconstructed over the WHOLE band in the
+                # finite `FARFIELD_DIFFRACTIVE` gauge.  On any refusal it
+                # returns None and we fall through byte-identically to the
+                # prior F070 refusal path (served = False).
+                low_w_result = self._low_w_diffractive_serve(
+                    lens, dense_w, geom, w_lo, w_hi)
+                if low_w_result is not None:
+                    return low_w_result
                 served = False
                 envelope_chart = None
 
@@ -2428,6 +2622,43 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         envelope[below_mask] = ff_envelope[keep]
         return envelope
 
+    def _diffractive_bottom_ceiling(self, lens):
+        """Low-``w`` diffractive truncation certificate ``w_low``, or ``None``.
+
+        Thin wrapper over `diffractive_w_low`: the closed-form frequency
+        below which the positive-parity diffractive series ``F_P``
+        (`diffractive_amplification`) is certified to the truncation bar.
+        It supplies the NESTED low split shared by the c3 and Born
+        band-split rungs -- the boundary between the analytic diffractive
+        bottom ``[w_lo, w_low)`` (Rung P) and the engine/chart host
+        ``[w_low, w_split)``.
+
+        Returns ``None`` at the macro-saddle parity wall (``gamma >= 1``,
+        `DiffractiveDomainError`), where there is NO positive-parity series
+        -- so a saddle-c3 split's nested bottom is empty and its entire
+        below-split region is hosted by the exact Schwinger engine (Rung
+        S).  Also returns ``None`` for degenerate geometry (propagated from
+        `diffractive_w_low`) and ``0.0`` when there is no shear (series
+        exact); both collapse the nested bottom to empty via the
+        ``w_low <= w_lo`` null-split identity at the call sites.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters from `_lens_params`.
+
+        Returns
+        -------
+        float or None
+            ``w_low``; ``None`` at the parity wall or on a degenerate solve.
+        """
+        try:
+            return diffractive_w_low(
+                (lens['y1'], lens['y2']), lens['gamma'],
+                lens['beta'], lens['kappa'])
+        except DiffractiveDomainError:
+            return None
+
     def _saddle_farfield_analytic(self, lens, dense_w):
         """Tier-1 far-from-caustic macro-saddle serve with a c3 band split.
 
@@ -2534,8 +2765,26 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             # below-split nodes; the exact engine serves them and the
             # above-split residual stays zero.
             _band_split, below_mask = _band_split_mask(dense_w, w_split)
+            # NESTED low split.  Conceptually the below-split region splits
+            # again at the diffractive certificate ``w_low``: the analytic
+            # bottom ``[w_lo, w_low)`` (Rung P) and the exact engine host
+            # ``[w_low, w_split)``.  For the macro saddle (``gamma > 1``)
+            # there is NO positive-parity diffractive series --
+            # `_diffractive_bottom_ceiling` returns ``None`` at the parity
+            # wall -- so ``band_split_low`` is ``False``, ``bottom_mask`` is
+            # empty, and ``host_mask`` is the WHOLE below-split region.  Rung
+            # S (f_schwinger) therefore hosts it in a single engine call,
+            # BYTE-IDENTICAL to the un-nested serve.  The two sequential
+            # `_band_split_mask` calls reuse the shared split arithmetic (no
+            # third copy); the bottom/host boolean composition is the only
+            # inline logic.
+            w_low = self._diffractive_bottom_ceiling(lens)
+            band_split_low, below_low = _band_split_mask(dense_w, w_low)
+            bottom_mask = ((below_low & below_mask) if band_split_low
+                           else np.zeros(dense_w.shape, dtype=bool))
+            host_mask = below_mask & ~bottom_mask
             envelope = self._engine_envelope_below_split(
-                lens, dense_w, below_mask)
+                lens, dense_w, host_mask)
 
         kernels, _total = reconstruct_farfield(
             dense_w, envelope, geom.delays, geom.saddle_kernels,
@@ -2670,7 +2919,27 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # the Born-specific ``eff_ceiling`` guard above stays here because
         # only Born nulls ``w_trust`` beyond the effective ceiling.
         _band_split, below_mask = _band_split_mask(dense_w, w_trust)
-        chart_w = dense_w[below_mask]
+
+        # NESTED low split.  The below-split region ``[w_lo, w_trust)`` is
+        # split again at the diffractive certificate ``w_low``: the analytic
+        # diffractive bottom ``[w_lo, w_low)`` (Rung P, `F_P` below) replaces
+        # the chart there, and the trained carrier + residual host the middle
+        # ``[w_low, w_trust)``.  For the astroid parity (``gamma < 1``) the
+        # series exists; ``_diffractive_bottom_ceiling`` returns ``w_low`` (or
+        # ``None`` on a degenerate solve, collapsing the bottom to empty via
+        # the ``w_low <= w_lo`` null-split identity).  The two sequential
+        # `_band_split_mask` calls reuse the shared split arithmetic (no third
+        # copy); ``bottom_mask`` / ``host_mask`` are the only inline boolean
+        # composition.  ``chart_w`` -- the trained-band refusal probe -- is
+        # the HOST sub-band only: the analytic bottom does not consult the
+        # chart, so a draw whose bottom escapes the trained ``log_w`` range is
+        # no longer refused whole.
+        w_low = self._diffractive_bottom_ceiling(lens)
+        band_split_low, below_low = _band_split_mask(dense_w, w_low)
+        bottom_mask = ((below_low & below_mask) if band_split_low
+                       else np.zeros(dense_w.shape, dtype=bool))
+        host_mask = below_mask & ~bottom_mask
+        chart_w = dense_w[host_mask]
 
         # Trained-band refusal: the residual interpolator cubic-extrapolates
         # off the trained ``log_w_grid`` (RegularGridInterpolator with
@@ -2678,7 +2947,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # the sub-band the chart must serve escapes the trained frequency
         # range, decline and fall through to the exact engine rather than
         # serve an extrapolated residual (F070 kernel-sum-below-floor class).
-        if not born_chart.covers(lens['gamma'], rho, chart_w):
+        if host_mask.any() and not born_chart.covers(
+                lens['gamma'], rho, chart_w):
             return None
 
         # Duck-typed namespace adapter for born_carrier_from_partition
@@ -2712,6 +2982,26 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         carrier = born_carrier_from_partition(partition_ns)
         residual = born_chart.evaluate(dense_w, lens['gamma'], rho)
         f_total = carrier + residual
+
+        # Rung P: overwrite the total amplification on the analytic bottom
+        # ``[w_lo, w_low)`` with the diffractive series ``F_P`` (which IS the
+        # full amplification, tending to ``sqrt(mu_macro)`` as ``w -> 0``),
+        # discarding the extrapolated chart carrier + residual there.  ``F_P``
+        # is expressed in the SAME absolute-frame amplification as ``f_total``,
+        # so the shared ``(f_total - ppgo) * exp(1j w t_min)`` demodulation
+        # below carries the analytic bottom into the ``FARFIELD_KERNEL_SUM``
+        # gauge with no field discontinuity at ``w_low``.  Empty when the
+        # nested bottom collapsed (saddle parity wall / null split), leaving
+        # the whole-below-split Born serve BYTE-IDENTICAL to HEAD.
+        if bottom_mask.any():
+            born_y = (lens['y1'], lens['y2'])
+            try:
+                for idx in np.flatnonzero(bottom_mask):
+                    f_total[idx] = diffractive_amplification(
+                        float(dense_w[idx]), born_y, lens['gamma'],
+                        lens['beta'], lens['kappa'])
+            except HypergeometricDomainError:
+                return None
 
         # Extract the far-field envelope over the full band by subtracting
         # the resolved ppGO channels and demodulating, THEN zero it above
@@ -2852,6 +3142,43 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         served = self._born_residual_analytic(lens, dense_w)
         if served is not None:
             return served
+
+        # Low-w diffractive intercept (WP2c).  The far-field kernel-sum
+        # gauge DIVERGES below its per-draw floor `channels.farfield_w_floor`
+        # (the F070 window), so every analytic rung above declines the band
+        # bottom; absent a surrogate chart to trip the buried F070 serve in
+        # `_surrogate_coefficients`, such a draw falls through to the exact
+        # engine.  Intercept it here with the SAME two-rung diffractive serve
+        # (`_low_w_diffractive_serve`): analytic ``F_P`` below the ``w_low``
+        # truncation certificate for the positive-parity exterior, and a
+        # reachability-capped engine host for the macro saddle, reconstructed
+        # whole-band in the finite ``FARFIELD_DIFFRACTIVE`` gauge.  Gated to
+        # the FAR-FIELD EXTERIOR (exactly two real images): the diffractive
+        # series is a weak-deflection expansion and would be finite-but-wrong
+        # on the four-image caustic interior -- a regime the far-field-chart
+        # admission excludes on the surrogate path but which is ungated here,
+        # so the image-count guard supplies that exclusion directly.  Only
+        # attempted when the band actually dips below the floor
+        # (``w_lo < w_floor``); otherwise the far-field rungs / engine own the
+        # band and this rung has no job.  The geometry-only partition mirrors
+        # the surrogate path's build and lets a `geometry.LensDomainError`
+        # propagate UNSWALLOWED, exactly as the seed engine path below would
+        # raise it, so the refusal set is preserved.  On any refusal the serve
+        # returns None and we fall through byte-identically to the exact seed
+        # engine.  Ordered LAST among the analytic intercepts by w-band
+        # disjointness (it owns the sub-floor bottom), not by priority.
+        w_lo = float(dense_w.min())
+        w_hi = float(dense_w.max())
+        geom = ChangRefsdalChannels(dense_w).geometry_partition(
+            gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
+            beta=lens['beta'], kappa=lens['kappa'])
+        if int(geom.real_mask.sum()) == 2:
+            w_floor = farfield_w_floor(geom.delays, geom.real_mask)
+            if w_lo < w_floor:
+                served = self._low_w_diffractive_serve(
+                    lens, dense_w, geom, w_lo, w_hi)
+                if served is not None:
+                    return served
 
         # Candidate seed engine evaluation (single call).  A candidate-side
         # `geometry.LensDomainError` / `SchwingerCertificationError` from

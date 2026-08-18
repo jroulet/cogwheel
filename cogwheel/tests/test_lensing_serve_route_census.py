@@ -6,7 +6,7 @@ no numerical tolerance to certify.  Three properties are load-bearing and
 are pinned here:
 
 1. MECE routing (`MeceSmallRunTestCase`).  Every draw lands in EXACTLY one
-   of the eight `SERVE_ROUTES` labels: the reported ``route_counts`` has
+   of the `SERVE_ROUTES` labels: the reported ``route_counts`` has
    exactly those keys, sums to ``n_samples`` (exhaustiveness), and -- with
    no artifact attached -- emits zero ``surrogate`` (that route is
    artifact-mode-only).  The independent oracle is a from-scratch re-tally
@@ -103,6 +103,12 @@ EXPECTED_SPLIT_GAUGE = 'caustic_rho'
 #: the ``engine_residual`` population into.
 _RESIDUAL_BUCKETS = (
     'born_chart_demand', 'near_caustic_tube', 'interior', 'undetermined')
+
+#: Routes with a legitimate per-draw certificate split (``w_split``): the
+#: exact engine serves the band at or below ``w_split``, an analytic /
+#: engine-hosted closure serves above it.  Single-sourced here so a future
+#: band-split route extends this ONE set, not every w_split-detail test.
+_W_SPLIT_ROUTES = frozenset({'saddle_c3', 'diffractive_engine_hosted'})
 
 
 @functools.lru_cache(maxsize=1)
@@ -227,7 +233,7 @@ class _CensusTestCase(TestCase):
 # ---------------------------------------------------------------------------
 
 class MeceSmallRunTestCase(_CensusTestCase):
-    """Every draw lands in exactly one of the eight `SERVE_ROUTES` labels."""
+    """Every draw lands in exactly one of the `SERVE_ROUTES` labels."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -239,9 +245,11 @@ class MeceSmallRunTestCase(_CensusTestCase):
         self._comparisons += 1
 
     def test_every_record_route_is_a_serve_route(self) -> None:
-        """No per-draw record carries a label outside the 8-set."""
+        """No per-draw record carries a label outside the SERVE_ROUTES set."""
         routes = frozenset(SERVE_ROUTES := src.SERVE_ROUTES)
-        self.assertEqual(len(routes), 8, 'SERVE_ROUTES is not an 8-label set')
+        self.assertEqual(
+            len(routes), len(SERVE_ROUTES),
+            'SERVE_ROUTES contains duplicate labels')
         self.assertIn('wave_refused', routes)
         for record in self.report['records']:
             self.assertIn(
@@ -971,10 +979,14 @@ class ReportBandSplitDetailTestCase(_CensusTestCase):
         cls.report = _shared_report()
 
     def test_w_split_detail_is_recorded_iff_saddle_c3(self) -> None:
-        """``w_split`` is present exactly on the ``saddle_c3`` records.
+        """``w_split`` is present only on the ``_W_SPLIT_ROUTES`` records.
 
-        Both admit branches record it (the whole-band admit's inversion is
-        ``<= w_lo``); every other route carries ``None`` -- the c3/ceiling
+        ``saddle_c3`` and ``diffractive_engine_hosted`` are the routes with
+        a legitimate per-draw certificate split (module-level
+        ``_W_SPLIT_ROUTES``, single-sourced so a future band-split route
+        extends one set, not this test).  Both ``saddle_c3`` admit branches
+        record it (the whole-band admit's inversion is ``<= w_lo``); every
+        route outside the set carries ``None`` -- the c3/ceiling
         engine-below bands are per-draw detail, never new residual keys.
         """
         saddle_seen = 0
@@ -985,10 +997,13 @@ class ReportBandSplitDetailTestCase(_CensusTestCase):
                     record['w_split'],
                     'saddle_c3 record without its w_split detail')
                 self.assertGreater(record['w_split'], 0.0)
+            elif record['route'] in _W_SPLIT_ROUTES:
+                if record['w_split'] is not None:
+                    self.assertGreater(record['w_split'], 0.0)
             else:
                 self.assertIsNone(
                     record['w_split'],
-                    f"non-saddle_c3 route {record['route']!r} carries a "
+                    f"non-split route {record['route']!r} carries a "
                     'w_split detail')
             self._comparisons += 1
         self.assertGreater(
