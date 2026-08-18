@@ -44,6 +44,27 @@ section: Backlog
   two-carrier combination (the beat-free tube lesson) is the
   LOAD-BEARING plan-time Professor derivation; spend the review there. Census mirror re-gated IN-BUILD
   (mirror-fidelity law; the c3 build's stale-instrument lesson).
+  BUILD 1 VERDICT (2026-08-18, born_farfield_completion; machinery
+  shipped, acceptance NOT met — fragment stays OPEN): the certificate
+  |delta| = hypot(a0, w*b1/2)/q2r evaluated at the band ceiling NEVER
+  admits under the physical prior — measured over all 1461 Born-gate
+  draws: est min 0.0195 / median 0.547 vs the 5e-5 admission bar;
+  carrier-only fires only for sub-solar lens masses (w_hi >= 1.27
+  locked by m >= 10 Msun). AND the honest trained_band_escape census
+  mirror exposed born_analytic 14.61% -> 0%: box-covered draws never
+  fit the trained chart's log-w FLOOR (prior band width 3.936 vs
+  trained 2.485), so production engine-serves them — the old census
+  share was mirror infidelity. HONEST LEDGER: engine_residual = 44.62%
+  (demand_census_post_born_10k.json). TWO FIX DIRECTIONS for build 2:
+  (a) BORN CHART FLOOR BAND-SPLIT — serve the in-band sub-range
+  [trained floor, w_trust], diffractive/engine below (the c3/low-w
+  nested-split pattern at the chart floor; mechanical, revives the
+  ~6% covered population); (b) CORRECTED-CARRIER FAR-FIELD SERVE —
+  serve carrier*(1 + a0/q2r + i*w*b1/(2*q2r)) analytically POINT-WISE
+  (no splining, so the F009/F025 chart objection does not apply) with
+  the O(w^2/q2r^2) next-order term as the certificate; re-derive the
+  admission floor under the physical prior BEFORE building (the c3
+  lesson: check reachability at plan time, not after).
   ACCEPTANCE: census far-field engine hosting -> the annulus only;
   carrier-only accuracy vs the engine in the reachable overlap within
   the certificate bar; astroid Born serving byte-identical inside the
