@@ -55,7 +55,21 @@ section: Backlog
   fit the trained chart's log-w FLOOR (prior band width 3.936 vs
   trained 2.485), so production engine-serves them — the old census
   share was mirror infidelity. HONEST LEDGER: engine_residual = 44.62%
-  (demand_census_post_born_10k.json). TWO FIX DIRECTIONS for build 2:
+  (demand_census_post_born_10k.json).
+  BUILD-2 REDIRECT (2026-08-18, corrected-carrier remainder probe,
+  corrected_carrier_remainder_probe.md, 540 engine calls, harness
+  byte-identical to born_amplification): the corrected carrier is NOT
+  serve-worthy AT ANY ORDER — the error floor is the omitted SECOND
+  IMAGE's beat e^{i*w*dtau}, amplitude sqrt(|mu2|/|mu1|) = 0.14-0.90
+  across the far field (a second stationary point; no polynomial in
+  1/q2r represents it; a0 breaks the exact w->0 limit). Admission at
+  the 1e-3 bar: EMPTY (0/500 nodes); census coverage 0.00%; parity
+  agnosticism confirmed on the saddle. MEASURED alternative: the
+  TWO-IMAGE GO carrier error decays ~1/w to 2e-4-2e-3 at w=60 where
+  both Born forms are 50-500% wrong — the beat-free lesson one octave
+  up: the far-field carrier must contain BOTH images. Fix direction (b)
+  below is SUPERSEDED by the two-image GO carrier + residual charts;
+  direction (a) stands. TWO FIX DIRECTIONS for build 2:
   (a) BORN CHART FLOOR BAND-SPLIT — serve the in-band sub-range
   [trained floor, w_trust], diffractive/engine below (the c3/low-w
   nested-split pattern at the chart floor; mechanical, revives the
