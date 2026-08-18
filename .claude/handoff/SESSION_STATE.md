@@ -1,12 +1,24 @@
 # Live session state (2026-08-17 ~16:55 EDT)
 
-RUNNING: build `c3_band_split_zero_refusal` (queue item 2, SECOND
-launch). Log /tmp/c3_band_split_zero_refusal_20260817_170038.log,
-PID 1473217, approval dir /tmp/c3_band_split_zero_refusal_approval,
-monitor armed. (Launch 1 died tool-less: build 5's leaked serena child
-squatted port 8323 and the readiness probe false-passed — fixed b52a2e4:
-setsid+killpg stop, loud pre-spawn port refusal, reaper orphan-on-port
-rule.)
+RUNNING: the (f_max, f_floor) joint sweep on beat-free charts (queue
+item 4) — /tmp/f_fraction_sweep.py, log /tmp/f_fraction_sweep_run.log,
+monitor armed, est <=2.8h (w<=60 DD band; recorded pre-launch).
+On SWEEP_DONE: read the JSON results, pick (f_max, f_floor) with
+provenance (closes the F083 constants fiction), then queue item 5 =
+deltoid far-field redesign build.
+
+CLOSED TODAY (2): c3_band_split_zero_refusal — commit 6958f0c (code) +
+b097ce1 (census mirror re-gate): saddle_c3 0.32%->14.09%,
+ppgo_above_ceiling 0->15.87%, wave_refused 12.03%->2.13%,
+engine_residual 72.25%->53.30% (re-gated census
+demand_census_post_c3_regate_10k.json). saddle_c3 fragment CLOSED;
+lensing_wave_refused_to_zero stays OPEN at the ZERO bar — the 2.13%
+residual (above-150, 150*min_dt<4 unresolved corner) is the
+arm-extension (2b) build, to land before 7b. Hand-finish pattern used
+again: tree gate red on stale suites -> triage subagent -> fixture
+surgery (15->10 ppgo-ceiling file; refusal fixtures deterministic via
+inverse_transform + lnprior premise) -> driver gate re-run ALL GREEN
+(2432) -> driver commit.
 Brief: .claude/handoff/c3_band_split_zero_refusal.md (verified facts at
 6a3f43c; tripwire scoped to the engine-reachable overlap band w<=150).
 Acceptance: census wave_refused -> ZERO (or named measure-zero set),
