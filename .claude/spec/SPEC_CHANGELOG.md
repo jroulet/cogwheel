@@ -20,7 +20,7 @@ shift (engine_residual 53.30% → 24.10%), and the certifying suite
 test_lensing_diffractive.py. `_diffractive.py` added to the module
 list.
 
-- `0.47.1` (2026-08-18):
+- `0.47.2` (2026-08-18):
 
 Post-commit doc sync (733b7ef): the serve-route demand census paragraph
 still described `0.32% saddle_c3` as unreachable and pointed at
@@ -33,6 +33,13 @@ fix (build `c3_band_split_zero_refusal`) and the re-gated numbers
 wave_refused 12.03% -> 2.13%, engine_residual 72.25% -> 53.30%, since
 further reduced to 24.10% by the low-w diffractive rungs). No SPEC
 content changed beyond this correction.
+
+- `0.47.1` (2026-08-18):
+
+Documented the Born carrier-only rung (build 1): certificate form,
+dormancy verdict under the physical prior (est min 0.0195 vs 5e-5),
+the trained-floor census correction (born_analytic 14.61% -> 0;
+engine_residual honestly 44.62%), and the build-2 directions.
 
 - `0.47.0` (2026-08-17):
 

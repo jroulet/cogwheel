@@ -670,6 +670,101 @@ def _saddle_min_image_sep(real_images):
     return float(np.min(dists[iu]))
 
 
+def _born_carrier_certificate_serves(lens, w_lo, w_hi, real_images):
+    """Whether the Born far exterior may be served carrier-only, or not.
+
+    SINGLE SOURCE OF TRUTH for the beyond-the-chart-box Born serve gate.
+    When the trained ``born_residual_chart`` does not cover a far-exterior
+    query -- past the trained ``(gamma, rho)`` grid, OR the entire macro
+    saddle region the astroid-only artifact never covers -- the residual is
+    served as identically ZERO and ONLY the lead-only carrier
+    (`_born.born_lead_carrier`, reconstructed via `born_carrier_from_partition`)
+    is kept.  This predicate decides when that carrier-only truncation is
+    accurate enough to admit, mirroring `_saddle_farfield_analytic_serves`.
+
+    The gate is a carrier-relative truncation certificate with a saddle
+    resolution fence and an image-separation backstop:
+
+    1. Domain (matches the census / chart axes).  Refuse if ``kappa != 0``
+       or ``beta != 0`` (the chart and the certificate are ``kappa = 0``,
+       ``beta = 0`` surfaces) or ``gamma == 0`` (no shear, no caustic frame).
+
+    2. Certificate (accuracy, PRIMARY).  The lead-only carrier omits a term
+       that is LINEAR in ``w`` (``|delta| = hypot(a0, 0.5*w*b1) / q2r``,
+       `_born.born_carrier_omitted_term`), so its worst case over the band is
+       at the CEILING ``w_hi`` -- the OPPOSITE convention to the saddle-c3
+       gate's band-FLOOR ``w_lo`` (evaluating at ``w_lo`` would silently
+       under-certify).  Admit iff the safety-factored estimate clears the
+       SAME production bar the saddle gate uses,
+       ``_SADDLE_FARFIELD_SAFETY * est <= _SADDLE_FARFIELD_CERT_BAR`` (no
+       Born-specific bar/safety).  A degenerate geometry returns ``inf`` and
+       refuses.
+
+    3. Separation backstop (defense-in-depth).  Require the minimum pairwise
+       real-image separation ``>= _SADDLE_FARFIELD_MIN_IMAGE_SEP`` (shared
+       with the saddle far-field gate via `_saddle_min_image_sep`); fewer
+       than two real images refuses.
+
+    4. Macro-saddle resolution fence.  For the macro saddle (``gamma > 1``,
+       ``det A < 0``) additionally require the band FLOOR to resolve the
+       closest real-image pair, ``w_lo * delta_min >= RHO_END`` (=4.0), with
+       ``delta_min`` the smallest pairwise real-image Fermat-delay separation
+       (`operator._real_delay_min_separation`).  Positive parity gets NO such
+       fence here: its low-``w`` floor is served by the diffractive ``F_P``
+       rung, out of scope for this gate.
+
+    Parameters
+    ----------
+    lens : dict
+        Lens parameters from `_lens_params`; ``kappa``, ``beta``, ``gamma``,
+        ``y1``, ``y2`` are read.
+    w_lo, w_hi : float
+        Band floor and ceiling dimensionless frequencies (``min``/``max`` of
+        the dense grid).  The certificate is evaluated at ``w_hi`` (worst
+        case), the saddle resolution fence at ``w_lo`` (worst case).
+    real_images : np.ndarray
+        Shape ``(k, 2)`` REAL image positions (``geom.images``; already
+        real-only -- do NOT index with the length-4 channel mask
+        ``geom.real_mask``).
+
+    Returns
+    -------
+    bool
+        Whether the carrier-only far-field serve may serve the whole band.
+    """
+    from cogwheel.lensing.chang_refsdal._born import born_carrier_omitted_term
+    from cogwheel.lensing.chang_refsdal.operator import (
+        _real_delay_min_separation)
+
+    # Domain assumptions matching the chart axes and the buried-path guard.
+    if lens['kappa'] != 0.0 or lens['beta'] != 0.0 or lens['gamma'] == 0.0:
+        return False
+
+    # Carrier-relative truncation certificate at the band CEILING ``w_hi``
+    # (the omitted term grows linearly in ``w``).  A degenerate geometry
+    # returns ``inf`` and fails the bar.
+    est = born_carrier_omitted_term(w_hi, lens['y1'], lens['y2'],
+                                    lens['gamma'])
+    if not (_SADDLE_FARFIELD_SAFETY * est <= _SADDLE_FARFIELD_CERT_BAR):
+        return False
+
+    # Separation backstop (defense-in-depth); < 2 real images refuses.
+    min_sep = _saddle_min_image_sep(real_images)
+    if min_sep is None or min_sep < _SADDLE_FARFIELD_MIN_IMAGE_SEP:
+        return False
+
+    # Macro-saddle resolution fence at the band FLOOR ``w_lo``.  Positive
+    # parity (gamma <= 1) has no such fence here.
+    if lens['gamma'] > 1.0:
+        source = np.array([lens['y1'], lens['y2']])
+        matrix = macro_matrix(lens['gamma'], lens['beta'], lens['kappa'])
+        delta_min = _real_delay_min_separation(source, matrix)
+        if not (w_lo * delta_min >= RHO_END):
+            return False
+
+    return True
+
+
 def _saddle_c3_split_point(real_images, source, matrix):
     """Certificate split frequency for the saddle far-field band split.
 
@@ -2799,27 +2894,41 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         Serves the Born (weak-deflection) exterior directly from the
         attached ``born_residual_chart`` -- WITHOUT any surrogate -- as the
-        analytic carrier ``born_carrier_from_partition`` plus the trained
-        residual, reconstructed under the ``FARFIELD_KERNEL_SUM`` tag.  It
-        is the reachability lift of the buried Born rung in
+        analytic carrier ``born_carrier_from_partition`` plus (in box) the
+        trained residual, reconstructed under the ``FARFIELD_KERNEL_SUM``
+        tag.  It is the reachability lift of the buried Born rung in
         `_surrogate_coefficients`: the same carrier + interpolated-residual
         decomposition, but reachable on the production (surrogate-free)
         path.
 
         GATE.  Serves ONLY when a chart is attached AND ``kappa == 0`` AND
         ``beta == 0`` AND the caustic-frame ``rho = caustic_rho(...) > 2.0``
-        (exterior) AND ``born_chart.covers(gamma, rho, chart_w)`` (box
-        containment plus the served w sub-band inside the trained log-w
-        range).  The shipped artifact's ``gamma_grid`` covers the astroid
-        parity only (0.05-0.9); a saddle ``gamma > 1`` query fails
-        ``covers()`` and falls through regardless of this gate.
+        (far exterior, two real images).  Interior / near-caustic / tube
+        (``rho <= 2``) always falls through to the exact engine -- the
+        carrier-only lift below never captures it.
+
+        BEYOND-THE-BOX CARRIER-ONLY LIFT.  When the far-exterior query is
+        NOT covered by the trained ``(gamma, rho, log_w)`` box -- past the
+        astroid-only ``gamma_grid`` (a macro ``gamma > 1`` saddle query the
+        artifact never trained), past the trained ``rho`` reach, or when the
+        served sub-band escapes the trained ``log_w`` range -- the residual
+        is served as identically ZERO and ONLY the lead carrier is kept,
+        gated by the module-level ``_born_carrier_certificate_serves``
+        (carrier-relative truncation certificate at the band ceiling, a
+        saddle-only ``w_lo * delta_min >= RHO_END`` resolution fence and the
+        shared min-image-separation backstop).  On a certificate refusal the
+        rung declines and falls through to the exact engine, exactly as HEAD
+        did on the bare ``covers()`` miss.  The FULLY-in-box serve
+        (box-covered AND the served sub-band inside the trained log-w range)
+        keeps the interpolated residual and is BYTE-IDENTICAL to HEAD.
+
         The ``kappa == 0`` / ``beta == 0`` guards mirror the buried-path
         guard precedence (``KappaBetaGuardPrecedenceTestCase``): the chart
-        axes are ``(gamma, rho, log_w)`` trained at the ``kappa = 0``,
-        ``beta = 0`` reference config, so a ``kappa != 0`` or ``beta != 0``
-        candidate CANNOT be represented and MUST fall through to the exact
-        engine -- serving a ``kappa = 0`` residual for a ``kappa != 0``
-        config would be a silent finite-but-wrong accuracy bug.  These stay
+        axes AND the certificate are the ``kappa = 0``, ``beta = 0``
+        reference surface, so a ``kappa != 0`` or ``beta != 0`` candidate
+        CANNOT be represented and MUST fall through to the exact engine --
+        serving a ``kappa = 0`` residual/carrier for a ``kappa != 0`` config
+        would be a silent finite-but-wrong accuracy bug.  These stay
         explicit flat guards (no shared optional-geometry helper).
 
         MAP CONSULT.  When a certified-ppGO map is installed and this
@@ -2839,6 +2948,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         A geometry ``LensDomainError`` propagates unswallowed, mirroring
         `_saddle_farfield_analytic` / `_ppgo_above_ceiling`; the cheap gates
         are checked BEFORE the geometry solve so a gate miss costs nothing.
+        The reconstruction TAIL (carrier, Rung P, demodulation, kernel
+        reduction) is factored into `_born_reconstruct`, fed the
+        interpolated residual (in box) or a zero residual (carrier-only).
 
         Parameters
         ----------
@@ -2858,9 +2970,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             return None
 
         # The chart is a kappa = 0, beta = 0 surface BY CONSTRUCTION (its
-        # axes carry neither dimension).  A candidate with kappa != 0 or
+        # axes carry neither dimension) and the carrier-only certificate is
+        # the same reference surface.  A candidate with kappa != 0 or
         # beta != 0 CANNOT be represented, and serving it the kappa = 0 /
-        # beta = 0 residual would be finite-but-wrong -- the exact
+        # beta = 0 residual/carrier would be finite-but-wrong -- the exact
         # never-serve-where-wrong violation the guard exists to prevent.
         # Fall through to the exact engine, which handles both fully.
         if lens['kappa'] != 0.0 or lens['beta'] != 0.0:
@@ -2880,12 +2993,20 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             rho = caustic_rho(lens['gamma'], abs_y, lens['kappa'])
         except (ValueError, LensDomainError):
             return None
-        if rho <= 2.0 or not born_chart.covers(lens['gamma'], rho):
+
+        # Interior / near-caustic / tube (rho <= 2): no Born far exterior.
+        # Fall through to the exact engine BEFORE the geometry solve,
+        # byte-identical to HEAD.  The carrier-only lift below NEVER captures
+        # this branch -- the tube case (covered but rho <= 2) keeps its
+        # engine fallthrough (pinned invariant).
+        if rho <= 2.0:
             return None
 
         # Cheap geometry-only partition (same construction the sibling
         # `_saddle_farfield_analytic` rung uses).  A geometry
-        # `LensDomainError` propagates unswallowed.
+        # `LensDomainError` propagates unswallowed -- and the seed engine
+        # path below would raise the identical error, so propagating it here
+        # preserves the refusal set exactly.
         geom = ChangRefsdalChannels(dense_w).geometry_partition(
             gamma=lens['gamma'], y=(lens['y1'], lens['y2']),
             beta=lens['beta'], kappa=lens['kappa'])
@@ -2913,27 +3034,17 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # is all-True, so nothing is zeroed and the serve is the whole-band
         # Born result.  ``chart_w`` is that served sub-band, used ONLY for
         # the trained-band refusal below -- the carrier / residual / ppGO
-        # serve runs over the FULL ``dense_w`` (see INS-2-001 note below).
-        # The band-split boolean + below-split node mask are the shared
-        # ``_band_split_mask`` arithmetic (split strictly inside the band);
-        # the Born-specific ``eff_ceiling`` guard above stays here because
-        # only Born nulls ``w_trust`` beyond the effective ceiling.
+        # serve runs over the FULL ``dense_w``.
         _band_split, below_mask = _band_split_mask(dense_w, w_trust)
 
         # NESTED low split.  The below-split region ``[w_lo, w_trust)`` is
         # split again at the diffractive certificate ``w_low``: the analytic
-        # diffractive bottom ``[w_lo, w_low)`` (Rung P, `F_P` below) replaces
-        # the chart there, and the trained carrier + residual host the middle
-        # ``[w_low, w_trust)``.  For the astroid parity (``gamma < 1``) the
-        # series exists; ``_diffractive_bottom_ceiling`` returns ``w_low`` (or
-        # ``None`` on a degenerate solve, collapsing the bottom to empty via
-        # the ``w_low <= w_lo`` null-split identity).  The two sequential
-        # `_band_split_mask` calls reuse the shared split arithmetic (no third
-        # copy); ``bottom_mask`` / ``host_mask`` are the only inline boolean
-        # composition.  ``chart_w`` -- the trained-band refusal probe -- is
-        # the HOST sub-band only: the analytic bottom does not consult the
-        # chart, so a draw whose bottom escapes the trained ``log_w`` range is
-        # no longer refused whole.
+        # diffractive bottom ``[w_lo, w_low)`` (Rung P, `F_P`) replaces the
+        # chart there, and the trained carrier + residual host the middle
+        # ``[w_low, w_trust)``.  ``chart_w`` -- the trained-band refusal
+        # probe -- is the HOST sub-band only: the analytic bottom does not
+        # consult the chart, so a draw whose bottom escapes the trained
+        # ``log_w`` range is no longer refused whole.
         w_low = self._diffractive_bottom_ceiling(lens)
         band_split_low, below_low = _band_split_mask(dense_w, w_low)
         bottom_mask = ((below_low & below_mask) if band_split_low
@@ -2941,27 +3052,87 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         host_mask = below_mask & ~bottom_mask
         chart_w = dense_w[host_mask]
 
-        # Trained-band refusal: the residual interpolator cubic-extrapolates
-        # off the trained ``log_w_grid`` (RegularGridInterpolator with
-        # ``fill_value=None``), which produces finite-but-wrong output.  If
-        # the sub-band the chart must serve escapes the trained frequency
-        # range, decline and fall through to the exact engine rather than
-        # serve an extrapolated residual (F070 kernel-sum-below-floor class).
-        if host_mask.any() and not born_chart.covers(
-                lens['gamma'], rho, chart_w):
-            return None
+        # Serve decision.  In HEAD both a box-containment miss
+        # (``not covers(gamma, rho)``) and a trained-band escape
+        # (``host_mask.any() and not covers(gamma, rho, chart_w)``) refused
+        # to the exact engine.  That gate is LIFTED: a beyond-box query is
+        # offered a certificate-gated CARRIER-ONLY serve (residual
+        # identically ZERO, only the lead carrier reconstructed) via
+        # ``_born_carrier_certificate_serves``; only a certificate refusal
+        # falls through.  The FULLY-in-box serve (box-covered AND the served
+        # host sub-band inside the trained log-w range) keeps the
+        # interpolated residual and is BYTE-IDENTICAL to HEAD.
+        covered = born_chart.covers(lens['gamma'], rho)
+        trained_band_escape = (
+            covered and host_mask.any()
+            and not born_chart.covers(lens['gamma'], rho, chart_w))
+        if covered and not trained_band_escape:
+            residual = born_chart.evaluate(dense_w, lens['gamma'], rho)
+        else:
+            w_lo = float(dense_w.min())
+            if not _born_carrier_certificate_serves(
+                    lens, w_lo, w_hi, geom.images):
+                return None
+            residual = np.zeros(dense_w.shape, dtype=complex)
 
+        return self._born_reconstruct(
+            lens, dense_w, geom, residual, below_mask, bottom_mask)
+
+    def _born_reconstruct(self, lens, dense_w, geom, residual,
+                          below_mask, bottom_mask):
+        """Reconstruct the Born far-field kernels from a supplied residual.
+
+        Pure reconstruction TAIL shared by the in-box serve (fed the
+        interpolated ``born_residual_chart`` residual) and the beyond-box
+        carrier-only serve (fed an identically ZERO residual).  Builds the
+        analytic carrier via `born_carrier_from_partition`, adds the caller's
+        residual, overwrites the diffractive bottom ``[w_lo, w_low)`` with
+        the diffractive series ``F_P`` (Rung P), demodulates into the
+        ``FARFIELD_KERNEL_SUM`` gauge zeroing the envelope above the trusted
+        floor, and reduces to the two dense kernels.
+
+        Owns NO serve decision and NO residual zeroing: the caller decides
+        in-box vs carrier-only and supplies ``residual`` (the interpolated
+        chart residual, or an identically zero array).  Passing the zero
+        array reduces ``f_total = carrier + residual`` to the bare carrier
+        with no perturbation of the in-box null-identity byte-path.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters from `_lens_params`.
+        dense_w : np.ndarray
+            FULL dimensionless frequency grid.  The carrier / residual / ppGO
+            are ALL served over this full band so their length matches
+            ``geom.saddle_kernels`` (N rows) and ``geom.delays`` --
+            ``born_carrier_from_partition`` -> ``reconstruct_farfield``
+            validate ``saddle_kernels.shape[0] == w.size`` and raise a shape
+            ``ValueError`` on a sub-slice against a full-length geometry
+            (INS-2-001).  The band split is applied by ZEROING the
+            reconstructed envelope, never by sub-slicing ``w``.
+        geom : object
+            Geometry-only partition from
+            ``ChangRefsdalChannels.geometry_partition``.
+        residual : np.ndarray
+            Complex residual over ``dense_w`` -- the interpolated chart
+            residual (in box) or an identically zero array (carrier-only).
+        below_mask : np.ndarray
+            Boolean nodes the Born envelope serves; the reconstructed
+            envelope is zeroed above (bare ppGO telescopes in).  All-True
+            without a band split.
+        bottom_mask : np.ndarray
+            Boolean nodes on the analytic diffractive bottom overwritten by
+            ``F_P``.  Empty at the saddle wall / null split, leaving the
+            whole-below-split serve byte-identical to HEAD.
+
+        Returns
+        -------
+        tuple or None
+            ``(delays, k0, k1, partition)`` on success, or ``None`` when the
+            diffractive bottom hits a `HypergeometricDomainError`.
+        """
         # Duck-typed namespace adapter for born_carrier_from_partition
         # (reads attributes by name), built over the FULL ``dense_w`` band.
-        # The carrier / residual / ppGO are ALL served over the full band so
-        # their length matches ``geom.saddle_kernels`` (N rows) and
-        # ``geom.delays`` -- ``born_carrier_from_partition`` ->
-        # ``reconstruct_farfield`` validate ``saddle_kernels.shape[0] ==
-        # w.size`` and raise a shape ``ValueError`` on a ``chart_w``
-        # sub-slice against a full-length geometry (INS-2-001).  The band
-        # split is applied by ZEROING the reconstructed envelope above
-        # ``w_trust`` (below), mirroring the surrogate-path far-field serve
-        # mirror, never by sub-slicing ``w``.
         partition_ns = types.SimpleNamespace(
             w=dense_w,
             source=np.array([lens['y1'], lens['y2']]),
@@ -2980,19 +3151,19 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         from cogwheel.lensing.chang_refsdal.channels import (
             born_carrier_from_partition)
         carrier = born_carrier_from_partition(partition_ns)
-        residual = born_chart.evaluate(dense_w, lens['gamma'], rho)
         f_total = carrier + residual
 
         # Rung P: overwrite the total amplification on the analytic bottom
         # ``[w_lo, w_low)`` with the diffractive series ``F_P`` (which IS the
         # full amplification, tending to ``sqrt(mu_macro)`` as ``w -> 0``),
-        # discarding the extrapolated chart carrier + residual there.  ``F_P``
-        # is expressed in the SAME absolute-frame amplification as ``f_total``,
-        # so the shared ``(f_total - ppgo) * exp(1j w t_min)`` demodulation
-        # below carries the analytic bottom into the ``FARFIELD_KERNEL_SUM``
-        # gauge with no field discontinuity at ``w_low``.  Empty when the
-        # nested bottom collapsed (saddle parity wall / null split), leaving
-        # the whole-below-split Born serve BYTE-IDENTICAL to HEAD.
+        # discarding the extrapolated / zero chart carrier + residual there.
+        # ``F_P`` is expressed in the SAME absolute-frame amplification as
+        # ``f_total``, so the shared ``(f_total - ppgo) * exp(1j w t_min)``
+        # demodulation below carries the analytic bottom into the
+        # ``FARFIELD_KERNEL_SUM`` gauge with no field discontinuity at
+        # ``w_low``.  Empty when the nested bottom collapsed (saddle parity
+        # wall / null split), leaving the whole-below-split serve
+        # BYTE-IDENTICAL to HEAD.
         if bottom_mask.any():
             born_y = (lens['y1'], lens['y2'])
             try:

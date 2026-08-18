@@ -3,7 +3,7 @@
 WHAT
 ----
 `run` draws full-reach lens prior samples and classifies each draw into
-EXACTLY ONE of ten mutually-exclusive serve routes -- the analytic rung
+EXACTLY ONE of eleven mutually-exclusive serve routes -- the analytic rung
 that WOULD answer it (or the exact-wave engine that would have to) -- WITHOUT
 ever evaluating a wave-optics amplitude.  It then aggregates the draw-level
 routes into ``(region x gamma-band x w-band)`` cells and splits the
@@ -82,14 +82,19 @@ from cogwheel.lensing.chang_refsdal import geometry
 # Route vocabulary
 # ---------------------------------------------------------------------------
 
-#: The ten MECE draw-level serve routes, listed in label-enumeration order.
+#: The eleven MECE draw-level serve routes, listed in label-enumeration order.
 #: The DECISION order (a first-admitting waterfall) is DIFFERENT and is
 #: documented on `classify_draw`; it mirrors the PRODUCTION rung order of
 #: ``likelihood._amplification_coefficients``: ``engine_refused`` is decided
 #: first, then ``surrogate`` (artifact mode only), ``ppgo_above_ceiling``
 #: (the above-ceiling band-split rung -- in production it fires BEFORE the
 #: saddle rung), ``saddle_c3`` (whole-band-analytic OR c3 band-split),
-#: ``born_analytic``, then the low-w diffractive rung splits by parity into
+#: ``born_analytic`` (Born far exterior, box-covered by the trained chart
+#: with the HOST sub-band inside its trained log-w range) and its
+#: beyond-box / band-escaping / macro-saddle sibling ``born_carrier_only``
+#: (the carrier-only truncation admitted by the shared production
+#: certificate),
+#: then the low-w diffractive rung splits by parity into
 #: ``diffractive_analytic`` (positive-parity Rung P, an ANALYTIC-side serve)
 #: and ``diffractive_engine_hosted`` (macro-saddle Rung S, an ENGINE-HOSTED
 #: serve -- under the zero-engine-served bar it is engine demand, never an
@@ -101,6 +106,7 @@ SERVE_ROUTES: tuple[str, ...] = (
     'ppgo_above_ceiling',
     'saddle_c3',
     'born_analytic',
+    'born_carrier_only',
     'diffractive_analytic',
     'diffractive_engine_hosted',
     'analytics_engine_hosted',
@@ -199,6 +205,14 @@ class _ProductionModules:
     saddle_c3_split_point: Any            # likelihood._saddle_c3_split_point
     saddle_min_image_sep: Any             # likelihood._saddle_min_image_sep
     saddle_min_sep_floor: float           # likelihood._SADDLE_FARFIELD_MIN...
+    born_carrier_serves: Any              # likelihood._born_carrier_certif...
+    born_chart: Any                       # BornResidualChart.load() or None
+    band_split_mask: Any                  # likelihood._band_split_mask
+    ppgo_band_split: Any                  # likelihood.LensedRelativeBinning...
+    ppgo_cell_ceiling: Any                # ...Likelihood._ppgo_cell_ceiling
+    diffractive_bottom_ceiling: Any       # ..._diffractive_bottom_ceiling
+    astroid_wall: float                   # ppgo_map.ASTROID_WALL
+    saddle_wall: float                    # ppgo_map.SADDLE_WALL
     farfield_w_floor: Any                 # channels.farfield_w_floor
     diffractive_w_low: Any                # _diffractive.diffractive_w_low
     diffractive_refusal_errors: tuple[type[BaseException], ...]  # w_low wall
@@ -230,10 +244,33 @@ def _load_production_modules() -> _ProductionModules:
         DiffractiveDomainError, diffractive_w_low)
     from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
     from cogwheel.lensing.chang_refsdal.channels import farfield_w_floor
+    from cogwheel.lensing.born_residual_chart import BornResidualChart
     from cogwheel.lensing.likelihood import (
-        _SADDLE_FARFIELD_MIN_IMAGE_SEP, _saddle_c3_split_point,
-        _saddle_farfield_analytic_serves, _saddle_min_image_sep)
+        _SADDLE_FARFIELD_MIN_IMAGE_SEP, LensedRelativeBinningLikelihood,
+        _band_split_mask, _born_carrier_certificate_serves,
+        _saddle_c3_split_point, _saddle_farfield_analytic_serves,
+        _saddle_min_image_sep)
     from cogwheel.lensing.waveform import dimensionless_frequency
+
+    # The Born far-exterior box discriminator (astroid-only shipped chart).
+    # Loaded engine-free from the registered NPZ, mirroring production's
+    # auto-attach (`likelihood._AUTO_BORN_CHART`): a load anomaly leaves the
+    # census with no chart, exactly as the production Born rung goes inactive
+    # when the chart is unavailable (both then fall Born-shaped draws through
+    # to the exact engine).  ``load`` reads a plain NPZ -- no engine call.
+    try:
+        born_chart = BornResidualChart.load()
+    except (OSError, ValueError, KeyError):
+        born_chart = None
+
+    # UNINITIALIZED likelihood shell (``object.__new__``; ``__init__`` is
+    # never run -- no event data, no engine).  The three Born host-band
+    # helpers bound off it (`_ppgo_band_split` / `_ppgo_cell_ceiling` /
+    # `_diffractive_bottom_ceiling`) read ONLY their ``lens`` argument and
+    # the process-global certified-ppGO map, never instance state, so this
+    # reuses the production host-band derivation byte-for-byte instead of
+    # re-typing it.
+    born_band_host = object.__new__(LensedRelativeBinningLikelihood)
 
     return _ProductionModules(
         channels_cls=ChangRefsdalChannels,
@@ -243,6 +280,14 @@ def _load_production_modules() -> _ProductionModules:
         saddle_c3_split_point=_saddle_c3_split_point,
         saddle_min_image_sep=_saddle_min_image_sep,
         saddle_min_sep_floor=float(_SADDLE_FARFIELD_MIN_IMAGE_SEP),
+        born_carrier_serves=_born_carrier_certificate_serves,
+        born_chart=born_chart,
+        band_split_mask=_band_split_mask,
+        ppgo_band_split=born_band_host._ppgo_band_split,
+        ppgo_cell_ceiling=born_band_host._ppgo_cell_ceiling,
+        diffractive_bottom_ceiling=born_band_host._diffractive_bottom_ceiling,
+        astroid_wall=float(ppgo_map.ASTROID_WALL),
+        saddle_wall=float(ppgo_map.SADDLE_WALL),
         farfield_w_floor=farfield_w_floor,
         diffractive_w_low=diffractive_w_low,
         diffractive_refusal_errors=(
@@ -604,11 +649,25 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
        analytic zero envelope above ``w_split``, exact engine below).  A
        merging pair (``est`` is ``None``) refuses the whole draw and falls
        onward.  ``w_split`` is recorded in the result detail.
-    5. ``born_analytic`` -- the Born weak-deflection exterior by geometric
-       predicate alone: ``kappa == beta == 0`` (fixed here), ``gamma != 0``
-       and ``caustic_rho > 2`` (the production Born intercept's coverage
-       predicate, minus the chart-box test that demand mode has no chart
-       for).
+    5. ``born_analytic`` / ``born_carrier_only`` -- the Born weak-deflection
+       exterior (chart attached, ``kappa == beta == 0`` fixed here,
+       ``gamma != 0`` and ``caustic_rho > 2``), mirroring the production
+       serve decision INCLUDING the trained-band escape: a draw is
+       ``born_analytic`` only when box-covered AND its HOST sub-band --
+       the band minus the certified-ppGO above-``w_trust`` split (capped
+       at ``min(parity_wall, cell_ceiling)``) and minus the nested
+       diffractive bottom ``[w_lo, w_low)``, via the production
+       `_band_split_mask` arithmetic -- stays inside the trained ``log_w``
+       range (``trained_band_escape = covered and host_mask.any() and not
+       covers(gamma, rho, chart_w)``).  A beyond-box OR band-escaping draw
+       is ``born_carrier_only`` IFF the shared production certificate
+       ``_born_carrier_certificate_serves`` admits the carrier-only
+       truncation (omitted-term bar at ``w_hi``, min-image-separation
+       backstop, saddle ``w_lo * delta_min >= RHO_END`` fence).  Both
+       parities reach the carrier-only branch; a certificate refusal falls
+       through to the node pass, and a MISSING chart skips the whole
+       intercept (production returns ``None`` before any serve,
+       carrier-only included).
     6. low-w diffractive rung (far-field exterior, ``w_lo < farfield_w_
        floor``), SPLIT BY PARITY onto opposite ledger sides: ``diffractive_
        analytic`` for the positive-parity Rung P (analytic ``F_P`` admitted
@@ -700,9 +759,67 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
         if c3_serves:
             return _result('saddle_c3', (), w_split=w_split)
 
-    # --- Intercept 5: born_analytic (Born exterior, geometric predicate) ---
-    if gamma != 0.0 and rho is not None and rho > _BORN_RHO_FLOOR:
-        return _result('born_analytic', ())
+    # --- Intercept 5: born_analytic / born_carrier_only (Born exterior) ---
+    # Mirrors the production first-class Born intercept
+    # (`likelihood.LensedRelativeBinningLikelihood._born_residual_analytic`):
+    # chart attached, ``kappa == beta == 0`` (fixed here), ``gamma != 0`` and
+    # caustic-frame ``rho > 2`` (far exterior, two real images).  With no
+    # chart loaded the production rung returns ``None`` BEFORE any serve
+    # (carrier-only included), so the whole intercept is skipped.
+    #
+    # The serve decision mirrors production EXACTLY, INCLUDING the
+    # trained-band escape (INS-1-002): the HOST sub-band ``chart_w`` is
+    # derived by the SAME two nested splits -- the certified-ppGO band split
+    # ``w_trust`` (`_ppgo_band_split`, ceiling-capped at ``min(parity_wall,
+    # cell_ceiling)``) and the nested diffractive-bottom split ``w_low``
+    # (`_diffractive_bottom_ceiling`) -- through the production
+    # `_band_split_mask` arithmetic, every helper and wall constant bound
+    # from `likelihood` / `ppgo_map` (never re-typed):
+    #   * ``covered and not trained_band_escape`` (box-covered AND the host
+    #     sub-band inside the trained log-w range) -> ``born_analytic``:
+    #     production serves the interpolated residual + carrier.
+    #   * beyond-box OR log-w-band-escaping (``trained_band_escape =
+    #     covered and host_mask.any() and not covers(gamma, rho, chart_w)``)
+    #     -> ``born_carrier_only`` IFF the SHARED production certificate
+    #     ``_born_carrier_certificate_serves`` admits the carrier-only
+    #     truncation (residual identically zero): the carrier-relative
+    #     omitted-term bar at ``w_hi``, the min-image-separation backstop and
+    #     the macro-saddle ``w_lo * delta_min >= RHO_END`` resolution fence.
+    #     A certificate refusal declines and falls through to the node pass
+    #     (engine demand), exactly as production returns ``None`` there.
+    # BOTH parities reach the carrier-only branch: a positive-parity
+    # beyond-box or band-escaping draw AND a macro saddle that clears the
+    # certificate + resolution fence -- it is NEVER gated ``gamma < 1``.
+    if (mods.born_chart is not None and gamma != 0.0 and rho is not None
+            and rho > _BORN_RHO_FLOOR):
+        lens = {'kappa': 0.0, 'beta': 0.0, 'gamma': gamma, 'y1': y1, 'y2': y2}
+        # Host sub-band derivation -- the `_born_residual_analytic` lines in
+        # production order: ppGO band split (ceiling-capped), nested
+        # diffractive-bottom split, host mask, host sub-band.
+        w_trust = mods.ppgo_band_split(lens)
+        if w_trust is not None:
+            wall = (mods.astroid_wall if gamma < 1.0 else mods.saddle_wall)
+            cell_ceiling = mods.ppgo_cell_ceiling(lens)
+            eff_ceiling = (wall if cell_ceiling is None
+                           else min(wall, cell_ceiling))
+            if w_hi > eff_ceiling:
+                w_trust = None
+        _band_split, below_mask = mods.band_split_mask(w_grid, w_trust)
+        w_low = mods.diffractive_bottom_ceiling(lens)
+        band_split_low, below_low = mods.band_split_mask(w_grid, w_low)
+        bottom_mask = ((below_low & below_mask) if band_split_low
+                       else np.zeros(w_grid.shape, dtype=bool))
+        host_mask = below_mask & ~bottom_mask
+        chart_w = w_grid[host_mask]
+
+        covered = mods.born_chart.covers(gamma, rho)
+        trained_band_escape = (
+            covered and host_mask.any()
+            and not mods.born_chart.covers(gamma, rho, chart_w))
+        if covered and not trained_band_escape:
+            return _result('born_analytic', ())
+        if mods.born_carrier_serves(lens, w_lo, w_hi, real_images):
+            return _result('born_carrier_only', ())
 
     # --- Intercept 6: low-w diffractive rung (parity-split, WP3) ---------
     # Mirrors the production diffractive intercept in
@@ -947,7 +1064,7 @@ def run(config: ServeRouteCensusConfig | None = None,
                 'prior-mass fraction times n_samples.'),
             'serve_routes_decision_order': [
                 'engine_refused', 'surrogate', 'ppgo_above_ceiling',
-                'saddle_c3', 'born_analytic',
+                'saddle_c3', 'born_analytic|born_carrier_only',
                 'diffractive_analytic|diffractive_engine_hosted',
                 'wave_refused|engine_residual|analytics_engine_hosted'],
             'serve_routes': list(SERVE_ROUTES),

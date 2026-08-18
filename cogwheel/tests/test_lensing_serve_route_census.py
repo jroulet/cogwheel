@@ -201,6 +201,41 @@ def _source_at_rho(gamma: float, target_rho: float,
     return abs_y * math.cos(angle_rad), abs_y * math.sin(angle_rad)
 
 
+def _born_in_band_mass() -> float:
+    """Probe mass whose band CEILING stays inside the trained log-w range.
+
+    The production Born serve (mirrored by intercept 5) refuses a covered
+    draw whose served HOST sub-band escapes the chart's trained ``log_w``
+    range, so the ``born_analytic`` fixture mass is DERIVED from the live
+    ``chart.log_w_grid`` ceiling (0.95 safety margin) -- never pinned to the
+    current chart build.  ``dimensionless_frequency`` is linear in mass, so
+    one unit-mass evaluation fixes the scale.
+    """
+    mods, f_grid, _ = _classify_env()
+    w_hi_unit = float(mods.dimensionless_frequency(f_grid, 1.0, 0.0).max())
+    return 0.95 * math.exp(mods.born_chart.log_w_grid[-1]) / w_hi_unit
+
+
+def _born_band_escape_mass() -> float:
+    """Probe mass whose band ceiling ESCAPES the trained log-w range (x2)."""
+    mods, f_grid, _ = _classify_env()
+    w_hi_unit = float(mods.dimensionless_frequency(f_grid, 1.0, 0.0).max())
+    return 2.0 * math.exp(mods.born_chart.log_w_grid[-1]) / w_hi_unit
+
+
+def _fixture_mass(label: str) -> float:
+    """Probe mass for a D2 fixture, derived live where the route needs it.
+
+    ``born_exterior`` must keep its host sub-band inside the trained log-w
+    range (the production trained-band escape otherwise reroutes it), so its
+    mass comes from `_born_in_band_mass`; every other fixture keeps the
+    shared `_PROBE_MASS_MSUN`.
+    """
+    if label == 'born_exterior':
+        return _born_in_band_mass()
+    return _PROBE_MASS_MSUN
+
+
 def _classify_probe(gamma: float, y1: float, y2: float,
                     m_lens_msun: float = _PROBE_MASS_MSUN):
     """Classify one hand-placed draw through the real `classify_draw`."""
@@ -499,12 +534,14 @@ class D2SignFlipInvarianceTestCase(_CensusTestCase):
     under the mirror and are deliberately NOT asserted here.
     """
 
-    def _quadruple(self, gamma: float, y1: float, y2: float):
+    def _quadruple(self, gamma: float, y1: float, y2: float,
+                   m_lens_msun: float):
         """Classify the four IEEE sign-flips of ``(y1, y2)``."""
         out = {}
         for s1 in (+1.0, -1.0):
             for s2 in (+1.0, -1.0):
-                out[(s1, s2)] = _classify_probe(gamma, s1 * y1, s2 * y2)
+                out[(s1, s2)] = _classify_probe(
+                    gamma, s1 * y1, s2 * y2, m_lens_msun)
         return out
 
     def test_route_and_node_kinds_are_d2_invariant(self) -> None:
@@ -519,7 +556,8 @@ class D2SignFlipInvarianceTestCase(_CensusTestCase):
                 self.assertGreater(abs(y2), 0.0)
                 self.assertNotAlmostEqual(abs(y1), abs(y2), places=6)
 
-                quad = self._quadruple(gamma, y1, y2)
+                quad = self._quadruple(gamma, y1, y2,
+                                       _fixture_mass(label))
                 base = quad[(+1.0, +1.0)]
                 # Premise 2: the base draw actually lands in the intended
                 # route, so the fixture exercises the route it claims to.
@@ -554,6 +592,81 @@ class D2SignFlipInvarianceTestCase(_CensusTestCase):
             len(routes), 3, 'fixtures collapsed to fewer than 3 routes')
         self.assertIn('saddle_c3', routes)
         self.assertIn('born_analytic', routes)
+        self._comparisons += 1
+
+
+# ---------------------------------------------------------------------------
+# 4b. Born trained-band escape (INS-1-002 mirror fidelity)
+# ---------------------------------------------------------------------------
+
+class BornTrainedBandEscapeTestCase(_CensusTestCase):
+    """A covered draw that escapes the trained log-w band is NOT Born-analytic.
+
+    Production ``_born_residual_analytic`` serves the interpolated residual
+    only when the chart box covers ``(gamma, rho)`` AND the served HOST
+    sub-band stays inside the trained ``log_w`` range; a covered-but-escaping
+    draw takes the certificate-gated carrier-only serve, or falls through to
+    the engine on a certificate refusal (INS-1-002).  Pinned with two draws
+    at the SAME far-exterior source, differing ONLY in lens mass: the
+    in-band mass and the escaping mass are both derived from the live chart
+    ceiling (`_born_in_band_mass` / `_born_band_escape_mass`), so a chart
+    retrain moves the fixtures with the boundary.  The expected route of the
+    escaping draw is read off the PRODUCTION certificate
+    (``_born_carrier_certificate_serves``), never hardcoded.
+    """
+
+    #: Far-exterior source shared by both draws (the D2 born fixture point).
+    _GAMMA = 0.5
+    _RHO = 3.0
+
+    def _source(self) -> tuple[float, float]:
+        return _source_at_rho(self._GAMMA, self._RHO, _D2_ANGLE_RAD)
+
+    def test_in_band_mass_serves_born_analytic(self) -> None:
+        """The derived in-band mass keeps the fixture on ``born_analytic``."""
+        y1, y2 = self._source()
+        result = _classify_probe(self._GAMMA, y1, y2, _born_in_band_mass())
+        self.assertEqual(result.route, 'born_analytic')
+        self._comparisons += 1
+
+    def test_band_escaping_mass_follows_the_certificate_decision(self) -> None:
+        """Escaping the trained band reroutes per the production certificate.
+
+        Premises first: the chart covers ``(gamma, rho)`` (so ONLY the
+        trained-band escape can reroute) and the escaping band ceiling
+        genuinely exceeds the trained ``log_w`` ceiling.  Then the route must
+        be ``born_carrier_only`` exactly when the shared production
+        certificate admits the carrier-only truncation, and neither Born
+        label otherwise (the engine fallthrough) -- the same decision
+        production takes at this draw.
+        """
+        mods, f_grid, _ = _classify_env()
+        y1, y2 = self._source()
+        m_esc = _born_band_escape_mass()
+        w_grid = mods.dimensionless_frequency(f_grid, m_esc, 0.0)
+
+        # Premise 1: box-covered, so a non-analytic route below can come
+        # only from the trained-band escape.
+        self.assertTrue(mods.born_chart.covers(self._GAMMA, self._RHO))
+        # Premise 2: the band ceiling escapes the trained log-w ceiling.
+        self.assertGreater(float(np.log(w_grid.max())),
+                           float(mods.born_chart.log_w_grid[-1]))
+
+        result = _classify_probe(self._GAMMA, y1, y2, m_esc)
+        self.assertNotEqual(result.route, 'born_analytic')
+
+        geom = mods.channels_cls(w_grid).geometry_partition(
+            gamma=self._GAMMA, y=(y1, y2), beta=0.0, kappa=0.0)
+        lens = {'kappa': 0.0, 'beta': 0.0, 'gamma': self._GAMMA,
+                'y1': y1, 'y2': y2}
+        serves = mods.born_carrier_serves(
+            lens, float(w_grid.min()), float(w_grid.max()),
+            np.asarray(geom.images))
+        if serves:
+            self.assertEqual(result.route, 'born_carrier_only')
+        else:
+            self.assertNotIn(result.route,
+                             ('born_analytic', 'born_carrier_only'))
         self._comparisons += 1
 
 

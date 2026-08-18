@@ -276,6 +276,88 @@ def born_amplification(w: float, y1: float, y2: float, gamma: float,
     return sqrt_mu * cmath.exp(1j * w * phi_geo) * correction
 
 
+def born_carrier_omitted_term(w: float, y1: float, y2: float, gamma: float,
+                              beta: float = 0.0, kappa: float = 0.0) -> float:
+    """Carrier-relative truncation certificate for the lead-only serve.
+
+    Magnitude of the FIRST NEGLECTED term of the Born far-field expansion,
+    relative to the lead-only carrier `born_lead_carrier`.  The resolved-
+    image series about ``sqrt(mu_macro)`` reads::
+
+        F_born / carrier = 1 + a0/Q2r + 1j*(w/2)*b1/Q2r + O(w**2 / Q2r**2),
+
+    so the leading omitted (carrier-relative) term is the complex number
+    ``a0/Q2r + 1j*(w/2)*b1/Q2r``, whose modulus is::
+
+        |delta| = sqrt(a0**2 + (w/2)**2 * b1**2) / Q2r
+                = math.hypot(a0, 0.5 * w * b1) / Q2r.
+
+    This is a CERTIFICATE ONLY.  ``a0`` and ``b1`` enter this remainder
+    estimate and NOTHING else: they are NEVER added to the serve carrier.
+    The object served beyond the trained chart box is `born_lead_carrier`
+    (``sqrt(mu_macro) * exp(1j*w*phi_geo)``) alone (F009/F025); this
+    helper only bounds how much that lead-only carrier omits, so an
+    admission gate can refuse where the truncation is too large.
+
+    Reads the parity-agnostic `_born_factors` DIRECTLY: those factors are
+    bit-identical on positive parity (``det_a > 0``) and the macro saddle
+    (``det_a < 0``), so this single closed form certifies BOTH parities.
+    It deliberately does NOT route through `born_amplification` /
+    `born_envelope`, which carry a positive-parity-only POLICY guard
+    (`BornDomainError` 'a0/b1 not derived on the macro saddle') that would
+    wrongly refuse the saddle here.
+
+    Parameters
+    ----------
+    w : float
+        Dimensionless lens-frame frequency (``> 0``).
+    y1, y2 : float
+        Reduced source position in the lens plane.
+    gamma, beta, kappa : float
+        External shear magnitude, orientation (radians), convergence.
+
+    Returns
+    -------
+    float
+        Dimensionless carrier-relative magnitude of the leading omitted
+        term.  Returns ``math.inf`` for the degenerate geometries
+        ``q2r == 0`` (source on the macro image / origin), ``gamma == 0``
+        (no shear, outside the sheared far-field domain of
+        `_born_factors`), or ``det_a == 0`` (caustic boundary, e.g.
+        ``gamma == 1`` at ``kappa == 0``), so the downstream certificate
+        refuses rather than dividing by zero or admitting a garbage
+        point.
+    """
+    # Degenerate-geometry refusals: return +inf so any "certificate <= bar"
+    # admission gate refuses loudly rather than dividing by zero or
+    # admitting a garbage point.  No shear (gamma == 0) is outside the
+    # sheared far-field domain of `_born_factors`.
+    if gamma == 0.0:
+        return math.inf
+    try:
+        sqrt_mu, phi_geo, q2r, b1, a0 = _born_factors(y1, y2, gamma, beta,
+                                                       kappa)
+    except ValueError:
+        # The source-at-origin degeneracy (q2r == |x0'|**2 == 0) makes
+        # `_born_factors` raise `math.log(r0_sq)` with r0_sq == 0 before it
+        # can return; r0_sq is a sum of squares, so this ValueError arises
+        # for that origin case ALONE.  Map it to the refusal sentinel.
+        return math.inf
+    except ZeroDivisionError:
+        # The caustic-boundary degeneracy (det_a == 0, i.e. gamma == 1 at
+        # kappa == 0) makes `_born_factors` divide by zero computing
+        # `sqrt_mu` (and, downstream, `x0_1`/`x0_2`/`b1`/`a0`) before it can
+        # return.  Almost certainly unreachable via production callers
+        # (`caustic_rho` refuses gamma == 1), but map it to the documented
+        # inf-refusal sentinel for defense in depth.
+        return math.inf
+    # Defense in depth for the q2r == 0 contract in case `_born_factors`
+    # ever returns 0.0 instead of raising at the origin.
+    if q2r == 0.0:
+        return math.inf
+    return math.hypot(a0, 0.5 * w * b1) / q2r
+
+
 def born_lead_carrier(w: float, y1: float, y2: float, gamma: float,
                       beta: float = 0.0, kappa: float = 0.0) -> complex:
     """Lead-only Born carrier ``morse * sqrt(|mu_macro|) * exp(1j*w*phi_geo)``.
