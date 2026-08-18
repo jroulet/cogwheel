@@ -9,8 +9,23 @@ arcs); the 6-way sharded re-sweep on F083-knee-trimmed arcs is the
 authoritative astroid evidence. NEW CAMPAIGN BLOCKER FILED:
 todo.d/lensing_tube_trainer_resolvable_subarc_trim.md (promote the F083
 trim into the trainer; sequence with/before tiling design).
-NEXT: queue item 5 = deltoid far-field redesign build (its fragment's
-f-constants dependency now satisfied; saddle sweep evidence valid).
+RE-SEQUENCED after the lobe-gauge probe + owner low-w directive:
+5a. LOW-W DIFFRACTIVE ANALYTIC RUNG build (owner: engine fall-through
+    at the band bottom unacceptable). Brief in prep
+    (.claude/handoff/low_w_diffractive_rung.md). One rung, three
+    closures: astroid F070 bottom, deltoid below-split hosting, every
+    band-split's floor. Certificate-gated, no measured constants,
+    census re-gated IN-BUILD (mirror-fidelity law).
+5b. Census re-run -> remaining deltoid mid-band demand.
+5c. Deltoid far-field redesign build sized to the remainder — brief
+    drafted (deltoid_farfield_redesign.md) but MUST absorb the probe
+    first: real demand is 12.67% of prior (lobe-gauge probe,
+    saddle_residual_lobe_gauge_probe.md — F073 quantified: 443/868
+    census-'interior' + 824/852 'shell' are genuine far-field), and
+    the main job is extending rho_outer (1.25-2.40) to the prior edge
+    (|y|=3), cusp rays on tile boundaries.
+Then: trainer-trim + tiling design -> ONE campaign -> map retrain ->
+2b arm-extension (wave_refused 2.13% -> 0) -> 7b census.
 
 CLOSED TODAY (2): c3_band_split_zero_refusal — commit 6958f0c (code) +
 b097ce1 (census mirror re-gate): saddle_c3 0.32%->14.09%,
