@@ -1,11 +1,16 @@
 # Live session state (2026-08-17 ~16:55 EDT)
 
-RUNNING: the (f_max, f_floor) joint sweep on beat-free charts (queue
-item 4) — /tmp/f_fraction_sweep.py, log /tmp/f_fraction_sweep_run.log,
-monitor armed, est <=2.8h (w<=60 DD band; recorded pre-launch).
-On SWEEP_DONE: read the JSON results, pick (f_max, f_floor) with
-provenance (closes the F083 constants fiction), then queue item 5 =
-deltoid far-field redesign build.
+QUEUE ITEM 4 COMPLETE: f-constants RULED with provenance
+(.claude/handoff/f_constants_decision.md, commit 5ceb2b3): f_max=0.40,
+f_floor=0.08 both parities; the bar gap at n_theta=7 is a PER-BAND
+DENSITY allocation for the tiling design (astroid 0.10-0.40 + saddle
+~1.1 flagged). Full-arc astroid sweep numbers were INVALID (untrimmed
+arcs); the 6-way sharded re-sweep on F083-knee-trimmed arcs is the
+authoritative astroid evidence. NEW CAMPAIGN BLOCKER FILED:
+todo.d/lensing_tube_trainer_resolvable_subarc_trim.md (promote the F083
+trim into the trainer; sequence with/before tiling design).
+NEXT: queue item 5 = deltoid far-field redesign build (its fragment's
+f-constants dependency now satisfied; saddle sweep evidence valid).
 
 CLOSED TODAY (2): c3_band_split_zero_refusal — commit 6958f0c (code) +
 b097ce1 (census mirror re-gate): saddle_c3 0.32%->14.09%,
