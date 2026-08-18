@@ -202,6 +202,13 @@ else
   APPROVE_ARGS=(--approval-dir "$APPROVAL_DIR")
 fi
 
+# Zero-cost planning recovery: SDK_RESUME_PLAN=<path to plan.json> loads a
+# previously approved/crash-recovery plan and skips the Architect (cli.py
+# --resume-plan; verification + approval gates still run).
+if [[ -n "${SDK_RESUME_PLAN:-}" ]]; then
+  APPROVE_ARGS+=(--resume-plan "$SDK_RESUME_PLAN")
+fi
+
 # Resolve the env's python ABSOLUTELY: `conda run ... python` trusts PATH,
 # and under some shells (serena MCP) a uv shim shadows the env python,
 # yielding ModuleNotFoundError for claude_agent_sdk (build 2d, 2026-07-17).
