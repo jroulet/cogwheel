@@ -6,8 +6,9 @@ section: Backlog
   beyond the chart, certificate-gated, never `covers()`-refused; the
   deltoid rung keyed on rho_lobe** `[→ spec]` — owner directive
   2026-08-17 ("changes needed for both parities"), superseding
-  [[lensing_deltoid_farfield_coordinate_redesign]] (fragment retired;
-  its Q2 cusp-ray evidence concerned the RETIRED origin-polar tiler —
+  `lensing_deltoid_farfield_coordinate_redesign` (fragment retired
+  outright, no completed.d record — its Q2 cusp-ray evidence concerned
+  the RETIRED origin-polar tiler —
   the live lobe machinery already puts cusp rays on tile edges via
   `_lobe_cusp_axis_map`). THE LAW: far from the caustic structure the
   physics gets EASIER — the residual against `born_lead_carrier` decays
@@ -26,7 +27,7 @@ section: Backlog
   hosting invisible to the origin-gauge gate — the saddle rung must key
   on rho_lobe (D2 fold onto the +y1 lobe, the `_lobe_serves` pattern).
   DEMAND INTERPLAY: the population's w-bands are low (w_hi median 4.6 /
-  p99 30.7 / max 38) — the [[lensing_low_w_diffractive_analytic_rung]]
+  p99 30.7 / max 38) — the [[2026-08-18_low_w_diffractive_analytic_rung]]
   serves the band bottom; this rung serves the far zone at all w; the
   remaining chart need is a thin near-lobe residual annulus in
   [w_low, w_split-ish] x [lobe shell, certificate radius], tiled by the
