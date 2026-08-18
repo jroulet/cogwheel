@@ -122,7 +122,8 @@ _N_CHANNELS = 4
 #: above ``w_trust`` to the point-mass ppGO band split;
 #: ``FARFIELD_DIFFRACTIVE`` (window i, the diffractive bottom below
 #: ``w_floor``) subtracts NOTHING and fits the bounded smooth ``F`` object (``F
-#: -> 1`` as ``w -> 0``); ``FARFIELD_KERNEL_SUM_MINUS_GHOST`` (window ii, the
+#: -> sqrt(mu_macro)*exp(-i*pi*n/2)`` as ``w -> 0``; ``n = 0`` positive parity,
+#: ``n = 1`` macro saddle); ``FARFIELD_KERNEL_SUM_MINUS_GHOST`` (window ii, the
 #: mid band ``[w_floor, w_trust)``) additionally subtracts the decaying
 #: complex-saddle ghost ``G`` so the stored remainder is smooth across the
 #: fold.  The tags NAME the reconstruction algebra, so they live here (the
@@ -1282,8 +1283,9 @@ def farfield_envelope_from_partition(
 
     * `FARFIELD_DIFFRACTIVE` -- the diffractive bottom ``[w_small, w_floor)``
       where no real pair separates.  Switch ``0`` everywhere: subtract
-      nothing, so the label is the bounded smooth ``F`` object (``F -> 1``
-      limit; no kernel divergence).
+      nothing, so the label is the bounded smooth ``F`` object
+      (``F -> sqrt(mu_macro)*exp(-i*pi*n/2)`` limit, ``n = 0`` positive parity,
+      ``n = 1`` macro saddle; no kernel divergence).
     * `FARFIELD_KERNEL_SUM` -- the mid band ``[w_floor, w_trust)`` with the
       real kernels subtracted,
 

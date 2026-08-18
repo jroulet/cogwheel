@@ -372,6 +372,21 @@ class RatioLayerTestCase(TestCase):
         self.like._force_direct = False
         return self.like.lnlike_and_metadata(par_dic)[0]
 
+    @staticmethod
+    def _decline_diffractive_intercept():
+        """Patcher declining the WP2c low-w diffractive intercept.
+
+        The intercept serves two-image sub-floor anchors (near_cusp,
+        two_image, sheared_sw) whole-band via `reconstruct_farfield`,
+        BEFORE the ratio/direct fork -- it does not consult
+        ``_force_direct`` -- so a probe of the ratio machinery would never
+        see its seam fire on those anchors.  Helpers whose invariant lives
+        on the ratio/direct fork run under this patcher.
+        """
+        return mock.patch.object(LensedRelativeBinningLikelihood,
+                                 '_low_w_diffractive_serve',
+                                 lambda *args, **kwargs: None)
+
     def _capture_reconstruction(self, par_dic):
         """
         Reconstruct the candidate and return ``(w, E_cand, F_total)``.
@@ -405,8 +420,13 @@ class RatioLayerTestCase(TestCase):
             store['total'] = np.asarray(total).copy()
             return kernels, total
 
+        # Decline the diffractive intercept
+        # (`_decline_diffractive_intercept`) so both paths keep funnelling
+        # through `reconstruct_from_envelope` -- the ratio-vs-direct
+        # identity under test lives on that fork.
         with mock.patch.object(likelihood_module, 'reconstruct_from_envelope',
-                               wrapper):
+                               wrapper), \
+             self._decline_diffractive_intercept():
             self.like._amplification_coefficients(par_dic)
         return store['w'], store['envelope'], store['total']
 
@@ -432,8 +452,13 @@ class RatioLayerTestCase(TestCase):
             store['count'] = int(np.size(coarse_w))
             return coarse_w, rho_nodes
 
+        # Decline the diffractive intercept
+        # (`_decline_diffractive_intercept`): it would serve two-image
+        # sub-floor anchors before the ratio fork, and the node-count
+        # invariant is about the ratio machinery itself.
         with mock.patch.object(self.like, '_ratio_loo_nodes',
-                               side_effect=wrapper):
+                               side_effect=wrapper), \
+             self._decline_diffractive_intercept():
             self.like._force_direct = False
             self.like._amplification_coefficients(par_dic)
         return store.get('count')

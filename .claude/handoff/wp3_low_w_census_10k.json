@@ -1,0 +1,25 @@
+{
+  "engine_calls": 0,
+  "mpmath_absent": true,
+  "n": 10000,
+  "route_counts": {
+    "surrogate": 0,
+    "ppgo_above_ceiling": 1587,
+    "saddle_c3": 1409,
+    "born_analytic": 1461,
+    "diffractive_analytic": 1427,
+    "diffractive_engine_hosted": 1493,
+    "analytics_engine_hosted": 0,
+    "engine_residual": 2410,
+    "wave_refused": 213,
+    "engine_refused": 0
+  },
+  "W_ceiling": 60.0,
+  "saddle_c3_total": 1409,
+  "saddle_c3_with_wsplit": 1409,
+  "saddle_c3_covered": 1409,
+  "wsplit_p1": 1.7910570415108917,
+  "wsplit_p50": 14.465277982444313,
+  "wsplit_p99": 40.34394141771252,
+  "wsplit_max": 51.61367046583002
+}

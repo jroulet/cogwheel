@@ -1,0 +1,15 @@
+{
+  "trigger": "post-commit",
+  "commit": "359a8ba5612991723b48d53a4281bdd672a7b595",
+  "timestamp": "2026-08-18T12:04:09Z",
+  "touched_files": [
+    "cogwheel/lensing/likelihood.py",
+    "cogwheel/lensing/serve_route_census.py",
+    "cogwheel/tests/test_lensing_diffractive.py",
+    "cogwheel/tests/test_lensing_marginalized_likelihood.py",
+    "cogwheel/tests/test_lensing_ppgo_above_ceiling.py",
+    "cogwheel/tests/test_lensing_saddle_likelihood.py",
+    "cogwheel/tests/test_lensing_saddle_serve_gate.py",
+    "cogwheel/tests/test_lensing_serve_route_census.py"
+  ]
+}

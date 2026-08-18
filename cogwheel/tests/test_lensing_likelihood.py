@@ -777,17 +777,30 @@ class NearCuspRegressionPinTestCase(LensedLikelihoodTestCase):
         """
         cand = self._near_cusp_candidate()
 
+        # The WP2c low-w diffractive intercept now serves this two-image
+        # near-cusp draw whole-band in the switchless FARFIELD_DIFFRACTIVE
+        # gauge (geometry-only partition, no ``exact_total``), so the
+        # ``_channel_switch`` seam this canary rides is never consulted
+        # there.  Decline the intercept for BOTH serves so the pin keeps
+        # exercising the engine path the WP1 switch fix lives on -- same
+        # event / generator / bins, assertions unchanged.
+        _decline_diffractive = mock.patch.object(
+            type(self.like), '_low_w_diffractive_serve',
+            lambda *args, **kwargs: None)
+
         # Production full-cluster switch: bounded kernels.  ``exact_total``
         # is the switch-INDEPENDENT total amplification |F| (the brute-force
         # oracle rides it), so it is the natural O(1) scale to compare to.
-        _, k0_prod, _, part = self.like._amplification_coefficients(cand)
+        with _decline_diffractive:
+            _, k0_prod, _, part = self.like._amplification_coefficients(cand)
         max_k_prod = float(np.max(np.abs(k0_prod)))
         f_scale = float(np.max(np.abs(part.exact_total)))
 
         # Buggy real-only switch on the SAME inputs: unbounded kernels.
         # Patch the engine's module-global switch that ``evaluate`` calls.
         with mock.patch.object(channels, '_channel_switch',
-                               _real_only_channel_switch):
+                               _real_only_channel_switch), \
+             _decline_diffractive:
             _, k0_bug, _, _ = self.like._amplification_coefficients(cand)
         max_k_bug = float(np.max(np.abs(k0_bug)))
 

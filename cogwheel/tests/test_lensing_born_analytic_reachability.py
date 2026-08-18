@@ -395,6 +395,8 @@ class _BornAnalyticProbe:
     _ppgo_band_split = LensedRelativeBinningLikelihood._ppgo_band_split
     _ppgo_cell_ceiling = LensedRelativeBinningLikelihood._ppgo_cell_ceiling
     _ppgo_cell_coords = LensedRelativeBinningLikelihood._ppgo_cell_coords
+    _diffractive_bottom_ceiling = (
+        LensedRelativeBinningLikelihood._diffractive_bottom_ceiling)
 
     def __init__(self, *, born_residual_chart=None):
         self._kernel_dense_f = _dense_f_grid()
