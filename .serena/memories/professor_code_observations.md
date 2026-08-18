@@ -737,3 +737,17 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   is to never write professor/* topic memories (Professor-curated only), so
   it landed here in code_observations instead — next time the Professor
   agent visits that topic, it should self-file the physics ruling above.
+
+## 2026-08-18 (born floor-split four-tier review, PASS)
+- `_born_residual_analytic`'s floor-split (likelihood.py
+  `_engine_envelope_below_split`/`_born_reconstruct`) layers FOUR tiers by
+  w-band: diffractive F_P at the bottom, trained BornResidualChart residual
+  in [trained_floor, w_trust] (zero elsewhere), raw engine value filling
+  [w_low, trained_floor), and bare ppGO carrier above w_trust -- masks
+  derived from the shipped `_band_split_mask` (zero-above-split convention,
+  matches the earlier low_w_diffractive_rung polarity ruling), four tiers
+  proven disjoint+covering. Null-residual reconstruction round-trips to
+  1e-13 against THREE independent oracles (carrier-only, diffractive
+  amplification, closed-form ppGO image-kernel sum), none of which reads
+  the captured total -- confirms the demod/remod algebra is an exact
+  round-trip, not just self-consistent.

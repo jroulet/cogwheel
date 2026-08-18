@@ -780,3 +780,14 @@
   measured value and the root-cause file:line in the docstring/change
   report so the pin flips green with zero further edits once the real fix
   lands.
+
+## 2026-08-18 (born_certificate census-mirror shards)
+- ENGINE-FREE CENSUS FIELD-SWAP PATTERN: to unit-test one classify_draw
+  branch in isolation, call the real `_load_production_modules()` then
+  `dataclasses.replace()` it swapping ONLY the fields the scenario needs
+  (e.g. born_chart, dimensionless_frequency, ppgo_band_split,
+  ppgo_cell_ceiling, diffractive_bottom_ceiling) -- every other field
+  (real geometry_partition, shipped `_band_split_mask`, other intercepts)
+  stays production, so earlier intercepts still return before any wave
+  door is touched. Cheaper and more faithful than reimplementing the
+  whole classify_draw dispatch with mocks.

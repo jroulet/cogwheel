@@ -577,3 +577,12 @@
   whenever a WP adds a new `self.<method>` call inside an existing method,
   sweep every stub/probe class that binds unbound production methods for
   that same class, not just the caller the WP names.
+
+## 2026-08-18 (INS-1-002, born_carrier_certificate review)
+- DELIBERATE-SCOPE PROBE EXCEPTION to the MagicMock-hides-new-attribute
+  lineage: an engine-free-BY-DESIGN probe legitimately not binding a new
+  engine-dependent method (e.g. `_engine_envelope_below_split`) is NOT
+  automatically the same defect -- check whether the route that method
+  serves is even reachable engine-free before flagging; if not, it's a
+  documented gap for a future engine-aware probe, not a stub-hides-
+  attribute finding.

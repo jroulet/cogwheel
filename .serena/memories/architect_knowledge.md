@@ -802,3 +802,27 @@
   that invocation) — still unresolved infra gap; a future session needing
   to persist a plan must either place it under the project root or ensure
   a native Write tool is present.
+
+## 2026-08-18 build (born_farfield_go_carrier + born_farfield_completion)
+- PRE-WP REACHABILITY VERDICT (new standing check): before scoping a WP to
+  build a new admission rung, verify how much of the target domain is
+  actually reachable once existing certificates are respected -- if an
+  existing honest certificate (e.g. the c3 remainder cert) already refuses
+  most of that domain for physical reasons, a new looser/1-term gate that
+  would admit there is a forbidden widen-a-bar move, not a genuine new
+  rung. Measure the reachable fraction (this build: <=2-3% admissible via
+  a bare GO carrier) before committing scope; NOT BUILT is itself a valid
+  plan outcome.
+- Trained-floor band-split (3-tier repair of a chart-covered rung that was
+  wrongly falling through to the exact engine on `trained_band_escape`):
+  engine-host tier [w_low, trained_floor), chart-serve tier
+  [trained_floor, w_trust], bare-carrier tier above w_trust -- reuses the
+  existing `_band_split_mask` + `_diffractive_bottom_ceiling` helpers, no
+  new split machinery.
+- Certificate-gated carrier-only serve pattern (beyond-box far-field lift):
+  evaluate the truncation certificate at band CEILING w_hi, not w_lo -- the
+  carrier-omitted-term bound is LINEAR in w (worst at ceiling), opposite the
+  w_lo convention used by the c3/ppgo w^-3 remainder gates. Saddle parity
+  needs an ADDITIONAL lower resolution fence (w_lo*delta_min >= RHO_END);
+  positive parity gets its floor free via the diffractive rung. Lead-only
+  carrier stays the single shared carrier -- no two-carrier fork.

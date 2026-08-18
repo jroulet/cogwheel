@@ -432,3 +432,12 @@
   `.claude/sync_issues.json`) can mismatch the pre-commit hook's fingerprint
   regex for "did the Librarian short-term/knowledge memory get touched",
   causing `sync_issues.json` to regenerate itself; stage the memory file
+  alongside any doc-only sync commit to avoid this self-regeneration loop.
+
+## 2026-08-18 (spec-changelog sync)
+- A todo.d fragment's OWN prior inline verdict paragraphs (written by an
+  earlier intermediate agent) can pre-emptively disambiguate a SPEC.md
+  sentence that otherwise reads as one monolithic pending item -- always
+  read the FULL todo.d fragment before rewriting a "fragment open" SPEC
+  sentence; it may already record that only part of the described work is
+  still live, changing what the replacement text should say.

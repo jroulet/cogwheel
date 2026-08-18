@@ -150,3 +150,12 @@
   the ONLY occurrences; after removal, re-run the same search (expect zero)
   plus `ast.parse` + a live import + a `dataclasses.fields()` count check as
   the mechanical proof the removal was both clean and syntactically valid.
+
+## 2026-08-18 (INS-1-003, born_carrier_omitted_term ZeroDivisionError)
+- SENTINEL-GUARD EXCEPTION COVERAGE: a helper returning a documented
+  sentinel (e.g. math.inf) for one domain-boundary exception (ValueError at
+  the true origin) can still raise an UNCAUGHT different exception
+  (ZeroDivisionError, e.g. `1.0/math.sqrt(abs(det_a))` at det_a==0 on the
+  caustic boundary) for a different degeneracy -- audit every raise path in
+  the wrapped helper, not just the one the original guard anticipated, and
+  broaden the except clause (or add an explicit pre-check) to cover it.

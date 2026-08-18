@@ -977,3 +977,17 @@
   polarity. For the inverted rung, explicitly force below_mask to all-False
   and skip the engine call when the split is inactive, or every above-split
   node gets silently routed into the wrong populator (regression vs HEAD).
+
+## 2026-08-18 build (born_farfield_completion, WP1/WP2)
+- SPEC GUARD UNREACHABILITY: a spec's stated post-call guard (`if x == 0:
+  return inf`) can be unreachable in practice if the callee it wraps already
+  raises (e.g. ValueError via math.log on the same zero condition) before
+  returning -- wrap the call in the matching except clause and keep the
+  post-call check only as defense-in-depth, don't rely on it as the sole
+  guard.
+- GATE-LIFTING ORDERING: lifting a refusal gate to attempt a certificate-
+  gated serve for previously-refused queries can require solving geometry
+  that the old refusal returned before touching (pre-geom None) -- a
+  propagating exception (e.g. LensDomainError) from that now-reached geom
+  solve is outcome-preserving, not a regression, if the engine path below
+  would raise the identical error for the same geometry.
