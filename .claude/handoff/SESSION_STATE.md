@@ -10,12 +10,23 @@ authoritative astroid evidence. NEW CAMPAIGN BLOCKER FILED:
 todo.d/lensing_tube_trainer_resolvable_subarc_trim.md (promote the F083
 trim into the trainer; sequence with/before tiling design).
 RE-SEQUENCED after the lobe-gauge probe + owner low-w directive:
-5a. LOW-W DIFFRACTIVE ANALYTIC RUNG build (owner: engine fall-through
-    at the band bottom unacceptable). Brief in prep
-    (.claude/handoff/low_w_diffractive_rung.md). One rung, three
-    closures: astroid F070 bottom, deltoid below-split hosting, every
-    band-split's floor. Certificate-gated, no measured constants,
-    census re-gated IN-BUILD (mirror-fidelity law).
+5a. LOW-W DIFFRACTIVE ANALYTIC RUNG build RUNNING (owner: engine
+    fall-through at the band bottom unacceptable). Brief
+    .claude/handoff/low_w_diffractive_rung.md (verified at c751215;
+    NOTE the corrected split tail: saddle_c3 w_split p50 14.5 / p99
+    40.4 — w_low>=w_split coverage is a REPORTED acceptance number,
+    not assumed). Log /tmp/low_w_diffractive_rung_20260817_234021.log,
+    PID 1630729, approval dir /tmp/low_w_diffractive_rung_approval,
+    monitor armed. Census re-gated IN-BUILD. Concurrent inherited-tree
+    gate insurance run: /tmp/gate_pre_low_w_insurance.log.
+    Plan review: the Professor's expansion+certificate derivation is
+    the load-bearing item; F(w->0)=1 exact anchor; escalate-not-
+    iterate on any overlap-band miss.
+    ALSO: deltoid redesign SUPERSEDED by
+    todo.d/lensing_born_farfield_completion.md (both parities,
+    carrier-only beyond chart, certificate not covers(), rho_lobe
+    keying, optimal-representation clause). Born brief redraft needed
+    from the new fragment before 5c launch.
 5b. Census re-run -> remaining deltoid mid-band demand.
 5c. Deltoid far-field redesign build sized to the remainder — brief
     drafted (deltoid_farfield_redesign.md) but MUST absorb the probe
