@@ -612,6 +612,42 @@ def _saddle_c3_route(mods: _ProductionModules, real_images: np.ndarray,
     return True, float(w_split)
 
 
+def _born_trained_floor_route(mods: _ProductionModules, gamma: float,
+                              rho: float, host_mask: np.ndarray,
+                              w_grid: np.ndarray) -> bool:
+    """Whether WP1's Born TRAINED-FLOOR split serves a band-escaping draw.
+
+    Thin mirror of Route 2 of
+    ``likelihood.LensedRelativeBinningLikelihood._born_residual_analytic``:
+    a box-covered draw whose HOST sub-band drops BELOW the chart's trained
+    ``log_w`` floor (a low-edge escape) is served AS ``born_analytic`` --
+    the chart serves the trained sub-band ``[trained_floor, w_trust]`` it was
+    actually trained on and the exact engine hosts the untrained remainder
+    ``[w_low, trained_floor)`` below it -- rather than refused whole to the
+    engine, EXACTLY when the low-edge split is a genuine strict sub-band.
+
+    ``trained_floor = exp(log_w_grid[0])`` is the low edge of the trained
+    coverage read from the shipped artifact (``log_w_grid[0]``) -- never a
+    literal, the same derivation WP1 uses.  The split arithmetic is the
+    production ``_band_split_mask`` (via ``mods.band_split_mask``) and the
+    coverage test is ``born_chart.covers``; no decision logic is
+    reimplemented here.  Returns True iff the inner split is active
+    (``trained_floor`` strictly inside the band), BOTH tiers are non-empty,
+    AND the chart sub-band is fully covered by the trained log-w range -- the
+    same four-way conjunction production Route 2 gates on.  A high-edge or
+    disjoint escape leaves ``chart_mask`` uncovered -> False -> the caller
+    falls through to the carrier-only certificate (production Route 3).
+    """
+    born_chart = mods.born_chart
+    trained_floor = math.exp(float(born_chart.log_w_grid[0]))
+    band_split_floor, below_floor = mods.band_split_mask(w_grid, trained_floor)
+    engine_mask = host_mask & below_floor
+    chart_mask = host_mask & ~below_floor
+    return bool(
+        band_split_floor and engine_mask.any() and chart_mask.any()
+        and born_chart.covers(gamma, rho, w_grid[chart_mask]))
+
+
 def classify_draw(mods: _ProductionModules, *, gamma: float,
                   m_lens_msun: float, y1: float, y2: float,
                   f_grid: np.ndarray, gamma_edges: np.ndarray,
@@ -652,22 +688,35 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     5. ``born_analytic`` / ``born_carrier_only`` -- the Born weak-deflection
        exterior (chart attached, ``kappa == beta == 0`` fixed here,
        ``gamma != 0`` and ``caustic_rho > 2``), mirroring the production
-       serve decision INCLUDING the trained-band escape: a draw is
-       ``born_analytic`` only when box-covered AND its HOST sub-band --
-       the band minus the certified-ppGO above-``w_trust`` split (capped
-       at ``min(parity_wall, cell_ceiling)``) and minus the nested
-       diffractive bottom ``[w_lo, w_low)``, via the production
-       `_band_split_mask` arithmetic -- stays inside the trained ``log_w``
-       range (``trained_band_escape = covered and host_mask.any() and not
-       covers(gamma, rho, chart_w)``).  A beyond-box OR band-escaping draw
-       is ``born_carrier_only`` IFF the shared production certificate
-       ``_born_carrier_certificate_serves`` admits the carrier-only
-       truncation (omitted-term bar at ``w_hi``, min-image-separation
-       backstop, saddle ``w_lo * delta_min >= RHO_END`` fence).  Both
-       parities reach the carrier-only branch; a certificate refusal falls
-       through to the node pass, and a MISSING chart skips the whole
-       intercept (production returns ``None`` before any serve,
-       carrier-only included).
+       serve decision's THREE routes INCLUDING the trained-band escape.  The
+       HOST sub-band ``chart_w`` is the band minus the certified-ppGO
+       above-``w_trust`` split (capped at ``min(parity_wall, cell_ceiling)``)
+       and minus the nested diffractive bottom ``[w_lo, w_low)``, via the
+       production `_band_split_mask` arithmetic; ``trained_band_escape =
+       covered and host_mask.any() and not covers(gamma, rho, chart_w)``.
+
+       * Route 1 -- ``covered and not trained_band_escape`` (box-covered AND
+         the host sub-band inside the trained log-w range) -> ``born_analytic``
+         (the interpolated residual + carrier over the whole band).
+       * Route 2 -- ``trained_band_escape`` whose low-edge split serves
+         (`_born_trained_floor_route`, a thin caller of the production
+         accessors: ``trained_floor = exp(log_w_grid[0])``, the production
+         `_band_split_mask`, and ``covers`` -- reimplementing no decision
+         logic) -> STILL ``born_analytic``.  WP1 serves the trained sub-band
+         ``[trained_floor, w_trust]`` from the chart and engine-hosts the
+         untrained remainder below the floor, so the draw is PARTIALLY served
+         analytic rather than refused whole to the engine.  A high-edge or
+         disjoint escape leaves this False and falls onward to Route 3.
+       * Route 3 -- a beyond-box OR high-edge/disjoint band-escaping draw is
+         ``born_carrier_only`` IFF the shared production certificate
+         ``_born_carrier_certificate_serves`` admits the carrier-only
+         truncation (omitted-term bar at ``w_hi``, min-image-separation
+         backstop, saddle ``w_lo * delta_min >= RHO_END`` fence).
+
+       Both parities reach the carrier-only branch; a certificate refusal
+       falls through to the node pass, and a MISSING chart skips the whole
+       intercept (production returns ``None`` before any serve, carrier-only
+       included).
     6. low-w diffractive rung (far-field exterior, ``w_lo < farfield_w_
        floor``), SPLIT BY PARITY onto opposite ledger sides: ``diffractive_
        analytic`` for the positive-parity Rung P (analytic ``F_P`` admitted
@@ -816,8 +865,25 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
         trained_band_escape = (
             covered and host_mask.any()
             and not mods.born_chart.covers(gamma, rho, chart_w))
+        # Route 1: fully in box -> the interpolated residual over the whole
+        # band.
         if covered and not trained_band_escape:
             return _result('born_analytic', ())
+        # Route 2: TRAINED-FLOOR band split (WP1) -> still ``born_analytic``.
+        # A box-covered draw whose HOST sub-band drops below the chart's
+        # trained ``log_w`` floor is PARTIALLY served -- the chart serves the
+        # trained sub-band ``[trained_floor, w_trust]`` it was trained on and
+        # the exact engine hosts the untrained remainder below it -- rather
+        # than refused whole to the engine.  ``_born_trained_floor_route`` is
+        # a thin caller of the production accessors (``log_w_grid``,
+        # ``covers``, ``_band_split_mask``); the split arithmetic is never
+        # reimplemented here.  A high-edge / disjoint escape leaves this
+        # False and falls onward to the carrier-only certificate, exactly as
+        # production Route 2 skips to Route 3.
+        if trained_band_escape and _born_trained_floor_route(
+                mods, gamma, rho, host_mask, w_grid):
+            return _result('born_analytic', ())
+        # Route 3: certificate-gated CARRIER-ONLY serve, else fall through.
         if mods.born_carrier_serves(lens, w_lo, w_hi, real_images):
             return _result('born_carrier_only', ())
 

@@ -104,9 +104,11 @@ Cost.
 """
 from __future__ import annotations
 
+import dataclasses
 import functools
 import math
 import pathlib
+import sys
 import types
 import unittest
 from unittest import mock
@@ -117,11 +119,15 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from cogwheel.lensing.chang_refsdal import _born, geometry, operator
-from cogwheel.lensing.chang_refsdal.channels import ChangRefsdalChannels
+from cogwheel.lensing.chang_refsdal import _born, _schwinger, geometry, operator
+from cogwheel.lensing.chang_refsdal.channels import (
+    ChangRefsdalChannels, born_carrier_from_partition)
 from cogwheel.lensing import likelihood
+from cogwheel.lensing import ppgo_map
+from cogwheel.lensing import serve_route_census
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood,
+    _band_split_mask,
     _SADDLE_FARFIELD_SAFETY, _SADDLE_FARFIELD_CERT_BAR)
 from cogwheel.lensing.ppgo_map import caustic_rho
 
@@ -697,7 +703,13 @@ class _ReconstructSpy:
 
     Returns a unique sentinel so the caller can distinguish "served"
     (sentinel) from "declined to the engine" (``None``) without running
-    the heavy reconstruction.
+    the heavy reconstruction.  The trained-floor band split (WP1) reaches
+    ``_born_reconstruct`` with two ADDITIONAL keyword arguments --
+    ``engine_envelope`` and ``engine_mask`` -- carrying the exact-engine
+    envelope that hosts the untrained ``[w_low, trained_floor)`` remainder;
+    they are recorded (as copies, or ``None`` on Routes 1/3 which never
+    pass them) so the tier-routing pin can prove which nodes each source
+    populates without running the engine.
     """
 
     def __init__(self):
@@ -705,11 +717,15 @@ class _ReconstructSpy:
         self.calls: list[dict] = []
 
     def __call__(self, lens, dense_w, geom, residual, below_mask,
-                 bottom_mask):
+                 bottom_mask, engine_envelope=None, engine_mask=None):
         self.calls.append({
             'residual': np.array(residual, copy=True),
             'below_mask': np.array(below_mask, copy=True),
             'bottom_mask': np.array(bottom_mask, copy=True),
+            'engine_envelope': (None if engine_envelope is None
+                                else np.array(engine_envelope, copy=True)),
+            'engine_mask': (None if engine_mask is None
+                            else np.array(engine_mask, copy=True)),
         })
         return self.sentinel
 
@@ -727,6 +743,83 @@ def _make_probe(chart: _StubChart):
     probe._ppgo_band_split = lambda lens: None
     probe._ppgo_cell_ceiling = lambda lens: None
     probe._diffractive_bottom_ceiling = lambda lens: None
+    probe.spy = _ReconstructSpy()
+    probe._born_reconstruct = probe.spy
+    probe.serve = types.MethodType(
+        LensedRelativeBinningLikelihood._born_residual_analytic, probe)
+    return probe
+
+
+class _WBandChart:
+    """A Born residual chart whose ``covers`` enforces a log-w trained band.
+
+    Faithful to the shipped ``BornResidualChart`` interface the trained-
+    floor band split reads: a 2-argument ``covers(gamma, rho)`` box probe
+    (always True here -- the synthetic ``(gamma, rho)`` box is orthogonal to
+    this suite's concern, the LOG-W split) and a 3-argument
+    ``covers(gamma, rho, w)`` that additionally requires the whole served
+    band ``w`` to lie inside the trained ``[floor_w, ceil_w]`` range, so a
+    served band dipping below ``floor_w`` reads as a trained-band escape.
+    ``log_w_grid`` exposes ``[log(floor_w), log(ceil_w)]`` so production
+    reads ``trained_floor = exp(log_w_grid[0]) == floor_w`` from the
+    artifact -- NEVER a literal.  ``evaluate`` returns the fixed sentinel
+    residual over whatever sub-band it is handed, recording each sub-band.
+    """
+
+    def __init__(self, floor_w: float, ceil_w: float, sentinel: complex):
+        self.floor_w = float(floor_w)
+        self.ceil_w = float(ceil_w)
+        self.sentinel = complex(sentinel)
+        #: trained log-w coverage; production reads exp(log_w_grid[0]).
+        self.log_w_grid = np.array(
+            [math.log(self.floor_w), math.log(self.ceil_w)], dtype=float)
+        self.evaluate_calls: list[np.ndarray] = []
+
+    def covers(self, gamma, rho, w=None):  # noqa: D401 - stub
+        """Box always covers; the 3-arg probe enforces the log-w band."""
+        if w is None:
+            return True
+        w = np.asarray(w, dtype=float)
+        if w.size == 0:
+            return True
+        return bool(w.min() >= self.floor_w and w.max() <= self.ceil_w)
+
+    def evaluate(self, w, gamma, rho):  # noqa: D401 - stub
+        """Return the sentinel residual over ``w`` (records the sub-band)."""
+        w = np.asarray(w, dtype=float)
+        self.evaluate_calls.append(np.array(w, copy=True))
+        return np.full(w.shape, self.sentinel, dtype=complex)
+
+
+def _make_floor_probe(chart, *, w_trust, w_low, engine_value=5.0 + 2.0j):
+    """Bind ``_born_residual_analytic`` with an ACTIVE trained-floor split.
+
+    Unlike ``_make_probe`` (no-split identity), this drives the map-consult
+    ``w_trust`` and the diffractive-bottom ``w_low`` to concrete floats so
+    the host band splits into the four tiers WP1 routes.  The engine
+    sub-envelope helper ``_engine_envelope_below_split`` is a SPY returning
+    ``engine_value`` on the mask nodes (and zero elsewhere, matching the
+    production full-length shape) and recording the ``(dense_w, mask)`` it
+    is handed; ``_born_reconstruct`` is the sentinel spy.  Engine-free.
+    """
+    probe = types.SimpleNamespace()
+    probe.born_residual_chart = chart
+    probe._ppgo_band_split = lambda lens: w_trust
+    probe._ppgo_cell_ceiling = lambda lens: None
+    probe._diffractive_bottom_ceiling = lambda lens: w_low
+    probe.engine_env_calls = []
+    probe.engine_value = complex(engine_value)
+
+    def _engine_env(lens, dense_w, mask):
+        probe.engine_env_calls.append({
+            'dense_w': np.array(dense_w, copy=True),
+            'mask': np.array(mask, copy=True),
+        })
+        out = np.zeros(np.shape(dense_w), dtype=complex)
+        out[np.asarray(mask, dtype=bool)] = probe.engine_value
+        return out
+
+    probe._engine_envelope_below_split = _engine_env
     probe.spy = _ReconstructSpy()
     probe._born_reconstruct = probe.spy
     probe.serve = types.MethodType(
@@ -1058,6 +1151,1060 @@ class ServeRoutingSelfFalsificationTestCase(_BornCertTestCase):
         self.assertFalse(serves_below)
         with self.assertRaises(AssertionError):
             self.assertTrue(serves_below)
+
+
+# =========================================================================== #
+# Trained-floor band-split pins (WP1/WP2).  A box-covered far-exterior draw
+# whose served host sub-band DROPS BELOW the chart's trained log-w floor is a
+# LOW-EDGE escape: instead of refusing the whole band (the Fact-2 regression),
+# the chart serves the trained sub-band ``[trained_floor, w_trust]`` and the
+# exact engine hosts the untrained remainder ``[w_low, trained_floor)`` below
+# it.  These pins are ENGINE-FREE: the real cheap ``geometry_partition`` +
+# ``caustic_rho`` run, but ``_engine_envelope_below_split`` and
+# ``_born_reconstruct`` are spied so ``operator.F_op`` is never called.
+# =========================================================================== #
+
+#: Positive-parity far-exterior lens for the trained-floor pins (rho ~ 111 >
+#: 2, gamma < 1 so the ceiling is the astroid wall >> the tiny w_hi here).
+FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2 = ROUTE_POS_GAMMA, ROUTE_POS_Y1, ROUTE_POS_Y2
+#: Dense band spanning all four tiers: nodes 0.05,0.15,0.25,0.35,0.45,...,0.75.
+FLOOR_DENSE = np.linspace(0.05, 0.75, 8)
+#: Map-consult trusted floor (below_mask boundary): w_trust = 0.60.
+FLOOR_WTRUST = 0.60
+#: Diffractive-bottom ceiling (bottom_mask boundary): w_low = 0.20.
+FLOOR_WLOW = 0.20
+#: Trained log-w floor the chart advertises via ``exp(log_w_grid[0])`` = 0.40;
+#: it lies STRICTLY between w_low and w_trust so the host band splits into a
+#: genuine engine tier below it and a chart tier above it.
+FLOOR_TRAINED = 0.40
+#: Trained log-w ceiling (well above w_hi so the chart sub-band is covered).
+FLOOR_CEIL = 4.0
+#: Distinctive residual the chart serves on its trained tier (NOT zero, NOT
+#: the engine_value, so both an all-zero and a mislabelled tier are caught).
+FLOOR_SENTINEL = 7.0 - 3.0j
+#: Distinctive engine-hosted envelope value on the engine tier.
+FLOOR_ENGINE_VALUE = 5.0 + 2.0j
+
+
+def _floor_tier_masks(dense_w, *, w_trust, w_low, trained_floor):
+    """Derive the four trained-floor tier masks from the LIVE band-split.
+
+    Mirrors ``_born_residual_analytic`` exactly using the shipped
+    ``_band_split_mask`` (never a hand-written comparison), returning
+    ``(bottom_mask, engine_mask, chart_mask, above_mask)`` -- the diffractive
+    bottom ``[w_lo, w_low)``, the engine-hosted ``[w_low, trained_floor)``,
+    the chart-served ``[trained_floor, w_trust]`` and the bare-ppGO carrier
+    ``(w_trust, w_hi]`` -- so a test can assert the partition PREMISE before
+    it drives the serve.
+    """
+    _band_split, below_mask = _band_split_mask(dense_w, w_trust)
+    band_split_low, below_low = _band_split_mask(dense_w, w_low)
+    bottom_mask = below_low & below_mask if band_split_low \
+        else np.zeros(dense_w.shape, dtype=bool)
+    host_mask = below_mask & ~bottom_mask
+    _band_split_floor, below_floor = _band_split_mask(dense_w, trained_floor)
+    engine_mask = host_mask & below_floor
+    chart_mask = host_mask & ~below_floor
+    above_mask = ~below_mask
+    return bottom_mask, engine_mask, chart_mask, above_mask
+
+
+class BornTrainedFloorTierRoutingTestCase(_BornCertTestCase):
+    """FLOOR-SPLIT TIER ROUTING: the three tiers map to the correct w segments.
+
+    A box-covered draw whose chart trained log-w range is a STRICT sub-band
+    ``[trained_floor, w_trust]`` of the requested band routes into four
+    disjoint w-tiers.  Realised ENGINE-FREE via the spy-recorded residual /
+    masks / engine_envelope / engine_mask fed to ``_born_reconstruct``:
+
+    * ``[trained_floor, w_trust]`` -> the chart's sentinel residual
+      (chart-served);
+    * ``[w_low, trained_floor)`` -> the engine-hosted envelope value
+      (engine-served, sentinel ABSENT);
+    * ``[w_lo, w_low)`` -> the diffractive ``F_P`` bottom (``bottom_mask``);
+    * ``(w_trust, w_hi]`` -> the bare ppGO carrier (above ``below_mask``).
+
+    An off-by-one in the inner ``chart_mask`` / ``engine_mask`` split, or a
+    polarity flip, moves a tier boundary to the wrong ``w`` and this pin
+    fails on the mis-labelled node.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.lens = _route_lens(FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2)
+        # Premise: far-exterior (rho > 2) so the serve REACHES the routing
+        # branches rather than the early rho <= 2 fallthrough.
+        self.rho = _route_rho(FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2)
+        self.assertGreater(self.rho, 2.0, 'fixture is not far-exterior')
+        # Premise: trained_floor is read from the artifact, not a literal.
+        self.chart = _WBandChart(FLOOR_TRAINED, FLOOR_CEIL, FLOOR_SENTINEL)
+        self.assertEqual(
+            math.exp(float(self.chart.log_w_grid[0])), FLOOR_TRAINED,
+            'trained_floor not recoverable from log_w_grid[0]')
+        (self.bottom_mask, self.engine_mask, self.chart_mask,
+         self.above_mask) = _floor_tier_masks(
+            FLOOR_DENSE, w_trust=FLOOR_WTRUST, w_low=FLOOR_WLOW,
+            trained_floor=FLOOR_TRAINED)
+
+    def test_four_tiers_partition_the_band(self):
+        """Premise: the four tiers are non-empty and partition the band."""
+        tiers = (self.bottom_mask, self.engine_mask, self.chart_mask,
+                 self.above_mask)
+        for name, mask in zip(
+                ('bottom', 'engine', 'chart', 'above'), tiers):
+            with self.subTest(tier=name):
+                self.assertTrue(mask.any(), f'{name} tier is empty')
+        union = np.zeros(FLOOR_DENSE.shape, dtype=bool)
+        overlap = np.zeros(FLOOR_DENSE.shape, dtype=int)
+        for mask in tiers:
+            union |= mask
+            overlap += mask.astype(int)
+        self.assertTrue(np.all(union), 'tiers do not cover the whole band')
+        np.testing.assert_array_equal(
+            overlap, np.ones(FLOOR_DENSE.shape, dtype=int),
+            'tiers are not disjoint (a node belongs to two tiers)')
+
+    def test_tiers_route_to_the_correct_sources(self):
+        """Chart sentinel on [floor,trust]; engine value on [low,floor); ..."""
+        probe = _make_floor_probe(
+            self.chart, w_trust=FLOOR_WTRUST, w_low=FLOOR_WLOW,
+            engine_value=FLOOR_ENGINE_VALUE)
+        with mock.patch.object(
+                likelihood, '_born_carrier_certificate_serves') as cert:
+            result = probe.serve(self.lens, FLOOR_DENSE)
+        # Route 2 taken: the certificate (Route 3 only) was never consulted.
+        self.assertIs(result, probe.spy.sentinel)
+        self.assertEqual(cert.call_count, 0,
+                         'trained-floor split leaked into the Route-3 '
+                         'certificate')
+        self.assertEqual(len(probe.spy.calls), 1)
+        call = probe.spy.calls[0]
+        residual = call['residual']
+        # Chart tier: the sentinel residual, and ONLY there.
+        np.testing.assert_array_equal(
+            residual[self.chart_mask],
+            np.full(int(self.chart_mask.sum()), FLOOR_SENTINEL))
+        # Engine + bottom + above tiers: the residual is ZERO (sentinel
+        # ABSENT) -- the engine envelope, not the residual, hosts them.
+        non_chart = ~self.chart_mask
+        np.testing.assert_array_equal(
+            residual[non_chart],
+            np.zeros(int(non_chart.sum()), dtype=complex),
+            'sentinel residual leaked outside the chart tier')
+        # Engine tier: engine_mask recorded, engine_envelope carries the
+        # engine value there and zero elsewhere.
+        self.assertIsNotNone(call['engine_mask'])
+        np.testing.assert_array_equal(call['engine_mask'], self.engine_mask)
+        env = call['engine_envelope']
+        self.assertIsNotNone(env, 'Route 2 did not pass an engine_envelope')
+        np.testing.assert_array_equal(
+            env[self.engine_mask],
+            np.full(int(self.engine_mask.sum()), FLOOR_ENGINE_VALUE))
+        np.testing.assert_array_equal(
+            env[~self.engine_mask],
+            np.zeros(int((~self.engine_mask).sum()), dtype=complex))
+        # Bottom + above tiers: the shared below/bottom masks locate them.
+        np.testing.assert_array_equal(call['bottom_mask'], self.bottom_mask)
+        np.testing.assert_array_equal(
+            ~call['below_mask'], self.above_mask)
+        # The chart evaluated EXACTLY the chart-tier sub-band, nothing else.
+        self.assertEqual(len(self.chart.evaluate_calls), 1)
+        np.testing.assert_array_equal(
+            self.chart.evaluate_calls[0], FLOOR_DENSE[self.chart_mask])
+        # The engine sub-envelope helper was consulted with the engine mask.
+        self.assertEqual(len(probe.engine_env_calls), 1)
+        np.testing.assert_array_equal(
+            probe.engine_env_calls[0]['mask'], self.engine_mask)
+
+    def test_tier_routing_diagnostic_plot(self):
+        """Stacked w-segment plot coloring each node by its serving tier."""
+        probe = _make_floor_probe(
+            self.chart, w_trust=FLOOR_WTRUST, w_low=FLOOR_WLOW,
+            engine_value=FLOOR_ENGINE_VALUE)
+        with mock.patch.object(
+                likelihood, '_born_carrier_certificate_serves'):
+            probe.serve(self.lens, FLOOR_DENSE)
+        colors = {'bottom (F_P)': ('tab:purple', self.bottom_mask),
+                  'engine': ('tab:blue', self.engine_mask),
+                  'chart': ('tab:green', self.chart_mask),
+                  'ppGO carrier': ('tab:orange', self.above_mask)}
+        fig, ax = plt.subplots(figsize=(6.0, 2.6))
+        for label, (color, mask) in colors.items():
+            ax.scatter(FLOOR_DENSE[mask], np.zeros(int(mask.sum())),
+                       s=120, color=color, label=label)
+        for edge, name in ((FLOOR_WLOW, 'w_low'),
+                           (FLOOR_TRAINED, 'trained_floor'),
+                           (FLOOR_WTRUST, 'w_trust')):
+            ax.axvline(edge, color='k', ls='--', alpha=0.5)
+            ax.text(edge, 0.02, name, rotation=90, fontsize=7, va='bottom')
+        ax.set_yticks([])
+        ax.set_xlabel('w')
+        ax.set_title('Spec B: trained-floor tier routing')
+        ax.legend(fontsize=7, ncol=2, loc='upper center')
+        _save_plot(fig, 'born_certificate_trained_floor_tier_routing.png')
+
+
+#: Disjoint-HIGH trained range: entirely ABOVE the requested band
+#: [0.05, 0.75], so EVERY served node escapes the trained log-w coverage --
+#: a genuine full escape, not a low-edge split.  trained_floor = 2.0 sits
+#: above w_hi, so the inner ``_band_split_mask`` at trained_floor is inactive
+#: and Route 2 is correctly skipped in favour of the Route-3 carrier-only lift.
+DISJOINT_FLOOR, DISJOINT_CEIL = 2.0, 4.0
+
+
+class BornDisjointEscapeNullSplitTestCase(_BornCertTestCase):
+    """NULL-SPLIT BYTE-IDENTITY: a full escape never engages Route 2.
+
+    A box-covered draw whose chart trained log-w range is DISJOINT from the
+    requested band (the whole served band escapes) must NOT trigger the
+    trained-floor band split -- it must behave BYTE-IDENTICALLY to a plain
+    ``covers()`` box-miss (the HEAD Route-3 fall-through / carrier-only lift):
+    the residual fed to ``_born_reconstruct`` is the carrier-only ZERO
+    residual, ``engine_envelope`` / ``engine_mask`` are ``None`` (Route 2
+    never ran), and the chart's ``evaluate`` is NEVER called.  A future
+    refactor of the tiering that let a disjoint range dribble into Route 2
+    would perturb the residual or attach an engine envelope; this pin
+    catches it.  Engine-free.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.lens = _route_lens(FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2)
+        self.rho = _route_rho(FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2)
+        self.assertGreater(self.rho, 2.0, 'fixture is not far-exterior')
+
+    def _serve(self, chart):
+        """Serve the disjoint/box-miss chart on the positive lens (Route 3)."""
+        probe = _make_probe(chart)
+        with mock.patch.object(
+                likelihood, '_born_carrier_certificate_serves',
+                wraps=likelihood._born_carrier_certificate_serves) as cert:
+            result = probe.serve(self.lens, FLOOR_DENSE)
+        return result, probe.spy, cert
+
+    def test_disjoint_escape_is_byte_identical_to_box_miss(self):
+        """Disjoint full-escape feeds the SAME thing as a plain covers-miss."""
+        disjoint = _WBandChart(DISJOINT_FLOOR, DISJOINT_CEIL, FLOOR_SENTINEL)
+        # Premise: the trained range really is disjoint-HIGH (above w_hi).
+        self.assertGreater(math.exp(float(disjoint.log_w_grid[0])),
+                           float(FLOOR_DENSE.max()),
+                           'trained floor is not above the band (not a full '
+                           'escape)')
+        # Reference: a plain covers()==False box-miss -- the HEAD Route-3 path.
+        box_miss = _StubChart(covers_result=False, residual=_DISTINCT_RESIDUAL)
+        res_new, spy_new, cert_new = self._serve(disjoint)
+        res_ref, spy_ref, cert_ref = self._serve(box_miss)
+        # Same certificate verdict (admitted) -> both serve carrier-only.
+        self.assertIs(res_new, spy_new.sentinel)
+        self.assertIs(res_ref, spy_ref.sentinel)
+        self.assertEqual(cert_new.call_count, 1)
+        self.assertEqual(cert_ref.call_count, 1)
+        call_new, call_ref = spy_new.calls[0], spy_ref.calls[0]
+        # BYTE-IDENTITY of every argument fed to _born_reconstruct.
+        np.testing.assert_array_equal(
+            call_new['residual'], call_ref['residual'])
+        np.testing.assert_array_equal(
+            call_new['below_mask'], call_ref['below_mask'])
+        np.testing.assert_array_equal(
+            call_new['bottom_mask'], call_ref['bottom_mask'])
+        # The residual is the carrier-only ZERO residual (not the chart's).
+        np.testing.assert_array_equal(
+            call_new['residual'], np.zeros(FLOOR_DENSE.shape, dtype=complex))
+        # Route 2 NEVER ran: no engine envelope / mask on either path.
+        self.assertIsNone(call_new['engine_envelope'])
+        self.assertIsNone(call_new['engine_mask'])
+        self.assertIsNone(call_ref['engine_envelope'])
+        # The disjoint chart's evaluate was NEVER invoked.
+        self.assertEqual(len(disjoint.evaluate_calls), 0,
+                         'disjoint full escape invoked chart interpolation')
+
+    def test_disjoint_escape_evaluate_never_called_via_mock(self):
+        """Explicit mock of the chart's evaluate: it is never called."""
+        disjoint = _WBandChart(DISJOINT_FLOOR, DISJOINT_CEIL, FLOOR_SENTINEL)
+        with mock.patch.object(disjoint, 'evaluate',
+                               wraps=disjoint.evaluate) as ev:
+            self._serve(disjoint)
+        self.assertEqual(ev.call_count, 0,
+                         'chart interpolation invoked on a full escape')
+
+    def test_disjoint_escape_refused_certificate_declines_like_box_miss(self):
+        """A refused saddle full-escape declines to the engine (None), same."""
+        lens = _route_lens(ROUTE_SAD_GAMMA, ROUTE_SAD_Y1, ROUTE_SAD_Y2)
+        fence_w, _ = _fence_w(ROUTE_SAD_GAMMA, ROUTE_SAD_Y1, ROUTE_SAD_Y2)
+        dense = np.linspace(fence_w * 0.1, fence_w * 0.9, ROUTE_N)
+        # Premise: far-exterior saddle below the resolution fence.
+        rho = _route_rho(ROUTE_SAD_GAMMA, ROUTE_SAD_Y1, ROUTE_SAD_Y2)
+        self.assertGreater(rho, 2.0, 'saddle fixture is not far-exterior')
+        disjoint = _WBandChart(DISJOINT_FLOOR, DISJOINT_CEIL, FLOOR_SENTINEL)
+        box_miss = _StubChart(covers_result=False, residual=_DISTINCT_RESIDUAL)
+        probe_new = _make_probe(disjoint)
+        probe_ref = _make_probe(box_miss)
+        res_new = probe_new.serve(lens, dense)
+        res_ref = probe_ref.serve(lens, dense)
+        # Both decline to the exact engine; neither reconstructs.
+        self.assertIsNone(res_new)
+        self.assertIsNone(res_ref)
+        self.assertEqual(len(probe_new.spy.calls), 0)
+        self.assertEqual(len(probe_ref.spy.calls), 0)
+        self.assertEqual(len(disjoint.evaluate_calls), 0)
+
+    def test_disjoint_vs_box_miss_diagnostic_plot(self):
+        """Residual-vs-w overlay: the disjoint and box-miss paths coincide."""
+        disjoint = _WBandChart(DISJOINT_FLOOR, DISJOINT_CEIL, FLOOR_SENTINEL)
+        box_miss = _StubChart(covers_result=False, residual=_DISTINCT_RESIDUAL)
+        _r, spy_new, _c = self._serve(disjoint)
+        _r, spy_ref, _c = self._serve(box_miss)
+        res_new = spy_new.calls[0]['residual']
+        res_ref = spy_ref.calls[0]['residual']
+        fig, ax = plt.subplots(figsize=(5.6, 3.2))
+        ax.plot(FLOOR_DENSE, res_new.real, 'o-', color='tab:green',
+                label='disjoint escape (new path)')
+        ax.plot(FLOOR_DENSE, res_ref.real, 'x--', color='tab:orange',
+                label='box-miss (HEAD path)')
+        ax.plot(FLOOR_DENSE, (res_new - res_ref).real, 's:',
+                color='tab:red', label='difference (must be 0)')
+        ax.set_xlabel('w')
+        ax.set_ylabel('Re(residual fed to reconstruct)')
+        ax.set_title('Spec A: disjoint escape == box-miss (null split)')
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+        _save_plot(fig, 'born_certificate_disjoint_null_split.png')
+
+
+# =========================================================================== #
+# Spec C: FLOOR-SPLIT REVIVAL -- the census ``classify_draw`` routes a
+# LOW-EDGE trained-floor escape to ``born_analytic`` (WP1 Route 2), NOT to a
+# whole-band engine refusal (``engine_residual`` -- the Fact-2 regression a
+# future gate tweak could reintroduce).
+#
+# Drives the REAL production ``serve_route_census.classify_draw`` waterfall
+# against a SYNTHETIC ``_ProductionModules`` bundle (``dataclasses.replace``
+# on the real ``_load_production_modules()`` output) swapping ONLY the four
+# accessors that fix the tiering geometry -- the Born chart, the
+# dimensionless-w map (pinned to ``FLOOR_DENSE``), the certified-ppGO
+# ``w_trust`` split and the diffractive-bottom ``w_low`` -- so the geometry
+# partition, the shipped ``_band_split_mask`` arithmetic, the
+# ``_born_trained_floor_route`` mirror and the carrier certificate all stay
+# the production objects.  Engine-free: ``dimensionless_frequency`` is
+# stubbed and intercepts 1-5 return before the exact-wave node pass.
+# =========================================================================== #
+
+
+@functools.lru_cache(maxsize=1)
+def _census_base_mods():
+    """The real production-module bundle (loaded once, engine-free)."""
+    return serve_route_census._load_production_modules()
+
+
+#: Frequency grid handed to ``classify_draw``; ignored by the stubbed
+#: ``dimensionless_frequency`` (which returns ``FLOOR_DENSE``), present only
+#: because the signature requires it.
+_CENSUS_F_GRID = np.geomspace(20.0, 1024.0, FLOOR_DENSE.size)
+
+
+def _census_mods(chart, *, w_trust=FLOOR_WTRUST, w_low=FLOOR_WLOW,
+                 dense=FLOOR_DENSE, born_carrier_serves=None):
+    """Synthetic ``_ProductionModules`` fixing a deterministic low-edge tiering.
+
+    Swaps ONLY the chart, the dimensionless-w map (pinned to ``dense`` so the
+    band is deterministic and engine-free), the certified-ppGO ``w_trust``
+    split and the diffractive-bottom ``w_low`` ceiling.  Every other field --
+    the real geometry class, the shipped ``_band_split_mask``, the parity
+    walls, the ``_born_trained_floor_route`` mirror, the carrier certificate
+    -- is the production object, so ``classify_draw`` runs the shipped
+    waterfall.  ``born_carrier_serves`` may be overridden (Route-3 control)
+    for the disjoint contrast.
+    """
+    base = _census_base_mods()
+    overrides = dict(
+        born_chart=chart,
+        dimensionless_frequency=lambda f_grid, m, z: np.array(dense,
+                                                              copy=True),
+        ppgo_band_split=lambda lens: w_trust,
+        ppgo_cell_ceiling=lambda lens: None,
+        diffractive_bottom_ceiling=lambda lens: w_low)
+    if born_carrier_serves is not None:
+        overrides['born_carrier_serves'] = born_carrier_serves
+    return dataclasses.replace(base, **overrides)
+
+
+def _classify_floor(chart, *, born_carrier_serves=None):
+    """Run the real ``classify_draw`` on the far-exterior floor fixture."""
+    mods = _census_mods(chart, born_carrier_serves=born_carrier_serves)
+    return serve_route_census.classify_draw(
+        mods, gamma=FLOOR_GAMMA, m_lens_msun=1.0, y1=FLOOR_Y1, y2=FLOOR_Y2,
+        f_grid=_CENSUS_F_GRID, gamma_edges=ppgo_map._gamma_band_edges())
+
+
+class BornTrainedFloorCensusRevivalTestCase(_BornCertTestCase):
+    """FLOOR-SPLIT REVIVAL: census routes a low-edge escape to born_analytic.
+
+    A box-covered draw whose HOST sub-band drops BELOW the chart's trained
+    ``log_w`` floor (a genuine LOW-EDGE strict sub-band escape) must be
+    classified ``born_analytic`` -- partially chart-served via WP1 Route 2 --
+    NOT whole-refused to the engine (``engine_residual`` / the Fact-2
+    regression).  A DISJOINT-HIGH escape (trained range entirely above the
+    band) must NOT trigger Route 2 and instead falls to the carrier-only
+    certificate (Route 3) -- proving the revival is specific to the low-edge
+    split, not a blanket ``born_analytic`` verdict.  Driven through the REAL
+    ``serve_route_census.classify_draw`` with only the chart + tiering
+    accessors swapped; engine-free.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Premise: the fixture is the far-exterior Born box the intercept
+        # requires (rho > the live _BORN_RHO_FLOOR) -- else the whole Born
+        # rung is skipped and the route says nothing about Route 2.
+        self.rho = _route_rho(FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2)
+        self.assertGreater(self.rho, serve_route_census._BORN_RHO_FLOOR,
+                           'fixture is not far-exterior; Born rung skipped')
+        self.low_edge = _WBandChart(FLOOR_TRAINED, FLOOR_CEIL, FLOOR_SENTINEL)
+        # Premise: a genuine STRICT sub-band -- trained floor read from the
+        # artifact (never a literal) sits between w_low and w_trust.
+        self.assertEqual(
+            math.exp(float(self.low_edge.log_w_grid[0])), FLOOR_TRAINED,
+            'trained_floor not recoverable from log_w_grid[0]')
+        self.assertTrue(FLOOR_WLOW < FLOOR_TRAINED < FLOOR_WTRUST,
+                        'trained floor is not a strict inner sub-band')
+
+    def test_low_edge_escape_route_is_born_analytic(self):
+        """Low-edge trained-floor escape -> born_analytic (Route 2 revival)."""
+        # A cert stub that WOULD admit (Route 3): if Route 2 mistakenly
+        # declined, the draw would still be born_carrier_only, so a
+        # born_analytic verdict proves Route 2 fired, and call_count == 0
+        # proves it fired BEFORE the certificate was ever consulted.
+        cert = mock.Mock(return_value=True)
+        result = _classify_floor(self.low_edge, born_carrier_serves=cert)
+        self.assertEqual(result.route, 'born_analytic',
+                         'low-edge trained-floor escape was not revived to '
+                         'born_analytic')
+        self.assertEqual(cert.call_count, 0,
+                         'Route 2 leaked into the Route-3 carrier certificate')
+        # The exact regression the spec guards: it must NOT whole-refuse.
+        self.assertNotIn(result.route,
+                         ('engine_residual', 'wave_refused', 'engine_refused'),
+                         'low-edge escape whole-refused to the engine '
+                         '(Fact-2 regression)')
+
+    def test_disjoint_escape_is_not_born_analytic(self):
+        """Disjoint-HIGH escape skips Route 2 -> carrier-only (Route 3)."""
+        disjoint = _WBandChart(DISJOINT_FLOOR, DISJOINT_CEIL, FLOOR_SENTINEL)
+        # Premise: the trained range is entirely ABOVE the band (full escape).
+        self.assertGreater(math.exp(float(disjoint.log_w_grid[0])),
+                           float(FLOOR_DENSE.max()),
+                           'disjoint fixture is not above the band')
+        # Cert admits -> the ONLY way to born_carrier_only is Route 3, so the
+        # route being carrier_only (not analytic) proves Route 2 was skipped.
+        cert = mock.Mock(return_value=True)
+        result = _classify_floor(disjoint, born_carrier_serves=cert)
+        self.assertNotEqual(result.route, 'born_analytic',
+                            'a disjoint full escape was mislabelled '
+                            'born_analytic (Route 2 fired wrongly)')
+        self.assertEqual(result.route, 'born_carrier_only')
+        self.assertEqual(cert.call_count, 1,
+                         'Route 3 certificate was not consulted for the '
+                         'disjoint escape')
+
+    def test_disjoint_escape_engine_refuses_without_certificate(self):
+        """Disjoint escape + declining cert -> engine demand (the pre-WP1 fate).
+
+        With Route 2 unavailable (disjoint) AND the carrier certificate
+        declining, the draw falls through to the engine node pass -- the
+        whole-refuse fate WP1 Route 2 rescues the low-edge population FROM.
+        This is the mass that moves out of ``engine_residual`` into
+        ``born_analytic`` once the trained floor is a strict inner sub-band.
+        """
+        disjoint = _WBandChart(DISJOINT_FLOOR, DISJOINT_CEIL, FLOOR_SENTINEL)
+        cert = mock.Mock(return_value=False)
+        result = _classify_floor(disjoint, born_carrier_serves=cert)
+        self.assertNotEqual(result.route, 'born_analytic')
+        self.assertNotEqual(result.route, 'born_carrier_only')
+        # It landed on the engine / analytic-fallthrough side, never revived.
+        self.assertIn(
+            result.route,
+            ('engine_residual', 'analytics_engine_hosted', 'wave_refused',
+             'diffractive_analytic', 'diffractive_engine_hosted'),
+            'disjoint escape with a declining cert did not fall through to '
+            'the engine node pass')
+
+    def test_trained_floor_route_predicate_discriminates(self):
+        """``_born_trained_floor_route`` is True low-edge, False disjoint.
+
+        Self-falsification of the mirror predicate itself: the same host mask
+        and w-grid yield True for the strict inner sub-band and False for the
+        disjoint-high range (the inner split at ``trained_floor`` is inactive
+        there), so the census route difference is the predicate's doing, not
+        an incidental waterfall side effect.
+        """
+        _bottom, engine_mask, chart_mask, _above = _floor_tier_masks(
+            FLOOR_DENSE, w_trust=FLOOR_WTRUST, w_low=FLOOR_WLOW,
+            trained_floor=FLOOR_TRAINED)
+        host_mask = engine_mask | chart_mask
+        self.assertTrue(engine_mask.any() and chart_mask.any(),
+                        'the low-edge fixture does not split both tiers')
+        mods_low = _census_mods(self.low_edge)
+        self.assertTrue(
+            serve_route_census._born_trained_floor_route(
+                mods_low, FLOOR_GAMMA, self.rho, host_mask, FLOOR_DENSE),
+            'the low-edge strict sub-band did not serve via Route 2')
+        disjoint = _WBandChart(DISJOINT_FLOOR, DISJOINT_CEIL, FLOOR_SENTINEL)
+        mods_hi = _census_mods(disjoint)
+        self.assertFalse(
+            serve_route_census._born_trained_floor_route(
+                mods_hi, FLOOR_GAMMA, self.rho, host_mask, FLOOR_DENSE),
+            'a disjoint-high range wrongly served via Route 2')
+
+    def test_revival_route_histogram_diagnostic_plot(self):
+        """Route vs trained-floor sweep: revived born_analytic vs escape.
+
+        Sweeps the chart's trained floor from inside the band (a strict inner
+        sub-band -> born_analytic, Route 2) up past the band ceiling (a full
+        escape -> born_carrier_only, Route 3, cert stubbed to admit), and
+        histograms the resulting census route -- the born_analytic bar is
+        exactly the population WP1 revives out of the engine.
+        """
+        floors = np.linspace(0.25, 3.0, 12)
+        cert = mock.Mock(return_value=True)
+        routes = []
+        for floor in floors:
+            chart = _WBandChart(float(floor), FLOOR_CEIL, FLOOR_SENTINEL)
+            routes.append(
+                _classify_floor(chart, born_carrier_serves=cert).route)
+        # A genuine mix must appear, else the sweep pins nothing.
+        self.assertIn('born_analytic', routes,
+                      'no trained floor produced a revived born_analytic')
+        self.assertIn('born_carrier_only', routes,
+                      'no trained floor produced a Route-3 escape')
+        labels = sorted(set(routes))
+        counts = [routes.count(label) for label in labels]
+        fig, ax = plt.subplots(figsize=(5.6, 3.2))
+        ax.bar(labels, counts, color='tab:green')
+        ax.set_ylabel('trained floors in sweep')
+        ax.set_title('Spec C: trained-floor sweep -> census route')
+        ax.tick_params(axis='x', labelrotation=20, labelsize=8)
+        fig.tight_layout()
+        _save_plot(fig, 'born_certificate_revival_route_histogram.png')
+
+
+# --------------------------------------------------------------------------- #
+# NULL-RESIDUAL RECONSTRUCTION IDENTITY (Spec: R=0 -> bare carrier to
+# round-off; the DRY ``_born_reconstruct`` tail stays exact under the new
+# tiering, with the diffractive bottom overwrite and above-below_mask zeroing
+# applied identically to HEAD).
+# --------------------------------------------------------------------------- #
+
+#: Relative tolerance for the R=0 reconstruction identity.  The
+#: ``_born_reconstruct`` demodulation is an exact algebraic round-trip
+#: (``(f_total - ppgo) * exp(1j w t_min)`` reversed by
+#: ``reconstruct_farfield``'s ``exp(-1j w t_min)`` re-modulation) so the only
+#: error is float64 round-off in the phase; the spec fixes the bar at 1e-13.
+NULL_RECON_RTOL = 1e-13
+
+
+def _make_reconstruct_probe():
+    """Bind the REAL ``_born_reconstruct`` tail behind a Route-3 serve.
+
+    Drives ``_born_residual_analytic`` on a NON-covering chart so the serve
+    takes the certificate-gated carrier-only Route 3 -- which feeds an
+    identically ZERO residual to ``_born_reconstruct`` -- while the
+    ``w_trust`` / ``w_low`` split helpers are pinned so the reconstruction
+    exercises BOTH the diffractive-bottom overwrite (``[w_lo, w_low)``) and
+    the above-``w_trust`` envelope zeroing.  Route 3 passes
+    ``engine_envelope=None`` so no exact-engine call is made -- the whole
+    reconstruction is analytic (carrier + diffractive series + demodulation).
+    The two post-reconstruction reducers (``_reduce_dense_kernels`` /
+    ``_image_delays``) need heavy instance/lens state and run AFTER
+    ``reconstruct_farfield``, so they are stubbed to no-ops; the captured
+    total is untouched by them.
+    """
+    probe = types.SimpleNamespace()
+    probe.born_residual_chart = _StubChart(
+        covers_result=False, residual=np.zeros(FLOOR_DENSE.size))
+    probe._ppgo_band_split = lambda lens: FLOOR_WTRUST
+    probe._ppgo_cell_ceiling = lambda lens: None
+    probe._diffractive_bottom_ceiling = lambda lens: FLOOR_WLOW
+    probe._reduce_dense_kernels = lambda kernels: (None, None)
+    probe._image_delays = lambda lens, geom: None
+    probe._born_reconstruct = types.MethodType(
+        LensedRelativeBinningLikelihood._born_reconstruct, probe)
+    probe.serve = types.MethodType(
+        LensedRelativeBinningLikelihood._born_residual_analytic, probe)
+    return probe
+
+
+class BornNullResidualReconstructionTestCase(_BornCertTestCase):
+    """R=0 reconstruction reproduces the bare carrier to round-off.
+
+    The ``_born_reconstruct`` tail is shared by the in-box serve (fed the
+    interpolated residual) and the carrier-only serve (fed R=0).  With an
+    identically zero residual ``f_total = carrier + 0`` must reconstruct,
+    node-for-node, to the pieces HEAD produced: the analytic carrier on the
+    trained/host interior, the diffractive series ``F_P`` on the overwritten
+    bottom, and the bare ppGO image-kernel sum above the trusted floor.  The
+    oracle is INDEPENDENT of the reconstruction: ``born_carrier_from_partition``
+    on a freshly rebuilt partition, ``diffractive_amplification`` on the
+    bottom nodes, and the closed-form image-kernel sum above -- none reads the
+    captured total.  Engine-free (Route 3, ``engine_envelope=None``).
+    """
+
+    requires_comparison = True
+
+    def setUp(self):
+        super().setUp()
+        self.dense_w = np.array(FLOOR_DENSE, copy=True)
+        self.lens = _route_lens(FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2)
+        # Rebuild the deterministic geometry the serve computes internally so
+        # the oracle carrier / ppGO come from the identical partition.
+        self.geom = ChangRefsdalChannels(self.dense_w).geometry_partition(
+            gamma=FLOOR_GAMMA, y=(FLOOR_Y1, FLOOR_Y2), beta=0.0, kappa=0.0)
+        # Premise: a genuine far-exterior draw the carrier certificate admits
+        # (else Route 3 declines to None and the tail never runs).
+        self.rho = _route_rho(FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2)
+        self.assertGreater(self.rho, 2.0,
+                           'fixture is not far-exterior (rho <= 2)')
+        w_lo, w_hi = float(self.dense_w.min()), float(self.dense_w.max())
+        self.assertTrue(
+            likelihood._born_carrier_certificate_serves(
+                self.lens, w_lo, w_hi, self.geom.images),
+            'premise lost: the carrier certificate no longer admits the '
+            'floor fixture, so Route 3 cannot be reached')
+        # The three tiers, derived from the LIVE band-split (never literals).
+        # This Route-3 serve uses R=0 (a non-covering chart), so there is NO
+        # trained-floor engine sub-band; the tiers are bottom / host-interior
+        # / above only.
+        _band_split, below_mask = _band_split_mask(self.dense_w, FLOOR_WTRUST)
+        band_split_low, below_low = _band_split_mask(self.dense_w, FLOOR_WLOW)
+        self.assertTrue(band_split_low, 'bottom split inactive -- fixture '
+                        'no longer straddles w_low')
+        self.bottom_mask = below_low & below_mask
+        self.host_mask = below_mask & ~self.bottom_mask
+        self.above_mask = ~below_mask
+        # All three tiers must be populated or the identity is vacuous.
+        for name, mask in (('bottom', self.bottom_mask),
+                           ('host-interior', self.host_mask),
+                           ('above', self.above_mask)):
+            self.assertTrue(mask.any(),
+                            f'{name} tier empty -- reconstruction identity '
+                            f'would assert nothing there')
+
+    def _capture_total(self, probe):
+        """Serve via Route 3, returning the discarded reconstruction total.
+
+        Patches ONLY ``likelihood.reconstruct_farfield`` (the tail); the
+        carrier build calls ``channels.reconstruct_farfield`` in a different
+        namespace, so exactly one capture -- the tail -- is recorded.
+        """
+        captured = {}
+        real_rf = likelihood.reconstruct_farfield
+
+        def _capture_rf(*args, **kwargs):
+            kernels, total = real_rf(*args, **kwargs)
+            captured.setdefault('calls', 0)
+            captured['calls'] += 1
+            captured['total'] = np.array(total, copy=True)
+            return kernels, total
+
+        with mock.patch.object(
+                likelihood, 'reconstruct_farfield', _capture_rf):
+            result = probe.serve(self.lens, self.dense_w)
+        self.assertIsNotNone(result, 'Route 3 declined -- the tail never ran')
+        self.assertEqual(captured.get('calls'), 1,
+                         'the reconstruction tail did not run exactly once')
+        return captured['total']
+
+    def test_r0_reconstruction_matches_piecewise_oracle(self):
+        """Each tier reconstructs to its independent closed-form oracle."""
+        probe = _make_reconstruct_probe()
+        total = self._capture_total(probe)
+
+        # Independent oracle pieces (none reads ``total``).
+        partition_ns = types.SimpleNamespace(
+            w=self.dense_w,
+            source=np.array([FLOOR_Y1, FLOOR_Y2]),
+            gamma=FLOOR_GAMMA, beta=0.0, kappa=0.0,
+            matrix=likelihood.macro_matrix(FLOOR_GAMMA, 0.0, 0.0),
+            t_min=self.geom.t_min, delays=self.geom.delays,
+            saddle_kernels=self.geom.saddle_kernels,
+            real_mask=self.geom.real_mask, images=self.geom.images)
+        carrier = born_carrier_from_partition(partition_ns)
+        real = np.asarray(self.geom.real_mask, dtype=bool)
+        ppgo = np.sum(
+            self.geom.saddle_kernels[:, real]
+            * np.exp(1j * self.dense_w[:, None]
+                     * self.geom.delays[real][None, :]),
+            axis=1)
+        diffractive = np.array([
+            likelihood.diffractive_amplification(
+                float(self.dense_w[idx]), (FLOOR_Y1, FLOOR_Y2),
+                FLOOR_GAMMA, 0.0, 0.0)
+            for idx in np.flatnonzero(self.bottom_mask)], dtype=complex)
+
+        # Host-interior: R=0 -> the bare carrier to round-off (the core claim).
+        host = self.host_mask
+        rel_host = np.abs(total[host] - carrier[host]) / np.abs(carrier[host])
+        self.n_compared += int(host.sum())
+        self.assertLessEqual(
+            float(rel_host.max()), NULL_RECON_RTOL,
+            f'host-interior R=0 reconstruction deviates from the bare '
+            f'carrier by {float(rel_host.max()):.2e} > {NULL_RECON_RTOL:.0e}')
+
+        # Bottom: overwritten by the diffractive series F_P.
+        rel_bottom = (np.abs(total[self.bottom_mask] - diffractive)
+                      / np.abs(diffractive))
+        self.n_compared += int(self.bottom_mask.sum())
+        self.assertLessEqual(
+            float(rel_bottom.max()), NULL_RECON_RTOL,
+            'diffractive-bottom overwrite not reproduced to round-off')
+
+        # Above w_trust: envelope zeroed -> the bare ppGO image-kernel sum.
+        rel_above = (np.abs(total[self.above_mask] - ppgo[self.above_mask])
+                     / np.abs(ppgo[self.above_mask]))
+        self.n_compared += int(self.above_mask.sum())
+        self.assertLessEqual(
+            float(rel_above.max()), NULL_RECON_RTOL,
+            'above-w_trust nodes did not telescope to the bare ppGO sum')
+
+        # Diagnostic: |total - piecewise oracle| vs w on a log scale.
+        oracle = carrier.copy()
+        oracle[self.above_mask] = ppgo[self.above_mask]
+        oracle[self.bottom_mask] = diffractive
+        fig, ax = plt.subplots(figsize=(5.6, 3.4))
+        resid = np.abs(total - oracle) / np.abs(oracle)
+        ax.semilogy(self.dense_w, np.maximum(resid, 1e-18), 'o-',
+                    color='tab:purple')
+        ax.axhline(NULL_RECON_RTOL, color='k', ls='--', lw=0.8,
+                   label=f'bar {NULL_RECON_RTOL:.0e}')
+        ax.set_xlabel('dimensionless w')
+        ax.set_ylabel('|total - oracle| / |oracle|')
+        ax.set_title('R=0 reconstruction identity (piecewise oracle)')
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        _save_plot(fig, 'born_certificate_null_residual_reconstruction.png')
+
+
+# --------------------------------------------------------------------------- #
+# ENGINE-FREE GUARANTEE ON ANALYTIC ROUTES (Spec: the census must never call
+# the amplitude engine or freshly import mpmath while classifying a draw onto
+# an analytic Born route; import-time module load is unavoidable, a CALL is a
+# defect).
+# --------------------------------------------------------------------------- #
+
+
+class _EngineDoorTripwire(Exception):
+    """Sentinel raised by every booby-trapped engine/mpmath entry point.
+
+    Deliberately NOT a subclass of any refusal error the census catches, so a
+    stray engine call surfaces as a hard failure rather than being swallowed
+    as a refusal (which would silently reroute the draw and hide the defect).
+    """
+
+
+class BornCensusEngineFreeTestCase(_BornCertTestCase):
+    """The census classifies Born analytic routes without touching the engine.
+
+    ``serve_route_census.classify_draw`` is a pure CLASSIFIER: it consults the
+    cheap geometry partition, the chart's ``covers`` box, the band-split masks
+    and the analytic carrier certificate, and returns a route label -- it must
+    never evaluate a waveform or run the mpmath quadrature.  Every engine door
+    (``ChangRefsdalChannels.evaluate``, ``_schwinger.f_schwinger`` and its
+    mpmath fallback) is booby-trapped to raise a sentinel that the census
+    CANNOT catch, and ``mpmath`` must not freshly enter ``sys.modules`` while a
+    born route is classified.  The three charts drive Routes 1/2/3 (two
+    ``born_analytic`` + one ``born_carrier_only``).
+    """
+
+    def setUp(self):
+        super().setUp()
+        # The census catch tuples must not swallow the tripwire (a widened
+        # catch that caught it would let an engine call masquerade as a
+        # refusal).  Assert disjointness against the LIVE tuples.
+        base = _census_base_mods()
+        for tup_name in ('refusal_errors', 'diffractive_refusal_errors'):
+            for caught in getattr(base, tup_name):
+                self.assertFalse(
+                    issubclass(_EngineDoorTripwire, caught),
+                    f'tripwire is catchable by {tup_name} ({caught!r}) -- an '
+                    f'engine call would be swallowed as a refusal')
+
+    def _run_engine_trapped(self, charts):
+        """Classify each chart with every engine door booby-trapped.
+
+        Returns ``(routes, doors, mpmath_freshly_imported)``.
+        """
+        door_evaluate = mock.Mock(side_effect=_EngineDoorTripwire('evaluate'))
+        door_fschw = mock.Mock(side_effect=_EngineDoorTripwire('f_schwinger'))
+        door_mpmath = mock.Mock(
+            side_effect=_EngineDoorTripwire('_f_schwinger_mpmath'))
+        mpmath_pre = 'mpmath' in sys.modules
+        routes = []
+        with mock.patch.object(ChangRefsdalChannels, 'evaluate',
+                               door_evaluate), \
+                mock.patch.object(_schwinger, 'f_schwinger', door_fschw), \
+                mock.patch.object(_schwinger, '_f_schwinger_mpmath',
+                                  door_mpmath):
+            for chart in charts:
+                routes.append(_classify_floor(chart).route)
+        mpmath_fresh = ('mpmath' in sys.modules) and not mpmath_pre
+        doors = {'evaluate': door_evaluate, 'f_schwinger': door_fschw,
+                 '_f_schwinger_mpmath': door_mpmath}
+        return routes, doors, mpmath_fresh
+
+    def test_born_routes_never_call_the_engine_or_import_mpmath(self):
+        """No engine door fires and mpmath is not freshly imported."""
+        charts = [
+            _WBandChart(0.05, FLOOR_CEIL, FLOOR_SENTINEL),      # Route 1
+            _WBandChart(FLOOR_TRAINED, FLOOR_CEIL, FLOOR_SENTINEL),  # Route 2
+            _WBandChart(DISJOINT_FLOOR, DISJOINT_CEIL, FLOOR_SENTINEL),  # R3
+        ]
+        routes, doors, mpmath_fresh = self._run_engine_trapped(charts)
+
+        # The three charts must land on the analytic Born routes (else the
+        # engine-free guarantee is vacuous -- a refused draw touches nothing).
+        self.assertEqual(routes[0], 'born_analytic', 'Route 1 misrouted')
+        self.assertEqual(routes[1], 'born_analytic', 'Route 2 misrouted')
+        self.assertEqual(routes[2], 'born_carrier_only', 'Route 3 misrouted')
+
+        # No engine door fired.
+        for name, door in doors.items():
+            self.assertEqual(
+                door.call_count, 0,
+                f'the census called the engine door {name!r} '
+                f'{door.call_count}x while classifying an analytic route')
+
+        # mpmath did not freshly enter sys.modules during classification.
+        self.assertFalse(
+            mpmath_fresh,
+            'mpmath was freshly imported while classifying a born route')
+
+        # Diagnostic: the per-door call-count bar (all zero on a clean run).
+        names = list(doors)
+        counts = [doors[n].call_count for n in names]
+        fig, ax = plt.subplots(figsize=(5.6, 3.2))
+        ax.bar(names, counts, color='tab:red')
+        ax.set_ylabel('census calls (must be 0)')
+        ax.set_ylim(0, 1)
+        ax.set_title('Engine-free guarantee: engine-door call counts')
+        ax.tick_params(axis='x', labelrotation=15, labelsize=8)
+        fig.tight_layout()
+        _save_plot(fig, 'born_certificate_census_engine_free.png')
+
+# --------------------------------------------------------------------------- #
+# CENSUS-MIRROR FAITHFULNESS (Spec: the census mirror must track the
+# production Born route EXACTLY -- and, crucially, by DELEGATING to the
+# production accessor objects (``born_chart.covers``, ``log_w_grid``,
+# ``_band_split_mask``) rather than re-typing the decision.  The route
+# OUTCOMES themselves are already pinned by ``BornTrainedFloorCensusRevival
+# TestCase``; the NOVEL teeth here are (a) the delegation assertions and
+# (b) a covered/uncovered x sub-band/escape route-agreement MATRIX between
+# the census ``classify_draw`` and the production ``_born_residual_analytic``
+# itself.)
+# --------------------------------------------------------------------------- #
+
+
+def _production_born_label(chart, lens):
+    """The Born route label implied by the production ``_born_residual_analytic``.
+
+    Drives the REAL serve (bound onto ``_make_floor_probe``) with the
+    carrier certificate patched to ADMIT, and reads back which of the three
+    routes fired purely from observable production side effects -- never
+    from the census:
+
+    * ``result is None``            -> ``'declined'`` (Route 3 refusal);
+    * served, certificate untouched -> ``'born_analytic'`` (Route 1 or 2);
+    * served, certificate consulted -> ``'born_carrier_only'`` (Route 3).
+
+    The vocabulary matches the census ``ClassifiedDraw.route`` exactly so the
+    two independent implementations can be compared cell-for-cell.  A second
+    return value carries the certificate call-count for the diff table.
+    """
+    probe = _make_floor_probe(chart, w_trust=FLOOR_WTRUST, w_low=FLOOR_WLOW,
+                              engine_value=FLOOR_ENGINE_VALUE)
+    with mock.patch.object(
+            likelihood, '_born_carrier_certificate_serves',
+            mock.Mock(return_value=True)) as cert:
+        result = probe.serve(lens, FLOOR_DENSE)
+    if result is None:
+        return 'declined', cert.call_count
+    if cert.call_count == 0:
+        return 'born_analytic', cert.call_count
+    return 'born_carrier_only', cert.call_count
+
+
+class BornCensusMirrorFaithfulnessTestCase(_BornCertTestCase):
+    """CENSUS-MIRROR FAITHFULNESS: the mirror DELEGATES and tracks production.
+
+    Two invariants the recurring laggard (a mirror that drifts because it
+    re-typed the gate) fails:
+
+    * DELEGATION -- ``_born_trained_floor_route`` reads the trained floor
+      from the artifact ``log_w_grid[0]``, hands it to the PRODUCTION
+      ``_band_split_mask`` object, and probes the PRODUCTION
+      ``born_chart.covers`` with the chart sub-band.  Verified by wrapping
+      those two callables in ``mock.Mock(wraps=...)`` spies and asserting
+      the exact arguments -- a re-typed comparison would never touch them.
+    * ROUTE AGREEMENT -- across a covered/uncovered x sub-band/escape grid,
+      the census ``classify_draw`` route equals the route the production
+      ``_born_residual_analytic`` itself takes (``_production_born_label``),
+      row for row, with a genuine mix of verdicts present so the match is
+      not vacuous.
+
+    Engine-free: the production serve rides ``_make_floor_probe`` (spy
+    reconstruct, no engine call) and the census rides ``_classify_floor``.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.lens = _route_lens(FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2)
+        self.rho = _route_rho(FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2)
+        # Premise: far-exterior Born box (rho > the live floor), else the
+        # whole rung is skipped and no route claim is meaningful.
+        self.assertGreater(self.rho, serve_route_census._BORN_RHO_FLOOR,
+                           'fixture is not far-exterior; Born rung skipped')
+        self.assertGreater(self.rho, 2.0, 'fixture below the production rho>2')
+        self.low_edge = _WBandChart(FLOOR_TRAINED, FLOOR_CEIL, FLOOR_SENTINEL)
+        # The host sub-band and its trained-floor split (shipped arithmetic).
+        _bottom, self.engine_mask, self.chart_mask, _above = _floor_tier_masks(
+            FLOOR_DENSE, w_trust=FLOOR_WTRUST, w_low=FLOOR_WLOW,
+            trained_floor=FLOOR_TRAINED)
+        self.host_mask = self.engine_mask | self.chart_mask
+        self.assertTrue(self.engine_mask.any() and self.chart_mask.any(),
+                        'the low-edge fixture does not split both tiers')
+
+    def test_mirror_delegates_to_production_covers_and_band_split(self):
+        """The mirror calls the PRODUCTION ``covers`` / ``_band_split_mask``.
+
+        Wrap ``born_chart.covers`` and the module ``_band_split_mask`` in
+        ``wraps`` spies and drive ``_born_trained_floor_route`` directly.
+        The predicate must (i) split the band at ``trained_floor =
+        exp(log_w_grid[0])`` -- read from the artifact -- via the production
+        ``_band_split_mask``, and (ii) probe ``covers`` with exactly the
+        chart sub-band ``FLOOR_DENSE[chart_mask]``.  A mirror that re-typed
+        either comparison would leave a spy uncalled: that is the teeth.
+        """
+        chart = self.low_edge
+        original_covers = chart.covers
+        covers_spy = mock.Mock(wraps=original_covers)
+        chart.covers = covers_spy
+        # Wrap the PRODUCTION band-split object the mirror actually consults
+        # (``mods.band_split_mask`` == ``likelihood._band_split_mask``), so a
+        # re-typed comparison would leave this spy uncalled.
+        base = _census_mods(chart)
+        bsm_spy = mock.Mock(wraps=base.band_split_mask)
+        mods = dataclasses.replace(base, band_split_mask=bsm_spy)
+
+        served = serve_route_census._born_trained_floor_route(
+            mods, FLOOR_GAMMA, self.rho, self.host_mask, FLOOR_DENSE)
+        self.assertTrue(served, 'the low-edge strict sub-band did not serve')
+        self.n_compared += 1
+
+        # (i) The band split ran on the PRODUCTION helper, once, at the
+        # artifact-derived trained floor -- never a literal.
+        trained_floor = math.exp(float(chart.log_w_grid[0]))
+        self.assertEqual(bsm_spy.call_count, 1,
+                         'the mirror did not delegate to the production '
+                         '_band_split_mask (re-typed the split?)')
+        bsm_args, bsm_kwargs = bsm_spy.call_args
+        self.assertEqual(bsm_kwargs, {})
+        np.testing.assert_array_equal(bsm_args[0], FLOOR_DENSE)
+        self.assertEqual(bsm_args[1], trained_floor,
+                         'the split was not taken at exp(log_w_grid[0])')
+
+        # (ii) The coverage probe ran on the PRODUCTION chart object with the
+        # chart sub-band FLOOR_DENSE[chart_mask] and this draw's (gamma, rho).
+        self.assertEqual(covers_spy.call_count, 1,
+                         'the mirror did not delegate to born_chart.covers')
+        cov_args, cov_kwargs = covers_spy.call_args
+        self.assertEqual(cov_kwargs, {})
+        self.assertEqual(cov_args[0], FLOOR_GAMMA)
+        self.assertEqual(cov_args[1], self.rho)
+        np.testing.assert_array_equal(cov_args[2], FLOOR_DENSE[self.chart_mask])
+    def test_census_route_matches_production_across_the_grid(self):
+        """Census route == production ``_born_residual_analytic`` route, row by row.
+
+        A covered/uncovered x sub-band/escape grid of charts:
+
+        * in-box (trained floor below the whole band)   -> born_analytic;
+        * low-edge escape (strict inner sub-band)        -> born_analytic;
+        * disjoint-high escape (trained range above)     -> born_carrier_only.
+
+        For each the production label (``_production_born_label``, cert
+        ADMIT) must equal the census route (``_classify_floor`` with a cert
+        that ADMITS), and a genuine mix of ``born_analytic`` /
+        ``born_carrier_only`` must appear so the agreement is not vacuous.
+        """
+        floor_min = float(FLOOR_DENSE.min())
+        charts = {
+            'in_box': _WBandChart(floor_min, FLOOR_CEIL, FLOOR_SENTINEL),
+            'low_edge': _WBandChart(FLOOR_TRAINED, FLOOR_CEIL, FLOOR_SENTINEL),
+            'disjoint_high': _WBandChart(DISJOINT_FLOOR, DISJOINT_CEIL,
+                                         FLOOR_SENTINEL),
+        }
+        cert = mock.Mock(return_value=True)
+        table = []
+        for name, chart in charts.items():
+            prod_label, cert_calls = _production_born_label(chart, self.lens)
+            census_route = _classify_floor(
+                chart, born_carrier_serves=cert).route
+            table.append({'draw': name, 'production': prod_label,
+                          'census': census_route, 'cert_calls': cert_calls})
+            with self.subTest(draw=name):
+                self.assertEqual(
+                    census_route, prod_label,
+                    f'census route {census_route!r} disagrees with the '
+                    f'production _born_residual_analytic route {prod_label!r} '
+                    f'for the {name} draw (mirror drifted from production)')
+            self.n_compared += 1
+        labels = {row['production'] for row in table}
+        self.assertIn('born_analytic', labels,
+                      'no draw exercised the analytic route')
+        self.assertIn('born_carrier_only', labels,
+                      'no draw exercised the carrier-only route')
+
+        # Diagnostic: the per-draw route-diff table -- any disagreeing row is
+        # a mirror that reimplemented rather than delegated.
+        fig, ax = plt.subplots(figsize=(6.4, 2.2))
+        ax.axis('off')
+        cells = [[r['draw'], r['production'], r['census'],
+                  'OK' if r['production'] == r['census'] else 'MISMATCH']
+                 for r in table]
+        tbl = ax.table(
+            cellText=cells,
+            colLabels=['draw', 'production route', 'census route', 'agree'],
+            loc='center', cellLoc='center')
+        tbl.auto_set_font_size(False)
+        tbl.set_fontsize(8)
+        ax.set_title('CENSUS-MIRROR FAITHFULNESS: route-agreement matrix')
+        fig.tight_layout()
+        _save_plot(fig, 'born_certificate_census_route_agreement.png')
+
+    def test_declining_certificate_agrees_on_fallthrough(self):
+        """A disjoint escape + DECLINING cert: production declines, census too.
+
+        The one row where production returns ``None`` (Route 3 refusal): the
+        census must NOT label it a Born route either -- it falls through to
+        the engine node pass.  Pins that the mirror tracks production on the
+        REFUSAL edge as well as the serve edge (a mirror that admitted here
+        would over-count born routes).
+        """
+        disjoint = _WBandChart(DISJOINT_FLOOR, DISJOINT_CEIL, FLOOR_SENTINEL)
+        probe = _make_floor_probe(disjoint, w_trust=FLOOR_WTRUST,
+                                  w_low=FLOOR_WLOW)
+        with mock.patch.object(
+                likelihood, '_born_carrier_certificate_serves',
+                mock.Mock(return_value=False)) as cert:
+            result = probe.serve(self.lens, FLOOR_DENSE)
+        self.assertIsNone(result, 'production did not decline the disjoint '
+                          'escape under a refusing certificate')
+        self.assertEqual(cert.call_count, 1)
+        census_route = _classify_floor(
+            disjoint,
+            born_carrier_serves=mock.Mock(return_value=False)).route
+        self.assertNotIn(
+            census_route, ('born_analytic', 'born_carrier_only'),
+            'census kept a Born route where production declined')
+        self.n_compared += 1
+
 
 
 if __name__ == '__main__':

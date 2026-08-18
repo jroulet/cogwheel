@@ -84,3 +84,24 @@ section: Backlog
   the certificate bar; astroid Born serving byte-identical inside the
   chart box; both-parity value pins, parsimony. Sequence: after/with
   the low-w rung build; before the tiling design.
+  BUILD-2 SHIPPED (2026-08-18, born farfield trained-floor band split;
+  fragment stays OPEN): direction (a) shipped -- `_born_residual_analytic`
+  gained Route 2 (`_band_split_mask`, `trained_floor = exp(log_w_grid[0])`):
+  when the box covers the host but the host sub-band's low edge drops
+  below the chart's trained floor, the chart serves the trained
+  sub-band [trained_floor, w_trust] and the exact engine hosts the
+  untrained remainder below it via the reused `_engine_envelope_below_
+  split` helper and `_born_reconstruct(engine_envelope=...)`. Route 1
+  (full-in-box) and Route 3 (carrier-only certificate serve) are
+  byte-identical to before. `serve_route_census.py` mirrors it via
+  `_born_trained_floor_route`. In-build 10k engine-free census
+  (n_freq=8) recovers 3.43% (born_analytic 0% -> 3.43%, engine_residual
+  24.10% -> 21.54%, diffractive_analytic 13.40%; all other routes
+  unchanged); born_carrier_only and saddle GO-served both remain 0, as
+  expected -- direction (b) stays superseded. Certified by
+  `cogwheel/tests/test_lensing_born_certificate.py`. REMAINING for this
+  fragment: the saddle far-field rho_lobe rung (12.67% of the prior,
+  the two-image GO carrier direction, briefed separately in
+  `.claude/handoff/born_farfield_go_carrier.md`), the near-lobe residual
+  annulus tiling, and both-parity value pins -- acceptance criteria
+  above are still unmet.

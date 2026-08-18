@@ -2907,13 +2907,31 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         (``rho <= 2``) always falls through to the exact engine -- the
         carrier-only lift below never captures it.
 
+        TRAINED-FLOOR BAND SPLIT.  When the far-exterior query IS box-covered
+        but the served host sub-band drops BELOW the chart's trained
+        ``log_w`` floor (a low-edge escape), the band is split a second time
+        at ``trained_floor = exp(log_w_grid[0])`` -- the low edge of the
+        trained coverage read from the shipped artifact, never a literal:
+        the chart serves the trained sub-band ``[trained_floor, w_trust]`` it
+        was actually trained on, the exact Schwinger engine hosts the
+        untrained remainder ``[w_low, trained_floor)`` below it (via
+        `_engine_envelope_below_split`), the analytic diffractive bottom
+        ``[w_lo, w_low)`` (Rung P) is unchanged, and the bare ppGO carrier
+        serves above ``w_trust``.  The two tiers share the
+        ``FARFIELD_KERNEL_SUM`` gauge so they stitch with no field
+        discontinuity.  This route runs ONLY when the chart sub-band is
+        genuinely covered by the trained range (a strict sub-band); a
+        high-edge escape or a disjoint trained range skips it and falls
+        through to the carrier-only lift below.
+
         BEYOND-THE-BOX CARRIER-ONLY LIFT.  When the far-exterior query is
         NOT covered by the trained ``(gamma, rho, log_w)`` box -- past the
         astroid-only ``gamma_grid`` (a macro ``gamma > 1`` saddle query the
         artifact never trained), past the trained ``rho`` reach, or when the
-        served sub-band escapes the trained ``log_w`` range -- the residual
-        is served as identically ZERO and ONLY the lead carrier is kept,
-        gated by the module-level ``_born_carrier_certificate_serves``
+        served sub-band escapes the trained ``log_w`` range at the HIGH edge
+        / disjointly (the trained-floor split above does not apply) -- the
+        residual is served as identically ZERO and ONLY the lead carrier is
+        kept, gated by the module-level ``_born_carrier_certificate_serves``
         (carrier-relative truncation certificate at the band ceiling, a
         saddle-only ``w_lo * delta_min >= RHO_END`` resolution fence and the
         shared min-image-separation backstop).  On a certificate refusal the
@@ -3052,34 +3070,80 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         host_mask = below_mask & ~bottom_mask
         chart_w = dense_w[host_mask]
 
-        # Serve decision.  In HEAD both a box-containment miss
-        # (``not covers(gamma, rho)``) and a trained-band escape
-        # (``host_mask.any() and not covers(gamma, rho, chart_w)``) refused
-        # to the exact engine.  That gate is LIFTED: a beyond-box query is
-        # offered a certificate-gated CARRIER-ONLY serve (residual
-        # identically ZERO, only the lead carrier reconstructed) via
-        # ``_born_carrier_certificate_serves``; only a certificate refusal
-        # falls through.  The FULLY-in-box serve (box-covered AND the served
-        # host sub-band inside the trained log-w range) keeps the
-        # interpolated residual and is BYTE-IDENTICAL to HEAD.
+        # Serve decision.  Three routes, in order of specificity:
+        #
+        #  1. FULLY in box (box-covered AND the served host sub-band inside
+        #     the trained log-w range): the interpolated residual over the
+        #     whole band -- BYTE-IDENTICAL to HEAD.
+        #  2. TRAINED-FLOOR band split (box-covered but the host sub-band
+        #     drops BELOW the trained log-w floor -- a low-edge escape): the
+        #     chart serves the trained sub-band ``[trained_floor, w_trust]``
+        #     it was actually trained on and the exact engine hosts the
+        #     untrained remainder ``[w_low, trained_floor)`` below it,
+        #     instead of refusing the whole band.
+        #  3. Beyond-box / high-edge escape / disjoint trained range: a
+        #     certificate-gated CARRIER-ONLY serve (residual identically
+        #     ZERO, only the lead carrier reconstructed), else fall through
+        #     to the exact engine -- BYTE-IDENTICAL to HEAD.
         covered = born_chart.covers(lens['gamma'], rho)
         trained_band_escape = (
             covered and host_mask.any()
             and not born_chart.covers(lens['gamma'], rho, chart_w))
+
+        # Route 1: fully in box.
         if covered and not trained_band_escape:
             residual = born_chart.evaluate(dense_w, lens['gamma'], rho)
-        else:
-            w_lo = float(dense_w.min())
-            if not _born_carrier_certificate_serves(
-                    lens, w_lo, w_hi, geom.images):
-                return None
-            residual = np.zeros(dense_w.shape, dtype=complex)
+            return self._born_reconstruct(
+                lens, dense_w, geom, residual, below_mask, bottom_mask)
 
+        # Route 2: trained-floor band split (direction (a), low-edge escape).
+        # ``trained_floor`` is the low edge of the trained log-w coverage,
+        # read from the shipped artifact (``log_w_grid[0]``) -- NEVER a
+        # literal.  Split the host region again at ``trained_floor`` with a
+        # second ``_band_split_mask`` call (shared arithmetic; no bespoke
+        # 3-region helper): the engine hosts BELOW ``trained_floor`` and the
+        # chart serves AT or ABOVE it (the same inverted polarity the
+        # saddle-c3 and ppGO band splits use).  ``below_floor`` includes the
+        # exact ``trained_floor`` node on the engine side; the chart
+        # sub-band is strictly above it and therefore strictly inside the
+        # trained log-w range.
+        if trained_band_escape:
+            trained_floor = math.exp(float(born_chart.log_w_grid[0]))
+            band_split_floor, below_floor = _band_split_mask(
+                dense_w, trained_floor)
+            engine_mask = host_mask & below_floor
+            chart_mask = host_mask & ~below_floor
+            # Serve the split ONLY when it is a genuine strict sub-band: the
+            # inner split is active (``trained_floor`` strictly inside the
+            # band -- rejects the null-fallback all-True ``below_floor``),
+            # BOTH tiers are non-empty, AND the chart sub-band is fully
+            # covered by the trained log-w range.  A high-edge escape or a
+            # disjoint range leaves ``chart_mask`` uncovered; skip the wrong
+            # populator and fall through to Route 3 (BYTE-IDENTICAL to HEAD).
+            if (band_split_floor and engine_mask.any() and chart_mask.any()
+                    and born_chart.covers(lens['gamma'], rho,
+                                          dense_w[chart_mask])):
+                residual = np.zeros(dense_w.shape, dtype=complex)
+                residual[chart_mask] = born_chart.evaluate(
+                    dense_w[chart_mask], lens['gamma'], rho)
+                engine_envelope = self._engine_envelope_below_split(
+                    lens, dense_w, engine_mask)
+                return self._born_reconstruct(
+                    lens, dense_w, geom, residual, below_mask, bottom_mask,
+                    engine_envelope=engine_envelope, engine_mask=engine_mask)
+
+        # Route 3: certificate-gated carrier-only serve, else fall through.
+        w_lo = float(dense_w.min())
+        if not _born_carrier_certificate_serves(
+                lens, w_lo, w_hi, geom.images):
+            return None
+        residual = np.zeros(dense_w.shape, dtype=complex)
         return self._born_reconstruct(
             lens, dense_w, geom, residual, below_mask, bottom_mask)
 
     def _born_reconstruct(self, lens, dense_w, geom, residual,
-                          below_mask, bottom_mask):
+                          below_mask, bottom_mask,
+                          engine_envelope=None, engine_mask=None):
         """Reconstruct the Born far-field kernels from a supplied residual.
 
         Pure reconstruction TAIL shared by the in-box serve (fed the
@@ -3124,6 +3188,19 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             Boolean nodes on the analytic diffractive bottom overwritten by
             ``F_P``.  Empty at the saddle wall / null split, leaving the
             whole-below-split serve byte-identical to HEAD.
+        engine_envelope : np.ndarray, optional
+            Full-length (``dense_w`` shape) exact-engine far-field envelope
+            in the ``FARFIELD_KERNEL_SUM`` gauge (from
+            `_engine_envelope_below_split`), used only on the trained-floor
+            band split.  When supplied, it OVERWRITES the reconstructed
+            envelope on ``engine_mask`` -- the untrained sub-band
+            ``[w_low, trained_floor)`` the chart cannot serve.  ``None`` on
+            every non-split serve (carrier-only and fully-in-box), leaving
+            the byte-path untouched.
+        engine_mask : np.ndarray, optional
+            Boolean nodes (``dense_w`` shape) the ``engine_envelope``
+            overwrites; required when ``engine_envelope`` is given and
+            ignored otherwise.
 
         Returns
         -------
@@ -3187,6 +3264,18 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             axis=1)
         envelope = (f_total - ppgo) * np.exp(1j * dense_w * geom.t_min)
         envelope[~below_mask] = 0.0
+
+        # Trained-floor tier overlay.  On the trained-floor band split the
+        # exact-engine far-field envelope replaces the (extrapolated,
+        # zeroed-residual) chart carrier on the untrained sub-band
+        # ``[w_low, trained_floor)`` -- the nodes the chart was never
+        # trained on.  Both sides are the SAME ``FARFIELD_KERNEL_SUM`` gauge
+        # (see `_engine_envelope_below_split`), so the exact engine below
+        # stitches onto the chart carrier + residual above with no field
+        # discontinuity.  ``None`` on every non-split serve, leaving the
+        # carrier-only and fully-in-box byte-paths untouched.
+        if engine_envelope is not None:
+            envelope[engine_mask] = engine_envelope[engine_mask]
 
         kernels, _total = reconstruct_farfield(
             dense_w, envelope, geom.delays, geom.saddle_kernels,
