@@ -4,10 +4,11 @@ Tests for the ppGO above-ceiling serve path in `lensing.likelihood`.
 Build: exterior_followup WP4 (ppGO above-ceiling rung).
 
 When the dimensionless frequency w_max exceeds the Schwinger QD ceiling
-(``W_CEILING_SCHWINGER_QD = 150.0``) the exact engine hard-refuses.  The
-ppGO above-ceiling rung (``_ppgo_above_ceiling``) serves the amplification
-via fold-corrected ppGO when the narrowest image pair is resolved
-(``w_lo * min_delta_tau >= RHO_END = 4.0``).
+(``W_CEILING_SCHWINGER_QD = 150.0``) the exact engine hard-refuses those
+nodes.  The ppGO above-ceiling rung (``_ppgo_above_ceiling``) splits the
+band at the ceiling -- exact engine at or below 150, fold-corrected ppGO
+above -- and admits only when the lowest above-ceiling node is resolved
+(``150 * min_delta_tau >= RHO_END = 4.0``).
 
 THREE SPECIFICATIONS tested:
 
@@ -21,20 +22,20 @@ THREE SPECIFICATIONS tested:
    w increases.  At w=500 the error is <= 0.3 * the error at w=150,
    and at w=150 the error is < 1e-2.
 
-3. **GATE BORDERS**: At w_max=150.0 exactly, the gate returns None.
-   Just above (w_max=nextafter(150, inf)), the gate enters but refuses
-   if w_lo*min_delta_tau < RHO_END.  At w_lo*min_delta_tau=RHO_END
-   exactly, the gate passes.
+3. **GATE ENTRY**: At w_max=150.0 exactly, the rung returns None (entry
+   guard).  The resolution gate, band partition and stitch are
+   canonically pinned in ``test_lensing_saddle_serve_gate.py::
+   PpgoAboveCeilingPartitionTestCase`` (one pin per routing decision).
 
 ORACLE: ``ChangRefsdalChannels.evaluate`` provides the independent exact
-total.  Gate borders are structural (no value oracle).
+total.  The gate entry guard is structural (no value oracle).
 
 COST ARITHMETIC:
 - Boundary continuity: 4 configs * 4 engine evals (w=55,60,140,149)
   + 2 ppGO-only evals (w=151,500).  Engine: ~2.5 s.  Total < 4 s.
 - Decreases with w: 5 configs * 4 w-values * 2 calls (fold+geo).
   ~40 calls * ~15 ms = ~0.6 s.
-- Gate borders: 4 configs * geometry_partition + 1 ppGO call.  < 2 s.
+- Gate entry: 1 rung call (returns at the entry guard).  < 0.1 s.
 Total < 10 s.
 """
 from __future__ import annotations
@@ -50,11 +51,10 @@ from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels, FARFIELD_KERNEL_SUM, _N_CHANNELS,
     reconstruct_farfield)
-from cogwheel.lensing.chang_refsdal.operator import (
-    geometric_amplification, RHO_END)
+from cogwheel.lensing.chang_refsdal.operator import geometric_amplification
 from cogwheel.lensing.chang_refsdal._airy_fold import fold_ppgo_correction
 from cogwheel.lensing.chang_refsdal._schwinger import (
-    SchwingerCertificationError, W_CEILING_SCHWINGER_QD)
+    W_CEILING_SCHWINGER_QD)
 from cogwheel.lensing.likelihood import LensedRelativeBinningLikelihood
 
 
@@ -68,18 +68,11 @@ _OUTPUT_DIR = pathlib.Path(__file__).parent / 'output'
 # Shared test constants
 # ======================================================================
 
-#: Absolute / relative tolerance for boundary continuity at w >= 140
-#: (engine vs ppGO agreement just around the ceiling).
-BOUNDARY_REL_TOL = 1e-2
-
 #: Tolerance for engine vs ppGO well inside the engine domain (w <= 60).
 SANITY_REL_TOL = 1e-3
 
 #: The extrapolated engine error at w=500 must be < this.
 EXTRAP_REL_TOL = 1e-3
-
-#: w values for the boundary continuity sweep.
-_BOUNDARY_W = np.array([55.0, 60.0, 140.0, 149.0, 151.0, 500.0])
 
 #: w values for the decreases-with-w sweep.
 _DECAY_W = np.array([150.0, 300.0, 500.0, 800.0])
@@ -417,91 +410,31 @@ class DecreasesWithWTestCase(_PpgoCeilingTestCase):
 # ======================================================================
 
 class GateBordersTestCase(_PpgoCeilingTestCase):
-    """Structural gate conditions at the ppGO above-ceiling boundaries.
+    """Entry guard of the ppGO above-ceiling rung.
 
-    Gate returns None unless: w_max > 150, >= 2 real images, positive
-    min(delta_tau), and w_lo * min_delta_tau >= RHO_END (=4.0).
+    The rung returns None unless w_max > W_CEILING_SCHWINGER_QD (=150)
+    and the lowest above-ceiling node is resolved
+    (``150 * min_delta_tau >= RHO_END``).  Only the entry guard is
+    pinned here; the resolution gate, band partition and stitch are
+    canonically pinned in ``test_lensing_saddle_serve_gate.py::
+    PpgoAboveCeilingPartitionTestCase`` (one pin per routing decision).
     """
 
     #: A source producing 4 real interior images at gamma=0.5.
     _SOURCE = np.array([0.08, 0.06])
 
-    def _min_delta_tau(self, source, gamma, w_grid):
-        """Minimum positive delay difference between real images."""
-        geom = ChangRefsdalChannels(w_grid).geometry_partition(
-            gamma=gamma, y=source.tolist(), beta=0.0, kappa=0.0)
-        real = np.asarray(geom.real_mask, dtype=bool)
-        rdelays = np.asarray(geom.delays)[real]
-        if len(rdelays) < 2:
-            return 0.0
-        dt = np.diff(np.sort(rdelays))
-        pos = dt[dt > 0]
-        return float(np.min(pos)) if len(pos) > 0 else 0.0
-
     def test_a_exact_ceiling_returns_none(self):
-        """w_max=150.0 exactly: gate returns None (not > ceiling)."""
-        self.n_checks += 1
-        self.assertFalse(150.0 > W_CEILING_SCHWINGER_QD)
+        """w_max == 150.0 exactly: entry guard returns None (not > ceiling).
 
-    def test_b_just_above_celling_unresolved(self):
-        """w_max>150 but w_lo*min_delta_tau < RHO_END -> None."""
-        source = self._SOURCE
-        for w_lo in [0.5, 1.0, 2.0]:
-            w_grid = np.array([w_lo, W_CEILING_SCHWINGER_QD + 1.0])
-            min_dt = self._min_delta_tau(source, 0.5, w_grid)
-            if min_dt > 0 and w_lo * min_dt < RHO_END:
-                break
-        else:
-            self.skipTest('Could not find unresolved config')
-        self.n_checks += 1
-        self.assertLess(w_lo * min_dt, RHO_END)
-
-    def test_b2_resolved_gate_passes(self):
-        """w_max nextafter(150,inf) + resolved pair: gate passes."""
-        source = self._SOURCE
-        min_dt = self._min_delta_tau(
-            source, 0.5, np.array([10.0, W_CEILING_SCHWINGER_QD + 1.0]))
-        self.assertGreater(min_dt, 0.0)
-        w_lo = RHO_END / min_dt
-        w_max = np.nextafter(W_CEILING_SCHWINGER_QD, np.inf)
-        w_grid = np.array([w_lo, w_max])
-        self.n_checks += 1
-        self.assertGreater(float(w_grid.max()),
-                           W_CEILING_SCHWINGER_QD)
-        self.n_checks += 1
-        self.assertGreaterEqual(w_lo * min_dt, RHO_END)
-
-        stub = MagicMock()
-        stub._reduce_dense_kernels = MagicMock(
-            return_value=(np.ones(3), np.zeros(3)))
-        stub._image_delays = MagicMock(
-            return_value=np.array([0.0, 0.1, 0.2, 0.3]))
-        lens = {'gamma': 0.5, 'y1': float(source[0]),
-                'y2': float(source[1]),
-                'beta': 0.0, 'kappa': 0.0}
+        The guard fires before any stub attribute or geometry work, so a
+        bare MagicMock stands in for the likelihood instance.
+        """
+        lens = {'gamma': 0.5, 'y1': float(self._SOURCE[0]),
+                'y2': float(self._SOURCE[1]), 'beta': 0.0, 'kappa': 0.0}
         result = LensedRelativeBinningLikelihood._ppgo_above_ceiling(
-            stub, lens, w_grid)
+            MagicMock(), lens, np.array([10.0, W_CEILING_SCHWINGER_QD]))
         self.n_checks += 1
-        self.assertIsNotNone(result,
-                             f'w_lo={w_lo:.6f}, w_max={w_max:.6f}')
-
-    def test_d_below_rho_end(self):
-        """w_lo*min_delta_tau < RHO_END (nextafter below): gate None."""
-        source = self._SOURCE
-        min_dt = self._min_delta_tau(
-            source, 0.5, np.array([1.0, W_CEILING_SCHWINGER_QD + 1.0]))
-        self.assertGreater(min_dt, 0.0)
-        w_lo = np.nextafter(RHO_END, -np.inf) / min_dt
-        w_grid = np.array([w_lo, W_CEILING_SCHWINGER_QD + 1.0])
-        lens = {'gamma': 0.5, 'y1': float(source[0]),
-                'y2': float(source[1]),
-                'beta': 0.0, 'kappa': 0.0}
-        stub = MagicMock()
-        result = LensedRelativeBinningLikelihood._ppgo_above_ceiling(
-            stub, lens, w_grid)
-        self.n_checks += 1
-        self.assertIsNone(result,
-                          f'w_lo*min_dt={w_lo*min_dt:.10f}')
+        self.assertIsNone(result)
 
 
 # ======================================================================
@@ -635,82 +568,15 @@ class SelfFalsificationTestCase(_PpgoCeilingTestCase):
 
 
 # ======================================================================
-# TEST CLASS 5: Gate fallthrough — unresolved pair
+# Retired 2026-08-17 (ceiling-keyed band-split serve): the old-gate
+# border tests (w_lo-keyed predicate) and GateFallthroughTestCase.  The
+# fallthrough fixture now RESOLVES at the ceiling (150*min_delta_tau
+# ~ 143 >= RHO_END) and is served by design.  Surviving canonical pins:
+#   * gate / partition / stitch: test_lensing_saddle_serve_gate.py::
+#     PpgoAboveCeilingPartitionTestCase
+#   * engine ceiling refusal: test_lensing_schwinger.py::
+#     QdCeilingRefusalTestCase::test_above_qd_ceiling_raises
 # ======================================================================
-
-class GateFallthroughTestCase(_PpgoCeilingTestCase):
-    """_ppgo_above_ceiling returns None when w_lo*min_delta_tau < RHO_END.
-
-    When the rung returns None at w_max > 150, _amplification_coefficients
-    falls through to the exact engine, which raises
-    ``SchwingerCertificationError`` at w > 150 -- same as HEAD behaviour
-    (no new crash, no silent wrong answer).
-
-    Cost: 2 geometry_partition calls + 1 engine call.  < 1 s.
-    """
-
-    #: Low-shear 2-image EXTERIOR config: gamma=0.10, rho=2.6, angle=0
-    #: gives source ~(0, 0.50) which is well outside the gamma=0.10
-    #: astroid caustic of extent ~0.19.  Both uniform arms decline
-    #: (no merging fold pair, no 3-stationary-point Pearcey form), so
-    #: the engine raises SchwingerCertificationError at w > 150.
-    #: With w_lo=0.87 and min_dt~0.95, w_lo*min_dt ~ 0.83 < RHO_END,
-    #: so the ppGO gate returns None (unresolved for test_a).
-    _GAMMA = 0.1
-    _RHO = 2.6
-    _ANGLE = 0.0
-    _W_LO = 0.87
-    _W_MAX = 200.0
-
-    @classmethod
-    def _get_source_and_dt(cls):
-        """Return (source, w_grid) for the unresolved fallthrough config."""
-        r_c = geometry.r_caustic(cls._GAMMA, cls._ANGLE)
-        radius = cls._RHO * r_c
-        source = np.array([0.0, radius])
-        w_grid = np.array([cls._W_LO, cls._W_MAX])
-        return source, w_grid
-
-    def test_a_unresolved_returns_none(self):
-        """Gate returns None because w_lo * min_delta_tau < RHO_END."""
-        source, w_grid = self._get_source_and_dt()
-
-        geom = ChangRefsdalChannels(w_grid).geometry_partition(
-            gamma=self._GAMMA, y=source.tolist(), beta=0.0, kappa=0.0)
-        real = np.asarray(geom.real_mask, dtype=bool)
-        real_delays = np.asarray(geom.delays)[real]
-        self.assertGreaterEqual(len(real_delays), 2,
-                                'Need >= 2 real images for the test')
-
-        sorted_d = np.sort(real_delays)
-        min_dt = float(np.min(np.diff(sorted_d)[np.diff(sorted_d) > 0]))
-        w_lo = float(w_grid.min())
-
-        self.assertLess(w_lo * min_dt, RHO_END,
-                        f'w_lo*min_dt={w_lo*min_dt:.4f} must be < {RHO_END}')
-
-        lens = {'gamma': self._GAMMA, 'y1': float(source[0]),
-                'y2': float(source[1]), 'beta': 0.0, 'kappa': 0.0}
-        stub = MagicMock()
-        result = LensedRelativeBinningLikelihood._ppgo_above_ceiling(
-            stub, lens, w_grid)
-        self.n_checks += 1
-        self.assertIsNone(result,
-                          f'w_lo*min_dt={w_lo*min_dt:.4f} < {RHO_END} '
-                          'but gate returned non-None')
-
-    def test_b_fallthrough_engine_raises_schwinger(self):
-        """Engine raises SchwingerCertificationError at w > 150."""
-        source, _w_grid = self._get_source_and_dt()
-
-        min_w = float(min(self._W_LO, 1.0))
-        w_engine = np.array([min_w, self._W_MAX])
-        ch = ChangRefsdalChannels(w_engine)
-        ch.reset()
-        self.n_checks += 1
-        with self.assertRaises(SchwingerCertificationError):
-            ch.evaluate(gamma=self._GAMMA, y=source.tolist(),
-                        beta=0.0, kappa=0.0)
 
 
 # ======================================================================
@@ -724,12 +590,16 @@ class NoSurrogateTestCase(_PpgoCeilingTestCase):
     """
 
     #: Exterior config at gamma=1.5, rho=1.5, angle=0.  2 well-separated
-    #: real images, delta_tau ~ 3.3 at HEAD.  With w_lo=2.0,
-    #: w_lo*delta_tau ~ 6.6 > RHO_END.
+    #: real images, min_delta_tau ~ 4.4, so the ceiling-keyed gate metric
+    #: 150*min_delta_tau ~ 657 >> RHO_END.  w_lo=151 puts the WHOLE band
+    #: above the ceiling: the engine leg is skipped and fold_ppgo carries
+    #: every node (the deep-massive-lens asymptote, byte-identical to the
+    #: pre-split whole-band ppGO serve; the straddling stitch is pinned
+    #: in test_lensing_saddle_serve_gate.py).
     _GAMMA = 1.5
     _RHO = 1.5
     _ANGLE = 0.0
-    _W_LO = 2.0
+    _W_LO = 151.0
     _W_MAX = 200.0
     _N_BINS = 3
     _N_SUBSAMPLES = 2
@@ -875,11 +745,14 @@ class SingleImageTestCase(_PpgoCeilingTestCase):
     Cost: 1 ppGO eval + 1 manual recomputation.  < 0.1 s.
     """
 
-    #: Exterior config: gamma=1.5, rho=1.5, angle=0.
+    #: Exterior config: gamma=1.5, rho=1.5, angle=0.  w_lo=151 puts the
+    #: WHOLE band above the Schwinger ceiling -- the regime where the
+    #: band-split rung is byte-identical to the whole-band ppGO serve,
+    #: so the full-band manual expectation below stands verbatim.
     _GAMMA = 1.5
     _RHO = 1.5
     _ANGLE = 0.0
-    _W_LO = 2.0
+    _W_LO = 151.0
     _W_MAX = 200.0
     _N_BINS = 3
     _N_SUBSAMPLES = 2

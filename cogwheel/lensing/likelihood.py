@@ -623,13 +623,140 @@ def _saddle_farfield_analytic_serves(real_images, source, matrix, w_lo):
         # Divergent mu/c3 near the critical curve -- a genuinely merging
         # pair.  This is the primary coalescence discriminator.
         return False
-    # Minimum pairwise Euclidean image separation (separation backstop).
+    # Minimum pairwise Euclidean image separation (separation backstop),
+    # shared with the band-split serve rung via `_saddle_min_image_sep`.
+    min_sep = _saddle_min_image_sep(images)
+    if min_sep is None:
+        # Unreachable: >= 2 images guaranteed above.  Kept as an explicit
+        # guard so the None-returning helper contract is honoured locally
+        # (and the type is narrowed to float for the comparison below).
+        return False
+    return (min_sep >= _SADDLE_FARFIELD_MIN_IMAGE_SEP
+            and _SADDLE_FARFIELD_SAFETY * est <= _SADDLE_FARFIELD_CERT_BAR)
+
+
+def _saddle_min_image_sep(real_images):
+    """Minimum pairwise Euclidean separation among real image positions.
+
+    Source-plane, Einstein-radius units.  Shared by the saddle far-field
+    serve gate (`_saddle_farfield_analytic_serves`) and the band-split
+    serve rung (`_saddle_farfield_analytic`) so both apply the IDENTICAL
+    separation backstop.  Returns ``None`` when fewer than two real images
+    (no pair to separate).
+
+    Parameters
+    ----------
+    real_images : np.ndarray
+        Shape ``(k, 2)`` REAL image positions (``geom.images``; already
+        real-only -- do NOT index with the length-4 channel mask
+        ``geom.real_mask``).
+
+    Returns
+    -------
+    float or None
+        The minimum pairwise separation, or ``None`` for fewer than two
+        real images.
+    """
+    images = np.asarray(real_images, dtype=float)
+    if len(images) < 2:
+        return None
     diffs = images[:, None, :] - images[None, :, :]
     dists = np.hypot(diffs[..., 0], diffs[..., 1])
     iu = np.triu_indices(len(images), k=1)
-    min_sep = float(np.min(dists[iu]))
-    return (min_sep >= _SADDLE_FARFIELD_MIN_IMAGE_SEP
-            and _SADDLE_FARFIELD_SAFETY * est <= _SADDLE_FARFIELD_CERT_BAR)
+    return float(np.min(dists[iu]))
+
+
+def _saddle_c3_split_point(real_images, source, matrix):
+    """Certificate split frequency for the saddle far-field band split.
+
+    The zero-envelope analytic serve's true remainder decays as the c3
+    leading stationary-phase term ``est(w) = C / w**3`` with ``C`` a
+    frequency-INDEPENDENT geometry factor (`geometry.ppgo_error_estimate`;
+    Professor ruling).  The smallest ``w`` at which the safety-factored
+    certificate clears the production bar,
+
+        _SADDLE_FARFIELD_SAFETY * C / w_split**3 == _SADDLE_FARFIELD_CERT_BAR,
+
+    is the EXACT cube-root inversion
+
+        w_split = w_ref * (S * est(w_ref) / bar) ** (1 / 3),
+
+    which is INDEPENDENT of the reference ``w_ref`` because ``est`` is a
+    pure ``C / w**3`` law (so ``w_ref = 1.0`` yields ``C`` directly).  No
+    bisection, no hardcoded split.  Above ``w_split`` the analytic zero
+    envelope already clears the bar; at or below it the exact engine must
+    serve.  Evaluating at a fixed ``w_ref`` makes the split point a
+    property of the geometry alone, independent of the dense grid; the
+    caller compares it against the grid's ``(w_lo, w_hi)`` and the exact
+    engine ceiling.
+
+    A ``None`` return from ``ppgo_error_estimate`` -- divergent ``mu`` /
+    ``c3`` at a genuinely merging pair near the critical curve -- is the
+    PRIMARY coalescence discriminator and propagates as ``None`` here: a
+    merging pair must REFUSE the whole draw and never enter a band split.
+    The ``None``-ness depends only on the ``w``-independent ``mu`` / ``c3``
+    finiteness, so it agrees with the gate's own ``est(w_lo)`` check.
+
+    Parameters
+    ----------
+    real_images : np.ndarray
+        Shape ``(k, 2)`` REAL image positions (``geom.images``; already
+        real-only -- do NOT index with the length-4 channel mask).
+    source : np.ndarray
+        Shape ``(2,)`` source position (interface symmetry with the gate).
+    matrix : np.ndarray
+        Shape ``(2, 2)`` macro matrix.
+
+    Returns
+    -------
+    float or None
+        The split frequency ``w_split``, or ``None`` for a merging pair.
+    """
+    from cogwheel.lensing.chang_refsdal.geometry import ppgo_error_estimate
+    w_ref = 1.0
+    est = ppgo_error_estimate(
+        np.asarray(real_images, dtype=float), source, matrix, w_ref)
+    if est is None:
+        return None
+    return w_ref * (_SADDLE_FARFIELD_SAFETY * est
+                    / _SADDLE_FARFIELD_CERT_BAR) ** (1.0 / 3.0)
+
+
+def _band_split_mask(dense_w, split):
+    """Band-split boolean and below-split node mask for a dense ``w`` grid.
+
+    Shared arithmetic for every band-split serve rung.  A band split is
+    active only when ``split`` is provided AND lies STRICTLY inside the
+    dense band ``(w_lo, w_hi)``; a split at or outside an endpoint is a
+    no-op.  ``below_mask`` marks the nodes the below-split rung serves;
+    without an active split it is all-``True`` (nothing is masked out), so
+    the caller's serve is byte-identical to the un-split result.
+
+    Convention (load-bearing): ALL band-split rungs zero the reconstructed
+    envelope ABOVE the split via ``envelope[~below_mask] = 0.0``; only what
+    POPULATES the below-split envelope differs per rung, so this helper
+    shares the mask arithmetic only -- never a serve-below callable.
+
+    Parameters
+    ----------
+    dense_w : np.ndarray
+        Dimensionless frequency grid for the kernel subsamples.
+    split : float or None
+        Certified trusted-floor frequency at which to split the band, or
+        ``None`` for no split.
+
+    Returns
+    -------
+    tuple
+        ``(band_split, below_mask)`` where ``band_split`` is a ``bool`` and
+        ``below_mask`` is a boolean ``np.ndarray`` of ``dense_w``'s shape.
+    """
+    w_lo = float(dense_w.min())
+    w_hi = float(dense_w.max())
+    band_split = split is not None and w_lo < split < w_hi
+    below_mask = ((dense_w <= split) if band_split
+                  else np.ones(dense_w.shape, dtype=bool))
+    return band_split, below_mask
 
 
 def _data_term(a_moments, rho0, rho1, kbar0, kbar1, tau, f_center):
@@ -2099,14 +2226,31 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         return delays, k0, k1, geom
 
     def _ppgo_above_ceiling(self, lens, dense_w):
-        """Whole-band ppGO serve when w_max exceeds the Schwinger QD ceiling.
+        """Split-band ppGO serve when w_max exceeds the Schwinger QD ceiling.
 
-        When ``w_max > W_CEILING_SCHWINGER_QD`` (=150) AND the narrowest
-        image pair is resolved (``w_lo * min_delta_tau >= RHO_END``), the
-        fold-corrected ppGO carrier is accurate across the entire band.
-        On any gate miss, returns ``None`` -- the caller falls through to
-        the exact engine, which raises ``SchwingerCertificationError``
-        unchanged from HEAD.
+        Fires only when ``w_max > W_CEILING_SCHWINGER_QD`` (=150), where the
+        exact engine hard-refuses the above-ceiling nodes.  Admits only when
+        the LOWEST above-ceiling node is resolved
+        (``W_CEILING_SCHWINGER_QD * min_delta_tau >= RHO_END``), which
+        guarantees EVERY above-ceiling node -- the ones the engine refuses
+        and fold_ppgo must carry -- is resolved and the fold-corrected ppGO
+        carrier is accurate there.
+
+        The band is split at the ceiling (`_band_split_mask` with
+        ``split = W_CEILING_SCHWINGER_QD``): the exact engine serves every
+        node at or below 150 via `_engine_envelope_below_split` (always
+        engine-reachable), and the fold-corrected ppGO carrier serves every
+        node above 150.  The two envelopes are zeroed on each other's nodes
+        and summed, so they stitch over the full band with no double count,
+        then reconstructed under ``FARFIELD_KERNEL_SUM``.  When the whole
+        band is above the ceiling (``w_lo >= 150``) the engine serves
+        nothing and fold_ppgo carries the entire band -- byte-identical to
+        HEAD's whole-band ppGO serve.
+
+        On any gate miss returns ``None`` -- the caller falls through to the
+        exact engine, which raises ``SchwingerCertificationError`` unchanged
+        from HEAD (the deferred 2b residual for an unresolved above-ceiling
+        corner, not a bug).
 
         Parameters
         ----------
@@ -2138,10 +2282,46 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         positive_deltas = delta_taus[delta_taus > 0]
         if len(positive_deltas) == 0:
             return None
-        w_lo = float(dense_w.min())
         min_delta_tau = float(np.min(positive_deltas))
-        if w_lo * min_delta_tau < RHO_END:
+        # Ceiling-keyed resolution gate: min_delta_tau is a per-DRAW
+        # geometric constant and w is linear in f, so the analytic-eligible
+        # set collapses to a single threshold at the ceiling.  Admit only
+        # when the LOWEST above-ceiling node (w just above the ceiling) is
+        # resolved, which guarantees EVERY above-ceiling node is resolved
+        # and fold_ppgo is accurate there.  Keying on the ceiling (not
+        # w_lo) is conservative when the whole band is above the ceiling
+        # (w_lo > 150): a draw whose above-ceiling corner is unresolved
+        # returns None and falls through to the exact engine ->
+        # SchwingerCertificationError (the deferred 2b residual, not a bug).
+        if W_CEILING_SCHWINGER_QD * min_delta_tau < RHO_END:
             return None
+
+        # Split the band at the Schwinger ceiling: the exact engine serves
+        # every node at or below the ceiling (always engine-reachable) and
+        # the fold-corrected ppGO carrier serves every node above it.
+        split = float(W_CEILING_SCHWINGER_QD)
+        band_split, below_mask = _band_split_mask(dense_w, split)
+        if not band_split:
+            # The entry guard fixes w_hi > split, so an inactive split can
+            # only mean split <= w_lo: the WHOLE band is above the ceiling
+            # and the exact engine serves nothing.  `_band_split_mask`
+            # returns an all-True below_mask for an inactive split -- its
+            # convention serves below-populator rungs, whose trusted floor
+            # sits ABOVE the band; this ceiling rung's engine populates
+            # BELOW the split (the opposite polarity), so collapse the mask
+            # to all-False and let fold_ppgo carry every node (the deep-
+            # massive-lens asymptote, byte-identical to HEAD's whole-band
+            # ppGO serve).
+            below_mask = np.zeros(dense_w.shape, dtype=bool)
+
+        # Exact-engine far-field envelope below the ceiling (0 above); when
+        # the whole band is above the ceiling there is nothing to serve, so
+        # skip the engine and leave the below contribution identically 0.
+        if band_split:
+            engine_below = self._engine_envelope_below_split(
+                lens, dense_w, below_mask)
+        else:
+            engine_below = np.zeros(dense_w.shape, dtype=complex)
 
         from cogwheel.lensing.chang_refsdal._airy_fold import (
             fold_ppgo_correction)
@@ -2161,7 +2341,14 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             * np.exp(1j * dense_w[:, None] * real_delays[None, :]),
             axis=1)
 
-        envelope = (f_minrel - ppgo_sum) * np.exp(1j * dense_w * geom.t_min)
+        # Fold-corrected ppGO envelope above the ceiling; zero it on the
+        # below-split nodes the exact engine already populates so the two
+        # carriers stitch over the full band with no double count.
+        fold_envelope = (f_minrel - ppgo_sum) * np.exp(
+            1j * dense_w * geom.t_min)
+        fold_envelope[below_mask] = 0.0
+
+        envelope = engine_below + fold_envelope
 
         kernels, _total = reconstruct_farfield(
             dense_w, envelope, geom.delays, geom.saddle_kernels,
@@ -2171,33 +2358,117 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         delays = self._image_delays(lens, geom)
         return delays, k0, k1, geom
 
+    def _engine_envelope_below_split(self, lens, dense_w, below_mask):
+        """Full-length far-field envelope: exact engine below split, 0 above.
+
+        Builds the ``FARFIELD_KERNEL_SUM``-gauge far-field envelope from a
+        fresh EXACT-Schwinger evaluation on the below-split sub-band
+        ``dense_w[below_mask]`` and scatters it into a full-length array,
+        leaving the above-split nodes ``0.0`` -- the analytic zero the
+        tier-1 serve carries.  The zeroed above-split region telescopes to
+        the bare ppGO image-kernel sum under `reconstruct_farfield`, so the
+        split stitches the exact engine below onto the analytic carriers
+        above with no field discontinuity.
+
+        The engine geometry is ``w``-INDEPENDENT (deterministic initial
+        label assignment; see `_evaluate_envelope`), so the sub-band
+        partition's delays / kernels / ``t_min`` / real mask match the
+        full-band ``geom`` the caller reconstructs against, and the
+        envelope VALUES are frame-consistent node by node.  The label comes
+        from the single authoritative far-field producer
+        `farfield_envelope_from_partition` -- NOT the SACR-C
+        ``partition.envelope``, whose ``critical_delay`` carrier is a
+        DIFFERENT gauge that `reconstruct_farfield` does not invert; the
+        producer's ``exp(+1j w t_min)`` demodulation is the matched inverse
+        of `reconstruct_farfield`'s re-modulation (both via the reduced
+        ``_frame_phase``), so the round trip is machine-precision.
+
+        Every below-split node satisfies ``w <= w_split <=
+        W_CEILING_SCHWINGER_QD``, so the exact engine is always reachable
+        (no ``SchwingerCertificationError``); a merging pair never reaches
+        here (refused at the gate).  A geometry ``LensDomainError``
+        propagates unswallowed, mirroring the sibling rungs.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters from `_lens_params`.
+        dense_w : np.ndarray
+            Full dimensionless frequency grid for the kernel subsamples.
+        below_mask : np.ndarray
+            Boolean mask (``dense_w`` shape) marking the below-split nodes
+            the exact engine serves; the complement is left ``0.0``.
+
+        Returns
+        -------
+        np.ndarray
+            Full-length (``dense_w`` shape) complex far-field envelope: the
+            exact-engine ``FARFIELD_KERNEL_SUM`` label on the below-split
+            nodes, ``0.0`` above.
+        """
+        sub_w = dense_w[below_mask]
+        # Pad with the FULL-band ceiling (a node strictly above the split,
+        # since w_split < w_hi in the split case) so a single below-split
+        # node still satisfies the engine's two-point minimum.  The padding
+        # node is dropped by ``keep`` and the geometry is w-independent, so
+        # it cannot perturb the served sub-band values.  (This uses the
+        # full-band max rather than the sub-band max so the size-1 sub-band
+        # gets a DISTINCT second node -- padding with the sub-band's own
+        # single value would collapse the grid back to one point.)
+        partition, _sacrc_env, _exact_total = self._evaluate_envelope(
+            lens, sub_w, pad_w=float(dense_w.max()))
+        # Deferred import avoids module-load cycle risk (mirrors the Born
+        # rung's `born_carrier_from_partition` import).
+        from cogwheel.lensing.chang_refsdal.channels import (
+            farfield_envelope_from_partition)
+        ff_envelope = farfield_envelope_from_partition(
+            partition, FARFIELD_KERNEL_SUM)
+        keep = np.searchsorted(partition.w, sub_w)
+        envelope = np.zeros(dense_w.shape, dtype=complex)
+        envelope[below_mask] = ff_envelope[keep]
+        return envelope
+
     def _saddle_farfield_analytic(self, lens, dense_w):
-        """Tier-1 far-from-caustic macro-saddle analytic serve (gamma > 1).
+        """Tier-1 far-from-caustic macro-saddle serve with a c3 band split.
 
-        Serves the resolvable far-from-caustic macro saddle from the
-        switched analytic channels with a ZERO envelope -- no engine call,
-        no fold_ppgo correction.  The rung serves only when the c3-led
-        certificate gate `_saddle_farfield_analytic_serves` admits: the
-        safety-factored leading-remainder estimate at the band floor clears
-        the production bar (``_SADDLE_FARFIELD_SAFETY *
-        ppgo_error_estimate(...) <= _SADDLE_FARFIELD_CERT_BAR``) AND the
-        minimum pairwise image separation clears the backstop.  The omitted
-        physics is the ``w**-3`` stationary-phase remainder, whose shape the
-        c3 term already carries, so the certificate at the band floor bounds
-        the whole band.  On those, the switched analytic channel sum
-        reconstructed under the ``FARFIELD_KERNEL_SUM`` tag -- which parks
-        ``tau_c = 0`` and hardcodes ``S_a = 1`` on the saturated set --
-        carries the whole band to within the rung's certified bar, so the
-        residual envelope is SET to zero and the analytic carriers alone
-        reconstruct the amplification.  It is NEGLIGIBLE, not identically
-        zero.  A genuinely merging pair near the critical curve
-        (``ppgo_error_estimate`` returns ``None``) or a near-caustic source
-        whose certificate exceeds the bar is REFUSED here and falls through
-        to the exact Schwinger engine.  On any gate miss, returns ``None``
-        and the caller falls through to the exact seed engine,
-        byte-identical to HEAD.
+        Serves the resolvable far-from-caustic macro saddle (``gamma > 1``)
+        from the switched analytic channels, splitting the dense ``w`` band
+        at the per-draw c3 certificate frequency ``w_split``
+        (`_saddle_c3_split_point`): ABOVE ``w_split`` the residual envelope
+        is ZERO -- the analytic carriers alone reconstruct the amplification
+        to within the certified bar (the omitted ``w**-3`` stationary-phase
+        remainder, whose shape the c3 term carries, has decayed below the
+        bar); AT OR BELOW ``w_split`` the exact Schwinger engine supplies
+        the ``FARFIELD_KERNEL_SUM`` far-field envelope
+        (`_engine_envelope_below_split`).  Both regions reconstruct under
+        the ``FARFIELD_KERNEL_SUM`` tag over the FULL ``dense_w`` band --
+        which parks ``tau_c = 0`` and hardcodes ``S_a = 1`` on the
+        saturated set -- so the exact engine below stitches onto the
+        analytic carriers above with no field discontinuity.
 
-        The rung never uses ``geom.switch`` / ``geom.critical_delay``: the
+        The whole-draw admit / refuse envelope is unchanged from HEAD; only
+        the previously-refused-but-splittable middle is newly served:
+
+        * Whole-band admit (``w_split <= w_lo``, i.e. the certificate
+          already clears the bar at the band floor): the gate
+          `_saddle_farfield_analytic_serves` returns ``True`` and the whole
+          band is served with a ZERO residual envelope -- no engine call,
+          BYTE-IDENTICAL to HEAD.
+        * Whole-draw refuse: a genuinely merging pair near the critical
+          curve (``ppgo_error_estimate`` -> ``None``, so ``w_split`` is
+          ``None``) or an under-separated pair (separation backstop) is
+          REFUSED, and a certificate that fails across the whole reachable
+          band (``w_split >= w_hi``) or would split beyond the exact
+          engine's ceiling (``w_split > W_CEILING_SCHWINGER_QD``) falls
+          through.  Each returns ``None`` and the caller falls through to
+          the exact seed engine, BYTE-IDENTICAL to HEAD.
+        * Band split (``w_lo < w_split < w_hi`` and ``w_split <= 150``):
+          exact engine below, analytic zero above.  This is the new serving
+          that revives the saddle-c3 route on draws HEAD refused whole.
+
+        The split point is the EXACT cube-root inversion of the certificate
+        (`_saddle_c3_split_point`); it is never hardcoded.  The rung never
+        uses ``geom.switch`` / ``geom.critical_delay``: the
         ``FARFIELD_KERNEL_SUM`` tag is the switched-analytic sum on the
         saturated set and needs no channel handover.  A geometry
         ``LensDomainError`` propagates unswallowed, mirroring
@@ -2224,11 +2495,47 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         source = np.array([lens['y1'], lens['y2']], dtype=float)
         matrix = macro_matrix(lens['gamma'], lens['beta'], lens['kappa'])
         w_lo = float(dense_w.min())
-        if not _saddle_farfield_analytic_serves(
-                real_images, source, matrix, w_lo):
-            return None
+        w_hi = float(dense_w.max())
 
-        envelope = np.zeros(dense_w.shape, dtype=complex)
+        # Whole-band admit fast path (single source of truth, shared with
+        # the census).  A ``True`` here is the HEAD admit: the c3
+        # certificate clears the bar at the band floor -- equivalently the
+        # split point ``w_split <= w_lo`` -- so the whole band is served
+        # with a ZERO residual envelope and no engine call.  The reconstruct
+        # below is then BYTE-IDENTICAL to HEAD.
+        if _saddle_farfield_analytic_serves(real_images, source, matrix, w_lo):
+            envelope = np.zeros(dense_w.shape, dtype=complex)
+        else:
+            # Gate miss: either a genuine whole-draw refusal (BYTE-IDENTICAL
+            # HEAD fall-through) or a certificate that fails at the band
+            # floor but admits a band split.  The split point discriminates,
+            # replacing the whole-band accuracy bar the gate applies at
+            # ``w_lo``.  The est-None (merging pair) and separation-backstop
+            # refusals mirror the gate's own two whole-draw refusals.
+            min_sep = _saddle_min_image_sep(real_images)
+            if min_sep is None:
+                # Fewer than two real images: not a resolved 2-image
+                # exterior (mirrors the gate's ``len < 2`` refusal).
+                return None
+            if min_sep < _SADDLE_FARFIELD_MIN_IMAGE_SEP:
+                return None
+            w_split = _saddle_c3_split_point(real_images, source, matrix)
+            if (w_split is None or w_split >= w_hi
+                    or w_split > W_CEILING_SCHWINGER_QD):
+                # Merging pair (None), certificate fails across the whole
+                # band, or the split would fall beyond the exact engine's
+                # ceiling: fall through to the exact engine (HEAD refuse).
+                return None
+            # Reached only with a gate miss AND separation OK, so the
+            # accuracy bar failed at ``w_lo`` and ``w_lo < w_split``
+            # strictly; with ``w_split < w_hi`` and ``w_split <= 150`` the
+            # split lies STRICTLY inside the band.  ``_band_split_mask``
+            # therefore returns ``band_split = True`` and marks the
+            # below-split nodes; the exact engine serves them and the
+            # above-split residual stays zero.
+            _band_split, below_mask = _band_split_mask(dense_w, w_split)
+            envelope = self._engine_envelope_below_split(
+                lens, dense_w, below_mask)
 
         kernels, _total = reconstruct_farfield(
             dense_w, envelope, geom.delays, geom.saddle_kernels,
@@ -2341,7 +2648,6 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # beyond-wall / beyond-measured-ceiling nodes).  Mirrors the
         # surrogate-path band-split arithmetic.
         w_trust = self._ppgo_band_split(lens)
-        w_lo = float(dense_w.min())
         w_hi = float(dense_w.max())
         if w_trust is not None:
             wall = (ASTROID_WALL if float(lens['gamma']) < 1.0
@@ -2351,7 +2657,6 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                            else min(wall, cell_ceiling))
             if w_hi > eff_ceiling:
                 w_trust = None
-        band_split = w_trust is not None and w_lo < w_trust < w_hi
 
         # ``below_mask`` marks the nodes the Born envelope actually serves;
         # above ``w_trust`` the reconstructed envelope is zeroed (E_ff = 0,
@@ -2360,8 +2665,11 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # Born result.  ``chart_w`` is that served sub-band, used ONLY for
         # the trained-band refusal below -- the carrier / residual / ppGO
         # serve runs over the FULL ``dense_w`` (see INS-2-001 note below).
-        below_mask = ((dense_w <= w_trust) if band_split
-                      else np.ones(dense_w.shape, dtype=bool))
+        # The band-split boolean + below-split node mask are the shared
+        # ``_band_split_mask`` arithmetic (split strictly inside the band);
+        # the Born-specific ``eff_ceiling`` guard above stays here because
+        # only Born nulls ``w_trust`` beyond the effective ceiling.
+        _band_split, below_mask = _band_split_mask(dense_w, w_trust)
         chart_w = dense_w[below_mask]
 
         # Trained-band refusal: the residual interpolator cubic-extrapolates

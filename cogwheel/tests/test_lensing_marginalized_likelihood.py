@@ -119,6 +119,7 @@ from matplotlib import pyplot as plt
 import lal
 
 from cogwheel import data, gw_prior, skyloc_angles, waveform
+from cogwheel.prior import FixedPrior
 from cogwheel.likelihood.marginalized_extrinsic import (
     MarginalizedExtrinsicLikelihood)
 from cogwheel.likelihood.reference_waveform_finder import (
@@ -717,19 +718,41 @@ class RefusalContractTestCase(_MarginalizedLensTestCase):
 
     def _in_support_sampled_vec(self):
         """
-        A sampled-coordinate vector whose real ``lnposterior`` is finite,
-        so patching the likelihood actually reaches the refusal-catch.
+        A sampled-coordinate vector inside the prior support (finite
+        ``lnprior``), so patching the likelihood actually reaches the
+        refusal-catch instead of short-circuiting at the prior.
+
+        Derived DETERMINISTICALLY from the well-conditioned ``MAIN_LENS``
+        fixture via ``prior.inverse_transform``.  Rejection-sampling
+        random prior draws through the REAL ``lnposterior`` here became a
+        TIMEOUT hazard with the ceiling-keyed band-split serve: a
+        large-mass draw that formerly refused fast is now legitimately
+        ADMITTED and served through the mpmath engine band
+        (60 < w <= 150) at minutes per call.
         """
         posterior = self.h.posterior
         prior = posterior.prior
-        rng = np.random.default_rng(SEED + 5)
-        for _ in range(50):
-            vec = prior.cubemin + rng.uniform(0.0, 1.0, prior.cubemin.shape) \
-                * prior.cubesize
-            if np.isfinite(posterior.lnposterior(*vec)):
-                return list(vec)
-        self.fail('could not draw an in-support sampled point for the '
-                  'posterior refusal test.')
+        point = _intrinsic_lens_point(self.marg, MAIN_LENS)
+        # Conform to the prior's OWN fixed entries (e.g. ``z_lens``) so
+        # the inversion premise derives from the live prior, not a
+        # literal that can drift.
+        for subprior in prior.subpriors:
+            if isinstance(subprior, FixedPrior):
+                point.update(subprior.standard_par_dic)
+        sampled = prior.inverse_transform(**point)
+        vec = [sampled[par] for par in prior.sampled_params]
+        # Premise: PRIOR support only.  The consumers mock the likelihood
+        # seam, so a finite lnprior is exactly what guarantees the
+        # refusal-catch is reached (an out-of-support point would go
+        # -inf vacuously, never consulting the likelihood).  Evaluating
+        # the REAL lnposterior here would both re-open the slow-serve
+        # timeout hazard and mutate the shared engine's adaptive state,
+        # breaking the bit-for-bit JSON-roundtrip pin downstream.
+        self.assertTrue(
+            np.isfinite(prior.lnprior(*vec)),
+            'premise: the deterministic MAIN_LENS point must be inside '
+            'the prior support (finite lnprior); it drifted out.')
+        return vec
 
     def test_posterior_maps_refusal_to_exact_neg_inf(self):
         """`LensedPosterior` returns exact ``-inf`` / ``None`` on refusal."""
