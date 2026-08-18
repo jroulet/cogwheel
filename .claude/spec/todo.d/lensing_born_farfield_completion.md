@@ -31,7 +31,17 @@ section: Backlog
   remaining chart need is a thin near-lobe residual annulus in
   [w_low, w_split-ish] x [lobe shell, certificate radius], tiled by the
   EXISTING lobe-exterior machinery during the demand-sized tiling
-  design — no new coordinates. Census mirror re-gated IN-BUILD
+  design — no new coordinates. OPTIMAL-REPRESENTATION CLAUSE (owner,
+  2026-08-17: any chart we keep uses the optimal representation and
+  coordinates — a shrunken region is not an excuse for a mediocre
+  chart): the annulus charts store the RESIDUAL AGAINST THE SAME
+  CARRIER THE RUNG SERVES (the astroid BornResidualChart pattern,
+  reconstruct = carrier + R; ONE carrier definition shared by rung and
+  chart, DRY), in lobe-gauge cusp-adapted coordinates. The subleading
+  macro image still interferes as cos(w*dtau_macro) out there — whether
+  the reference is the lead carrier alone or a non-vanishing
+  two-carrier combination (the beat-free tube lesson) is the
+  LOAD-BEARING plan-time Professor derivation; spend the review there. Census mirror re-gated IN-BUILD
   (mirror-fidelity law; the c3 build's stale-instrument lesson).
   ACCEPTANCE: census far-field engine hosting -> the annulus only;
   carrier-only accuracy vs the engine in the reachable overlap within
