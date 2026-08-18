@@ -11,6 +11,14 @@ exact-wave-demand population three ways by caustic-relative reach, so a
 downstream campaign planner (the "7b" acceptance tool) can size each analytic
 family against the demand this census maps.
 
+The draw-level routes mirror the BAND-SPLIT serving semantics of the
+production likelihood rungs: ``ppgo_above_ceiling`` is the above-ceiling
+split (exact engine at or below ``W_CEILING_SCHWINGER_QD``, fold-corrected
+ppGO above, gated on ``W_CEILING_SCHWINGER_QD * min_delta_tau >= RHO_END``)
+and ``saddle_c3`` covers BOTH the whole-band-analytic admit and the c3 band
+split (exact engine at or below the per-draw certificate split ``w_split``,
+analytic zero envelope above; ``w_split`` is recorded per draw).
+
 Two classification granularities are produced per draw:
 
 * a DRAW-LEVEL route (one of `SERVE_ROUTES`), decided by a first-admitting
@@ -76,11 +84,14 @@ from cogwheel.lensing.chang_refsdal import geometry
 
 #: The eight MECE draw-level serve routes, listed in label-enumeration order.
 #: The DECISION order (a first-admitting waterfall) is DIFFERENT and is
-#: documented on `classify_draw`: ``engine_refused`` is decided first, then
-#: ``surrogate`` (artifact mode only), ``saddle_c3``, ``born_analytic``, and
-#: finally the per-node pass resolves ``wave_refused`` / ``engine_residual``
-#: / ``ppgo_above_ceiling`` / ``analytics_engine_hosted`` (in that
-#: precedence order -- see `classify_draw`).
+#: documented on `classify_draw`; it mirrors the PRODUCTION rung order of
+#: ``likelihood._amplification_coefficients``: ``engine_refused`` is decided
+#: first, then ``surrogate`` (artifact mode only), ``ppgo_above_ceiling``
+#: (the above-ceiling band-split rung -- in production it fires BEFORE the
+#: saddle rung), ``saddle_c3`` (whole-band-analytic OR c3 band-split),
+#: ``born_analytic``, and finally the per-node pass resolves
+#: ``wave_refused`` / ``engine_residual`` / ``analytics_engine_hosted``
+#: (in that precedence order -- see `classify_draw`).
 SERVE_ROUTES: tuple[str, ...] = (
     'surrogate',
     'ppgo_above_ceiling',
@@ -106,11 +117,12 @@ ROUTE_KINDS: tuple[str, ...] = (
 )
 
 #: The three uniform-arm KINDS a served wave node can carry (the subset of
-#: `ROUTE_KINDS` produced by ``operator._uniform_arm_value``).  Production
+#: `ROUTE_KINDS` produced by ``operator._uniform_arm_value``).  The engine
 #: offers the arms to EVERY wave node above the DD ceiling (both the
-#: ``(60, 150]`` mpmath band and the above-QD-ceiling regime).  A draw is
-#: ``ppgo_above_ceiling`` iff every node is served AND at least one node's
-#: KIND is in this set.
+#: ``(60, 150]`` mpmath band and the above-QD-ceiling regime).  These are
+#: node-level labels only: the draw-level ``ppgo_above_ceiling`` route is
+#: the whole-band above-ceiling INTERCEPT (the production
+#: ``_ppgo_above_ceiling`` rung), never a node-pass outcome.
 _UNIFORM_ARM_KINDS: frozenset[str] = frozenset(
     {'fold', 'ghost_ppgo', 'pearcey'})
 
@@ -178,6 +190,9 @@ class _ProductionModules:
     draw_samples: Any                     # surrogate_census.draw_samples
     dimensionless_frequency: Any          # waveform.dimensionless_frequency
     saddle_farfield_serves: Any           # likelihood._saddle_farfield_...
+    saddle_c3_split_point: Any            # likelihood._saddle_c3_split_point
+    saddle_min_image_sep: Any             # likelihood._saddle_min_image_sep
+    saddle_min_sep_floor: float           # likelihood._SADDLE_FARFIELD_MIN...
     macro_matrix: Any                     # geometry.macro_matrix
     select_branch: Any                    # operator.select_branch
     uniform_arm_value: Any                # operator._uniform_arm_value
@@ -187,6 +202,7 @@ class _ProductionModules:
     ghost_ppgo_amplification: Any         # operator._ghost_ppgo_amplification
     w_ceiling_dd: float                   # _schwinger.W_CEILING_SCHWINGER
     w_ceiling_qd: float                   # _schwinger.W_CEILING_SCHWINGER_QD
+    rho_end: float                        # operator.RHO_END (likelihood's own)
     refusal_errors: tuple[type[BaseException], ...]  # surrogate._REFUSAL_ERRORS
 
 
@@ -201,7 +217,9 @@ def _load_production_modules() -> _ProductionModules:
     from cogwheel.lensing import surrogate_census as sc
     from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels, _schwinger
     from cogwheel.lensing.chang_refsdal import operator as op
-    from cogwheel.lensing.likelihood import _saddle_farfield_analytic_serves
+    from cogwheel.lensing.likelihood import (
+        _SADDLE_FARFIELD_MIN_IMAGE_SEP, _saddle_c3_split_point,
+        _saddle_farfield_analytic_serves, _saddle_min_image_sep)
     from cogwheel.lensing.waveform import dimensionless_frequency
 
     return _ProductionModules(
@@ -209,6 +227,9 @@ def _load_production_modules() -> _ProductionModules:
         draw_samples=sc.draw_samples,
         dimensionless_frequency=dimensionless_frequency,
         saddle_farfield_serves=_saddle_farfield_analytic_serves,
+        saddle_c3_split_point=_saddle_c3_split_point,
+        saddle_min_image_sep=_saddle_min_image_sep,
+        saddle_min_sep_floor=float(_SADDLE_FARFIELD_MIN_IMAGE_SEP),
         macro_matrix=geometry.macro_matrix,
         select_branch=op.select_branch,
         uniform_arm_value=op._uniform_arm_value,
@@ -218,6 +239,7 @@ def _load_production_modules() -> _ProductionModules:
         ghost_ppgo_amplification=op._ghost_ppgo_amplification,
         w_ceiling_dd=float(_schwinger.W_CEILING_SCHWINGER),
         w_ceiling_qd=float(_schwinger.W_CEILING_SCHWINGER_QD),
+        rho_end=float(op.RHO_END),
         refusal_errors=tuple(sg._REFUSAL_ERRORS),
     )
 
@@ -235,6 +257,15 @@ class DrawResult:
     per-node `ROUTE_KINDS` vector, the aggregation coordinates, the
     caustic-relative reach and the draw's dimensionless ``w`` band.  No
     per-draw weight is carried: the draws are equal-weight by construction.
+
+    ``w_split`` is the saddle-c3 certificate split frequency recorded on a
+    ``saddle_c3`` draw (``None`` on every other route): the exact engine
+    serves the band nodes at or below ``w_split`` and the analytic zero
+    envelope serves above it, so the tiling design can size the below-split
+    chart demand from this detail.  A whole-band-analytic admit records its
+    (``<= w_lo``) split point too.  The ``ppgo_above_ceiling`` engine-below
+    band needs no per-draw detail: its split is the constant
+    ``W_CEILING_SCHWINGER_QD``.
     """
 
     gamma: float
@@ -249,6 +280,7 @@ class DrawResult:
     caustic_rho: float | None
     log_w_min: float
     log_w_max: float
+    w_split: float | None = None
 
     def as_record(self) -> dict[str, Any]:
         """JSON-serializable per-draw record (no weight column)."""
@@ -266,6 +298,8 @@ class DrawResult:
                             else float(self.caustic_rho)),
             'log_w_min': float(self.log_w_min),
             'log_w_max': float(self.log_w_max),
+            'w_split': (None if self.w_split is None
+                        else float(self.w_split)),
         }
 
 
@@ -447,13 +481,84 @@ def _caustic_rho_or_none(gamma: float, abs_y: float) -> float | None:
         return None
 
 
+def _ppgo_ceiling_gate_passes(mods: _ProductionModules, geom: Any) -> bool:
+    """Mirror of the production ``_ppgo_above_ceiling`` admission gate.
+
+    Leg-for-leg mirror of the gate in
+    ``likelihood.LensedRelativeBinningLikelihood._ppgo_above_ceiling`` up to
+    (and excluding) the serve itself: at least two real-image delays, a
+    positive minimum pairwise delay separation, and the ceiling-keyed
+    resolution gate ``W_CEILING_SCHWINGER_QD * min_delta_tau >= RHO_END``
+    (both constants bound from the production modules, never re-typed).
+    The caller has already established ``w_hi > W_CEILING_SCHWINGER_QD``
+    (the rung's entry guard).  A ``True`` here is the production serve:
+    fold-corrected ppGO above the ceiling, exact engine below -- the
+    engine-below band is the constant split at the ceiling, so no per-draw
+    split detail is recorded.  All quantities are geometry-only
+    (``geom.delays`` / ``geom.real_mask``): zero engine calls.
+    """
+    real = np.asarray(geom.real_mask, dtype=bool)
+    real_delays = np.asarray(geom.delays)[real]
+    if len(real_delays) < 2:
+        return False
+    delta_taus = np.diff(np.sort(real_delays))
+    positive_deltas = delta_taus[delta_taus > 0]
+    if len(positive_deltas) == 0:
+        return False
+    min_delta_tau = float(np.min(positive_deltas))
+    return mods.w_ceiling_qd * min_delta_tau >= mods.rho_end
+
+
+def _saddle_c3_route(mods: _ProductionModules, real_images: np.ndarray,
+                     source: np.ndarray, matrix: np.ndarray, w_lo: float,
+                     w_hi: float) -> tuple[bool, float | None]:
+    """Whether the saddle c3 rung serves this draw END-TO-END, plus w_split.
+
+    Thin mirror of the serve decision in
+    ``likelihood.LensedRelativeBinningLikelihood._saddle_farfield_analytic``,
+    calling the production helpers (``_saddle_farfield_analytic_serves``,
+    ``_saddle_min_image_sep``, ``_saddle_c3_split_point``) so the served set
+    and the counted set can never skew:
+
+    * whole-band admit -- the gate passes at the band floor ``w_lo``
+      (equivalently ``w_split <= w_lo``): analytic zero envelope over the
+      whole band, no engine demand;
+    * band split -- the gate fails at ``w_lo`` but the separation backstop
+      holds and the certificate split point satisfies
+      ``w_lo < w_split < w_hi`` with ``w_split <= W_CEILING_SCHWINGER_QD``:
+      analytic zero envelope above ``w_split``, exact engine below;
+    * refuse -- a merging pair (``est`` and hence ``w_split`` is ``None``;
+      the whole-draw refusal), an under-separated pair (separation
+      backstop), a certificate failing across the whole band
+      (``w_split >= w_hi``), or a split beyond the exact engine's ceiling
+      (``w_split > W_CEILING_SCHWINGER_QD``).
+
+    Returns ``(serves, w_split)``; ``w_split`` is recorded on every serve
+    (for the whole-band admit it is the same certificate inversion,
+    ``<= w_lo``) so the tiling design can size the below-split chart demand.
+    """
+    if mods.saddle_farfield_serves(real_images, source, matrix, w_lo):
+        w_split = mods.saddle_c3_split_point(real_images, source, matrix)
+        return True, None if w_split is None else float(w_split)
+    min_sep = mods.saddle_min_image_sep(real_images)
+    if min_sep is None or min_sep < mods.saddle_min_sep_floor:
+        return False, None
+    w_split = mods.saddle_c3_split_point(real_images, source, matrix)
+    if (w_split is None or w_split >= w_hi
+            or w_split > mods.w_ceiling_qd):
+        return False, None
+    return True, float(w_split)
+
+
 def classify_draw(mods: _ProductionModules, *, gamma: float,
                   m_lens_msun: float, y1: float, y2: float,
                   f_grid: np.ndarray, gamma_edges: np.ndarray,
                   artifact: Any | None = None) -> DrawResult:
     """Classify one lens prior draw into exactly one `SERVE_ROUTES` label.
 
-    Decision waterfall (first-admitting):
+    Decision waterfall (first-admitting), mirroring the PRODUCTION rung
+    order of ``likelihood._amplification_coefficients`` (surrogate ->
+    above-ceiling ppGO -> saddle c3 -> Born -> exact engine):
 
     1. ``engine_refused`` -- the real geometry partition (or its construction)
        raises a named domain refusal; the source produces ``lnL = -inf`` and
@@ -464,37 +569,55 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     2. ``surrogate`` -- artifact mode only (WP2 threads a loaded artifact in).
        In demand mode (``artifact is None``) this label is never emitted; the
        invariant is asserted below.
-    3. ``saddle_c3`` -- a macro saddle whose far-from-caustic image pair the
-       c3 certificate admits at the band-floor ``w_lo`` (thin call to
-       ``likelihood._saddle_farfield_analytic_serves``; the certificate is not
-       reimplemented).
-    4. ``born_analytic`` -- the Born weak-deflection exterior by geometric
+    3. ``ppgo_above_ceiling`` -- the band ceiling exceeds the Schwinger QD
+       ceiling (``w_hi > W_CEILING_SCHWINGER_QD``) AND the production
+       ceiling-keyed resolution gate admits (`_ppgo_ceiling_gate_passes`:
+       ``W_CEILING_SCHWINGER_QD * min_delta_tau >= RHO_END``).  Production
+       serves the fold-corrected ppGO carrier above the ceiling and the
+       exact engine below (the constant 150 split).  This rung fires BEFORE
+       the saddle rung, so a draw both rungs would serve counts here --
+       production precedence is the law.
+    4. ``saddle_c3`` -- a macro saddle (``gamma > 1``) the c3 rung serves
+       END-TO-END (`_saddle_c3_route`, a thin caller of the production
+       helpers; the certificate is never reimplemented): EITHER the
+       whole-band admit at the band floor ``w_lo`` (``w_split <= w_lo``:
+       zero envelope, no engine demand) OR the c3 band split
+       (``w_lo < w_split < w_hi`` and ``w_split <= W_CEILING_SCHWINGER_QD``:
+       analytic zero envelope above ``w_split``, exact engine below).  A
+       merging pair (``est`` is ``None``) refuses the whole draw and falls
+       onward.  ``w_split`` is recorded in the result detail.
+    5. ``born_analytic`` -- the Born weak-deflection exterior by geometric
        predicate alone: ``kappa == beta == 0`` (fixed here), ``gamma != 0``
        and ``caustic_rho > 2`` (the production Born intercept's coverage
-       predicate, minus the chart-box test that demand mode has no chart for).
-    5. per-node pass, resolved in this precedence: ``wave_refused`` (any node
-       is an above-QD-ceiling deterministic refuser -- production raises
-       ``SchwingerCertificationError`` and the draw's ``lnL`` is ``-inf``, so
-       it is a production REFUSAL, not engine demand), then
+       predicate, minus the chart-box test that demand mode has no chart
+       for).
+    6. per-node pass, resolved in this precedence: ``wave_refused`` (any
+       node is an above-QD-ceiling deterministic refuser -- production
+       raises ``SchwingerCertificationError`` and the draw's ``lnL`` is
+       ``-inf``, so it is a production REFUSAL, not engine demand), then
        ``engine_residual`` (any node is exact-wave demand), then
-       ``ppgo_above_ceiling`` (all nodes served, at least one via a uniform
-       arm) and ``analytics_engine_hosted`` (all nodes served, no arm
-       needed).
+       ``analytics_engine_hosted`` (every node served by the engine-hosted
+       analytics -- geometric asymptote and/or uniform arms).
 
-    The per-node pass is reached ONLY after intercepts 1-4 decline, so
-    ``wave_refused`` can never absorb a draw a whole-band intercept would
-    serve first; within the node pass it precedes ``engine_residual``
-    because production's any-refuser -> whole-grid-refusal is DETERMINISTIC
-    (no engine exists above the ceiling), while an exact-wave node is merely
-    potential engine demand.  Because every whole-band intercept is decided
-    at the worst-case band-floor ``w_lo``, a whole-band analytic serve and an
-    exact-wave (or refused) node never coexist for the same draw, so the
-    labels stay MECE (asserted below).
+    The per-node pass is reached ONLY after intercepts 1-5 decline, so
+    ``wave_refused`` is now a DERIVED, named set: intercept 3 absorbs every
+    above-ceiling draw whose ceiling gate passes and intercept 4 absorbs
+    the c3-served saddles (whole-band AND band-split -- a ``w_hi > 150``
+    saddle the c3 rung serves classifies ``saddle_c3``, never
+    ``wave_refused``), so only draws with above-ceiling nodes whose ceiling
+    gate FAILED (``W_CEILING_SCHWINGER_QD * min_delta_tau < RHO_END`` --
+    the deferred-2b unresolved near-caustic corner) can still carry a
+    refuser node.  Within the node pass ``wave_refused`` precedes
+    ``engine_residual`` because production's any-refuser ->
+    whole-grid-refusal is DETERMINISTIC (no engine exists above the
+    ceiling), while an exact-wave node is merely potential engine demand.
+    The labels stay MECE: exactly one route per draw (asserted below).
     """
     w_grid = mods.dimensionless_frequency(f_grid, m_lens_msun, 0.0)
     log_w = np.log(w_grid)
     log_w_min, log_w_max = float(log_w.min()), float(log_w.max())
     w_lo = float(w_grid.min())
+    w_hi = float(w_grid.max())
     source = np.array([y1, y2], dtype=float)
     abs_y = math.hypot(y1, y2)
     rho = _caustic_rho_or_none(gamma, abs_y)
@@ -503,12 +626,13 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     gamma_band = _gamma_band_of(gamma, gamma_edges)
     w_band = _w_band_of(log_w_max, mods.w_ceiling_dd, mods.w_ceiling_qd)
 
-    def _result(route: str, kinds: tuple[str, ...]) -> DrawResult:
+    def _result(route: str, kinds: tuple[str, ...],
+                w_split: float | None = None) -> DrawResult:
         return DrawResult(
             gamma=gamma, m_lens_msun=m_lens_msun, y1=y1, y2=y2, route=route,
             node_route_kinds=kinds, region=region, gamma_band=gamma_band,
             w_band=w_band, caustic_rho=rho, log_w_min=log_w_min,
-            log_w_max=log_w_max)
+            log_w_max=log_w_max, w_split=w_split)
 
     # --- Intercept 1: engine_refused (decided first, via the real path) ---
     try:
@@ -523,6 +647,14 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
             log_w_min=log_w_min, log_w_max=log_w_max):
         return _result('surrogate', ())
 
+    # --- Intercept 3: ppgo_above_ceiling (above-ceiling band split) ---
+    # Production rung order: `_ppgo_above_ceiling` fires BEFORE the saddle
+    # rung, so a draw both rungs would serve counts here.  Entry guard and
+    # gate mirror the production method exactly (constants bound from
+    # production).
+    if w_hi > mods.w_ceiling_qd and _ppgo_ceiling_gate_passes(mods, geom):
+        return _result('ppgo_above_ceiling', ())
+
     matrix = mods.macro_matrix(gamma, 0.0, 0.0)
     # ``geom.images`` is already the real-only array (``geometry.find_images``);
     # it must NOT be re-masked with the length-4 channel ``real_mask`` (the
@@ -530,34 +662,41 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     real_images = np.asarray(geom.images)
     eta = float(geom.caustic_distance)
 
-    # --- Intercept 3: saddle_c3 (macro saddle far-field, c3 certificate) ---
-    # Gated on the saddle parity exactly as the production serve rung, so the
-    # census served set is a byte-faithful mirror (served == counted).
-    if gamma > 1.0 and mods.saddle_farfield_serves(
-            real_images, source, matrix, w_lo):
-        return _result('saddle_c3', ())
+    # --- Intercept 4: saddle_c3 (macro saddle far-field, c3 band split) ---
+    # Gated on the saddle parity exactly as the production serve rung;
+    # `_saddle_c3_route` is a thin caller of the production helpers, so the
+    # census served set is a byte-faithful mirror (served == counted) of
+    # BOTH the whole-band-analytic admit and the c3 band split.
+    if gamma > 1.0:
+        c3_serves, w_split = _saddle_c3_route(
+            mods, real_images, source, matrix, w_lo, w_hi)
+        if c3_serves:
+            return _result('saddle_c3', (), w_split=w_split)
 
-    # --- Intercept 4: born_analytic (Born exterior, geometric predicate) ---
+    # --- Intercept 5: born_analytic (Born exterior, geometric predicate) ---
     if gamma != 0.0 and rho is not None and rho > _BORN_RHO_FLOOR:
         return _result('born_analytic', ())
 
-    # --- Per-node pass (reached ONLY after intercepts 1-4 decline) ---
+    # --- Per-node pass (reached ONLY after intercepts 1-5 decline) ---
     delta_min = mods.real_delay_min_separation(source, matrix)
     kinds = _classify_nodes(mods, gamma=gamma, source=source, w_grid=w_grid,
                             delta_min=delta_min, eta=eta)
-    used_arm = any(k in _UNIFORM_ARM_KINDS for k in kinds)
 
     if 'refused' in kinds:
+        # Only reachable with above-ceiling nodes AND a failed ceiling gate
+        # (intercept 3 absorbed every gate-passer): the deferred-2b
+        # unresolved near-caustic corner, a production refusal.
         route = 'wave_refused'
     elif 'exact_wave' in kinds:
         route = 'engine_residual'
-    elif used_arm:
-        route = 'ppgo_above_ceiling'
     else:
         route = 'analytics_engine_hosted'
 
-    # MECE invariant: demand mode never emits 'surrogate', and a whole-band
-    # analytic serve and an exact-wave node never coexist for one draw.
+    # MECE invariant: demand mode never emits 'surrogate'; every intercept
+    # returns before the node pass, so an intercept route and a node-pass
+    # route can never coexist for one draw (a band-split serve's
+    # engine-below demand is per-draw DETAIL -- w_split / the constant
+    # ceiling split -- not a second label).
     assert not (artifact is None and route == 'surrogate')
     return _result(route, kinds)
 
@@ -725,9 +864,9 @@ def run(config: ServeRouteCensusConfig | None = None,
                 'no importance weights), so every count equals its '
                 'prior-mass fraction times n_samples.'),
             'serve_routes_decision_order': [
-                'engine_refused', 'surrogate', 'saddle_c3', 'born_analytic',
-                'wave_refused|engine_residual|ppgo_above_ceiling'
-                '|analytics_engine_hosted'],
+                'engine_refused', 'surrogate', 'ppgo_above_ceiling',
+                'saddle_c3', 'born_analytic',
+                'wave_refused|engine_residual|analytics_engine_hosted'],
             'serve_routes': list(SERVE_ROUTES),
             'route_kinds': list(ROUTE_KINDS),
             'w_band_edges': {

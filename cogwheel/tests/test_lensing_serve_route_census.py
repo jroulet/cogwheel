@@ -39,10 +39,19 @@ are pinned here:
 zero draws / comparisons asserts nothing and is failed.
 `SelfFalsificationTestCase` proves each guard above can actually go red.
 
+Beyond the three report-level properties, hand-placed single draws pin the
+production BAND-SPLIT serving semantics (commit 6958f0c): the c3 saddle
+band split (whole-band admit AND in-band ``w_split``, recorded per draw),
+the above-ceiling ppGO intercept with its ceiling-keyed gate
+(``150 * min_delta_tau >= RHO_END``) firing BEFORE the saddle rung
+(production rung order), and ``wave_refused`` as the DERIVED deferred-2b
+set (above-ceiling band AND failed ceiling gate) -- plus the per-node band
+ladder witnesses on draws that genuinely reach the node pass.
+
 Cost note (fast tier): the shared demand run is 150 draws x 32 freq nodes
-(~14 s wall, memoized once for classes 1-2); the engine-free run is 120
-draws x 32 nodes under four active patches (~12 s).  Two `run` calls total,
-well under the 5-minute file ceiling.
+(~14 s wall, memoized once for the report-level classes); the engine-free
+run is 120 draws x 32 nodes under four active patches (~12 s).  Two `run`
+calls total, well under the 5-minute file ceiling.
 """
 
 from __future__ import annotations
@@ -642,34 +651,56 @@ class SaddleFiniteHugeEstimateRefusesTestCase(_CensusTestCase):
 # 6. Production band-ladder fixtures (audit witnesses)
 # ---------------------------------------------------------------------------
 
-#: Mass (Msun) at the top of the lens prior for the ladder fixtures: the
-#: band ceiling ``w_hi ~ 444`` clears the QD ceiling (150) so the
-#: above-ceiling rungs are live, while the band floor ``w_lo ~ 8.7`` stays
+#: Mass (Msun) at the top of the lens prior for the above-ceiling ladder
+#: fixture: the band ceiling ``w_hi ~ 444`` clears the QD ceiling (150) so
+#: the above-ceiling rung is live, while the band floor ``w_lo ~ 8.7`` stays
 #: in DD-engine territory -- one draw spans all three ladder rungs.
 _LADDER_MASS_MSUN = 3500.0
 
-#: Source polar angle (rad) for the ladder fixtures (the audit's 30 deg).
+#: Mass (Msun) for the mixed mpmath-band fixture: the band ceiling
+#: ``w_hi ~ 127`` stays AT OR BELOW the QD ceiling, so the draw can never be
+#: absorbed by the ``ppgo_above_ceiling`` intercept (whose entry guard is
+#: ``w_hi > 150``) and is guaranteed to reach the per-node pass.
+_LADDER_TUBE_MASS_MSUN = 1000.0
+
+#: Source polar angle (rad) for the mixed tube fixture (the audit's 30 deg).
 _LADDER_ANGLE_RAD = math.radians(30.0)
+
+#: Source polar angle for the unresolved interior fixture: ON the cusp axis
+#: (angle 0), where the interior fold pair is maximally degenerate and the
+#: minimum real-image delay separation collapses (measured ``min_delta_tau
+#: ~ 9.1e-3`` at ``rho = 0.5``, ``gamma = 0.5``), so the production ceiling
+#: gate ``W_CEILING_SCHWINGER_QD * min_delta_tau >= RHO_END`` FAILS and the
+#: draw reaches the per-node pass -- the deferred-2b unresolved near-caustic
+#: corner.  Off-axis (the audit's 30 deg) the same draw now gate-passes and
+#: is served by the above-ceiling intercept, so it can no longer witness the
+#: refusal ladder.
+_LADDER_CUSP_ANGLE_RAD = 0.0
 
 
 class ProductionBandLadderTestCase(_CensusTestCase):
     """Per-node kinds follow the production band ladder (audit witnesses).
 
-    Two hand-placed ``gamma = 0.5``, ``M = 3500`` draws (w band ~ [8.7, 444])
-    pin the three audited ladder invariants:
+    Two hand-placed ``gamma = 0.5`` draws that REACH the per-node pass under
+    the band-split serving semantics pin the audited ladder invariants:
 
-    * REFUSAL CONFLATION: an interior draw (``caustic_rho = 0.5``) whose
-      above-QD-ceiling wave nodes BOTH arms decline is a DETERMINISTIC
-      production refusal (``SchwingerCertificationError``, ``lnL = -inf`` --
-      no exact engine exists above 150), so the census labels those nodes
-      ``refused`` and the draw ``wave_refused`` -- even though it also
-      carries exact_wave nodes (the precedence pin: refusal beats
-      ``engine_residual``, keeping refusals out of the sizing residual).
-    * ARM THRESHOLD: the mixed tube-shell draw (``caustic_rho = 1.5``, the
-      audit's witness v-a) shows arm-served nodes in the mpmath band
-      ``(60, 150]``, mirroring production's arms-first offer there; every
-      ``w <= 60`` node stays exact_wave (production has no arms below the
-      DD ceiling).
+    * DEFERRED-2B REFUSAL: the on-cusp-axis interior draw (``caustic_rho =
+      0.5``, angle 0, ``M = 3500``, w band ~ [8.7, 444]) FAILS the
+      production ceiling gate (its fold-degenerate ``min_delta_tau``
+      collapses, ``150 * min_delta_tau < RHO_END`` -- premise-guarded), so
+      the above-ceiling intercept declines and the draw falls to the node
+      pass, where its arm-declined above-QD-ceiling wave nodes are
+      DETERMINISTIC production refusers (``SchwingerCertificationError``,
+      ``lnL = -inf``): the census labels those nodes ``refused`` and the
+      draw ``wave_refused`` -- even though it also carries exact_wave nodes
+      (the precedence pin: refusal beats ``engine_residual``, keeping
+      refusals out of the sizing residual).
+    * ARM THRESHOLD: the mixed tube-shell draw (``caustic_rho = 1.5``,
+      ``M = 1000``, w band ~ [2.5, 127] -- ceiling ``<= 150`` so the
+      above-ceiling intercept can never absorb it) shows arm-served nodes in
+      the mpmath band ``(60, 150]``, mirroring production's arms-first offer
+      there; every ``w <= 60`` node stays exact_wave (production has no arms
+      below the DD ceiling).
     * SELECT_BRANCH BELOW CEILING: no node at or below the QD ceiling is
       labelled ``geometric`` (or ``refused``) -- production consults
       ``select_branch`` only above 150.
@@ -679,43 +710,81 @@ class ProductionBandLadderTestCase(_CensusTestCase):
     def setUpClass(cls) -> None:
         mods, f_grid, _ = _classify_env()
         cls.mods = mods
-        cls.w_grid = np.asarray(mods.dimensionless_frequency(
-            f_grid, _LADDER_MASS_MSUN, 0.0), dtype=float)
+        cls.masses = {'interior_unresolved': _LADDER_MASS_MSUN,
+                      'tube_mixed': _LADDER_TUBE_MASS_MSUN}
+        cls.w_grids = {
+            label: np.asarray(mods.dimensionless_frequency(
+                f_grid, mass, 0.0), dtype=float)
+            for label, mass in cls.masses.items()}
         cls.results = {}
-        for label, rho in (('interior_armless', 0.5), ('tube_mixed', 1.5)):
-            y1, y2 = _source_at_rho(0.5, rho, _LADDER_ANGLE_RAD)
+        for label, rho, angle in (
+                ('interior_unresolved', 0.5, _LADDER_CUSP_ANGLE_RAD),
+                ('tube_mixed', 1.5, _LADDER_ANGLE_RAD)):
+            y1, y2 = _source_at_rho(0.5, rho, angle)
             cls.results[label] = _classify_probe(
-                0.5, y1, y2, m_lens_msun=_LADDER_MASS_MSUN)
+                0.5, y1, y2, m_lens_msun=cls.masses[label])
 
     def _kinds(self, label: str) -> np.ndarray:
         """Node-kind vector as an array, length-checked against the grid."""
         kinds = np.array(self.results[label].node_route_kinds)
-        self.assertEqual(kinds.size, self.w_grid.size)
+        self.assertEqual(kinds.size, self.w_grids[label].size)
         return kinds
 
-    def test_band_spans_all_three_ladder_rungs(self) -> None:
-        """Premise guard: the fixture w band crosses BOTH ceilings."""
-        self.assertLessEqual(self.w_grid.min(), self.mods.w_ceiling_dd)
-        self.assertGreater(self.w_grid.max(), self.mods.w_ceiling_qd)
+    def test_band_spans_the_ladder_rungs(self) -> None:
+        """Premise guard: the fixture bands cover the intended rungs.
+
+        The unresolved interior fixture crosses BOTH ceilings (all three
+        rungs live); the mixed fixture crosses the DD ceiling but stays at
+        or below the QD ceiling, so it reaches the per-node pass by
+        construction (the above-ceiling intercept's ``w_hi > 150`` entry
+        guard cannot fire).
+        """
+        interior = self.w_grids['interior_unresolved']
+        self.assertLessEqual(interior.min(), self.mods.w_ceiling_dd)
+        self.assertGreater(interior.max(), self.mods.w_ceiling_qd)
+        tube = self.w_grids['tube_mixed']
+        self.assertLessEqual(tube.min(), self.mods.w_ceiling_dd)
+        self.assertGreater(tube.max(), self.mods.w_ceiling_dd)
+        self.assertLessEqual(tube.max(), self.mods.w_ceiling_qd)
         self._comparisons += 1
 
-    def test_armless_above_ceiling_draw_is_wave_refused(self) -> None:
-        """The w_hi~444 interior draw classifies wave_refused, not residual.
+    def test_unresolved_above_ceiling_draw_is_wave_refused(self) -> None:
+        """The gate-failing w_hi~444 interior draw classifies wave_refused.
 
-        Its ``refused`` nodes all sit above the QD ceiling, and exact_wave
-        demand coexists in the same draw -- yet the deterministic refusal
-        takes precedence, so the draw is excluded from the campaign-sizing
-        residual.
+        Premise guard: the production ceiling gate genuinely FAILS here
+        (``W_CEILING_SCHWINGER_QD * min_delta_tau < RHO_END``, recomputed
+        from the geometry-only partition with production-bound constants),
+        so the draw is the deferred-2b unresolved corner the above-ceiling
+        intercept must NOT absorb.  Its ``refused`` nodes all sit above the
+        QD ceiling, and exact_wave demand coexists in the same draw -- yet
+        the deterministic refusal takes precedence, so the draw is excluded
+        from the campaign-sizing residual.
         """
-        kinds = self._kinds('interior_armless')
+        result = self.results['interior_unresolved']
+        w_grid = self.w_grids['interior_unresolved']
+        geom = self.mods.channels_cls(w_grid).geometry_partition(
+            gamma=result.gamma, y=(result.y1, result.y2),
+            beta=0.0, kappa=0.0)
+        real_delays = np.asarray(geom.delays)[
+            np.asarray(geom.real_mask, dtype=bool)]
+        deltas = np.diff(np.sort(real_delays))
+        min_delta_tau = float(deltas[deltas > 0].min())
+        self.assertLess(
+            self.mods.w_ceiling_qd * min_delta_tau, self.mods.rho_end,
+            'premise: the ceiling gate PASSES for this fixture, so the '
+            'above-ceiling intercept serves it and the refusal ladder is '
+            'no longer witnessed -- move the fixture deeper into the '
+            'unresolved corner')
+        kinds = self._kinds('interior_unresolved')
         self.assertEqual(
-            self.results['interior_armless'].route, 'wave_refused',
-            'armless above-ceiling draw was not routed to wave_refused -- '
-            'a production refusal is being conflated with engine demand')
+            result.route, 'wave_refused',
+            'gate-failing above-ceiling draw was not routed to '
+            'wave_refused -- a production refusal is being conflated with '
+            'engine demand')
         refused = kinds == 'refused'
         self.assertTrue(refused.any())
         self.assertTrue(
-            (self.w_grid[refused] > self.mods.w_ceiling_qd).all(),
+            (w_grid[refused] > self.mods.w_ceiling_qd).all(),
             "'refused' at or below the QD ceiling: no deterministic "
             'refusal exists there (an engine does)')
         self.assertIn('exact_wave', kinds)  # precedence, not vacuity
@@ -724,8 +793,9 @@ class ProductionBandLadderTestCase(_CensusTestCase):
     def test_mixed_draw_arms_serve_the_mpmath_band(self) -> None:
         """Witness v-a: the corrected node map arm-serves (60, 150] nodes."""
         kinds = self._kinds('tube_mixed')
-        mid = ((self.w_grid > self.mods.w_ceiling_dd)
-               & (self.w_grid <= self.mods.w_ceiling_qd))
+        w_grid = self.w_grids['tube_mixed']
+        mid = ((w_grid > self.mods.w_ceiling_dd)
+               & (w_grid <= self.mods.w_ceiling_qd))
         self.assertTrue(mid.any())
         self.assertTrue(
             np.isin(kinds[mid], tuple(src._UNIFORM_ARM_KINDS)).any(),
@@ -736,9 +806,9 @@ class ProductionBandLadderTestCase(_CensusTestCase):
 
     def test_no_select_branch_at_or_below_the_qd_ceiling(self) -> None:
         """No 'geometric'/'refused' label at w <= 150 in either fixture."""
-        below = self.w_grid <= self.mods.w_ceiling_qd
         for label in self.results:
             kinds = self._kinds(label)
+            below = self.w_grids[label] <= self.mods.w_ceiling_qd
             self.assertFalse(
                 np.isin(kinds[below], ('geometric', 'refused')).any(),
                 f'{label}: select_branch consulted at or below the QD '
@@ -747,10 +817,10 @@ class ProductionBandLadderTestCase(_CensusTestCase):
 
     def test_dd_band_nodes_are_unconditional_engine_demand(self) -> None:
         """Every w <= 60 node is exact_wave in both fixtures (no arms there)."""
-        low = self.w_grid <= self.mods.w_ceiling_dd
-        self.assertTrue(low.any())
         for label in self.results:
             kinds = self._kinds(label)
+            low = self.w_grids[label] <= self.mods.w_ceiling_dd
+            self.assertTrue(low.any())
             self.assertTrue(
                 (kinds[low] == 'exact_wave').all(),
                 f'{label}: a w<=60 node escaped the DD engine -- production '
@@ -759,7 +829,210 @@ class ProductionBandLadderTestCase(_CensusTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 7. Self-falsification -- prove each guard above can go red
+# 7. Band-split serving intercepts (c3 split + above-ceiling split)
+# ---------------------------------------------------------------------------
+
+#: Band-split saddle fixture: ``gamma = 3`` at ``caustic_rho = 1.2`` fails
+#: the whole-band gate at the band floor (premise-guarded) but its c3
+#: certificate split point lies strictly inside the band and below the
+#: engine ceiling, so the revived band-split rung serves it end-to-end.
+_C3_SPLIT_RHO = 1.2
+
+#: Whole-band saddle fixture (same as the D2 ``saddle_farfield_c3`` draw):
+#: the gate passes at the band floor, i.e. ``w_split <= w_lo``.
+_C3_WHOLE_BAND_RHO = 3.0
+
+
+class BandSplitInterceptTestCase(_CensusTestCase):
+    """The census mirrors the band-split serving rungs of commit 6958f0c.
+
+    Three hand-placed saddle draws pin the revived taxonomy:
+
+    * c3 BAND SPLIT: a draw the whole-band gate REFUSES at ``w_lo`` but the
+      per-draw certificate split ``w_lo < w_split < w_hi`` (and ``<= 150``)
+      admits classifies ``saddle_c3``, with ``w_split`` recorded in the
+      per-draw detail and equal to the production
+      ``_saddle_c3_split_point`` value (the census binds the helper, never
+      re-derives it).
+    * WHOLE-BAND ADMIT: the historical whole-band serve stays ``saddle_c3``
+      and records its (``<= w_lo``) split point.
+    * PRODUCTION PRECEDENCE: a draw BOTH rungs would serve (ceiling gate
+      passes AND the c3 gate passes, ``w_hi > 150``) classifies
+      ``ppgo_above_ceiling`` -- the above-ceiling rung fires before the
+      saddle rung in ``likelihood._amplification_coefficients``.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        mods, f_grid, _ = _classify_env()
+        cls.mods = mods
+        cls.f_grid = f_grid
+
+    def _saddle_env(self, rho: float, mass: float):
+        """Classify a gamma=3 saddle draw and return production quantities."""
+        gamma = 3.0
+        y1, y2 = _source_at_rho(gamma, rho, _D2_ANGLE_RAD)
+        w_grid = np.asarray(self.mods.dimensionless_frequency(
+            self.f_grid, mass, 0.0), dtype=float)
+        geom = self.mods.channels_cls(w_grid).geometry_partition(
+            gamma=gamma, y=(y1, y2), beta=0.0, kappa=0.0)
+        images = np.asarray(geom.images)
+        source = np.array([y1, y2], dtype=float)
+        matrix = self.mods.macro_matrix(gamma, 0.0, 0.0)
+        w_lo, w_hi = float(w_grid.min()), float(w_grid.max())
+        serves_lo = self.mods.saddle_farfield_serves(
+            images, source, matrix, w_lo)
+        w_split = lk._saddle_c3_split_point(images, source, matrix)
+        result = _classify_probe(gamma, y1, y2, m_lens_msun=mass)
+        return result, serves_lo, w_split, w_lo, w_hi, geom
+
+    def test_band_split_saddle_serves_and_records_w_split(self) -> None:
+        """The revived c3 band split admits and records the split point.
+
+        Premise guards: the whole-band gate refuses at ``w_lo`` (this draw
+        was ``wave_refused``/residual under the old whole-band-only mirror)
+        and the production split point lies strictly inside the band, at or
+        below the engine ceiling.  The pin: route ``saddle_c3``, with the
+        recorded ``w_split`` numerically identical to the production
+        helper's value (same helper, no re-typed certificate).
+        """
+        (result, serves_lo, w_split, w_lo, w_hi,
+         _geom) = self._saddle_env(_C3_SPLIT_RHO, _PROBE_MASS_MSUN)
+        self.assertFalse(
+            serves_lo, 'premise: whole-band gate now admits at w_lo -- '
+            'fixture no longer exercises the band-split rung')
+        self.assertIsNotNone(w_split)
+        self.assertGreater(w_split, w_lo)
+        self.assertLess(w_split, w_hi)
+        self.assertLessEqual(w_split, self.mods.w_ceiling_qd)
+        self.assertEqual(
+            result.route, 'saddle_c3',
+            'band-splittable saddle draw not served by the c3 rung -- the '
+            'census still mirrors the retired whole-band-only gate')
+        self.assertEqual(result.node_route_kinds, ())
+        self.assertEqual(result.w_split, w_split)
+        self._comparisons += 1
+
+    def test_whole_band_saddle_records_split_at_or_below_floor(self) -> None:
+        """The historical whole-band admit stays saddle_c3, w_split <= w_lo."""
+        (result, serves_lo, w_split, w_lo, _w_hi,
+         _geom) = self._saddle_env(_C3_WHOLE_BAND_RHO, _PROBE_MASS_MSUN)
+        self.assertTrue(
+            serves_lo, 'premise: whole-band gate refuses at w_lo -- '
+            'fixture drifted off the whole-band-admit branch')
+        self.assertEqual(result.route, 'saddle_c3')
+        self.assertIsNotNone(result.w_split)
+        self.assertEqual(result.w_split, w_split)
+        self.assertLessEqual(result.w_split, w_lo)
+        self._comparisons += 1
+
+    def test_ceiling_intercept_precedes_the_saddle_rung(self) -> None:
+        """A draw BOTH rungs would serve classifies ppgo_above_ceiling.
+
+        Premise guards: ``w_hi > 150``, the production ceiling gate passes
+        (``150 * min_delta_tau >= RHO_END``, recomputed from the
+        geometry-only partition), AND the c3 whole-band gate passes.  The
+        pin is the production rung ORDER: the above-ceiling split fires
+        first, so the draw counts as ``ppgo_above_ceiling`` (whole-band
+        intercept: empty node kinds, no ``w_split`` detail).
+        """
+        (result, serves_lo, _w_split, _w_lo, w_hi,
+         geom) = self._saddle_env(_C3_WHOLE_BAND_RHO, _LADDER_MASS_MSUN)
+        self.assertGreater(w_hi, self.mods.w_ceiling_qd)
+        self.assertTrue(
+            serves_lo, 'premise: the saddle rung would not serve this draw, '
+            'so it cannot witness the precedence')
+        real_delays = np.asarray(geom.delays)[
+            np.asarray(geom.real_mask, dtype=bool)]
+        deltas = np.diff(np.sort(real_delays))
+        min_delta_tau = float(deltas[deltas > 0].min())
+        self.assertGreaterEqual(
+            self.mods.w_ceiling_qd * min_delta_tau, self.mods.rho_end,
+            'premise: the ceiling gate would not admit this draw, so it '
+            'cannot witness the precedence')
+        self.assertEqual(
+            result.route, 'ppgo_above_ceiling',
+            'production precedence broken: the above-ceiling rung fires '
+            'before the saddle rung in _amplification_coefficients')
+        self.assertEqual(result.node_route_kinds, ())
+        self.assertIsNone(result.w_split)
+        self._comparisons += 1
+
+
+# ---------------------------------------------------------------------------
+# 8. Report-level derived-set and detail pins (shared small run)
+# ---------------------------------------------------------------------------
+
+class ReportBandSplitDetailTestCase(_CensusTestCase):
+    """Report-level pins for the band-split taxonomy on the shared run."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.report = _shared_report()
+
+    def test_w_split_detail_is_recorded_iff_saddle_c3(self) -> None:
+        """``w_split`` is present exactly on the ``saddle_c3`` records.
+
+        Both admit branches record it (the whole-band admit's inversion is
+        ``<= w_lo``); every other route carries ``None`` -- the c3/ceiling
+        engine-below bands are per-draw detail, never new residual keys.
+        """
+        saddle_seen = 0
+        for record in self.report['records']:
+            if record['route'] == 'saddle_c3':
+                saddle_seen += 1
+                self.assertIsNotNone(
+                    record['w_split'],
+                    'saddle_c3 record without its w_split detail')
+                self.assertGreater(record['w_split'], 0.0)
+            else:
+                self.assertIsNone(
+                    record['w_split'],
+                    f"non-saddle_c3 route {record['route']!r} carries a "
+                    'w_split detail')
+            self._comparisons += 1
+        self.assertGreater(
+            saddle_seen, 0,
+            'premise: no saddle_c3 draw at this scale -- the iff pin is '
+            'half-vacuous')
+
+    def test_wave_refused_is_the_failed_ceiling_gate_set(self) -> None:
+        """Every wave_refused record sits above the ceiling with a failed gate.
+
+        The derived-set pin: ``wave_refused`` is ONLY the deferred-2b
+        corner -- draws whose band reaches above ``W_CEILING_SCHWINGER_QD``
+        AND whose production ceiling gate fails (``150 * min_delta_tau <
+        RHO_END``, recomputed here from the geometry-only partition with
+        production-bound constants).  A wave_refused record that gate-passes
+        would be a draw the production above-ceiling rung serves -- the
+        pre-band-split blindness this census update removes.
+        """
+        mods, f_grid, _ = _classify_env()
+        refused_records = [r for r in self.report['records']
+                           if r['route'] == 'wave_refused']
+        self.assertGreater(
+            len(refused_records), 0,
+            'premise: no wave_refused draw at this scale')
+        for record in refused_records:
+            self.assertGreater(
+                math.exp(record['log_w_max']), mods.w_ceiling_qd,
+                'wave_refused record whose band never exceeds the QD '
+                'ceiling -- refusal is impossible there')
+            w_grid = mods.dimensionless_frequency(
+                f_grid, record['m_lens_msun'], 0.0)
+            geom = mods.channels_cls(w_grid).geometry_partition(
+                gamma=record['gamma'], y=(record['y1'], record['y2']),
+                beta=0.0, kappa=0.0)
+            self.assertFalse(
+                src._ppgo_ceiling_gate_passes(mods, geom),
+                'wave_refused record whose ceiling gate PASSES -- '
+                'production serves this draw via _ppgo_above_ceiling, so '
+                'the census is refusing a served draw')
+            self._comparisons += 1
+
+
+# ---------------------------------------------------------------------------
+# 9. Self-falsification -- prove each guard above can go red
 # ---------------------------------------------------------------------------
 
 class SelfFalsificationTestCase(TestCase):
@@ -853,6 +1126,24 @@ class SelfFalsificationTestCase(TestCase):
         permuted = ('exact_wave', 'geometric', 'exact_wave')
         self.assertNotEqual(base, permuted)          # elementwise: differ
         self.assertEqual(Counter(base), Counter(permuted))  # multiset: same
+
+    def test_w_split_iff_guard_has_teeth(self) -> None:
+        """A forged w_split on a non-saddle route fails the iff predicate.
+
+        Positive control for `ReportBandSplitDetailTestCase`: the detail
+        pin requires ``(route == 'saddle_c3') == (w_split is not None)``;
+        a record that leaks the detail onto another route (or a saddle_c3
+        record that drops it) violates the predicate.
+        """
+        legit = ({'route': 'saddle_c3', 'w_split': 30.7},
+                 {'route': 'engine_residual', 'w_split': None})
+        forged = ({'route': 'engine_residual', 'w_split': 30.7},
+                  {'route': 'saddle_c3', 'w_split': None})
+        predicate = (lambda r:
+                     (r['route'] == 'saddle_c3') == (r['w_split'] is not None))
+        self.assertTrue(all(predicate(r) for r in legit))
+        for record in forged:
+            self.assertFalse(predicate(record))
 
     def test_saddle_finite_huge_refusal_guard_has_teeth(self) -> None:
         """The naive 'est is not None' gate admits where the safe gate refuses.

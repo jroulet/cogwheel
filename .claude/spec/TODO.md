@@ -2003,30 +2003,6 @@ Tag conventions:
   list; carrier/gate/census landed the same day.
 
 
-- **THE SADDLE c3 RUNG IS DEAD UNDER THE PHYSICAL PRIOR — band-split
-  serving is what makes its calibration live** `[→ spec]` — measured
-  2026-08-17 (demand-census audit): the c3 certificate admits at band
-  floors w_lo >= ~28 (rho 0.3) / ~20 (rho 1.5) / ~8.7 (rho 2.5), but
-  the physical 20 Hz prior's band floors are w_lo = 2.476e-3 * M <=
-  8.67 (M <= 3500) — the calibrated admitting regime is UNREACHABLE as
-  a whole-band intercept, and the census's saddle_c3 route at 0.3%
-  faithfully mirrors production. The 672-point calibration is not
-  wasted: the rung becomes live via BAND-SPLIT serving — serve the
-  analytic channel sum above the certificate's admitting floor and the
-  engine/chart below, exactly the w_trust-split architecture the Born
-  intercept already implements against the certified map. Design: the
-  certificate itself yields the per-draw split point (the smallest w
-  where S * ppgo_error_estimate(w) <= bar — closed form to invert or
-  bisect, cheap); the serve returns split coefficients like the Born
-  band-split with its byte-exact null-split identity pattern. Sizing
-  input: the corrected demand census shows the residual concentrated at
-  w <= 60; a c3 band-split converts every saddle-exterior draw's
-  above-floor band from chart demand to analytic serving, shrinking
-  the saddle-side table need to [w_lo, min(60, split point)]. Sequence
-  with the demand-sized tiling design (the split changes the tiling's
-  w-bands); before 7b.
-
-
 - **THE 326 CARVED-OUT SADDLE DRAWS ARE 100% NEAR-CAUSTIC — they are the
   uniform arms' domain, and nothing routes them there** `[→ spec]` —
   measured 2026-08-12 at HEAD 4e72409.
@@ -3148,8 +3124,23 @@ Tag conventions:
   ACCEPTANCE: the demand census's wave_refused route reads ZERO (or
   the measure-zero named-refusal set only) after the per-node
   above-ceiling serving + arm extension land; 7b inherits this bar —
-  a refused draw is not a served draw. Sequence: with/after the c3
-  band-split build (shared band-split machinery); before 7b.
+  a refused draw is not a served draw. Sequence: before 7b.
+  PROGRESS (2026-08-17, build c3_band_split_zero_refusal + census
+  re-gate): defect (1) is FIXED — the per-node ceiling rung serves
+  15.87% of prior (was 0.00%) and the c3 band-split covers saddle
+  exteriors' above-150 bands analytically. wave_refused measured
+  12.03% → 2.13% (213/10k draws; re-gated census
+  demand_census_post_c3_regate_10k.json). The RESIDUAL is exactly the
+  named set: above-150 draws with 150·min_delta_tau < RHO_END = 4 —
+  the unresolved near-caustic corner where fold_ppgo is inaccurate and
+  the engine refuses. 2.13% is NOT measure-zero: defect (2), the
+  arm-extension consolidation ([[lensing_ppgo_extrapolation_beyond_engine_reach]]
+  refined form + the saddle-envelope-negligible route), is now the
+  whole remaining work — deferred from the c3 build by Professor
+  ruling (unsettled tau_c-re-gauge empirics; train/serve-skew risk).
+  Also note (completion-record latency observation): formerly-refused
+  draws now pay real engine cost in the mpmath band until charts
+  absorb it — the campaign prices this in.
 
 
 - **THE WEDGE ANGULAR AXIS IS CUSP-SINGULAR — and the arc-length remap makes it
