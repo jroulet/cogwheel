@@ -763,3 +763,42 @@
   the interpolant controls (F_ref), never by the raw physical total — the
   raw total can vanish at points unrelated to interpolation error (e.g. an
   old carrier's Airy zeros), producing a false failure signature.
+
+
+## 2026-08-17/18 build (low_w_diffractive_rung, parity-wall two-rung serve)
+- PARITY WALL is a branch point, not a coordinate artifact: positive parity
+  (gamma'<1) keeps a convergent shear-operator series (truncation-certified,
+  reaches w=0, no ceiling); saddle (gamma'>1) has NO analytic series at any
+  order (direct Fermat-delay moments diverge for any lens with real images —
+  quadratic tau growth) and must be served via the exact Schwinger integral
+  self-certified by paired N/2N quadrature (also first-class — "series vs
+  quadrature" is not a certificate distinction). Don't unify the two
+  parities onto one representation across the wall — reinforces "optimal
+  representation for kept charts."
+- F(w->0) anchor is PARITY-DEPENDENT: sqrt(mu_macro)*exp(-i*pi*n/2)
+  (positive parity n=0 -> +sqrt(mu_macro); saddle n=1 -> -1j*sqrt(mu_macro)).
+  F->1 ONLY at gamma=kappa=0 — a handoff/docstring claiming "F->1 as w->0"
+  in general is a bug; sweep for it wherever a low-w anchor is documented.
+- Nested band-split = TWO sequential `_band_split_mask` calls composed
+  inline, never a bespoke 3-region helper (Simplifier ruling) — the pattern
+  for any further-subdividing split beyond the existing 2-region convention.
+- A closed-form certificate's error-model MONOTONICITY (floor vs ceiling in
+  w), held at a reference frequency, can silently disagree with the TRUE
+  w-dependent tail's direction — don't trust it by construction; add an
+  "honest gate" that re-evaluates the actual leading omitted term AT the
+  served boundary and compares to the real bar before shipping (see
+  coder_knowledge for the implementation pattern). 5th instance of the
+  "gate must bound the error of the object it admits" lineage
+  (F069/F070/F074/F076 + this diffractive rung).
+- Shared split-mask helpers carry an implicit POLARITY (which side is
+  "trusted/populated" when the split is inactive). Reusing one across a
+  rung with OPPOSITE polarity (e.g. an above-ceiling rung where the engine
+  populates BELOW instead of the usual below-populated convention) requires
+  explicitly inverting the null-fallback mask + skipping the wrong
+  populator call, or an inactive split silently misroutes the whole band.
+- Plan-file-outside-project-root obstruction recurred a 2nd time (Professor
+  agent's designated plan path lands outside the Serena project root, so
+  Serena read/write refuse it and no native Write tool is available in
+  that invocation) — still unresolved infra gap; a future session needing
+  to persist a plan must either place it under the project root or ensure
+  a native Write tool is present.

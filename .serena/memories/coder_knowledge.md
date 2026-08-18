@@ -950,3 +950,30 @@
   b._helper`) at runtime, not just "import succeeds" — identity proves
   there is truly one implementation, not two copies that happen to
   agree today.
+
+
+## 2026-08-17/18 build (low_w_diffractive_rung, WP1-WP3)
+- `point_mass_g_derivatives` (_hyp1f1) ALREADY bakes prefactor_c (the exact
+  C(w), w*ln(w) phase) into every returned kernel value via its internal
+  `_carrier` — do not re-multiply by prefactor_c on top of it, or the phase
+  double-counts. Check this whenever composing a new analytic object from
+  point-mass kernel derivatives.
+- HONEST SELF-CONSISTENCY GATE (generalizes the gate-bounds-wrong-object
+  lineage to a certificate being shipped for the first time): after
+  computing a closed-form candidate boundary (e.g. w_low), re-evaluate the
+  ACTUAL leading omitted series term AT that boundary (the worst-case point
+  in the served band) and compare its magnitude to the real certification
+  bar; return None (refuse) if it fails — even when the closed form "looks"
+  principled (derived from a reference-frequency-held estimate), since such
+  estimates can have the wrong monotonicity vs the true w-dependent tail.
+- ERROR-METRIC CURRENCY instance: honest_error must normalize by the TOTAL
+  amplitude-space magnitude `lam*sqrt_mu` (lam=1-kappa), never bare
+  sqrt_mu, whenever kappa can be nonzero — bare sqrt_mu understates the
+  relative error by a factor of lam.
+- Reused split-mask helper across an INVERTED-polarity rung (ceiling rung:
+  engine populates BELOW the split, fold populates ABOVE — opposite of the
+  usual below-trusted convention): the shared helper's null/inactive-split
+  fallback (all-True below_mask) is only safe for the "below is trusted"
+  polarity. For the inverted rung, explicitly force below_mask to all-False
+  and skip the engine call when the split is inactive, or every above-split
+  node gets silently routed into the wrong populator (regression vs HEAD).

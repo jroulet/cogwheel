@@ -78,3 +78,22 @@
   can be deliberate bottom-up structuring (primitives -> public assembly)
   rather than disorder — report, don't reorder; diff risk outweighs
   benefit for large modules.
+
+
+## 2026-08-17 (beat-free build production files, bulk long-line pass)
+- Safe bulk long-line procedure: classify every reported line with
+  `tokenize` (COMMENT / STRING / CODE) before touching it; spill-forward
+  refill ONLY true COMMENT lines; prove harmlessness two ways — token-
+  stream equality ignoring COMMENT/NL, and `ast.dump` equality with string
+  constants whitespace-normalized (the latter catches a refill that
+  accidentally changes docstring wording).
+- Watch refill seams: greedy word-wrap can split inline math/expressions
+  across comment lines (e.g. `u = d**(2/3)`, `parity != 1`); grep the diff
+  for lines ending `=`, `!=`, `(w *` after any automated rewrap and hand-
+  polish those seams.
+- A quoted-annotation-only symbol (e.g. a TYPE_CHECKING-only import used
+  solely inside `from __future__ import annotations` string-form type
+  hints) shows zero AST Name-node uses but is not actually unused — the
+  AST Name-node unused-import checker is not a sufficient oracle for
+  TYPE_CHECKING imports, same caution as the existing `__future__ import
+  annotations`-always-flagged note above.

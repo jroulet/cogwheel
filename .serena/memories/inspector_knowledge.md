@@ -559,3 +559,21 @@
   un-updated caller SILENTLY (no TypeError, just always-False/refuse) —
   `find_referencing_symbols` on the guard is mandatory, including
   census/diagnostic mirrors and direct unit-test callers; sweep EVERY
+
+
+## 2026-08-18 (low_w_diffractive_rung / serve_route_census WP3, INS-5-001)
+- CONTRACT-WIDENING LAGGARD: widening a shared enum/contract (e.g.
+  SERVE_ROUTES 8->10, or a route gaining a new detail field like a
+  w_split-carrier) silently strands PRE-EXISTING tests in a file OUTSIDE
+  the build's changed-file manifest that pin the old count / old
+  iff-contract. Always re-run the schema/census invariant test file
+  (often a different file than the one carrying the new behavior) after
+  any SERVE_ROUTES/ROUTE_KINDS/per-record-detail change — a green
+  behavior suite does not cover the census invariant suite.
+- MagicMock-hides-new-attribute recurred a 3rd+ time this build (two
+  separate stub/probe classes missed binding a NEW self.<method> call
+  added mid-build: `_diffractive_bottom_ceiling` on `_BornAnalyticProbe`,
+  `_engine_envelope_below_split` on the above-ceiling gate stubs) —
+  whenever a WP adds a new `self.<method>` call inside an existing method,
+  sweep every stub/probe class that binds unbound production methods for
+  that same class, not just the caller the WP names.

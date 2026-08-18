@@ -712,3 +712,28 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   to catch, look here first); (2) zero-fill vs serve-None — serve must
   not silently interpolate across an isolated zero-filled node; (3) r
   stays finite/smooth across Airy-zero crossings away from build nodes.
+
+
+## 2026-08-18 (low_w_diffractive_rung, saddle-vs-positive-parity scope ruling)
+- No parity-agnostic Fermat-delay-moment asymptotic series exists at ANY
+  order for a lens with real images: tau(x) grows quadratically at large
+  |x|, so INT tau^n d^2x diverges for every n>=1 — the low-w end has no
+  stationary-phase structure to anchor a series (unlike the high-w end,
+  which localizes at isolated stationary points). The only valid low-w
+  analytic object is the point-mass-core analytic continuation
+  G_PM = C(w)*1F1(...), which only converges for gamma'<1 (positive
+  parity, inside the parity-wall branch point).
+- Saddle (gamma'>1) therefore has no genuine low-w series; its correct
+  "analytic" object is the 1D Schwinger integral itself (exact at all w,
+  validated 2.2e-15 vs the 2D rotated-contour oracle), self-certified via
+  paired N/2N quadrature (tol 3e-10) — a quadrature remainder is as valid
+  an analytic certificate as a series-truncation remainder ("series vs
+  quadrature" is not a physics/certificate distinction). Serving positive
+  parity through Schwinger instead of its convergent series would be
+  strictly worse (loses the w=0 reach, imposes an artificial ~w=60 ceiling
+  the series doesn't have) — keep both objects, don't unify.
+- NOTE: this session's professor short-term memory requested this ruling be
+  filed under professor/microlensing_chang_refsdal; Dreamer's standing rule
+  is to never write professor/* topic memories (Professor-curated only), so
+  it landed here in code_observations instead — next time the Professor
+  agent visits that topic, it should self-file the physics ruling above.

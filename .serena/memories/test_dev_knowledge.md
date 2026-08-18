@@ -768,3 +768,15 @@
   spurious pass on a padded one), and guard held-out accuracy sweeps with
   refused_count == 0 so a sample landing on a zero-filled/refused node
   cannot silently contribute a garbage measurement.
+
+
+## 2026-08-18 (INS-3-001, low_w_diffractive_rung)
+- "THE GATE MOVES, NOT THE TEST": when a driver ruling's acceptance text
+  assumes a companion production fix (owned by a DIFFERENT, not-yet-run
+  agent) has already landed, and your own file read + live measurement
+  prove it has not, write the test to the CORRECTED expectation anyway and
+  let it be honestly RED at authoring time — never soften it (no
+  expectedFailure, no loosened bound) to force a green. Document the
+  measured value and the root-cause file:line in the docstring/change
+  report so the pin flips green with zero further edits once the real fix
+  lands.
