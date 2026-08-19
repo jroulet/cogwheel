@@ -1,5 +1,0 @@
-{
-  "recorded": "2026-08-18T22:17:31Z",
-  "reason": "spec/doc discipline deferred for an SDK build",
-  "owed": ["","  * DATA_CONTRACTS.yaml modified but no changelog evidence staged. Either:","    - stage an edit to .claude/spec/DATA_CONTRACTS_CHANGELOG.md (monolithic mode), OR","    - create .claude/spec/contracts_changelog.d/<date>_<slug>.md with bump: in frontmatter (fragment mode)."]
-}
