@@ -1,39 +1,31 @@
-## Ruling: INS-1-003 (diffractive_certificate_reach build) — COMPOSITION bug, not docstring
+diffractive_certificate_fit REVIEW (Professor, 2026-08-19) — VERDICT FAIL.
 
-`_diffractive_bottom_ceiling` (band-aware) returns `w_low == w_hi` when the whole
-dense band clears the diffractive N/2N bar (`_rootfind_w_high` line 323: `if
-relerr(w_hi) <= target: return w_hi`). The nested-split composition reuses
-`_band_split_mask(dense_w, w_low)`, whose strict-interior test (`w_lo < split <
-w_hi`) fails at `w_low == w_hi`, so `band_split_low=False` and the
-`if band_split_low else zeros` branch empties `bottom_mask`; `host_mask` becomes
-the whole below-split region. F_P (Rung P) serves ZERO nodes.
+The `w_low_fit` surface OVER-SERVES off-grid in angle by up to ~5x. Root cause:
+`_DIFFRACTIVE_FIT_N_HARM = _DEFAULT_MAX_ORDER = 16` harmonics `cos(4k theta)`
+fitted on only 8 eigenframe thetas (multiples of pi/4) + 12 random
+(beta,kappa,r,theta) rows. At the 8 grid angles `cos(4k theta)` aliases to 2
+patterns (even-k -> +1, odd-k -> (-1)^m), so 16 angular DOFs are wildly
+underdetermined and lstsq produces catastrophic off-grid oscillation.
 
-Key mis-anchor: HEAD's `diffractive_w_low` returned the CONSERVATIVE candidate
-(brief fact 1: 23-405x below the honest ceiling, never up-searched). For a
-whole-band-eligible low-gamma draw, HEAD's `w_low = candidate` sat STRICTLY inside
-`[w_lo, w_hi]` -> non-empty bottom (F_P served `[w_lo, candidate)`), chart hosted
-`[candidate, w_trust]`. HEAD only "hosted everything" when the candidate itself
->= w_hi (rare). So the plan's "byte-identity where w_low >= w_hi" conflates the
-rare HEAD candidate-overshoot case with the NEW common whole-band-certified case;
-leaving the composition as-is REGRESSES HEAD (F_P serves nothing where HEAD served
-a non-empty bottom) and defeats the brief's "serve to the honest ceiling".
+MEASURED (independent, reusing scripts/fit_diffractive_certificate.py's
+`_measure_w_low_true`/`_unreduced_source`, exact `f_schwinger` oracle):
+- gamma=0.2, r=0.9 (beta=kappa=0), theta sweep [0, pi/2]: w_low_fit oscillates
+  0.004 .. 60.0 (the DD cap) while w_low_true stays 13.7-21.4; 8/33 off-grid
+  probe angles OVER-SERVE, worst ratio ~4.2x (theta=pi/8: fit 60 vs true 14.4).
+- gamma=0.3 r=0.9: worst ratio ~5.0x (theta=pi/8, fit 36.8 vs true 7.4).
+- End-to-end at (gamma=0.2,r=0.9,theta=0.6): w_low_fit=32.93 but series
+  breaches CERTIFICATION_BAR=1e-4 at w~20 (rel 3.7e-4) and hits 9e-2 at w=32;
+  honest ceiling ~17.3. Silent interior 1e-4 breach — the bug class under repair.
+- Tightness ALSO broken off-grid: ratios as low as 0.004-0.05 (Y_REF=(0.8,0.4)
+  at gamma=0.1 gives fit 2.16 vs true 40.9).
 
-Fix (composition-level, NOT in `_band_split_mask`): special-case
-`w_low >= float(dense_w.max())` -> `bottom_mask = below_mask` (full region),
-host empty. Do NOT relax `_band_split_mask`'s strict interior: the outer splits
-(w_split / w_trust / trained_floor) load-bear on "edge = no-op" (below_mask
-all-True null-split identity; trained-floor "genuine strict sub-band" guard
-`band_split_floor and ...`). Macro-saddle (gamma>1) returns None -> unaffected.
-
-Latent secondary: `_rootfind_w_low` (down-search branch) is NOT capped at w_hi,
-so `_diffractive_bottom_ceiling` can return w_low > w_hi there; the `>= w_hi`
-special-case covers it, but the certificate should cap BOTH branches (return w_hi
-whenever the certified region extends past the band top).
-
-Test pins needed: (1) composition value pin — a whole-band draw serves F_P over
-the full below-split region (host empty), asserted against the engine oracle
-within CERTIFICATION_BAR, not by path; (2) a dedicated engine-honesty pin at the
-served band top w_hi: the 0.9*w_low sweep uses the UNBOUNDED ceiling and
-deliberately stays off the zero-margin ceiling, so it can miss the top sliver in
-barely-whole-band draws, and the N/2N estimator at w_hi is demonstrably
-optimistic/non-monotone at low gamma (NONMONOTONE_DRAW gamma=0.1, breach ~0.9*w_low).
+Why the committed suite is green: FullGridCertificateOracleTestCase probes only
+the SAME 8 on-grid thetas + 12 random rows (which never land in aliasing
+troughs); TruncationCertifiedBandTestCase uses only CLEAN_GAMMAS at Y_REF. The
+INS-1-001 migration DELETED the exact tests that would have caught this:
+NONMONOTONE_DRAW, CeilingTightnessTestCase, CeilingMonotonicityTestCase.
+The derate 0.745 (=1/max_on_grid_overpred) cannot bound the ~5x off-grid
+over-prediction. The `_DIFFRACTIVE_FIT_N_HARM = _DEFAULT_MAX_ORDER` coupling is
+the latent trap, now realized. Fix: cut harmonics to ~k<=4 (resolvable at 8
+thetas) OR >=32-theta re-bake + an off-grid over-serve re-validation; re-derate
+against the off-grid worst.

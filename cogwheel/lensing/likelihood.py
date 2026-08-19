@@ -104,7 +104,7 @@ from cogwheel.lensing.chang_refsdal.geometry import (
 from cogwheel.lensing.chang_refsdal._schwinger import (
     W_CEILING_SCHWINGER, W_CEILING_SCHWINGER_QD, SchwingerCertificationError)
 from cogwheel.lensing.chang_refsdal._diffractive import (
-    DiffractiveDomainError, diffractive_amplification, diffractive_w_low)
+    DiffractiveDomainError, diffractive_amplification, w_low_fit)
 from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
 from cogwheel.lensing.chang_refsdal.operator import RHO_END
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
@@ -1934,17 +1934,16 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         refusal path.
 
         Rung P (positive parity, ``det A > 0`` i.e. ``gamma < 1``): the
-        low-``w`` truncation certificate ``diffractive_w_low`` admits the
-        analytic series ``F_P`` (`diffractive_amplification`) on ``w <
-        w_low``; the exact engine hosts ``[w_low, w_hi]``.  A single
-        `_band_split_mask` at ``w_low`` (analytic below / engine above).
-        The c3/Born nested split at ``w_split`` is deferred to WP2b/WP2c.
-        ``w_low`` is a closed-form certificate, never a measured constant;
-        `_diffractive.diffractive_w_low` honest-verifies the candidate
-        against the actual truncated series at the band boundary before
-        returning it, refusing (returning ``None``) whenever that honest
-        relative truncation error exceeds ``CERTIFICATION_BAR`` -- so
-        admission here is certificate-verified, not merely closed-form.
+        low-``w`` truncation certificate `w_low_fit` admits the analytic
+        series ``F_P`` (`diffractive_amplification`) on ``w < w_low``; the
+        exact engine hosts ``[w_low, w_hi]``.  A single `_band_split_mask`
+        at ``w_low`` (analytic below / engine above).  The c3/Born nested
+        split at ``w_split`` is deferred to WP2b/WP2c.  ``w_low`` is an
+        O(1) parametric surface fitted to the engine-honest truncation
+        ceiling (the largest ``w`` whose order-``M`` series stays within
+        `CERTIFICATION_BAR` of the exact Schwinger engine), de-rated to be
+        conservative on its calibration grid -- so admission here is
+        certificate-verified, never merely closed-form.
 
         Rung S (macro saddle, ``det A < 0`` i.e. ``gamma > 1``): the Fermat
         moments diverge, so there is NO analytic series.  The exact engine
@@ -1977,7 +1976,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             and rotated by ``beta`` into the eigenframe, with a ``1 / lam``
             amplitude prefactor, so ``F_P -> sqrt(mu_macro)`` as ``w -> 0``)
             inside `_diffractive.diffractive_amplification` /
-            ``diffractive_w_low``, which receive ``lens['beta']`` and
+            `w_low_fit`, which receive ``lens['beta']`` and
             ``lens['kappa']`` verbatim.
             There is NO upstream ``kappa == 0`` / ``beta == 0`` guard: the
             sole gate on the calling path (the ``_amplification_coefficients``
@@ -1985,10 +1984,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             ``int(geom.real_mask.sum()) == 2`` -- positive-parity image-count
             selection of the far-field exterior -- and it forwards ``lens``
             unmodified.  Admission onto the Rung-P analytic sub-band is
-            therefore governed SOLELY by the leading-omitted-term truncation
-            certificate ``diffractive_w_low`` (which self-refuses when the
-            honest truncation error breaches ``CERTIFICATION_BAR``), not by
-            any ``kappa`` / ``beta`` precondition.
+            therefore governed SOLELY by the truncation certificate
+            `w_low_fit` (which returns ``None`` on degenerate geometry and
+            raises at the reduced-shear wall), not by any ``kappa`` /
+            ``beta`` precondition.
         dense_w : np.ndarray
             Full dimensionless-frequency grid, 1-D, strictly positive.
         geom : ChangRefsdalGeometryPartition
@@ -2011,10 +2010,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             # exact engine host above it.
             y = (lens['y1'], lens['y2'])
             try:
-                w_low = diffractive_w_low(
-                    y, gamma, lens['beta'], lens['kappa'],
-                    w_lo=w_lo, w_hi=w_hi)
-            except HypergeometricDomainError:
+                w_low = w_low_fit(
+                    y, gamma, lens['beta'], lens['kappa'], w_hi=w_hi)
+            except DiffractiveDomainError:
                 return None
             if w_low is None or w_low <= w_lo:
                 # Null case: no admissible analytic sub-band inside the
@@ -2718,50 +2716,51 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         envelope[below_mask] = ff_envelope[keep]
         return envelope
 
-    def _diffractive_bottom_ceiling(self, lens, *, w_lo=None, w_hi=None):
+    def _diffractive_bottom_ceiling(self, lens, *, w_hi=None):
         """Low-``w`` diffractive truncation certificate ``w_low``, or ``None``.
 
-        Thin wrapper over `diffractive_w_low`: the closed-form frequency
+        Thin wrapper over `w_low_fit`: the fitted, conservative frequency
         below which the positive-parity diffractive series ``F_P``
         (`diffractive_amplification`) is certified to the truncation bar.
         It supplies the NESTED low split shared by the c3 and Born
         band-split rungs -- the boundary between the analytic diffractive
-        bottom ``[w_lo, w_low)`` (Rung P) and the engine/chart host
-        ``[w_low, w_split)``.
+        bottom (Rung P) and the engine/chart host.
 
-        The certificate is now BAND-AWARE: the optional ``w_lo`` / ``w_hi``
-        band bounds are forwarded verbatim to `diffractive_w_low`, so a
-        whole-band certificate (every node honest-verified under the bar)
-        returns ``w_hi`` and collapses the host region to empty, while a
-        band-floor failure self-refuses and returns ``None``.
+        The optional ``w_hi`` band cap is forwarded verbatim to `w_low_fit`
+        (it caps the fitted ceiling), so a whole-band certificate returns
+        ``w_hi`` and collapses the host region to empty.  The null-split
+        handling -- the whole band below or above the certificate boundary
+        -- is owned by the CALL SITES via ``_band_split_mask(dense_w,
+        w_low)`` plus the ``w_low >= dense_w.max()`` whole-band branch;
+        this wrapper returns the raw fitted ceiling only.
 
         Returns ``None`` at the macro-saddle parity wall (``gamma >= 1``,
         `DiffractiveDomainError`), where there is NO positive-parity series
         -- so a saddle-c3 split's nested bottom is empty and its entire
         below-split region is hosted by the exact Schwinger engine (Rung
         S).  Also returns ``None`` for degenerate geometry (propagated from
-        `diffractive_w_low`) and ``0.0`` when there is no shear (series
-        exact); both collapse the nested bottom to empty via the
-        ``w_low <= w_lo`` null-split identity at the call sites.
+        `w_low_fit`) and ``0.0`` when there is no shear (series exact);
+        both collapse the nested bottom to empty via the whole-band /
+        empty-bottom branches at the call sites.
 
         Parameters
         ----------
         lens : dict
             Lens parameters from `_lens_params`.
-        w_lo, w_hi : float or None
-            Optional band bounds forwarded to `diffractive_w_low` (``None``
-            -> unbounded below / above, respectively).
+        w_hi : float or None
+            Optional band cap forwarded to `w_low_fit` (``None`` ->
+            unbounded above).
 
         Returns
         -------
         float or None
-            ``w_low``; ``w_hi`` when the whole band clears the bar;
+            ``w_low``; ``w_hi`` when the fitted ceiling reaches ``w_hi``;
             ``None`` at the parity wall or on a degenerate solve.
         """
         try:
-            return diffractive_w_low(
+            return w_low_fit(
                 (lens['y1'], lens['y2']), lens['gamma'],
-                lens['beta'], lens['kappa'], w_lo=w_lo, w_hi=w_hi)
+                lens['beta'], lens['kappa'], w_hi=w_hi)
         except DiffractiveDomainError:
             return None
 
@@ -2886,13 +2885,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             # third copy); the bottom/host boolean composition is the only
             # inline logic.
             w_low = self._diffractive_bottom_ceiling(
-                lens, w_lo=float(dense_w.min()), w_hi=float(dense_w.max()))
+                lens, w_hi=float(dense_w.max()))
             band_split_low, below_low = _band_split_mask(dense_w, w_low)
             if w_low is not None and w_low >= float(dense_w.max()):
                 # Whole band certified: the analytic diffractive bottom
                 # serves the ENTIRE below-split region and the engine/chart
-                # host collapses to empty.  (The `>=` also absorbs the
-                # down-search branch, which is not capped at ``w_hi``.)
+                # host collapses to empty.
                 bottom_mask = below_mask
             else:
                 bottom_mask = ((below_low & below_mask) if band_split_low
@@ -3085,13 +3083,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # does not consult the chart, so a draw whose bottom escapes the
         # trained ``log_w`` range is no longer refused whole.
         w_low = self._diffractive_bottom_ceiling(
-            lens, w_lo=float(dense_w.min()), w_hi=float(dense_w.max()))
+            lens, w_hi=float(dense_w.max()))
         band_split_low, below_low = _band_split_mask(dense_w, w_low)
         if w_low is not None and w_low >= float(dense_w.max()):
             # Whole band certified: the analytic diffractive bottom serves
             # the ENTIRE below-split region and the engine/chart host
-            # collapses to empty.  (The `>=` also absorbs the down-search
-            # branch, which is not capped at ``w_hi``.)
+            # collapses to empty.
             bottom_mask = below_mask
         else:
             bottom_mask = ((below_low & below_mask) if band_split_low

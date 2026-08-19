@@ -4,16 +4,12 @@ diffractive analytic serve object and its truncation certificate.
 
 WHAT THIS SUITE ADJUDICATES
 ---------------------------
-`_diffractive.diffractive_w_low` ships with an explicit UNVERIFIED note in its
-own docstring:
-
-    "the closed form's admission DIRECTION (serve w < w_low vs w > w_low) must
-     be validated against the engine oracle before the rung is wired in. This
-     function implements the WP1 closed form faithfully; it does not adjudicate
-     direction."
-
-This suite IS that engine-oracle validation.  Three questions, from the
-Architect's specs:
+`_diffractive.w_low_fit` is the fitted, O(1) truncation-certificate boundary
+that replaced the per-proposal honest scan.  Its correctness rests on ONE
+load-bearing claim: it never OVER-SERVES -- for every admitted draw, the
+order-`_DEFAULT_MAX_ORDER` operator series agrees with the exact engine to
+within `CERTIFICATION_BAR` on ``[w_lo, w_low]``.  This suite IS the
+engine-oracle validation of that claim.  Three questions:
 
   1. LOW-W ANCHOR (`LowWAnchorTestCase`).  The served DC limit must tend to
      ``sqrt(mu_macro)`` with the F009-S Morse phase -- ``+sqrt(mu)`` (arg -> 0)
@@ -23,54 +19,47 @@ Architect's specs:
      would silently corrupt every low-w serve; this pins against that.
 
   2. TRUNCATION VS EXACT ENGINE over the certified band
-     (`TruncationCertifiedBandTestCase`).  Where the certificate admits, the
-     order-8 truncation must agree with the exact engine to within
-     ``CERTIFICATION_BAR`` (1e-4).  This is ESCALATE-ON-MISS: no widened
-     tolerance is encoded.  It passes only on the sub-domain the truncation
-     genuinely serves (measured: reduced shear ``gamma' <= 0.3``).
+     (`TruncationCertifiedBandTestCase`, `KappaEngineOracleTestCase`).  Where
+     the fitted certificate admits, the order-`_DEFAULT_MAX_ORDER` truncation
+     must agree with the exact engine to within `CERTIFICATION_BAR` (1e-4).
+     This is ESCALATE-ON-MISS: no widened tolerance is encoded.  The sweep
+     runs over ``[w_lo, 0.9*w_low_fit]`` (the 0.9 margin keeps the sweep off
+     the ceiling, where a float64 round-off at ``w == w_low`` could trip a
+     value that is in fact at the bar).  If `w_low_fit` ever over-serves on
+     the swept domain, this class goes red.  The conservative-region sweep
+     only samples `CLEAN_GAMMAS` at the single source `Y_REF` (a conservative
+     corner of the fit), so a stale re-bake of the fitted coefficients can
+     pass it unnoticed; `FullGridCertificateOracleTestCase` re-runs the same
+     served-vs-engine comparison over the calibration script's OWN full grid
+     (``scripts/fit_diffractive_certificate.py::_grid_points('full', 42)``),
+     which covers the over-serve corners (small/large ``r``, gamma 0.4-0.5)
+     by construction -- the same grid the fit was trained on.
 
-  3. SELF-REFUSAL AND MONOTONICITY near the wall (`WallRefusalTestCase`,
-     `WLowMonotonicityWitnessTestCase`).  At/beyond the parity wall
-     ``gamma' >= 1 - DELTA_GAMMA_P`` the rung must decline
+  3. SELF-REFUSAL at the wall (`WallRefusalTestCase`).  At/beyond the parity
+     wall ``gamma' >= 1 - DELTA_GAMMA_P`` the rung must decline
      (``DiffractiveDomainError``), never return a small optimistic number.
-
-MEASURED SPEC DISCREPANCY (escalated, not papered over)
--------------------------------------------------------
-The engine oracle shows the WP1 closed form's serve direction and band width
-are OPTIMISTIC beyond ``gamma' ~ 0.33``:
-
-  * over the admitted band ``[w_lo, w_low]`` the truncation error REACHES
-    ``6e-2`` at ``gamma' = 0.5`` and grows with ``gamma'`` -- far above the
-    1e-4 bar the certificate promises (`CertificateOptimismWitnessTestCase`);
-  * ``w_low`` INCREASES toward the wall (4.0 -> 5.2 as ``gamma'`` 0.90 ->
-    0.994) rather than shrinking to nothing, so the rung claims an ever-WIDER
-    low-w band exactly where the truncation is worst
-    (`WLowMonotonicityWitnessTestCase`).
-
-Rather than commit a permanently-red suite (which would jam the tree gate), the
-two witness classes PIN the measured optimism with teeth: each asserts the
-defect is present AND bounded, and each FLIPS RED the moment the certificate is
-tightened to honour the bar.  See the change report / build report for the
-escalation.  The clean-domain class (2) stays a hard, un-widened invariant.
 
 ORACLE INDEPENDENCE
 -------------------
 The reference is `_schwinger.f_schwinger` -- the exact Schwinger proper-time
-double-double engine -- evaluated in the eigenframe ``R(-beta) y`` at
-``kappa = 0``.  It shares NO accumulation path with the operator series under
-test (the series is the float64 truncation of the separate mpmath
-``_oracle_fop`` contraction, F002).  `f_schwinger` is the engine the shipped
-likelihood hands off to above ``w_low``, so agreeing with it is exactly the
-serve-consistency the rung needs.  ``w`` stays ``<= 60`` so the engine runs on
-its exact double-double path (mpmath only above 60).
+double-double engine -- evaluated in the eigenframe ``R(-beta) y`` (at
+``kappa = 0``) or reconstructed through the mass-sheet map (at ``kappa > 0``,
+see `_engine_reference_kappa`).  It shares NO accumulation path with the
+operator series under test (the series is the float64 truncation of the
+separate mpmath ``_oracle_fop`` contraction, F002).  `f_schwinger` is the
+engine the shipped likelihood hands off to above ``w_low``, so agreeing with
+it is exactly the serve-consistency the rung needs.  ``w`` stays ``<= 60`` so
+the engine runs on its exact double-double path (mpmath only above 60).
 """
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 import math
 import os
 import cmath
-from unittest import TestCase, main
+from unittest import TestCase, main, mock
 
 import numpy as np
 import matplotlib
@@ -82,15 +71,15 @@ import mpmath as mp
 from cogwheel.lensing.chang_refsdal._schwinger import (
     f_schwinger, _f_schwinger_mpmath, _CERTIFICATION_TOL,
     W_CEILING_SCHWINGER, W_CEILING_SCHWINGER_QD, SchwingerCertificationError)
-from cogwheel.lensing.chang_refsdal._born import DELTA_GAMMA_P, _born_factors
+from cogwheel.lensing.chang_refsdal._born import DELTA_GAMMA_P
 from cogwheel.lensing.ppgo_map import CERTIFICATION_BAR
 from cogwheel.lensing.chang_refsdal import operator as _operator
+import cogwheel.lensing.chang_refsdal._diffractive as _diffractive_mod
 from cogwheel.lensing.chang_refsdal._diffractive import (
-    diffractive_amplification, diffractive_w_low, DiffractiveDomainError,
-    _honest_tail_ratio, _reduced_shear, _operator_terms, _kernel_length,
-    _CERT_REFERENCE_W, _DIFFRACTIVE_CERT_SAFETY, _DEFAULT_MAX_ORDER)
+    diffractive_amplification, w_low_fit, DiffractiveDomainError,
+    _operator_terms, _kernel_length)
 from cogwheel.lensing.chang_refsdal._hyp1f1 import (
-    prefactor_c, point_mass_g_derivatives)
+    HypergeometricDomainError, prefactor_c, point_mass_g_derivatives)
 from cogwheel.lensing.likelihood import (
     _band_split_mask, LensedRelativeBinningLikelihood)
 
@@ -102,26 +91,10 @@ OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'output')
 #: shear operator acts on both eigen-directions).
 Y_REF = (0.8, 0.4)
 
-#: Reduced shears whose order-8 truncation is genuinely certified: measured
-#: worst relative error over ``[w_lo, w_low]`` stays below `CERTIFICATION_BAR`
-#: (2.998e-10, 4.687e-07, 5.378e-05 at these three).  Beyond ~0.33 the
-#: truncation crosses the bar (see the witness class).
+#: Reduced shears whose order-`_DEFAULT_MAX_ORDER` truncation is genuinely
+#: certified: measured worst relative error over ``[w_lo, w_low_fit]`` stays
+#: below `CERTIFICATION_BAR` at these three.
 CLEAN_GAMMAS = (0.1, 0.2, 0.3)
-
-#: The single (gamma, beta) draw whose honest tail ratio is NON-monotone in
-#: ``w``: at ``beta = 0`` the reduced-shear geometry sits near the on-axis
-#: symmetry and the N/2N tail breaches the bar near ``w ~ 12.4``, DIPS back
-#: under it over ``~13.0-13.6``, and breaches again near ``13.9``, so the
-#: honest ceiling (`_rootfind_w_high`'s LAST crossing, ~13.9) over-certifies a
-#: band containing the ~12.4 breach.  The 0.9 ceiling-margin re-target cannot
-#: exclude it (the breach sits at ~0.9*w_low), so this draw is EXCLUDED from
-#: the engine-honesty sweep and pinned separately by
-#: `CeilingTightnessTestCase.test_nonmonotone_tail_ratio_witness_gamma_0_1`.
-NONMONOTONE_DRAW = (0.1, 0.0)
-
-#: Reduced shears where the certificate is OPTIMISTIC: the admitted band hosts
-#: errors above the bar.  Used by the leaky-gate witness, NOT the invariant.
-OPTIMISTIC_GAMMAS = (0.4, 0.5)
 
 #: Eigenframe rotations exercised for the frame-pairing oracle (kappa = 0).
 BETAS = (0.0, 0.7, -1.1)
@@ -133,54 +106,31 @@ ANCHOR_WS = (1e-2, 3e-3, 1e-3)
 #: Number of frequency samples per certified-band sweep.
 N_BAND = 40
 
-#: Convergence (kappa) values probing INS-2-002: the honest-verification gate
-#: in `diffractive_w_low` normalizes by ``sqrt_mu`` instead of the true
-#: total-amplitude-space magnitude ``lam * sqrt_mu`` (``lam = 1 - kappa``), so
-#: it understates relative truncation error by a factor of ``lam`` once
-#: ``kappa > 0``.  At ``kappa = 0`` the fix is a no-op (``lam = 1``); these
-#: values are all kappa > 0 so the reported bug can actually manifest.
+#: Convergence (kappa) values exercising the kappa > 0 mass-sheet
+#: reconstruction: the fitted certificate serves ``kappa != 0`` verbatim
+#: (no upstream ``kappa == 0`` guard), so the engine-oracle sweep must cover
+#: nonzero kappa too.
 KAPPA_GRID = (0.1, 0.2, 0.3)
 
-#: Reduced-shear/kappa combinations whose order-8 truncation stays genuinely
-#: certified at kappa > 0: measured worst relative error over
-#: ``[w_lo, w_low]`` stays below `CERTIFICATION_BAR` by >= 6.3x at every
-#: (kappa, gamma) in `KAPPA_GRID[:2] x KAPPA_CLEAN_GAMMAS` (worst measured
-#: 1.576e-05 at kappa=0.2, gamma=0.2, beta=0.7).  ``kappa=0.3`` is excluded
-#: here -- see `KAPPA_WITNESS`.
+#: Reduced-shear/kappa combinations whose order-`_DEFAULT_MAX_ORDER`
+#: truncation stays genuinely certified at kappa > 0: measured worst relative
+#: error over ``[w_lo, w_low_fit]`` stays below `CERTIFICATION_BAR` at every
+#: (kappa, gamma) in `KAPPA_GRID[:2] x KAPPA_CLEAN_GAMMAS`.  ``kappa=0.3`` is
+#: covered separately by `KAPPA_WITNESS`.
 KAPPA_CLEAN_GAMMAS = (0.1, 0.2)
 
-#: (kappa, gamma, beta) marking the INS-3-001 re-raise of INS-2-002: measured
-#: worst relative error 1.4748e-04 > `CERTIFICATION_BAR` (1e-4) under the
-#: pre-fix honest-verification normalization (divided by ``sqrt_mu`` instead
-#: of ``lam * sqrt_mu``), i.e. this draw was ADMITTED by `diffractive_w_low`
-#: yet the admitted band hosted truncation error above the bar the
-#: certificate promises.  This is a stronger, directly-reproduced instance of
-#: INS-2-002 (the finding's own cited draw, kappa=0.3/gamma=0.2/beta=0.0,
-#: measures 8.594e-05 -- under the bar; widening beta to 0.7 crosses it).
-#: `KappaEngineOracleTestCase.
-#: test_truncation_within_bar_at_former_leaky_gate_witness` pins the
-#: CORRECTED expectation (worst <= CERTIFICATION_BAR): the `lam * sqrt_mu`
-#: normalization fix (INS-3-001) has landed in `_diffractive.py` and this
-#: pin is GREEN (see that method's docstring for the live measured value).
-#: Low-gamma bin exercising the large-headroom up-bracket: the closed-form
-#: candidate sits far below the honest ceiling here (measured gain ~485x at
-#: `Y_REF`), so the up-bracket is materially load-bearing, not a no-op.
-LOW_HEADROOM_GAMMA = 0.03
-
-#: Candidate-clears reduced shears for the ceiling-tightness / monotone
-#: invariants: `CLEAN_GAMMAS` plus the large-headroom low-gamma bin.  Scoped to
-#: draws where `_honest_tail_ratio` is monotone in ``w`` on the served band.
-TIGHT_GAMMAS = CLEAN_GAMMAS + (LOW_HEADROOM_GAMMA,)
-
-#: `TIGHT_GAMMAS` minus ``gamma = 0.1``, the draw whose honest tail ratio is
-#: NON-monotone (breach near w~12.4, dip ~13.0-13.6, breach ~13.9).  The
-#: ceiling sweep is scoped to the monotone gammas; gamma=0.1 is covered by the
-#: first-breach witness and the re-targeted engine-honesty sweep (whose
-#: `0.9*w_low` endpoint is green once the ceiling is the first breach).
-TIGHT_MONOTONE_GAMMAS = (LOW_HEADROOM_GAMMA, 0.2, 0.3)
-TIGHT_ALL_GAMMAS = CLEAN_GAMMAS + (LOW_HEADROOM_GAMMA,)
-
+#: (kappa, gamma, beta) exercising the kappa > 0 mass-sheet path at the upper
+#: end of `KAPPA_GRID`: `KappaEngineOracleTestCase.
+#: test_truncation_within_bar_at_former_leaky_gate_witness` pins that the
+#: admitted band's worst truncation error stays below `CERTIFICATION_BAR`.
 KAPPA_WITNESS = (0.3, 0.2, 0.7)
+
+#: Path of the calibration script relative to this test file.  The full-grid
+#: oracle sweep imports ``_grid_points`` / ``_unreduced_source`` from it (see
+#: `_load_fit_certificate_script`) so the probe grid is the SAME grid the fit
+#: was trained on and cannot drift from the training domain.
+_FIT_SCRIPT_REL = os.path.join('..', '..', 'scripts',
+                               'fit_diffractive_certificate.py')
 
 
 def _rot_minus_beta(beta: float) -> np.ndarray:
@@ -212,16 +162,15 @@ def _band_worst_relerr(y, gamma: float, beta: float = 0.0):
 
     The diffractive rung serves ``w <= w_low``; the sweep runs from a small
     positive floor up to ``0.9 * w_low`` and scores each point against the
-    exact engine.  The 0.9 factor keeps the sweep OFF the ceiling: at
-    ``w == w_low`` the N/2N honest estimator sits exactly at the bar with
-    ZERO margin (it is an estimator, not a bound), so a point right at
-    ``w_low`` fails on float64 round-off alone.  ``0.9 * w_low`` is still a
-    hard, un-widened probe of the served band's interior.
+    exact engine.  The 0.9 factor keeps the sweep OFF the ceiling so a point
+    right at ``w_low`` (where the fit has zero margin) does not trip on
+    float64 round-off; ``0.9 * w_low`` is still a hard, un-widened probe of
+    the served band's interior.
     """
-    w_low = diffractive_w_low(y, gamma, beta, 0.0)
+    w_low = w_low_fit(y, gamma, beta, 0.0)
     if w_low is None or not w_low > 0.0:
         raise AssertionError(
-            f'diffractive_w_low returned {w_low} for gamma={gamma}; '
+            f'w_low_fit returned {w_low} for gamma={gamma}; '
             'the band is undefined and the sweep would assert nothing.')
     w_lo = max(0.05, 0.02 * w_low)
     ws = np.linspace(w_lo, 0.9 * w_low, N_BAND)
@@ -266,10 +215,10 @@ def _band_worst_relerr_kappa(y, gamma: float, beta: float, kappa: float):
     signature that cannot silently pick up a nonzero kappa.  The sweep top is
     ``0.9 * w_low`` for the same ceiling-margin reason as `_band_worst_relerr`.
     """
-    w_low = diffractive_w_low(y, gamma, beta, kappa)
+    w_low = w_low_fit(y, gamma, beta, kappa)
     if w_low is None or not w_low > 0.0:
         raise AssertionError(
-            f'diffractive_w_low returned {w_low} for gamma={gamma}, '
+            f'w_low_fit returned {w_low} for gamma={gamma}, '
             f'kappa={kappa}; the band is undefined and the sweep would '
             'assert nothing.')
     w_lo = max(0.05, 0.02 * w_low)
@@ -282,53 +231,80 @@ def _band_worst_relerr_kappa(y, gamma: float, beta: float, kappa: float):
     idx = int(np.argmax(rels))
     return float(rels[idx]), float(ws[idx]), float(w_low), ws, rels
 
+@functools.lru_cache(maxsize=1)
+def _load_fit_certificate_script():
+    """Lazily import the calibration script (single source of truth).
 
-def _honest_tail_ratio_at(y, gamma: float, beta: float, kappa: float,
-                          w: float) -> float:
-    """Honest N/2N tail ratio at ``w``, bound to the production verifier.
-
-    Reconstructs the mass-sheet eigenframe reduction `diffractive_w_low`
-    performs (``lam``, ``y' = y / sqrt(lam)``, ``z_eig = R(-beta) y'``,
-    ``s = |y'|**2``) and calls the SHIPPING `_honest_tail_ratio` -- the same
-    bound verifier the certificate uses, not a re-typed copy -- so a change to
-    the tail-ratio definition is caught here, not silently papered over.
+    `scripts/fit_diffractive_certificate.py` defines the calibration grid
+    (`_grid_points`) and the source reconstruction (`_unreduced_source`);
+    importing it here -- rather than re-deriving the grid inside this test --
+    means `FullGridCertificateOracleTestCase` probes EXACTLY the domain the
+    fit was trained on, so the sweep cannot drift from the training domain.
+    The module is cached so the sweep cache below stays keyed on one object.
     """
-    lam, gamma_prime = _reduced_shear(gamma, kappa)
-    root = math.sqrt(lam)
-    yp0 = float(y[0]) / root
-    yp1 = float(y[1]) / root
-    s = yp0 * yp0 + yp1 * yp1
-    z_eig = cmath.exp(-1j * float(beta)) * complex(yp0, yp1)
-    return _honest_tail_ratio(float(w), z_eig.real, z_eig.imag, s,
-                              gamma_prime, _DEFAULT_MAX_ORDER)
+    script_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), _FIT_SCRIPT_REL))
+    spec = importlib.util.spec_from_file_location(
+        'fit_diffractive_certificate', script_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def _closed_form_candidate(y, gamma: float, beta: float, kappa: float) -> float:
-    """Recompute the closed-form candidate seed (the pre-WP1 ceiling).
+def _grid_relerr(w: float, y, gamma: float, beta: float,
+                 kappa: float) -> float | None:
+    """Served-vs-engine relative error at frequency ``w`` for one grid row.
 
-    Transcribes the candidate construction inside `diffractive_w_low` (the
-    reference-frequency error model inverted at ``bar_inner``) using the same
-    production primitives -- `_reduced_shear`, `_born_factors`,
-    `_operator_terms` -- so it is an independent re-derivation of the OLD
-    ceiling against which the new honest ceiling is compared.  Verified to
-    reproduce the production candidate bit-exactly at ``kappa = 0``.
+    ``None`` when the served series cannot be evaluated at ``w``
+    (`HypergeometricDomainError`, the point-mass kernel leaves its certified
+    double-double domain ``w * sqrt(s) <= DD_PRODUCT_CEILING``) or the engine
+    refuses to certify there -- such a row is not measurable and the
+    certificate over-reaches rather than over-serves.
     """
-    lam, gamma_prime = _reduced_shear(gamma, kappa)
-    order = _DEFAULT_MAX_ORDER
-    root = math.sqrt(lam)
-    yp0 = float(y[0]) / root
-    yp1 = float(y[1]) / root
-    s = yp0 * yp0 + yp1 * yp1
-    z_eig = cmath.exp(-1j * float(beta)) * complex(yp0, yp1)
-    sqrt_mu = _born_factors(float(y[0]), float(y[1]), float(gamma),
-                            float(beta), float(kappa))[0]
-    terms = _operator_terms(_CERT_REFERENCE_W, z_eig.real, z_eig.imag, s,
-                            gamma_prime, order + 1)
-    alpha_ref = abs(gamma_prime) / (2.0 * _CERT_REFERENCE_W)
-    r_next = abs(terms[order + 1]) / alpha_ref ** (order + 1)
-    bar_inner = CERTIFICATION_BAR / _DIFFRACTIVE_CERT_SAFETY
-    return (abs(gamma_prime) / 2.0) * (
-        lam * sqrt_mu * r_next / bar_inner) ** (1.0 / (order + 1))
+    try:
+        f_p = diffractive_amplification(w, y, gamma, beta, kappa)
+        f_e = _engine_reference_kappa(w, y, gamma, beta, kappa)
+    except (HypergeometricDomainError, SchwingerCertificationError):
+        return None
+    return float(abs(f_p - f_e) / abs(f_e))
+
+
+@functools.lru_cache(maxsize=1)
+def _full_grid_sweep(script):
+    """Served-vs-engine sweep over the full calibration grid.
+
+    Returns ``(rows, n_refused, n_domain)`` with each row
+    ``(gamma, beta, kappa, r, theta, w_low, rel_at_wlow, rel_at_09wlow)``.
+    Pure (no test counters) and cached so the assertion and diagnostic-plot
+    tests share ONE engine sweep.  The cached state is the shipped constants;
+    `test_removing_derate_trips_overserve` does NOT use this cache (it runs
+    its own loop under a patched de-rate).
+    """
+    rows: list[tuple[float, float, float, float, float, float,
+                     float, float]] = []
+    n_refused = 0
+    n_domain = 0
+    for gamma, beta, kappa, r, theta in script._grid_points('full', 42):
+        y = script._unreduced_source(r, theta, gamma, beta, kappa)
+        w_low = w_low_fit(y, gamma, beta, kappa)
+        if w_low is None or not w_low > 0.0:
+            n_refused += 1
+            continue
+        rel_wlow = _grid_relerr(w_low, y, gamma, beta, kappa)
+        if rel_wlow is None:
+            n_domain += 1
+            continue
+        rel_09 = _grid_relerr(0.9 * w_low, y, gamma, beta, kappa)
+        if rel_09 is None:
+            # The kernel domain is monotone in w, so if w_low evaluates,
+            # 0.9*w_low does too -- an engine refusal here is a genuine
+            # non-serve; count it rather than asserting nothing.
+            n_domain += 1
+            continue
+        rows.append((float(gamma), float(beta), float(kappa), float(r),
+                     float(theta), float(w_low), float(rel_wlow),
+                     float(rel_09)))
+    return rows, n_refused, n_domain
 
 
 #: mpmath working precision for the independent point-mass oracles.  50 dps
@@ -543,27 +519,21 @@ class LowWAnchorTestCase(DiffractiveTestCase):
 
 
 class TruncationCertifiedBandTestCase(DiffractiveTestCase):
-    """Spec 2 -- order-8 truncation matches the exact engine over the band.
+    """Spec 2 -- truncation matches the exact engine over the certified band.
 
-    ESCALATE-ON-MISS.  Over the admitted band ``[w_lo, 0.9*w_low]`` the
+    ESCALATE-ON-MISS.  Over the admitted band ``[w_lo, 0.9*w_low_fit]`` the
     truncation must agree with `f_schwinger` to within `CERTIFICATION_BAR`.
-    The sweep stops at ``0.9 * w_low`` (not ``w_low``) because at the ceiling
-    the N/2N honest estimator has ZERO margin against the true order-M error --
-    it is an estimator, not a bound, so a point at ``w_low`` fails on float64
+    The sweep stops at ``0.9 * w_low`` (not ``w_low``) because a point exactly
+    at the fitted ceiling has zero margin, so it could trip on float64
     round-off alone.  The bar is NOT widened: a miss inside the 0.9 band is a
-    genuine regression of the rung's legitimacy.  The optimistic regime is
-    pinned separately (`CertificateOptimismWitnessTestCase`) and the single
-    non-monotone draw (`NONMONOTONE_DRAW`) by
-    `CeilingTightnessTestCase.test_nonmonotone_tail_ratio_witness_gamma_0_1`,
-    so neither corrupts this invariant's tolerance.
+    genuine over-serve by the fitted certificate -- the one claim this suite
+    exists to police.
     """
 
     def test_truncation_within_bar_over_band(self):
-        """max rel-err(w) <= CERTIFICATION_BAR across [w_lo, 0.9*w_low]."""
+        """max rel-err(w) <= CERTIFICATION_BAR across [w_lo, 0.9*w_low_fit]."""
         for gamma in CLEAN_GAMMAS:
             for beta in BETAS:
-                if (gamma, beta) == NONMONOTONE_DRAW:
-                    continue
                 worst, w_worst, w_low, _, _ = _band_worst_relerr(
                     Y_REF, gamma, beta)
                 self.n_compared += 1
@@ -578,7 +548,7 @@ class TruncationCertifiedBandTestCase(DiffractiveTestCase):
     def test_band_is_nonempty_on_clean_domain(self):
         """Every clean geometry yields a positive, finite served band."""
         for gamma in CLEAN_GAMMAS:
-            w_low = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
+            w_low = w_low_fit(Y_REF, gamma, 0.0, 0.0)
             self.n_compared += 1
             with self.subTest(gamma=gamma):
                 self.assertIsNotNone(w_low)
@@ -604,72 +574,23 @@ class TruncationCertifiedBandTestCase(DiffractiveTestCase):
         self.assertTrue(os.path.exists(path))
 
 
-class CertificateOptimismWitnessTestCase(DiffractiveTestCase):
-    """Spec 2b -- the tightened certificate REFUSES the optimistic regime.
-
-    Earlier the engine oracle showed `diffractive_w_low` admitted bands whose
-    truncation error EXCEEDED `CERTIFICATION_BAR` once ``gamma' >~ 0.33`` (the
-    spec-flagged optimism defect).  INS-1-001 added an honest self-consistency
-    check evaluated at the band top ``w_low`` -- the worst (largest-w) point of
-    the served band -- and declines any geometry whose leading omitted term
-    breaches `CERTIFICATION_BAR` there.  This class was explicitly designed as
-    a leaky-gate witness that would FLIP RED the moment the certificate was
-    tightened; that has now happened, so it is repurposed to its intended
-    successor invariant: the optimistic regime must be REFUSED (``None``),
-    never served with an over-bar band.
-    """
-
-    def test_optimistic_regime_is_honest_at_order_16(self):
-        """gamma' in {0.4, 0.5}: the honest gate admits a REAL ceiling.
-
-        At the shipped truncation order 8 these gammas sat in the deep
-        optimistic regime (candidate over the bar, self-refused).  The order-16
-        truncation (adopted by the order scan: monotone ceiling rise AND a
-        4.5 pct-point engine_residual drop) genuinely extends reach, so the
-        gate now admits a positive ceiling -- verified honest against the
-        exact engine at the served band (worst rel-err ~1.000e-4 at w_low,
-        within the 1% estimator allowance).  The assertion is a VALUE claim on
-        the engine-honest ceiling, not a path claim.
-        """
-        for gamma in OPTIMISTIC_GAMMAS:
-            w_low = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
-            self.n_compared += 1
-            with self.subTest(gamma=gamma):
-                self.assertIsNotNone(w_low)
-                self.assertGreater(w_low, 0.0)
-                # Honest against the exact engine at the ceiling (1% allowance
-                # for the N/2N estimator's zero margin exactly at w_low).
-                w_probe = 0.95 * w_low
-                f_p = diffractive_amplification(
-                    w_probe, Y_REF, gamma, 0.0, 0.0)
-                f_e = _engine_reference(w_probe, Y_REF, gamma, 0.0)
-                rel = abs(f_p - f_e) / abs(f_e)
-                self.assertLessEqual(
-                    rel, CERTIFICATION_BAR,
-                    f'order-16 admit over-certifies at gamma={gamma}: '
-                    f'rel-err {rel:.3e} > bar at w={w_probe:.3f} '
-                    f'(w_low={w_low:.3f})')
-
-
 class KappaEngineOracleTestCase(DiffractiveTestCase):
-    """INS-2-002: engine-oracle pin for the previously-unpinned kappa > 0 regime.
+    """Engine-oracle pin for the kappa > 0 mass-sheet regime.
 
-    Before this class, every accuracy invariant in this suite fixed
-    ``kappa = 0``, so the honest-verification gate's normalization defect (it
-    divides by ``sqrt_mu`` instead of ``lam * sqrt_mu``, understating relative
-    truncation error by a factor of ``lam = 1 - kappa`` once ``kappa > 0``)
-    was never exercised by an engine oracle.  This closes that gap: first a
-    pairing gate confirms the new kappa-aware oracle
-    (`_engine_reference_kappa`) agrees with the already-verified kappa=0
-    oracle at kappa=0, then the certified-band invariant is re-run at
-    kappa > 0 on the sub-domain that measurably stays under the bar.
+    The fitted certificate serves ``kappa != 0`` verbatim (no upstream
+    ``kappa == 0`` guard), so the truncation-vs-engine invariant must be
+    exercised at kappa > 0 too.  First a pairing gate confirms the kappa-aware
+    oracle (`_engine_reference_kappa`) agrees with the already-verified
+    kappa=0 oracle (`_engine_reference`) at kappa=0, then the certified-band
+    invariant is re-run at kappa > 0 on the sub-domain that measurably stays
+    under the bar.
     """
 
     def test_pairing_gate_kappa_zero_matches_verified_oracle(self):
         """At kappa=0 the mass-sheet oracle must reduce to `_engine_reference`."""
         for gamma in KAPPA_CLEAN_GAMMAS:
             for beta in BETAS:
-                w_low = diffractive_w_low(Y_REF, gamma, beta, 0.0)
+                w_low = w_low_fit(Y_REF, gamma, beta, 0.0)
                 w_probe = 0.3 * w_low
                 f_new = _engine_reference_kappa(w_probe, Y_REF, gamma, beta, 0.0)
                 f_old = _engine_reference(w_probe, Y_REF, gamma, beta)
@@ -704,21 +625,11 @@ class KappaEngineOracleTestCase(DiffractiveTestCase):
                             f'(w_low={w_low:.3f}) exceeds the bar')
 
     def test_truncation_within_bar_at_former_leaky_gate_witness(self):
-        """INS-3-001: `KAPPA_WITNESS` (kappa=0.3/gamma=0.2/beta=0.7) certificate.
+        """`KAPPA_WITNESS` (kappa=0.3/gamma=0.2/beta=0.7): truncation under the bar.
 
-        Replaces the retired `KappaLeakyGateWitnessTestCase`, per that
-        witness's own self-declared resolution condition ("fold this draw
-        into KappaEngineOracleTestCase if it now stays under the bar").
-
-        Pins the CORRECTED expectation: `diffractive_w_low`'s honest-
-        verification gate normalizes by ``lam * sqrt_mu`` instead of the
-        bare ``sqrt_mu`` (INS-3-001 fix, owned by production code), so the
-        admitted band's worst truncation error at `KAPPA_WITNESS` genuinely
-        holds `CERTIFICATION_BAR`, same as every other admitted draw in this
-        suite.
-
-        STATUS: the `lam * sqrt_mu` normalization fix has landed in
-        `_diffractive.py` and this pin is GREEN.
+        Pins that the fitted certificate's admitted band holds
+        `CERTIFICATION_BAR` at the upper end of `KAPPA_GRID`, same as every
+        other admitted draw in this suite.
         """
         kappa, gamma, beta = KAPPA_WITNESS
         worst, w_worst, w_low, _, _ = _band_worst_relerr_kappa(
@@ -732,6 +643,143 @@ class KappaEngineOracleTestCase(DiffractiveTestCase):
             'insufficient in _diffractive.py.')
 
 
+class FullGridCertificateOracleTestCase(DiffractiveTestCase):
+    """INS-3-002 -- ZERO OVER-SERVE over the FULL calibration grid.
+
+    `TruncationCertifiedBandTestCase` probes only `CLEAN_GAMMAS` at the single
+    source `Y_REF` (``s = 0.8``, ``r ~ 0.894``) -- a CONSERVATIVE corner of
+    the fit (probe ratios 0.94-0.99 there), so a stale re-bake of the fitted
+    coefficients can pass it GREEN while the shipped surface over-serves the
+    out-of-sample corners (small ``r ~ 0.3``, large ``r ~ 1.1-1.3``, gamma
+    0.4-0.5).  This class re-runs the served-vs-engine comparison over the
+    calibration script's OWN grid -- ``_grid_points('full', seed=42)`` from
+    `scripts/fit_diffractive_certificate.py`, imported (not re-derived) so the
+    probe domain is exactly the training domain -- which spans ``r = sqrt(s)``
+    in [0.3, 1.3] x gamma in [0.05, 0.5] x 8 eigenframe angles plus 12 random
+    (beta, kappa) rows, covering the over-serve corners by construction.
+
+    Per row: the source is reconstructed with the script's `_unreduced_source`,
+    ``w_low = w_low_fit(y, gamma, beta, kappa)`` is the certificate boundary,
+    and the served series is probed at ``w = w_low`` (the band's worst point;
+    the truncation tail grows with ``w``) AND at ``w = 0.9 * w_low`` (the
+    interior, robust against ceiling round-off).  Both must agree with the
+    exact engine (the mass-sheet-reconstructed `f_schwinger`,
+    `_engine_reference_kappa`) to within `CERTIFICATION_BAR` -- ZERO
+    over-serve.  Rows `w_low_fit` refuses (None) are counted; rows where the
+    served series cannot be evaluated at ``w_low`` (kernel domain
+    `HypergeometricDomainError`) are counted and must stay a strict minority
+    -- a certificate promising frequencies the series cannot evaluate is
+    over-reach, not service.
+
+    Cost: ~252 rows x 2 probes x (series + oracle) ~ 70 ms each ~ 35 s per
+    sweep (measured), cached across the assertion and diagnostic-plot tests
+    so the suite pays ONE engine sweep total; the falsification runs its own
+    early-exit loop (~10 s).  Well inside the fast-tier ceilings (single test
+    < 60 s, file < 5 min).  The ``w_low`` boundary probe is ULP-stable at the
+    shipped constants (worst row ~9.99998e-5, no single-coefficient ULP
+    perturbation flips it).
+    """
+
+    def test_zero_overserve_over_full_calibration_grid(self):
+        """Served series stays within CERTIFICATION_BAR at w_low and 0.9 w_low."""
+        script = _load_fit_certificate_script()
+        rows, n_refused, n_domain = _full_grid_sweep(script)
+        self.n_compared += len(rows)
+        self.n_skipped += n_refused + n_domain
+        self.assertGreater(
+            len(rows), 50,
+            'premise lost: full-grid sweep measured too few rows to certify '
+            f'zero over-serve (measured={len(rows)}, refused={n_refused}, '
+            f'domain-refused={n_domain})')
+        self.assertLess(
+            n_domain, len(rows),
+            'certificate over-reach: more rows refused at the kernel domain '
+            f'({n_domain}) than measured ({len(rows)}) -- w_low_fit promises '
+            'frequencies the served series cannot evaluate')
+        for gamma, beta, kappa, r, theta, w_low, rel_wlow, rel_09 in rows:
+            with self.subTest(gamma=gamma, beta=beta, kappa=kappa, r=r,
+                              theta=theta):
+                self.assertLessEqual(
+                    rel_wlow, CERTIFICATION_BAR,
+                    f'OVER-SERVE at the certificate boundary w=w_low='
+                    f'{w_low:.3f}: rel={rel_wlow:.3e} > bar='
+                    f'{CERTIFICATION_BAR:.0e} -- the baked fit is not '
+                    'conservative on the calibration grid')
+                self.assertLessEqual(
+                    rel_09, CERTIFICATION_BAR,
+                    f'OVER-SERVE at w=0.9*w_low={0.9 * w_low:.3f}: '
+                    f'rel={rel_09:.3e} > bar={CERTIFICATION_BAR:.0e}')
+
+    def test_diagnostic_plot_relerr_vs_domain(self):
+        """Save relerr vs (r, gamma) over the grid with the bar line.
+
+        Over-serve appears as points ABOVE the bar, clustered at small r,
+        large r, and gamma 0.4-0.5 (the corners a stale re-bake inflates).
+        Reuses the cached sweep, so this test adds no engine probes.
+        """
+        script = _load_fit_certificate_script()
+        rows, _n_refused, _n_domain = _full_grid_sweep(script)
+        self.n_compared += len(rows)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        gammas = np.array([r_[0] for r_ in rows])
+        radii = np.array([r_[3] for r_ in rows])
+        rels = np.array([r_[6] for r_ in rows])
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+        sc1 = ax1.scatter(gammas, rels, c=radii, cmap='viridis', s=14)
+        ax1.axhline(CERTIFICATION_BAR, ls='--', color='r',
+                    label=f'bar={CERTIFICATION_BAR:.0e}')
+        ax1.set_yscale('log')
+        ax1.set_xlabel('gamma')
+        ax1.set_ylabel('relerr at w=w_low vs engine')
+        ax1.set_title('full calibration grid; points above the bar over-serve')
+        ax1.legend()
+        fig.colorbar(sc1, ax=ax1, label='r')
+        sc2 = ax2.scatter(radii, rels, c=gammas, cmap='plasma', s=14)
+        ax2.axhline(CERTIFICATION_BAR, ls='--', color='r')
+        ax2.set_yscale('log')
+        ax2.set_xlabel('r')
+        ax2.set_ylabel('relerr at w=w_low vs engine')
+        fig.colorbar(sc2, ax=ax2, label='gamma')
+        fig.tight_layout()
+        path = os.path.join(OUTPUT_DIR, 'full_grid_relerr_vs_domain.png')
+        fig.savefig(path, dpi=90)
+        plt.close(fig)
+        self.assertTrue(os.path.exists(path))
+
+    def test_removing_derate_trips_overserve(self):
+        """SELF-FALSIFICATION: derate=1.0 must over-serve somewhere on the grid.
+
+        The de-rate is the load-bearing conservative margin (the raw least-
+        squares surface over-predicts by up to ~1.34x), so with it set to 1.0
+        the served ceiling inflates and the served series MUST exceed the bar
+        at some grid row -- if none does, the zero-over-serve assertion above
+        has no teeth.  Early-exits at the first over-serve row (measured ~10 s
+        at the shipped coefficients).  Runs on the shipped coefficients with
+        ONLY the de-rate perturbed, and bypasses the `_full_grid_sweep` cache.
+        """
+        script = _load_fit_certificate_script()
+        found = None
+        with mock.patch.object(_diffractive_mod,
+                               '_DIFFRACTIVE_FIT_DERATE', 1.0):
+            for gamma, beta, kappa, r, theta in script._grid_points('full', 42):
+                y = script._unreduced_source(r, theta, gamma, beta, kappa)
+                w_low = w_low_fit(y, gamma, beta, kappa)
+                if w_low is None or not w_low > 0.0:
+                    continue
+                rel_wlow = _grid_relerr(w_low, y, gamma, beta, kappa)
+                if rel_wlow is None:
+                    continue
+                self.n_compared += 1
+                if rel_wlow > CERTIFICATION_BAR:
+                    found = (gamma, beta, kappa, r, theta, w_low, rel_wlow)
+                    break
+        self.assertIsNotNone(
+            found,
+            'removing the de-rate did not over-serve on the calibration '
+            'grid -- the zero-over-serve assertion has no teeth (the raw '
+            'fit never exceeds the honest ceiling)')
+
+
 class WallRefusalTestCase(DiffractiveTestCase):
     """Spec 3a -- the rung self-refuses at/beyond the parity wall.
 
@@ -739,9 +787,7 @@ class WallRefusalTestCase(DiffractiveTestCase):
     ``1 - kappa <= 0``) both entry points must raise `DiffractiveDomainError`,
     never return a small optimistic number.  Inside the certified-clean domain
     (reduced shear ~1/3) the rung must still admit -- otherwise "refuses at the
-    wall" would be vacuously satisfied by a rung that refuses everywhere.  (The
-    honest INS-1-001 gate declines the whole ``[~1/3, wall)`` band, so the
-    anti-vacuity admit witness lives at ~1/3, not just inside the wall.)
+    wall" would be vacuously satisfied by a rung that refuses everywhere.
     """
 
     #: The wall in reduced shear; anything at or above declines.
@@ -755,11 +801,11 @@ class WallRefusalTestCase(DiffractiveTestCase):
                     diffractive_amplification(1.0, Y_REF, gamma, 0.0, 0.0)
 
     def test_w_low_refuses_at_and_beyond_wall_via_gamma(self):
-        """gamma' >= WALL (kappa=0): diffractive_w_low raises (not a number)."""
+        """gamma' >= WALL (kappa=0): w_low_fit raises (not a number)."""
         for gamma in (self.WALL, 1.0, 1.2):
             with self.subTest(gamma=gamma):
                 with self.assertRaises(DiffractiveDomainError):
-                    diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
+                    w_low_fit(Y_REF, gamma, 0.0, 0.0)
 
     def test_refuses_via_kappa_reduced_shear_and_nonphysical_lambda(self):
         """kappa lifts gamma' over the wall / drives lambda <= 0 -> raise."""
@@ -767,75 +813,23 @@ class WallRefusalTestCase(DiffractiveTestCase):
         for gamma, kappa in ((0.5, 0.5), (0.6, 0.5), (0.3, 1.0), (0.3, 1.2)):
             with self.subTest(gamma=gamma, kappa=kappa):
                 with self.assertRaises(DiffractiveDomainError):
-                    diffractive_w_low(Y_REF, gamma, 0.0, kappa)
+                    w_low_fit(Y_REF, gamma, 0.0, kappa)
 
     def test_admits_inside_the_certified_domain(self):
         """gamma'=0.3 (certified-clean): the rung admits (refusal is not vacuous).
 
-        The honest INS-1-001 gate declines the whole ``[~1/3, wall)`` band, so
-        the anti-vacuity admit witness lives in the certified-clean domain
+        The anti-vacuity admit witness lives in the certified-clean domain
         (reduced shear ~1/3) rather than just inside the wall.  Without this
         the "refuses at the wall" invariant would be vacuously met by a rung
         that refuses everywhere.
         """
-        w_low = diffractive_w_low(Y_REF, 0.3, 0.0, 0.0)
+        w_low = w_low_fit(Y_REF, 0.3, 0.0, 0.0)
         self.n_compared += 1
         self.assertIsNotNone(w_low)
         self.assertTrue(math.isfinite(w_low) and w_low > 0.0)
         # And the amplification evaluates without raising.
         val = diffractive_amplification(1.0, Y_REF, 0.3, 0.0, 0.0)
         self.assertTrue(math.isfinite(abs(val)))
-
-
-class WLowMonotonicityWitnessTestCase(DiffractiveTestCase):
-    """Spec 3b -- the certified band collapses to refusal toward the wall.
-
-    The spec's correct behaviour: the certified band must vanish as
-    ``gamma' -> 1`` so nothing is served where the truncation is worst.  The
-    shipped WP1 closed form ALONE did the OPPOSITE -- ``w_low`` grew toward the
-    wall -- exactly the "admission DIRECTION unvalidated" hazard the module
-    flagged.  INS-1-001's honest self-consistency gate (evaluated at the band
-    top ``w_low``) corrects this: the entire near-wall region breaches
-    `CERTIFICATION_BAR` and is declined, so `diffractive_w_low` returns
-    ``None`` across the approach to the wall.  This class -- explicitly built to
-    FLIP RED once the certificate was corrected -- is repurposed to its intended
-    successor invariant: refusal across the near-wall sweep.
-    """
-
-    #: gamma' sweep marching up toward the wall.  Every value is beyond the
-    #: certified-clean boundary (~1/3), so the honest gate declines them all.
-    GAMMAS_TO_WALL = (0.90, 0.93, 0.95, 0.97, 0.98, 0.99, 0.994)
-
-    def test_near_wall_band_is_refused(self):
-        """CORRECTED: w_low declines (None) across the approach to the wall."""
-        for g in self.GAMMAS_TO_WALL:
-            w_low = diffractive_w_low(Y_REF, g, 0.0, 0.0)
-            self.n_compared += 1
-            with self.subTest(gamma=g):
-                self.assertIsNone(
-                    w_low,
-                    'DIRECTION REGRESSED? the honest gate must decline the '
-                    f'near-wall band, but gamma={g} admitted w_low={w_low} -- '
-                    'a served band where the truncation is worst.')
-
-    def test_diagnostic_plot_w_low_vs_gamma(self):
-        """Save w_low vs gamma' (band shrinks to refusal past ~1/3)."""
-        gammas = np.linspace(0.05, 0.994, 60)
-        w_lows = [diffractive_w_low(Y_REF, g, 0.0, 0.0) for g in gammas]
-        fig, ax = plt.subplots(figsize=(7, 4.5))
-        ax.plot(gammas, [w if w is not None else np.nan for w in w_lows],
-                marker='.')
-        ax.axvline(1.0 - DELTA_GAMMA_P, ls='--', color='k',
-                   label='parity wall')
-        ax.set_xlabel("reduced shear gamma'")
-        ax.set_ylabel('w_low (certified band top)')
-        ax.set_title('Certified band collapses to refusal past reduced shear ~1/3')
-        ax.legend()
-        fig.tight_layout()
-        path = os.path.join(OUTPUT_DIR, 'w_low_vs_gamma_direction.png')
-        fig.savefig(path, dpi=90)
-        plt.close(fig)
-        self.assertTrue(os.path.exists(path))
 
 
 class ShearFreePointMassPhaseTestCase(DiffractiveTestCase):
@@ -941,7 +935,7 @@ class NestedNullSplitByteIdentityTestCase(DiffractiveTestCase):
     (reproduced here EXACTLY from the two production sites) is::
 
         _bs, below_mask       = _band_split_mask(dense_w, w_split)
-        w_low                 = _diffractive_bottom_ceiling(lens, w_lo, w_hi)
+        w_low                 = _diffractive_bottom_ceiling(lens, w_hi)
         band_split_low, below = _band_split_mask(dense_w, w_low)
         bottom_mask = (below & below_mask) if band_split_low else all-False
         host_mask   = below_mask & ~bottom_mask
@@ -964,7 +958,7 @@ class NestedNullSplitByteIdentityTestCase(DiffractiveTestCase):
         """Reproduce the production nested-split composition verbatim."""
         _bs, below_mask = _band_split_mask(dense_w, w_split)
         w_low = LensedRelativeBinningLikelihood._diffractive_bottom_ceiling(
-            None, lens, w_lo=float(dense_w.min()), w_hi=float(dense_w.max()))
+            None, lens, w_hi=float(dense_w.max()))
         band_split_low, below_low = _band_split_mask(dense_w, w_low)
         if w_low is not None and w_low >= float(dense_w.max()):
             bottom_mask = below_mask
@@ -1130,351 +1124,6 @@ class RungSQuadratureSelfCertificateTestCase(DiffractiveTestCase):
         plt.close(fig)
 
 
-class CeilingTightnessTestCase(DiffractiveTestCase):
-    """Spec -- the honest ceiling is the N/2N crossing, not an arbitrary clamp.
-
-    WP1 replaced the closed-form candidate with an up-bracket search
-    (`_rootfind_w_high`) to the honest ceiling.  For a monotone tail ratio the
-    returned ``w*`` sits at the point where `_honest_tail_ratio` crosses
-    `CERTIFICATION_BAR`: at and just below ``w*`` the ratio clears the bar,
-    just above it breaches.  This class pins that bracketing on the
-    candidate-clears domain, and pins that the ceiling is a GEOMETRY property
-    (band-independent), not an artifact of how the band is threaded.
-
-    MEASURED NON-MONOTONICITY (escalated, then RESOLVED by the first-breach
-    search)
-    --------------------------------------------------------------------
-    At ``gamma = 0.1`` the honest tail ratio is NOT monotone in ``w``: it
-    breaches the bar near ``w ~ 12.4``, dips back under it over ``~13.0-13.6``,
-    and breaches again near ``13.9``.  The engine oracle agrees to 6 significant
-    figures, so the dip is a real feature of the truncation error, not an
-    estimator artefact (it also vanishes at truncation order 16+: the series is
-    convergent, and the re-crossing is an order-8 phenomenon).  A naive
-    bisection up-search returns the LAST crossing (``~13.9``), certifying a
-    band ``[0, 13.9]`` that contains the ``12.4`` breach -- an
-    over-certification.  The first-breach-aware `_rootfind_w_high` (two-tier
-    running-max scan, then continuous bisection inside one oscillation lobe)
-    returns the FIRST crossing (``~12.1``), so ``gamma = 0.1`` now passes the
-    full crossing sweep below (band-independent, and ``0.9*w*``/``1.5*w*``
-    probes green).  It is additionally pinned by
-    `test_nonmonotone_tail_ratio_witness_gamma_0_1`, which asserts the ceiling
-    sits at or below the first breach.
-    """
-
-    def test_ceiling_is_honest_crossing(self):
-        """relerr(w*) <= BAR, relerr(0.9*w*) <= BAR, relerr(1.5*w*) > BAR.
-
-        The straddling band ``[0.5*w*, 2*w*]`` brackets the honest ceiling; the
-        three probes confirm the returned ceiling is where the honest N/2N
-        ratio crosses the bar -- a wrong (arbitrary) bracket displaces the
-        crossing from ``w*``.  Includes the non-monotone gamma=0.1, whose
-        first-breach ceiling now satisfies all three probes and band
-        independence (see class docstring).
-        """
-        for gamma in TIGHT_ALL_GAMMAS:
-            w_star = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
-            w_lo, w_hi = 0.5 * w_star, 2.0 * w_star
-            w_banded = diffractive_w_low(Y_REF, gamma, 0.0, 0.0,
-                                         w_lo=w_lo, w_hi=w_hi)
-            r_star = _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0, w_banded)
-            r_below = _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0,
-                                            0.9 * w_banded)
-            r_above = _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0,
-                                            1.5 * w_banded)
-            self.n_compared += 1
-            with self.subTest(gamma=gamma):
-                # Band-independence: the ceiling is a geometry property.  The
-                # bisection converges to the same root from either bracket, up
-                # to float64 rounding (~3e-11 rel); a NON-monotone tail ratio
-                # would shift it by ~13% (the gamma=0.1 witness).
-                self.assertLessEqual(
-                    abs(w_banded - w_star) / w_star, 1e-9,
-                    f'band shifted the ceiling at gamma={gamma}: '
-                    f'{w_banded} != {w_star}')
-                # The honest N/2N crossing, not an arbitrary clamp.
-                self.assertLessEqual(r_star, CERTIFICATION_BAR,
-                                     f'ceiling breaches at gamma={gamma}')
-                self.assertLessEqual(r_below, CERTIFICATION_BAR,
-                                     f'just-below breaches at gamma={gamma} '
-                                     f'(non-monotone tail ratio?)')
-                self.assertGreater(r_above, CERTIFICATION_BAR,
-                                   f'ceiling is an arbitrary low clamp at '
-                                   f'gamma={gamma}')
-
-    def test_order_16_reaches_past_the_order_8_re_crossing(self):
-        """At the shipped order 16 the gamma=0.1 re-crossing is GONE.
-
-        At order 8 the honest tail ratio breaches the bar near ``w ~ 12.4``,
-        dips under it over ``~13.0-13.6``, and re-breaches near ``13.9`` -- a
-        genuine (engine-confirmed) non-monotonicity that the first-breach
-        search must not stride over.  Raising the truncation order to 16
-        (adopted by the order scan) CONVERGES that re-crossing away: the
-        order-16 tail ratio is far under the bar at the old 12.5/13.2 breach
-        points and the honest ceiling extends to ``~40.9``.  This pins the
-        convergent-series property (a physical reach gain, not a broken
-        refusal) and that the served band is still interior-breach-free
-        against the exact engine at the new ceiling.
-        """
-        gamma = 0.1
-        # Premise: the order-8 re-crossing is gone at order 16 (series
-        # convergent, per the order scan).
-        self.assertLess(
-            _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0, 12.5),
-            CERTIFICATION_BAR,
-            'premise lost: order-16 tail ratio still breaches at w=12.5')
-        self.assertLess(
-            _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0, 13.2),
-            CERTIFICATION_BAR,
-            'premise lost: order-16 tail ratio still breaches at w=13.2')
-        w_ceiling = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
-        self.n_compared += 1
-        self.assertGreater(
-            w_ceiling, 12.5,
-            f'order-16 ceiling did not extend past the order-8 re-crossing '
-            f'(w_ceiling={w_ceiling:.2f} <= 12.5)')
-        # The extended band is honest against the exact engine at its top.
-        w_probe = 0.95 * w_ceiling
-        f_p = diffractive_amplification(w_probe, Y_REF, gamma, 0.0, 0.0)
-        f_e = _engine_reference(w_probe, Y_REF, gamma, 0.0)
-        rel = abs(f_p - f_e) / abs(f_e)
-        self.assertLessEqual(
-            rel, CERTIFICATION_BAR,
-            f'order-16 extended ceiling over-certifies at gamma=0.1: '
-            f'rel-err {rel:.3e} > bar at w={w_probe:.3f}')
-
-    def test_diagnostic_plot_ceiling_tightness(self):
-        """Save tail_ratio vs w with the bar line (monotone gammas)."""
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        fig, ax = plt.subplots()
-        for gamma in TIGHT_GAMMAS:
-            w_star = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
-            ws = np.linspace(0.05, min(2.0 * w_star, 120.0), 120)
-            ratios = [_honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0, w)
-                      for w in ws]
-            ax.semilogy(ws, np.maximum(ratios, 1e-18),
-                        label=f'gamma={gamma}')
-            ax.axvline(w_star, ls=':', lw=0.7)
-        ax.axhline(CERTIFICATION_BAR, ls='--', color='k',
-                   label='CERTIFICATION_BAR')
-        ax.set_xlabel('w')
-        ax.set_ylabel('honest N/2N tail ratio')
-        ax.set_title('Ceiling tightness: honest ratio crosses the bar at w*')
-        ax.legend(fontsize=7)
-        fig.savefig(os.path.join(OUTPUT_DIR,
-                                 'ceiling_tightness_tail_ratio.png'), dpi=80)
-        plt.close(fig)
-        self.n_compared += 1
-
-
-class CeilingMonotonicityTestCase(DiffractiveTestCase):
-    """Spec -- the new honest ceiling is >= the pre-change closed-form candidate.
-
-    WP1's up-bracket must never UNDER-serve the closed-form candidate it
-    replaced: on the candidate-clears domain the bisection seed is the
-    candidate and it only moves up, so ``w_new >= candidate`` always holds.
-    Where the closed form is far below the honest ceiling (low gamma) the gain
-    is large (measured ~485x at gamma=0.03, ~34x at 0.1, ~5.6x at 0.2, ~1.2x at
-    0.3); the low-gamma bin is asserted STRICTLY greater with a wide margin so
-    a regressed (inert) up-bracket trips it.
-    """
-
-    def test_new_ceiling_never_underserves_old_candidate(self):
-        """w_new >= candidate everywhere; strictly greater on the low-gamma bin.
-
-        The "old candidate" is re-derived by `_closed_form_candidate` and fed
-        back as ``w_hi`` (so the up-bracket is inert -- returns exactly the
-        candidate), then compared against the unbounded honest ceiling.
-        """
-        for gamma in TIGHT_GAMMAS:
-            candidate = _closed_form_candidate(Y_REF, gamma, 0.0, 0.0)
-            w_inert = diffractive_w_low(Y_REF, gamma, 0.0, 0.0,
-                                        w_hi=candidate)
-            w_new = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
-            self.n_compared += 1
-            with self.subTest(gamma=gamma):
-                # Inert up-bracket at w_hi=candidate reproduces the candidate
-                # bit-exactly -- the helper IS the pre-change ceiling.
-                self.assertEqual(w_inert, candidate)
-                # The honest ceiling is never below the candidate it replaced.
-                self.assertGreaterEqual(
-                    w_new, w_inert,
-                    f'up-bracket under-serves at gamma={gamma}: '
-                    f'{w_new} < {w_inert}')
-                if gamma == LOW_HEADROOM_GAMMA:
-                    # Large-headroom bin: the gain is real, not a rounding
-                    # wiggle (measured ~485x; a 2x margin still has teeth).
-                    self.assertGreater(
-                        w_new, 2.0 * w_inert,
-                        f'no low-gamma gain at gamma={gamma}: {w_new} vs '
-                        f'{w_inert}')
-
-    def test_diagnostic_plot_old_vs_new_ceiling(self):
-        """Save old candidate vs new ceiling per gamma bin."""
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        fig, ax = plt.subplots()
-        gammas = sorted(TIGHT_GAMMAS)
-        candidates = [_closed_form_candidate(Y_REF, g, 0.0, 0.0)
-                      for g in gammas]
-        news = [diffractive_w_low(Y_REF, g, 0.0, 0.0) for g in gammas]
-        ax.semilogy(gammas, candidates, 'o-', label='closed-form candidate')
-        ax.semilogy(gammas, news, 's-', label='honest ceiling')
-        ax.set_xlabel('gamma')
-        ax.set_ylabel('w (log)')
-        ax.set_title('Monotone: honest ceiling >= closed-form candidate')
-        ax.legend()
-        fig.savefig(os.path.join(OUTPUT_DIR,
-                                 'ceiling_monotonicity_old_vs_new.png'),
-                    dpi=80)
-        plt.close(fig)
-        self.n_compared += 1
-
-
-class BandFloorAndWholeBandAdmissionTestCase(DiffractiveTestCase):
-    """Spec -- band semantics: floor-fail refuses, whole-band-clear admits.
-
-    Two edges of the ``w_lo``/``w_hi`` threading:
-
-    * a band FLOOR whose honest tail ratio already exceeds the bar must REFUSE
-      (``None``), never return a sub-floor ceiling;
-    * a band whose TOP already clears the bar is certified whole, and the
-      ceiling is ``w_hi`` exactly.
-
-    The floor check only fires on the candidate-clears branch (the up-search),
-    so the refusal fixtures use `CLEAN_GAMMAS` with a floor pushed ABOVE the
-    honest ceiling -- the OPTIMISTIC gammas (0.4, 0.5) named in the spec are
-    refused earlier, by the deep-optimistic gate, before any floor is
-    consulted, so they cannot witness the floor check itself.
-    """
-
-    def test_floor_breach_refuses(self):
-        """w_lo above the honest ceiling -> None (never a sub-floor ceiling)."""
-        for gamma in CLEAN_GAMMAS:
-            w_star = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
-            w_lo, w_hi = 2.0 * w_star, 4.0 * w_star
-            r_floor = _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0, w_lo)
-            self.n_compared += 1
-            with self.subTest(gamma=gamma):
-                # Premise: the floor is genuinely above the honest ceiling.
-                self.assertGreater(r_floor, CERTIFICATION_BAR,
-                                   f'floor {w_lo} does not breach the bar at '
-                                   f'gamma={gamma}')
-                result = diffractive_w_low(Y_REF, gamma, 0.0, 0.0,
-                                           w_lo=w_lo, w_hi=w_hi)
-                self.assertIsNone(
-                    result,
-                    f'floor breach served a ceiling {result} below w_lo at '
-                    f'gamma={gamma}')
-
-    def test_whole_band_clear_returns_w_hi(self):
-        """Band top under the bar -> ceiling is w_hi exactly."""
-        for w_hi in (3.0, 5.0):
-            r_top = _honest_tail_ratio_at(Y_REF, 0.1, 0.0, 0.0, w_hi)
-            self.n_compared += 1
-            with self.subTest(w_hi=w_hi):
-                self.assertLessEqual(r_top, CERTIFICATION_BAR,
-                                     f'band top {w_hi} breaches the bar; '
-                                     'fixture is not whole-band-clear')
-                result = diffractive_w_low(Y_REF, 0.1, 0.0, 0.0,
-                                           w_lo=0.05, w_hi=w_hi)
-                self.assertEqual(result, w_hi)
-
-
-class WrapperFidelityBandRoutingTestCase(DiffractiveTestCase):
-    """Spec -- the likelihood wrapper is a faithful band pass-through.
-
-    `_diffractive_bottom_ceiling(lens, w_lo, w_hi)` must equal
-    `diffractive_w_low((y1, y2), gamma, beta, kappa, w_lo=w_lo, w_hi=w_hi)`
-    exactly -- the wrapper adds only the ``DiffractiveDomainError -> None``
-    translation at the saddle wall -- and the nested ``_band_split_mask``
-    composition the two production sites use must place the analytic
-    diffractive bottom on ``[w_lo, w_low)`` with the host above, collapsing to
-    a byte-identical no-op where ``w_low`` is not strictly interior
-    (``w_low <= w_lo`` -> floor-fail -> ``None``; ``w_low >= w_hi`` ->
-    whole-band-clear -> ``w_hi``).
-
-    Engine-free: no wave is evaluated; only the real wrapper,
-    `diffractive_w_low` and `_band_split_mask` run on a synthetic dense band.
-    """
-
-    #: Positive-parity lens (gamma < 1) so the pass-through runs on the served
-    #: branch (no DiffractiveDomainError translation at the saddle wall).
-    LENS = dict(y1=Y_REF[0], y2=Y_REF[1], gamma=0.2, beta=0.0, kappa=0.0)
-
-    def test_wrapper_is_faithful_pass_through(self):
-        """`_diffractive_bottom_ceiling` == `diffractive_w_low` for a given band.
-
-        The combos deliberately include bands that CHANGE the result -- a
-        whole-band-clear top (``w_hi = 3.0`` -> returns ``w_hi``, not the
-        unbounded ceiling) and a floor above the honest ceiling
-        (``w_lo = 10.0`` -> returns ``None``) -- so a wrapper that silently
-        dropped the ``w_lo``/``w_hi`` bounds (returned the unbounded ceiling)
-        would fail the equality, giving the pass-through pin real teeth.
-        """
-        for w_lo, w_hi in ((0.05, None), (None, 5.0), (0.05, 5.0),
-                           (0.05, 3.0), (10.0, 20.0), (None, None)):
-            direct = diffractive_w_low(
-                (self.LENS['y1'], self.LENS['y2']), self.LENS['gamma'],
-                self.LENS['beta'], self.LENS['kappa'], w_lo=w_lo, w_hi=w_hi)
-            wrapped = LensedRelativeBinningLikelihood._diffractive_bottom_ceiling(
-                None, self.LENS, w_lo=w_lo, w_hi=w_hi)
-            self.n_compared += 1
-            with self.subTest(w_lo=w_lo, w_hi=w_hi):
-                self.assertEqual(wrapped, direct)
-
-    def test_band_split_routes_bottom_below_wlow_host_above(self):
-        """Nested composition: bottom = [w_lo, w_low), host = [w_low, w_split)."""
-        w_low = LensedRelativeBinningLikelihood._diffractive_bottom_ceiling(
-            None, self.LENS)
-        self.assertGreater(w_low, 0.0)   # premise: a real positive ceiling
-        dense = np.linspace(w_low * 0.3, w_low * 3.0, 60)   # straddles w_low
-        wl, band_split_low, below, bottom, host = (
-            NestedNullSplitByteIdentityTestCase._compose(
-                dense, None, self.LENS))
-        self.n_compared += 1
-        self.assertTrue(band_split_low)
-        self.assertTrue(np.array_equal(bottom, dense <= wl))
-        self.assertTrue(np.array_equal(host, below & ~bottom))
-        self.assertFalse(np.any(bottom & host))   # partition, never overlap
-
-    def test_band_split_byte_identity_when_floor_fails(self):
-        """w_low <= w_lo (floor breach) -> None -> host byte-identical to below."""
-        w_low = LensedRelativeBinningLikelihood._diffractive_bottom_ceiling(
-            None, self.LENS)
-        dense = np.linspace(w_low * 2.0, w_low * 2.0 + 60.0, 50)  # all above
-        wl, band_split_low, below, bottom, host = (
-            NestedNullSplitByteIdentityTestCase._compose(
-                dense, None, self.LENS))
-        self.n_compared += 1
-        self.assertIsNone(wl)            # floor breach self-refuses
-        self.assertFalse(band_split_low)
-        self.assertFalse(bottom.any())
-        self.assertTrue(np.array_equal(host, below))
-
-    def test_band_split_whole_band_clear_collapses_host(self):
-        """w_low >= w_hi (whole band under bar) -> bottom FULL, host empty.
-
-        The diffractive bottom (Rung P) is honest at every node of a
-        whole-band-certified draw, so it must serve the ENTIRE below-split
-        region and the engine/chart host must collapse to empty -- the
-        ``w_low >= dense_w.max()`` composition special-case.  This is the
-        point of the band-aware certificate (INS-1-003); leaving the host
-        full regresses HEAD's non-empty analytic bottom to engine hosting.
-        """
-        w_hi = 3.0
-        r_top = _honest_tail_ratio_at(Y_REF, self.LENS['gamma'], 0.0, 0.0, w_hi)
-        self.assertLessEqual(r_top, CERTIFICATION_BAR,
-                             f'band top {w_hi} breaches the bar; fixture is '
-                             'not whole-band-clear')
-        dense = np.linspace(0.05, w_hi, 40)
-        wl, band_split_low, below, bottom, host = (
-            NestedNullSplitByteIdentityTestCase._compose(
-                dense, None, self.LENS))
-        self.n_compared += 1
-        self.assertEqual(wl, w_hi)          # whole-band certificate
-        self.assertTrue(np.array_equal(bottom, below))   # bottom FULL
-        self.assertFalse(host.any())        # host empty
-
-
 class DiffractiveSelfFalsificationTestCase(DiffractiveTestCase):
     """Prove the suite can go red -- teeth, not decoration.
 
@@ -1495,13 +1144,6 @@ class DiffractiveSelfFalsificationTestCase(DiffractiveTestCase):
         # the inverted claim (|F| anchored at 1) must be false.
         with self.assertRaises(AssertionError):
             self.assertLess(dev_wrong_anchor, 0.1 * dev_from_sqrt_mu)
-
-    def test_optimism_witness_has_teeth(self):
-        """A hypothetical honest certificate would trip the '> bar' guard."""
-        # If a fix drove the band error to 0, the witness lower guard fails.
-        honest_worst = 0.0
-        with self.assertRaises(AssertionError):
-            self.assertGreater(honest_worst, CERTIFICATION_BAR)
 
     def test_frame_pairing_gate_has_teeth(self):
         """A mis-rotated engine oracle disagrees with the served value.
@@ -1558,25 +1200,6 @@ class DiffractiveSelfFalsificationTestCase(DiffractiveTestCase):
         host = below & ~bottom
         with self.assertRaises(AssertionError):
             self.assertTrue(np.array_equal(host, below))
-
-
-    def test_ceiling_tightness_has_teeth(self):
-        """An arbitrary LOW clamp fails the 'breaches above' probe.
-
-        The crossing check asserts ``relerr(1.5*w*) > BAR``.  Feed a WRONG
-        (too-low) ceiling ``0.3*w*``: ``1.5 * (0.3*w*) = 0.45*w*`` sits well
-        below the real crossing, so its honest ratio is still under the bar and
-        the assertion must FAIL -- proving the check rejects a low clamp rather
-        than passing it.
-        """
-        gamma = 0.2
-        w_star = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
-        wrong = 0.3 * w_star
-        r_above_wrong = _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0,
-                                              1.5 * wrong)
-        self.n_compared += 1
-        with self.assertRaises(AssertionError):
-            self.assertGreater(r_above_wrong, CERTIFICATION_BAR)
 
     def test_uncertified_serve_would_fail_rung_s(self):
         """Past the QD ceiling a serve is impossible; expecting one fails.

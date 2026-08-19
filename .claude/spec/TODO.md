@@ -2940,6 +2940,25 @@ Tag conventions:
      relative measure (wide away from the wall); re-price via the
      tiling census. Expectation: a small fraction of the slice's 2M
      calls.
+     STATUS 2026-08-19 (order-16 refresh, 10k seed 0, plan only):
+     `tiling_plan_and_cost_order16.json` re-answers the 7a2 estimate
+     at the raised certificate. engine_residual share 42.06% ->
+     33.15% (within 0.35 pct pts of the 3k order-16 measurement
+     32.80%); route deltas: diffractive_analytic +812, born_analytic
+     +79, engine_residual -891 (812 of the 891 went to Rung P
+     analytic — the analytics-first doctrine IS converting). But the
+     demand-sized PLAN is unchanged: total_nodes 11252 / total_calls
+     90016 (identical to 7a2), because the exterior:+1 cell retains
+     residual demand in the same measured w-range (0.0248-4.97, src
+     measured), so its 19-tile / 6080-node plan persists and
+     exterior:+1 is STILL 54.0% of planned nodes -> escalation does
+     NOT clear. residual_vs_ledger ratio 1.021 -> 0.805 (measured
+     now below the 0.4119 ledger). Implication: the certificate fix
+     removed residual draws but NOT the exterior tile budget — the
+     astroid-exterior dominance is structural at this demand gate,
+     not a certificate artifact. Next lever is the certified-ppGO
+     map retrain (F080) or the Born-chart retrain, not another
+     certificate raise.
   3. PRE-TRAIN CHECKLIST (all cheap, all owed before any bake):
      `f_floor` measured (not ratio-preserving; the sweep is a driver
      step); `N_map = 501` (the 2001 sizing note); tube 2-D gamma map

@@ -214,7 +214,7 @@ class _ProductionModules:
     astroid_wall: float                   # ppgo_map.ASTROID_WALL
     saddle_wall: float                    # ppgo_map.SADDLE_WALL
     farfield_w_floor: Any                 # channels.farfield_w_floor
-    diffractive_w_low: Any                # _diffractive.diffractive_w_low
+    w_low_fit: Any                        # _diffractive.w_low_fit
     diffractive_refusal_errors: tuple[type[BaseException], ...]  # w_low wall
     macro_matrix: Any                     # geometry.macro_matrix
     select_branch: Any                    # operator.select_branch
@@ -241,8 +241,7 @@ def _load_production_modules() -> _ProductionModules:
     from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels, _schwinger
     from cogwheel.lensing.chang_refsdal import operator as op
     from cogwheel.lensing.chang_refsdal._diffractive import (
-        DiffractiveDomainError, diffractive_w_low)
-    from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
+        DiffractiveDomainError, w_low_fit)
     from cogwheel.lensing.chang_refsdal.channels import farfield_w_floor
     from cogwheel.lensing.born_residual_chart import BornResidualChart
     from cogwheel.lensing.likelihood import (
@@ -267,7 +266,7 @@ def _load_production_modules() -> _ProductionModules:
     # never run -- no event data, no engine).  The three Born host-band
     # helpers bound off it (`_ppgo_band_split` / `_ppgo_cell_ceiling` /
     # `_diffractive_bottom_ceiling`) read ONLY their ``lens`` argument (plus
-    # the ``w_lo``/``w_hi`` band for `_diffractive_bottom_ceiling`) and the
+    # the ``w_hi`` band cap for `_diffractive_bottom_ceiling`) and the
     # process-global certified-ppGO map, never instance state, so this reuses
     # the production host-band derivation byte-for-byte instead of re-typing
     # it.
@@ -290,9 +289,8 @@ def _load_production_modules() -> _ProductionModules:
         astroid_wall=float(ppgo_map.ASTROID_WALL),
         saddle_wall=float(ppgo_map.SADDLE_WALL),
         farfield_w_floor=farfield_w_floor,
-        diffractive_w_low=diffractive_w_low,
-        diffractive_refusal_errors=(
-            HypergeometricDomainError, DiffractiveDomainError),
+        w_low_fit=w_low_fit,
+        diffractive_refusal_errors=(DiffractiveDomainError,),
         macro_matrix=geometry.macro_matrix,
         select_branch=op.select_branch,
         uniform_arm_value=op._uniform_arm_value,
@@ -721,7 +719,7 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     6. low-w diffractive rung (far-field exterior, ``w_lo < farfield_w_
        floor``), SPLIT BY PARITY onto opposite ledger sides: ``diffractive_
        analytic`` for the positive-parity Rung P (analytic ``F_P`` admitted
-       by the ``diffractive_w_low`` truncation certificate -- an ANALYTIC
+       by the ``w_low_fit`` truncation certificate -- an ANALYTIC
        serve), and ``diffractive_engine_hosted`` for the macro-saddle Rung S
        (exact engine hosting the whole band under the per-draw reachability
        cap ``min(w_split, W_CEILING_SCHWINGER)`` -- an ENGINE-HOSTED serve,
@@ -822,8 +820,8 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     # derived by the SAME two nested splits -- the certified-ppGO band split
     # ``w_trust`` (`_ppgo_band_split`, ceiling-capped at ``min(parity_wall,
     # cell_ceiling)``) and the nested diffractive-bottom split ``w_low``
-    # (`_diffractive_bottom_ceiling`, called with the band ``w_lo``/``w_hi``
-    # so the ceiling is band-aware) -- through the production
+    # (`_diffractive_bottom_ceiling`, called with the band cap ``w_hi`` so
+    # the ceiling is band-aware) -- through the production
     # `_band_split_mask` arithmetic, every helper and wall constant bound
     # from `likelihood` / `ppgo_map` (never re-typed):
     #   * ``covered and not trained_band_escape`` (box-covered AND the host
@@ -856,8 +854,7 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
             if w_hi > eff_ceiling:
                 w_trust = None
         _band_split, below_mask = mods.band_split_mask(w_grid, w_trust)
-        w_low = mods.diffractive_bottom_ceiling(
-            lens, w_lo=w_lo, w_hi=w_hi)
+        w_low = mods.diffractive_bottom_ceiling(lens, w_hi=w_hi)
         band_split_low, below_low = mods.band_split_mask(w_grid, w_low)
         if w_low is not None and w_low >= float(w_grid.max()):
             bottom_mask = below_mask
@@ -902,8 +899,8 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     # ``farfield_w_floor`` (else the far-field rungs / engine own the band).
     # The rung SPLITS BY PARITY onto OPPOSITE sides of the ledger:
     #   * gamma < 1 (positive parity, Rung P) -> ``diffractive_analytic``:
-    #     the analytic ``F_P`` series admitted by the closed-form truncation
-    #     certificate ``diffractive_w_low`` (an ANALYTIC-side serve).
+    #     the analytic ``F_P`` series admitted by the fitted truncation
+    #     certificate ``w_low_fit`` (an ANALYTIC-side serve).
     #   * gamma >= 1 (macro saddle, Rung S) -> ``diffractive_engine_hosted``:
     #     the exact engine hosts the whole band under the per-draw
     #     reachability cap ``W_reach = min(w_split, W_CEILING_SCHWINGER)``.
@@ -911,29 +908,24 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     #     so it lands on the ENGINE-HOSTED side -- under the zero-engine-
     #     served (7b) bar every Rung-S draw is counted as engine demand.
     # Both branches call the SAME production certificate helpers
-    # (``diffractive_w_low`` / ``farfield_w_floor`` / ``saddle_c3_split_
+    # (``w_low_fit`` / ``farfield_w_floor`` / ``saddle_c3_split_
     # point``); the decision logic is never reimplemented here.
     if int(geom.real_mask.sum()) == 2:
         w_floor = mods.farfield_w_floor(geom.delays, geom.real_mask)
         if w_lo < w_floor:
             if gamma < 1.0:
-                # Rung P admission mirror: ``diffractive_w_low`` receives the
-                # band (``w_lo``/``w_hi``) and returns the HONEST ceiling its
-                # N/2N verifier supports (whole-band-certified -> ``w_hi``),
-                # so an analytic sub-band is admitted iff ``w_low`` is finite
-                # and strictly inside the band (``w_low > w_lo``).  A
-                # ``HypergeometricDomainError``
-                # (kernel out of the certified box) is production's
-                # decline-and-fall-through (``return None``); the gamma'-wall
-                # ``DiffractiveDomainError`` is a production refusal near
-                # gamma==1 -- caught here too and declined, the census's
-                # conservative demand-overcounting direction (it can only push
-                # such a sliver into the engine-demand node pass below, never
-                # mislabel it as analytic closure).
+                # Rung P admission mirror: ``w_low_fit`` receives the band
+                # ceiling cap (``w_hi``) and returns the FITTED conservative
+                # ceiling (``w_hi``-capped); the band floor (``w_low > w_lo``)
+                # is the call-site null-split identity, mirroring production.
+                # The gamma'-wall ``DiffractiveDomainError`` is a production
+                # refusal near gamma==1 -- caught here too and declined, the
+                # census's conservative demand-overcounting direction (it can
+                # only push such a sliver into the engine-demand node pass
+                # below, never mislabel it as analytic closure).
                 try:
-                    w_low = mods.diffractive_w_low(
-                        (y1, y2), gamma, 0.0, 0.0,
-                        w_lo=w_lo, w_hi=w_hi)
+                    w_low = mods.w_low_fit(
+                        (y1, y2), gamma, 0.0, 0.0, w_hi=w_hi)
                 except mods.diffractive_refusal_errors:
                     w_low = None
                 if w_low is not None and float(w_low) > w_lo:
