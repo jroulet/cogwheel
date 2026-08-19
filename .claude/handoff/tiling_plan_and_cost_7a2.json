@@ -1,0 +1,302 @@
+{
+  "schema": "tiling_plan_v1",
+  "census_refresh": {
+    "schema_source": "serve_route_census_v1",
+    "mode": "demand",
+    "n_samples": 10000,
+    "route_counts": {
+      "surrogate": 0,
+      "ppgo_above_ceiling": 1587,
+      "saddle_c3": 1409,
+      "born_analytic": 343,
+      "born_carrier_only": 0,
+      "diffractive_analytic": 725,
+      "diffractive_engine_hosted": 1517,
+      "analytics_engine_hosted": 0,
+      "engine_residual": 4206,
+      "wave_refused": 213,
+      "engine_refused": 0
+    },
+    "engine_residual_count": 4206,
+    "engine_residual_share": 0.4206,
+    "ledger_reference": 0.4119,
+    "share_over_ledger": 1.0211216314639475,
+    "residual_split": {
+      "total": 4206,
+      "split_gauge": "caustic_rho",
+      "note": "count and prior_mass_fraction are equal by construction (equal-weight draws); the split is on caustic-relative rho, never rho_lobe.",
+      "born_chart_demand": {
+        "count": 545,
+        "prior_mass_fraction": 0.12957679505468378
+      },
+      "near_caustic_tube": {
+        "count": 781,
+        "prior_mass_fraction": 0.18568711364717072
+      },
+      "interior": {
+        "count": 2880,
+        "prior_mass_fraction": 0.6847360912981455
+      },
+      "undetermined": {
+        "count": 0,
+        "prior_mass_fraction": 0.0
+      }
+    },
+    "gamma_band_edges": [
+      0.05,
+      0.09102821015130402,
+      0.1657227008669993,
+      0.3017088168272581,
+      0.45,
+      0.5492802716530588,
+      0.55,
+      0.9,
+      1.0,
+      1.1,
+      1.1572945272629378,
+      1.3393306228327468,
+      1.55
+    ]
+  },
+  "config": {
+    "n_gamma": 4,
+    "n_u": 4,
+    "n_theta": 4,
+    "n_rho": 4,
+    "n_theta_c": 4,
+    "w_nodes_per_decade": 4,
+    "f_max": 0.4,
+    "gamma_band_halfwidth": 0.1,
+    "min_gamma_band": 1e-06,
+    "n_farfield_tiles_per_side": 5,
+    "n_caustic_samples": 200,
+    "gamma_refine_near_one_window": 0.15,
+    "gamma_refine_near_one_width": 0.05
+  },
+  "cost_model": {
+    "labels_per_node": 8,
+    "seconds_per_call": 0.0903,
+    "w_ceiling_dd": 60.0,
+    "note": "a call is one node-label; SECONDS_PER_CALL=0.0903 is the DD-band per-call smoke rate, tiling_census uses _SECONDS_PER_LABEL=0.09 s/label (== per call); the ~0.3% gap is smoke jitter."
+  },
+  "per_region": {
+    "tube:+1": {
+      "parity": 1,
+      "region": "tube",
+      "n_bands": 1,
+      "n_bands_planned": 1,
+      "n_bands_gated_no_demand": 0,
+      "n_bands_empty": 0,
+      "region_tiles": 1,
+      "region_nodes": 1248,
+      "region_calls": 9984,
+      "bands": [
+        {
+          "gamma_band": "0.45-0.54928",
+          "band": [
+            0.395,
+            0.595
+          ],
+          "gamma_mid": 0.495,
+          "n_tiles": 1,
+          "spatial_nodes_total": 48,
+          "theta_node_counts": [
+            12
+          ],
+          "n_gamma_in_band": 2,
+          "n_w": 13,
+          "w_lo": 0.025192797513723164,
+          "w_hi": 40.34517262130661,
+          "w_range_source": "measured",
+          "annulus": null,
+          "band_nodes": 1248
+        }
+      ]
+    },
+    "exterior:+1": {
+      "parity": 1,
+      "region": "exterior",
+      "n_bands": 1,
+      "n_bands_planned": 1,
+      "n_bands_gated_no_demand": 0,
+      "n_bands_empty": 0,
+      "region_tiles": 19,
+      "region_nodes": 6080,
+      "region_calls": 48640,
+      "bands": [
+        {
+          "gamma_band": "0.45-0.54928",
+          "band": [
+            0.395,
+            0.595
+          ],
+          "gamma_mid": 0.495,
+          "n_tiles": 19,
+          "spatial_nodes_total": 304,
+          "theta_node_counts": null,
+          "n_gamma_in_band": 2,
+          "n_w": 10,
+          "w_lo": 0.02482321625702923,
+          "w_hi": 4.972446670338311,
+          "w_range_source": "measured",
+          "annulus": {
+            "gauge": "caustic_rho",
+            "rho_inner": 2.5813694165879886,
+            "rho_outer": 3.604960694557813,
+            "caustic_reach": 1.3931231385659777,
+            "note": "astroid origin-centred exterior remainder; inner edge is the tube-shell exclusion rho, outer the prior source reach, both in caustic_rho."
+          },
+          "band_nodes": 6080
+        }
+      ]
+    },
+    "wedge_interior:+1": {
+      "parity": 1,
+      "region": "wedge_interior",
+      "n_bands": 1,
+      "n_bands_planned": 1,
+      "n_bands_gated_no_demand": 0,
+      "n_bands_empty": 0,
+      "region_tiles": 30,
+      "region_nodes": 3060,
+      "region_calls": 24480,
+      "bands": [
+        {
+          "gamma_band": "0.45-0.54928",
+          "band": [
+            0.395,
+            0.595
+          ],
+          "gamma_mid": 0.495,
+          "n_tiles": 30,
+          "spatial_nodes_total": 30,
+          "theta_node_counts": null,
+          "n_gamma_in_band": 2,
+          "n_w": 51,
+          "w_lo": 0.02519808730447497,
+          "w_hi": 60.0,
+          "w_range_source": "measured_clipped_dd",
+          "annulus": null,
+          "band_nodes": 3060
+        }
+      ]
+    },
+    "tube:-1": {
+      "parity": -1,
+      "region": "tube",
+      "n_bands": 1,
+      "n_bands_planned": 1,
+      "n_bands_gated_no_demand": 0,
+      "n_bands_empty": 0,
+      "region_tiles": 2,
+      "region_nodes": 864,
+      "region_calls": 6912,
+      "bands": [
+        {
+          "gamma_band": "1.15729-1.33933",
+          "band": [
+            1.205,
+            1.4050000000000002
+          ],
+          "gamma_mid": 1.3050000000000002,
+          "n_tiles": 2,
+          "spatial_nodes_total": 96,
+          "theta_node_counts": [
+            6,
+            18
+          ],
+          "n_gamma_in_band": 1,
+          "n_w": 9,
+          "w_lo": 0.14193275720962384,
+          "w_hi": 18.673514644547332,
+          "w_range_source": "measured",
+          "annulus": null,
+          "band_nodes": 864,
+          "saddle_bottom_anchor": {
+            "anchor": "F(w->0) = -1j * sqrt(mu_macro)  [Morse n=1]",
+            "sqrt_mu_macro": 1.192654401995301,
+            "w_axis_lower_edge": 0.14193275720962384,
+            "note": "record only; no serving ladder / ceiling is modified."
+          }
+        }
+      ]
+    },
+    "lobe_interior:-1": {
+      "parity": -1,
+      "region": "lobe_interior",
+      "n_bands": 1,
+      "n_bands_planned": 0,
+      "n_bands_gated_no_demand": 0,
+      "n_bands_empty": 1,
+      "region_tiles": 0,
+      "region_nodes": 0,
+      "region_calls": 0,
+      "bands": []
+    },
+    "lobe_exterior:-1": {
+      "parity": -1,
+      "region": "lobe_exterior",
+      "n_bands": 1,
+      "n_bands_planned": 0,
+      "n_bands_gated_no_demand": 1,
+      "n_bands_empty": 0,
+      "region_tiles": 0,
+      "region_nodes": 0,
+      "region_calls": 0,
+      "bands": []
+    }
+  },
+  "per_parity": {
+    "+1": {
+      "nodes": 10388,
+      "calls": 83104
+    },
+    "-1": {
+      "nodes": 864,
+      "calls": 6912
+    }
+  },
+  "totals": {
+    "total_nodes": 11252,
+    "total_calls": 90016,
+    "wall_clock_s": 8128.4448,
+    "wall_clock_hours": 2.2579013333333333
+  },
+  "cross_checks": {
+    "i_vs_self_estimate": {
+      "plan_nodes": 11252,
+      "self_estimate_nodes": 1120.0,
+      "ratio": 10.04642857142857,
+      "note": "_self_estimate is a blanket-count upper bound; ratio < 1 reflects the demand gate and per-axis sizing."
+    },
+    "ii_vs_tiling_census": {
+      "plan_nodes": 11252,
+      "tiling_census_nodes": 12576.0,
+      "ratio": 0.8947201017811705,
+      "note": "tiling_census applies no demand gate; ratio << 1 expected."
+    },
+    "iii_residual_vs_ledger": {
+      "measured_engine_residual_share": 0.4206,
+      "ledger": 0.4119,
+      "ratio": 1.0211216314639475
+    }
+  },
+  "escalation": {
+    "should_escalate": true,
+    "reasons": [
+      "max region node share 0.540 exceeds limit 0.40"
+    ],
+    "total_calls": 90016.0,
+    "max_region_share": 0.540348382509776,
+    "call_limit": 500000.0,
+    "region_share_limit": 0.4,
+    "per_region_node_share": {
+      "tube:+1": 0.11091361535726982,
+      "exterior:+1": 0.540348382509776,
+      "wedge_interior:+1": 0.2719516530394597,
+      "tube:-1": 0.0767863490934945,
+      "lobe_interior:-1": 0.0,
+      "lobe_exterior:-1": 0.0
+    }
+  }
+}
