@@ -742,7 +742,7 @@ def _make_probe(chart: _StubChart):
     probe.born_residual_chart = chart
     probe._ppgo_band_split = lambda lens: None
     probe._ppgo_cell_ceiling = lambda lens: None
-    probe._diffractive_bottom_ceiling = lambda lens: None
+    probe._diffractive_bottom_ceiling = lambda lens, *, w_lo=None, w_hi=None: None
     probe.spy = _ReconstructSpy()
     probe._born_reconstruct = probe.spy
     probe.serve = types.MethodType(
@@ -806,7 +806,7 @@ def _make_floor_probe(chart, *, w_trust, w_low, engine_value=5.0 + 2.0j):
     probe.born_residual_chart = chart
     probe._ppgo_band_split = lambda lens: w_trust
     probe._ppgo_cell_ceiling = lambda lens: None
-    probe._diffractive_bottom_ceiling = lambda lens: w_low
+    probe._diffractive_bottom_ceiling = lambda lens, *, w_lo=None, w_hi=None: w_low
     probe.engine_env_calls = []
     probe.engine_value = complex(engine_value)
 
@@ -1522,7 +1522,8 @@ def _census_mods(chart, *, w_trust=FLOOR_WTRUST, w_low=FLOOR_WLOW,
                                                               copy=True),
         ppgo_band_split=lambda lens: w_trust,
         ppgo_cell_ceiling=lambda lens: None,
-        diffractive_bottom_ceiling=lambda lens: w_low)
+        diffractive_bottom_ceiling=(
+            lambda lens, *, w_lo=None, w_hi=None: w_low))
     if born_carrier_serves is not None:
         overrides['born_carrier_serves'] = born_carrier_serves
     return dataclasses.replace(base, **overrides)
@@ -1723,7 +1724,8 @@ def _make_reconstruct_probe():
         covers_result=False, residual=np.zeros(FLOOR_DENSE.size))
     probe._ppgo_band_split = lambda lens: FLOOR_WTRUST
     probe._ppgo_cell_ceiling = lambda lens: None
-    probe._diffractive_bottom_ceiling = lambda lens: FLOOR_WLOW
+    probe._diffractive_bottom_ceiling = (
+        lambda lens, *, w_lo=None, w_hi=None: FLOOR_WLOW)
     probe._reduce_dense_kernels = lambda kernels: (None, None)
     probe._image_delays = lambda lens, geom: None
     probe._born_reconstruct = types.MethodType(

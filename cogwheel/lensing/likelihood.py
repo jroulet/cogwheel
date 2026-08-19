@@ -2718,7 +2718,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         envelope[below_mask] = ff_envelope[keep]
         return envelope
 
-    def _diffractive_bottom_ceiling(self, lens, w_lo=None, w_hi=None):
+    def _diffractive_bottom_ceiling(self, lens, *, w_lo=None, w_hi=None):
         """Low-``w`` diffractive truncation certificate ``w_low``, or ``None``.
 
         Thin wrapper over `diffractive_w_low`: the closed-form frequency
@@ -2886,10 +2886,17 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             # third copy); the bottom/host boolean composition is the only
             # inline logic.
             w_low = self._diffractive_bottom_ceiling(
-                lens, float(dense_w.min()), float(dense_w.max()))
+                lens, w_lo=float(dense_w.min()), w_hi=float(dense_w.max()))
             band_split_low, below_low = _band_split_mask(dense_w, w_low)
-            bottom_mask = ((below_low & below_mask) if band_split_low
-                           else np.zeros(dense_w.shape, dtype=bool))
+            if w_low is not None and w_low >= float(dense_w.max()):
+                # Whole band certified: the analytic diffractive bottom
+                # serves the ENTIRE below-split region and the engine/chart
+                # host collapses to empty.  (The `>=` also absorbs the
+                # down-search branch, which is not capped at ``w_hi``.)
+                bottom_mask = below_mask
+            else:
+                bottom_mask = ((below_low & below_mask) if band_split_low
+                               else np.zeros(dense_w.shape, dtype=bool))
             host_mask = below_mask & ~bottom_mask
             envelope = self._engine_envelope_below_split(
                 lens, dense_w, host_mask)
@@ -3078,10 +3085,17 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         # does not consult the chart, so a draw whose bottom escapes the
         # trained ``log_w`` range is no longer refused whole.
         w_low = self._diffractive_bottom_ceiling(
-            lens, float(dense_w.min()), float(dense_w.max()))
+            lens, w_lo=float(dense_w.min()), w_hi=float(dense_w.max()))
         band_split_low, below_low = _band_split_mask(dense_w, w_low)
-        bottom_mask = ((below_low & below_mask) if band_split_low
-                       else np.zeros(dense_w.shape, dtype=bool))
+        if w_low is not None and w_low >= float(dense_w.max()):
+            # Whole band certified: the analytic diffractive bottom serves
+            # the ENTIRE below-split region and the engine/chart host
+            # collapses to empty.  (The `>=` also absorbs the down-search
+            # branch, which is not capped at ``w_hi``.)
+            bottom_mask = below_mask
+        else:
+            bottom_mask = ((below_low & below_mask) if band_split_low
+                           else np.zeros(dense_w.shape, dtype=bool))
         host_mask = below_mask & ~bottom_mask
         chart_w = dense_w[host_mask]
 

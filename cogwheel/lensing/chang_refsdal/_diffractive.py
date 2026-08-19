@@ -311,38 +311,84 @@ def _honest_tail_ratio(w: float, u0: float, v0: float, s: float,
 def _rootfind_w_high(relerr, lower: float, target: float,
                      w_lo: float | None, w_hi: float | None,
                      max_iter: int = 100) -> float | None:
-    """Largest ``w`` in ``[lower, w_hi]`` whose true relative error is ``<= target``.
+    """Largest ``w`` in ``[lower, w_hi]`` whose RUNNING-MAX relerr ``<= target``.
 
-    Up-search mirror of `_rootfind_w_low`: ``relerr`` is monotone non-decreasing
-    in ``w`` on the low-w band, so the boundary is bracketed by doubling ``hi``
-    from ``lo`` until the error exceeds ``target`` (or ``w_hi`` is reached, or
-    ``hi`` turns non-finite) and then refined by bisection.  ``w_lo`` floors the
-    band; a floor that already fails (``relerr(w_lo) > target``) returns
-    ``None``, and a whole band under ``target`` returns ``w_hi``.
+    First-breach-aware up-search.  The honest N/2N tail ratio is NOT monotone
+    in ``w`` near the first crossing (breach -> dip -> re-breach; the omitted
+    tail's phase oscillates as ``w`` grows toward the divergence), so a raw
+    doubling+bisection can stride over the first breach and certify a band
+    that contains an interior breach.  Instead this search tracks the RUNNING
+    MAXIMUM ``rmax(w) = max_{[lower, w]} relerr``, monotone non-decreasing by
+    construction, and returns the largest ``w`` whose running max still
+    clears ``target`` (the genuine first breach).  ``w_lo`` floors the band (a
+    floor that already fails returns ``None``); ``w_hi`` caps it (a whole band
+    under ``target`` returns ``w_hi``).
+
+    The scan is TWO-TIER: coarse (5%) while ``relerr`` is far under the bar
+    (where it is monotone and feature-free), then fine (0.2%) once ``relerr``
+    nears the bar -- the oscillation's width shrinks as the crossing
+    approaches (measured ~1% at the lowest gamma demand), so the fine tier is
+    sized to the narrowest observed feature, never coarser.  The running max
+    is checked at every scan point, so no breach, however narrow, is stridden
+    over.
+
+    A note on ``w_hi`` and the ``whole-band`` case: ``rmax(w_hi) <= target``
+    is checked, NOT ``relerr(w_hi) <= target`` -- a pointwise top check is
+    unsafe because the tail ratio can breach, dip back under the bar, and
+    re-breach inside the band (the non-monotone witness).  Only the running
+    maximum decides.
     """
-    if w_hi is not None and relerr(w_hi) <= target:
-        return w_hi
     if w_lo is not None and relerr(w_lo) > target:
         return None
     lo = max(lower, w_lo) if w_lo is not None else lower
-    hi = lo
-    for _ in range(max_iter):
-        if relerr(hi) > target:
-            break
-        if w_hi is not None and hi >= w_hi:
-            break
-        hi *= 2.0
-        if not math.isfinite(hi):
-            break
-    if w_hi is not None and hi > w_hi:
-        hi = w_hi
-    for _ in range(max_iter):
-        mid = 0.5 * (lo + hi)
-        if relerr(mid) <= target:
-            lo = mid
+    if not math.isfinite(relerr(lo)):
+        return None
+
+    # Two-tier scan tracking the running maximum.  rmax is monotone by
+    # construction, so the first point whose running max exceeds ``target``
+    # brackets the genuine first breach; the fine tier starts once relerr is
+    # within a factor ``fine_near_bar`` of the bar (the oscillation is only
+    # present near the crossing, well above ``target / fine_near_bar``).
+    scan_step_coarse = 1.05
+    scan_step_fine = 1.002
+    fine_near_bar = 100.0
+    w = lo
+    rmax = relerr(lo)
+    while True:
+        if w_hi is not None and w >= w_hi:
+            return w_hi
+        if rmax > target / fine_near_bar:
+            scan_step = scan_step_fine
         else:
-            hi = mid
-    return lo
+            scan_step = scan_step_coarse
+        w_next = w * scan_step
+        if not math.isfinite(w_next):
+            break
+        r = relerr(w_next)
+        if not math.isfinite(r):
+            r = math.inf
+        rmax = max(rmax, r)
+        if rmax > target:
+            break
+        w = w_next
+    if rmax <= target:
+        return w_hi if w_hi is not None else w
+
+    # First breach bracketed in (w, w_next].  The fine scan ensures the
+    # bracket is narrower than one oscillation lobe, so ``relerr`` is
+    # monotone within it: ``relerr(w) <= target`` (running max at w clears)
+    # and ``relerr(w_next) > target`` (the scan point that broke the loop).
+    # Bisect the CONTINUOUS relerr to float64 convergence -- grid-independent.
+    lo_e, hi_e = w, w_next
+    for _ in range(max_iter):
+        mid = 0.5 * (lo_e + hi_e)
+        if mid <= lo_e or mid >= hi_e:
+            break
+        if relerr(mid) <= target:
+            lo_e = mid
+        else:
+            hi_e = mid
+    return lo_e
 
 
 def diffractive_w_low(y, gamma: float, beta: float = 0.0, kappa: float = 0.0,

@@ -10,6 +10,20 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 Engine-free demand-sized tiling plan shipped (`cogwheel/lensing/tiling_plan.py` + CLI `scripts/tiling_plan.py`, order-7a step 2 of `todo.d/lensing_training_campaign`): `run(...)`/`build_plan(...)` predict the training campaign's per-`region x parity x gamma_band` tile plan and total engine-call cost by refreshing the serve-route demand census and delegating tile enumeration to the production tilers exactly as `tiling_census` does, gating each chart tile on positive `engine_residual` demand and sizing every axis to `n = ceil(span / resolution)`. Also fixes INS-1-001 (DD-band w-axis ceiling clip) via `_resolve_dd_ceiling`, threaded through `build_plan`/`_plan_region`/`_plan_band` with two new source tags recording when a clip fired. Zero wave-optics evaluations; three cross-checks and an escalation verdict are reported, never asserted-fatal.
 
+- `0.48.1` (2026-08-19):
+
+`diffractive_w_low` (Rung P, `_diffractive.py`) now serves to the honest
+first-breach ceiling: the N/2N tail ratio is NOT monotone in `w` near the
+crossing (breach → dip → re-breach; a real order-8 truncation phenomenon,
+engine-confirmed, vanishing at order 16+), so the certificate was over-
+certifying (gamma=0.1 returned 13.9 when the first breach is 12.1, up to +78%
+in `w`). `_rootfind_w_high` is now a two-tier running-max scan (coarse 5% far
+under the bar, fine 0.2% near it) returning the largest `w` whose RUNNING MAX
+clears `CERTIFICATION_BAR`; `_diffractive_bottom_ceiling` takes keyword-only
+`w_lo`/`w_hi`; and the nested c3/Born/census band-split compositions
+whole-band-certify correctly (bottom full, host empty) instead of regressing
+to engine-host. Census and likelihood consumers thread the band verbatim.
+
 - `0.48.0` (2026-08-18):
 
 Documented the low-w diffractive rungs in the microlensing engine

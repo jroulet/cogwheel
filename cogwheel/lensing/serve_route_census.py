@@ -856,10 +856,14 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
             if w_hi > eff_ceiling:
                 w_trust = None
         _band_split, below_mask = mods.band_split_mask(w_grid, w_trust)
-        w_low = mods.diffractive_bottom_ceiling(lens, w_lo, w_hi)
+        w_low = mods.diffractive_bottom_ceiling(
+            lens, w_lo=w_lo, w_hi=w_hi)
         band_split_low, below_low = mods.band_split_mask(w_grid, w_low)
-        bottom_mask = ((below_low & below_mask) if band_split_low
-                       else np.zeros(w_grid.shape, dtype=bool))
+        if w_low is not None and w_low >= float(w_grid.max()):
+            bottom_mask = below_mask
+        else:
+            bottom_mask = ((below_low & below_mask) if band_split_low
+                           else np.zeros(w_grid.shape, dtype=bool))
         host_mask = below_mask & ~bottom_mask
         chart_w = w_grid[host_mask]
 

@@ -1,9 +1,10 @@
 {
   "trigger": "post-commit",
-  "commit": "a69987eaf1614b96708806fbbe76e952bc29fb78",
-  "timestamp": "2026-08-19T05:13:34Z",
+  "commit": "24becc5aba978c5e6b2a80fcf3d66dd900e7bfd3",
+  "timestamp": "2026-08-19T14:19:15Z",
   "touched_files": [
     "cogwheel/lensing/chang_refsdal/_born.py",
+    "cogwheel/lensing/chang_refsdal/_diffractive.py",
     "cogwheel/lensing/likelihood.py",
     "cogwheel/lensing/serve_route_census.py",
     "cogwheel/lensing/tiling_plan.py",

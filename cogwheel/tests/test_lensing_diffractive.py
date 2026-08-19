@@ -172,11 +172,13 @@ LOW_HEADROOM_GAMMA = 0.03
 #: draws where `_honest_tail_ratio` is monotone in ``w`` on the served band.
 TIGHT_GAMMAS = CLEAN_GAMMAS + (LOW_HEADROOM_GAMMA,)
 
-#: `TIGHT_GAMMAS` minus ``gamma = 0.1``, the single draw whose honest tail
-#: ratio is NON-monotone (breach near w~12.4, dip ~13.0-13.6, breach ~13.9),
-#: so its ceiling is not a single clean N/2N crossing.  Used by the crossing
-#: sweep; gamma=0.1 is pinned by the non-monotonicity witness instead.
+#: `TIGHT_GAMMAS` minus ``gamma = 0.1``, the draw whose honest tail ratio is
+#: NON-monotone (breach near w~12.4, dip ~13.0-13.6, breach ~13.9).  The
+#: ceiling sweep is scoped to the monotone gammas; gamma=0.1 is covered by the
+#: first-breach witness and the re-targeted engine-honesty sweep (whose
+#: `0.9*w_low` endpoint is green once the ceiling is the first breach).
 TIGHT_MONOTONE_GAMMAS = (LOW_HEADROOM_GAMMA, 0.2, 0.3)
+TIGHT_ALL_GAMMAS = CLEAN_GAMMAS + (LOW_HEADROOM_GAMMA,)
 
 KAPPA_WITNESS = (0.3, 0.2, 0.7)
 
@@ -944,10 +946,13 @@ class NestedNullSplitByteIdentityTestCase(DiffractiveTestCase):
         """Reproduce the production nested-split composition verbatim."""
         _bs, below_mask = _band_split_mask(dense_w, w_split)
         w_low = LensedRelativeBinningLikelihood._diffractive_bottom_ceiling(
-            None, lens, float(dense_w.min()), float(dense_w.max()))
+            None, lens, w_lo=float(dense_w.min()), w_hi=float(dense_w.max()))
         band_split_low, below_low = _band_split_mask(dense_w, w_low)
-        bottom_mask = ((below_low & below_mask) if band_split_low
-                       else np.zeros(dense_w.shape, dtype=bool))
+        if w_low is not None and w_low >= float(dense_w.max()):
+            bottom_mask = below_mask
+        else:
+            bottom_mask = ((below_low & below_mask) if band_split_low
+                           else np.zeros(dense_w.shape, dtype=bool))
         host_mask = below_mask & ~bottom_mask
         return w_low, band_split_low, below_mask, bottom_mask, host_mask
 
@@ -1118,19 +1123,24 @@ class CeilingTightnessTestCase(DiffractiveTestCase):
     candidate-clears domain, and pins that the ceiling is a GEOMETRY property
     (band-independent), not an artifact of how the band is threaded.
 
-    MEASURED NON-MONOTONICITY (escalated, not papered over)
-    -------------------------------------------------------
+    MEASURED NON-MONOTONICITY (escalated, then RESOLVED by the first-breach
+    search)
+    --------------------------------------------------------------------
     At ``gamma = 0.1`` the honest tail ratio is NOT monotone in ``w``: it
     breaches the bar near ``w ~ 12.4``, dips back under it over ``~13.0-13.6``,
     and breaches again near ``13.9``.  The engine oracle agrees to 6 significant
     figures, so the dip is a real feature of the truncation error, not an
-    estimator artefact.  The bisection up-search returns the LAST crossing
-    (``~13.9``), certifying a band ``[0, 13.9]`` that contains the ``12.4``
-    breach (``1.19e-4 > 1e-4``) -- an over-certification.  ``gamma = 0.1`` is
-    therefore EXCLUDED from the crossing sweep (its ``0.9*w*`` probe is red by
-    construction) and pinned separately by
-    `test_nonmonotone_tail_ratio_witness_gamma_0_1`, which flips the moment the
-    up-search is made first-breach-aware.  See the change report.
+    estimator artefact (it also vanishes at truncation order 16+: the series is
+    convergent, and the re-crossing is an order-8 phenomenon).  A naive
+    bisection up-search returns the LAST crossing (``~13.9``), certifying a
+    band ``[0, 13.9]`` that contains the ``12.4`` breach -- an
+    over-certification.  The first-breach-aware `_rootfind_w_high` (two-tier
+    running-max scan, then continuous bisection inside one oscillation lobe)
+    returns the FIRST crossing (``~12.1``), so ``gamma = 0.1`` now passes the
+    full crossing sweep below (band-independent, and ``0.9*w*``/``1.5*w*``
+    probes green).  It is additionally pinned by
+    `test_nonmonotone_tail_ratio_witness_gamma_0_1`, which asserts the ceiling
+    sits at or below the first breach.
     """
 
     def test_ceiling_is_honest_crossing(self):
@@ -1139,10 +1149,11 @@ class CeilingTightnessTestCase(DiffractiveTestCase):
         The straddling band ``[0.5*w*, 2*w*]`` brackets the honest ceiling; the
         three probes confirm the returned ceiling is where the honest N/2N
         ratio crosses the bar -- a wrong (arbitrary) bracket displaces the
-        crossing from ``w*``.  Scoped to the monotone gammas (0.03, 0.2, 0.3);
-        gamma=0.1 is non-monotone (see class docstring).
+        crossing from ``w*``.  Includes the non-monotone gamma=0.1, whose
+        first-breach ceiling now satisfies all three probes and band
+        independence (see class docstring).
         """
-        for gamma in TIGHT_MONOTONE_GAMMAS:
+        for gamma in TIGHT_ALL_GAMMAS:
             w_star = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
             w_lo, w_hi = 0.5 * w_star, 2.0 * w_star
             w_banded = diffractive_w_low(Y_REF, gamma, 0.0, 0.0,
@@ -1173,15 +1184,17 @@ class CeilingTightnessTestCase(DiffractiveTestCase):
                                    f'gamma={gamma}')
 
     def test_nonmonotone_tail_ratio_witness_gamma_0_1(self):
-        """Pin the gamma=0.1 non-monotonicity: dip AND over-certification.
+        """Pin gamma=0.1 first-breach-awareness: ceiling BELOW the dip.
 
         The honest tail ratio breaches the bar near ``w ~ 12.4``, DIPS back
         under it over ``~13.0-13.6``, and breaches again near ``13.9`` -- so it
-        is not monotone in ``w``.  Consequence: the unbounded up-search returns
-        a ceiling ABOVE the first breach, so the served band hosts a point
-        whose error exceeds the bar.  This witness flips red the moment either
-        the tail ratio is made monotone or the up-search is made
-        first-breach-aware.
+        is not monotone in ``w``.  The first-breach-aware up-search returns the
+        FIRST crossing (``~12.1``), NOT the last (``~13.9``), so the served
+        band ``[0, w_low]`` contains no interior breach.  This test asserts
+        the first-breach property directly: the ceiling sits at or below the
+        first breach ``w ~ 12.5``.  (The pre-fix search returned ~13.9 and
+        this assertion was ``assertGreater(w_ceiling, 12.5)`` -- red-by-design
+        until the up-search became first-breach-aware.)
         """
         gamma = 0.1
         breach = _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0, 12.5)
@@ -1194,10 +1207,11 @@ class CeilingTightnessTestCase(DiffractiveTestCase):
         self.assertLess(dip, breach,
                         'tail ratio is now monotone (dip >= breach)')
         w_ceiling = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
-        self.assertGreater(
+        self.assertLessEqual(
             w_ceiling, 12.5,
-            'up-search no longer over-certifies (ceiling <= first breach); '
-            'the tightness sweep may now admit gamma=0.1')
+            'up-search over-certifies past the first breach at gamma=0.1 '
+            f'(ceiling={w_ceiling:.2f} > 12.5); the served band would '
+            'contain the ~12.4 interior breach')
 
     def test_diagnostic_plot_ceiling_tightness(self):
         """Save tail_ratio vs w with the bar line (monotone gammas)."""
@@ -1373,7 +1387,7 @@ class WrapperFidelityBandRoutingTestCase(DiffractiveTestCase):
                 (self.LENS['y1'], self.LENS['y2']), self.LENS['gamma'],
                 self.LENS['beta'], self.LENS['kappa'], w_lo=w_lo, w_hi=w_hi)
             wrapped = LensedRelativeBinningLikelihood._diffractive_bottom_ceiling(
-                None, self.LENS, w_lo, w_hi)
+                None, self.LENS, w_lo=w_lo, w_hi=w_hi)
             self.n_compared += 1
             with self.subTest(w_lo=w_lo, w_hi=w_hi):
                 self.assertEqual(wrapped, direct)
@@ -1407,8 +1421,16 @@ class WrapperFidelityBandRoutingTestCase(DiffractiveTestCase):
         self.assertFalse(bottom.any())
         self.assertTrue(np.array_equal(host, below))
 
-    def test_band_split_byte_identity_when_whole_band_clear(self):
-        """w_low >= w_hi (whole band under bar) -> w_hi -> host == below."""
+    def test_band_split_whole_band_clear_collapses_host(self):
+        """w_low >= w_hi (whole band under bar) -> bottom FULL, host empty.
+
+        The diffractive bottom (Rung P) is honest at every node of a
+        whole-band-certified draw, so it must serve the ENTIRE below-split
+        region and the engine/chart host must collapse to empty -- the
+        ``w_low >= dense_w.max()`` composition special-case.  This is the
+        point of the band-aware certificate (INS-1-003); leaving the host
+        full regresses HEAD's non-empty analytic bottom to engine hosting.
+        """
         w_hi = 3.0
         r_top = _honest_tail_ratio_at(Y_REF, self.LENS['gamma'], 0.0, 0.0, w_hi)
         self.assertLessEqual(r_top, CERTIFICATION_BAR,
@@ -1419,10 +1441,9 @@ class WrapperFidelityBandRoutingTestCase(DiffractiveTestCase):
             NestedNullSplitByteIdentityTestCase._compose(
                 dense, None, self.LENS))
         self.n_compared += 1
-        self.assertEqual(wl, w_hi)       # whole-band certificate collapses host
-        self.assertFalse(band_split_low)   # w_hi not strictly interior
-        self.assertFalse(bottom.any())
-        self.assertTrue(np.array_equal(host, below))
+        self.assertEqual(wl, w_hi)          # whole-band certificate
+        self.assertTrue(np.array_equal(bottom, below))   # bottom FULL
+        self.assertFalse(host.any())        # host empty
 
 
 class DiffractiveSelfFalsificationTestCase(DiffractiveTestCase):
