@@ -1,11 +1,12 @@
 {
   "trigger": "post-commit",
-  "commit": "b50c6d49f89a530b5b5e41441c77fb41d4e24753",
-  "timestamp": "2026-08-18T22:17:32Z",
+  "commit": "a69987eaf1614b96708806fbbe76e952bc29fb78",
+  "timestamp": "2026-08-19T05:13:34Z",
   "touched_files": [
     "cogwheel/lensing/chang_refsdal/_born.py",
     "cogwheel/lensing/likelihood.py",
     "cogwheel/lensing/serve_route_census.py",
+    "cogwheel/lensing/tiling_plan.py",
     "cogwheel/tests/test_lensing_born_analytic_reachability.py",
     "cogwheel/tests/test_lensing_born_certificate.py",
     "cogwheel/tests/test_lensing_diffractive.py",
@@ -13,6 +14,7 @@
     "cogwheel/tests/test_lensing_ppgo_above_ceiling.py",
     "cogwheel/tests/test_lensing_saddle_likelihood.py",
     "cogwheel/tests/test_lensing_saddle_serve_gate.py",
-    "cogwheel/tests/test_lensing_serve_route_census.py"
+    "cogwheel/tests/test_lensing_serve_route_census.py",
+    "cogwheel/tests/test_lensing_tiling_plan.py"
   ]
 }
