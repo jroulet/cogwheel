@@ -619,36 +619,18 @@ class CertificateOptimismWitnessTestCase(DiffractiveTestCase):
     never served with an over-bar band.
     """
 
-    def test_optimistic_regime_is_honest_at_order_16(self):
-        """gamma' in {0.4, 0.5}: the honest gate admits a REAL ceiling.
-
-        At the shipped truncation order 8 these gammas sat in the deep
-        optimistic regime (candidate over the bar, self-refused).  The order-16
-        truncation (adopted by the order scan: monotone ceiling rise AND a
-        4.5 pct-point engine_residual drop) genuinely extends reach, so the
-        gate now admits a positive ceiling -- verified honest against the
-        exact engine at the served band (worst rel-err ~1.000e-4 at w_low,
-        within the 1% estimator allowance).  The assertion is a VALUE claim on
-        the engine-honest ceiling, not a path claim.
-        """
+    def test_optimistic_regime_is_refused(self):
+        """gamma' in {0.4, 0.5}: the honest gate declines (returns None)."""
         for gamma in OPTIMISTIC_GAMMAS:
             w_low = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
             self.n_compared += 1
             with self.subTest(gamma=gamma):
-                self.assertIsNotNone(w_low)
-                self.assertGreater(w_low, 0.0)
-                # Honest against the exact engine at the ceiling (1% allowance
-                # for the N/2N estimator's zero margin exactly at w_low).
-                w_probe = 0.95 * w_low
-                f_p = diffractive_amplification(
-                    w_probe, Y_REF, gamma, 0.0, 0.0)
-                f_e = _engine_reference(w_probe, Y_REF, gamma, 0.0)
-                rel = abs(f_p - f_e) / abs(f_e)
-                self.assertLessEqual(
-                    rel, CERTIFICATION_BAR,
-                    f'order-16 admit over-certifies at gamma={gamma}: '
-                    f'rel-err {rel:.3e} > bar at w={w_probe:.3f} '
-                    f'(w_low={w_low:.3f})')
+                self.assertIsNone(
+                    w_low,
+                    'OPTIMISM RETURNED? the honest self-consistency gate '
+                    f'admitted the optimistic regime at gamma={gamma} '
+                    f'(w_low={w_low}); it must decline it so no over-bar band '
+                    'is served.')
 
 
 class KappaEngineOracleTestCase(DiffractiveTestCase):
@@ -1201,46 +1183,35 @@ class CeilingTightnessTestCase(DiffractiveTestCase):
                                    f'ceiling is an arbitrary low clamp at '
                                    f'gamma={gamma}')
 
-    def test_order_16_reaches_past_the_order_8_re_crossing(self):
-        """At the shipped order 16 the gamma=0.1 re-crossing is GONE.
+    def test_nonmonotone_tail_ratio_witness_gamma_0_1(self):
+        """Pin gamma=0.1 first-breach-awareness: ceiling BELOW the dip.
 
-        At order 8 the honest tail ratio breaches the bar near ``w ~ 12.4``,
-        dips under it over ``~13.0-13.6``, and re-breaches near ``13.9`` -- a
-        genuine (engine-confirmed) non-monotonicity that the first-breach
-        search must not stride over.  Raising the truncation order to 16
-        (adopted by the order scan) CONVERGES that re-crossing away: the
-        order-16 tail ratio is far under the bar at the old 12.5/13.2 breach
-        points and the honest ceiling extends to ``~40.9``.  This pins the
-        convergent-series property (a physical reach gain, not a broken
-        refusal) and that the served band is still interior-breach-free
-        against the exact engine at the new ceiling.
+        The honest tail ratio breaches the bar near ``w ~ 12.4``, DIPS back
+        under it over ``~13.0-13.6``, and breaches again near ``13.9`` -- so it
+        is not monotone in ``w``.  The first-breach-aware up-search returns the
+        FIRST crossing (``~12.1``), NOT the last (``~13.9``), so the served
+        band ``[0, w_low]`` contains no interior breach.  This test asserts
+        the first-breach property directly: the ceiling sits at or below the
+        first breach ``w ~ 12.5``.  (The pre-fix search returned ~13.9 and
+        this assertion was ``assertGreater(w_ceiling, 12.5)`` -- red-by-design
+        until the up-search became first-breach-aware.)
         """
         gamma = 0.1
-        # Premise: the order-8 re-crossing is gone at order 16 (series
-        # convergent, per the order scan).
-        self.assertLess(
-            _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0, 12.5),
-            CERTIFICATION_BAR,
-            'premise lost: order-16 tail ratio still breaches at w=12.5')
-        self.assertLess(
-            _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0, 13.2),
-            CERTIFICATION_BAR,
-            'premise lost: order-16 tail ratio still breaches at w=13.2')
-        w_ceiling = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
+        breach = _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0, 12.5)
+        dip = _honest_tail_ratio_at(Y_REF, gamma, 0.0, 0.0, 13.2)
         self.n_compared += 1
-        self.assertGreater(
-            w_ceiling, 12.5,
-            f'order-16 ceiling did not extend past the order-8 re-crossing '
-            f'(w_ceiling={w_ceiling:.2f} <= 12.5)')
-        # The extended band is honest against the exact engine at its top.
-        w_probe = 0.95 * w_ceiling
-        f_p = diffractive_amplification(w_probe, Y_REF, gamma, 0.0, 0.0)
-        f_e = _engine_reference(w_probe, Y_REF, gamma, 0.0)
-        rel = abs(f_p - f_e) / abs(f_e)
+        self.assertGreater(breach, CERTIFICATION_BAR,
+                           'premise lost: no breach near w=12.5 at gamma=0.1')
+        self.assertLess(dip, CERTIFICATION_BAR,
+                        'premise lost: no dip under the bar near w=13.2')
+        self.assertLess(dip, breach,
+                        'tail ratio is now monotone (dip >= breach)')
+        w_ceiling = diffractive_w_low(Y_REF, gamma, 0.0, 0.0)
         self.assertLessEqual(
-            rel, CERTIFICATION_BAR,
-            f'order-16 extended ceiling over-certifies at gamma=0.1: '
-            f'rel-err {rel:.3e} > bar at w={w_probe:.3f}')
+            w_ceiling, 12.5,
+            'up-search over-certifies past the first breach at gamma=0.1 '
+            f'(ceiling={w_ceiling:.2f} > 12.5); the served band would '
+            'contain the ~12.4 interior breach')
 
     def test_diagnostic_plot_ceiling_tightness(self):
         """Save tail_ratio vs w with the bar line (monotone gammas)."""

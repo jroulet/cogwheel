@@ -61,7 +61,7 @@ from cogwheel.lensing.chang_refsdal._hyp1f1 import (
 #: ``(gamma' s w / 2)**n / n!`` (Notes in `diffractive_w_low`), so eight orders
 #: are ample across the certified low-w band; the certificate reads the first
 #: omitted term at order ``M + 1``.
-_DEFAULT_MAX_ORDER = 16
+_DEFAULT_MAX_ORDER = 8
 
 #: Safety factor tightening the certification bar, matching the high-w c3
 #: certificate precedent (`likelihood._saddle_c3_split_point` uses 20.0).  No
