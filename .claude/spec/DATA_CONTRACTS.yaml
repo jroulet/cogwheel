@@ -13,7 +13,7 @@
 #   MINOR: new artifacts, conventions, or consumer/producer entries
 #   PATCH: field list corrections, wording fixes
 
-schema_version: "3.3.0"
+schema_version: "3.3.1"
 
 # ── Conventions ──────────────────────────────────────────────────────────
 # Define project-wide data conventions here. These are referenced by
