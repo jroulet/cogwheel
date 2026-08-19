@@ -751,3 +751,29 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   amplification, closed-form ppGO image-kernel sum), none of which reads
   the captured total -- confirms the demod/remod algebra is an exact
   round-trip, not just self-consistent.
+
+## 2026-08-19 (tiling_plan campaign cost predictor, ruling + PASS confirmation)
+- Demand-sized tiling axis laws (cogwheel/lensing/tiling_plan.py), PASS-
+  confirmed against production + an independent oracle (39/39 tests):
+  Law 1 (gamma resolution) = `_C_GAMMA(0.4) * r_caustic / |dr/dgamma|` via
+  central finite-difference on the engine-free `_scalar_caustic_reach`,
+  step clamped to stay on one side of the parity wall; monotonically
+  tightens toward gamma=1 on both sides. Cross-checked against an
+  INDEPENDENT polar sweep of `geometry.r_caustic` (astroid on-axis,
+  machine-exact ~2e-16; saddle off-axis needs a finer grid than the
+  91-pt check affords, so that side is carried by the closed form only).
+  Law 3 (w-node density) = `ceil(per_decade * log10(w_hi/w_lo))`, interior
+  15/dec vs exterior 4/dec (matches SACR-C fast-fringe vs beat-free-
+  residual density); w-edges must be MEASURED demand edges per region
+  (never a blanket ceiling), with above-ceiling residual clipped to the DD
+  ceiling (60). Annulus bounds carry an explicit `gauge` field; astroid
+  caustic_rho round-trips through the independent `ppgo_map.caustic_rho`
+  to 1e-6; saddle uses the real rho_lobe prior edge (~20), not the retired
+  2.40 cap. Escalation verdict uses STRICT `>` on both caps (total calls
+  5e5, region share 0.40) and only RECORDS, never raises.
+- n=100-2000 sample census probes are UNDERSAMPLING ARTIFACTS, not real
+  region-share signals — a probe that trips the 0.40-share escalation
+  reason with only 1 region catching any demand is the predicate working
+  as designed on too few draws, not evidence of an actual imbalance; the
+  real per-region distribution requires the full 10k-sample census (a
+  >240s operator-deferred run), not a quick smoke sample.

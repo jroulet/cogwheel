@@ -90,7 +90,11 @@
   `.claude/agent_state/foreman_lite.json` as a side effect — revert both
   with `git checkout --` and don't commit them; "All surfaces up to date"
   with zero real diff is a legitimate clean-backlog outcome, not a missed
-  check.
+  check. CAVEAT (2026-08-19, tiling_plan sync): the side-effect file set
+  is NOT fixed — `foreman_lite.json` is sometimes untouched while
+  `tidy_advisory.json` still dirties. Always check
+  `git status --porcelain` fresh after each render rather than assuming a
+  constant pair to revert.
 - When a changelog/TODO fragment reports "N new tests", SUM the literal
   per-report test counts from each contributing agent's own change report
   rather than eyeballing a round total — an un-summed guess is an easy
@@ -413,13 +417,16 @@
   convention.
 
 ## 2026-08-17 (serve_route_census doc sync)
-- STANDING RULE (confirmed 3x: tiling_census 08-14, saddle_tube_fundamental_
-  training 08-15, serve_route_census 08-17): "new lensing census/training
-  module shipped" is a standing trigger to add a dated inline paragraph to
-  SPEC.md's big Microlensing-engine table row — `sync_derived_docs.py`
-  reporting "N checks, all OK" only verifies mechanical/structural
-  completeness, NOT this narrative depth, so a clean sync run is not
-  evidence the row is current.
+- STANDING RULE (confirmed 5x+: tiling_census 08-14, saddle_tube_fundamental_
+  training 08-15, serve_route_census 08-17, tiling_plan 08-19, and its
+  companion F083/tube_trainer_subarc_trim build): "new lensing census/
+  training module shipped" is a standing trigger to add a dated inline
+  paragraph to SPEC.md's big Microlensing-engine table row —
+  `sync_derived_docs.py` reporting "N checks, all OK" only verifies
+  mechanical/structural completeness, NOT this narrative depth, so a clean
+  sync run is not evidence the row is current. This is now the STANDARD
+  expectation after every lensing-census/training-family build, not a
+  recurring surprise to keep re-discovering.
 - INS-N-00N inspector finding labels are NOT persistent cross-build IDs
   (unlike F0xx FINDINGS numbers) — the same label (e.g. INS-1-001) recurs
   across unrelated builds; don't assume label reuse means doc staleness

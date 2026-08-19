@@ -18,9 +18,15 @@
 - ROUTING (recurring, 5x+): doc-sync/SPEC findings -> post-gate Librarian
   with exact replacement text (SPEC.md in files_affected is informational);
   findings confined to test-file fixtures/constants/categories -> Test
-  Developer, never Coder. When a WP is deliberately redirected off the
-  default agent, NAME the executing agent inside coder_instructions — an
-  implicit redirect silently mis-routes back to the default.
+  Developer, never Coder. EXCEPTION (2026-08-19, tiling_plan INS-2-001): a
+  FULLY PRESCRIPTIVE finding — exact new input/expected-output boundary
+  cases spelled out, extending an EXISTING fixture/test class, no
+  production change — may pipeline to Coder as a cheap fixture edit
+  instead of opening a fresh Test Developer WP; the Test-Developer-only
+  rule targets open-ended test authorship, not finishing a fully-specified
+  case. When a WP is deliberately redirected off the default agent, NAME
+  the executing agent inside coder_instructions — an implicit redirect
+  silently mis-routes back to the default.
 - Inspector SPEC-staleness findings caused by a completed build (not a
   Coder defect) should be OVERRIDDEN as Librarian-routed at triage rather
   than surfaced as Coder work; include the exact suggested replacement text
@@ -826,3 +832,26 @@
   needs an ADDITIONAL lower resolution fence (w_lo*delta_min >= RHO_END);
   positive parity gets its floor free via the diffractive rung. Lead-only
   carrier stays the single shared carrier -- no two-carrier fork.
+
+## 2026-08-18/19 (campaign_tiling_design 7a-step2 tiling_plan + tube_trainer_subarc_trim/F083)
+- Demand-sized tiling-plan WPs: derive every axis from measured/closed-form
+  quantities, never a blanket literal — gamma_res=C*r_caustic/|dr_caustic/
+  dgamma| (bands butt the parity wall, never straddle it); n_theta=ceil(a
+  density kappa * trimmed arc span), not a bare node count; w-axis=
+  [measured w_lo,w_hi] taken PER DEMAND CELL (different regions carry
+  different measured edges — never one blanket ceiling for all); annulus
+  bounds declared in ONE named gauge (e.g. caustic_rho vs rho_lobe),
+  converted via the correct radius ratio, never silently mixed. Cost =
+  calls*SECONDS_PER_CALL, cross-checked against >=2 independent estimates;
+  escalate (RECORD a verdict, never raise) if total calls or any single
+  region's share exceeds a hard cap. A census/data refresh a new planning
+  WP depends on is a PREAMBLE step folded into that WP, not its own WP.
+- Promoting an algorithm from a test fixture into production (F083 tube
+  arc-trim -> `_trim_tube_arc`): gate strictly on the TOPOLOGICAL invariant
+  (parity/sign of det A), never a profile predicate; derive the safety
+  margin from the single worst (binding-corner) case and rely on
+  monotone-nesting for the rest; ship the tuned scan constants verbatim
+  (re-tuning forbidden); treat "engine refuses everywhere on this fixture"
+  as a drifted-core loud-failure trip-wire to preserve, not soften. The
+  ~200s acceptance spot-check is a DRIVER post-build step, not a permanent
+  test.

@@ -586,3 +586,11 @@
   serves is even reachable engine-free before flagging; if not, it's a
   documented gap for a future engine-aware probe, not a stub-hides-
   attribute finding.
+
+## 2026-08-19 (tiling_plan pass-4 PASS)
+- DELIVERABLE-ARTIFACT-ABSENT IS NOT AUTOMATICALLY A DEFECT: when a build's
+  target output (e.g. a `.claude/handoff/*.json`) doesn't exist on disk yet
+  but the function that would produce it (`run()`/`build_plan()`) is
+  exercised end-to-end by a passing test and its logic is independently
+  verified, carry the missing artifact forward as a DRIVER run-the-CLI
+  step, not a code defect — don't block the build on an operator action.

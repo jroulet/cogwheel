@@ -991,3 +991,36 @@
   propagating exception (e.g. LensDomainError) from that now-reached geom
   solve is outcome-preserving, not a regression, if the engine path below
   would raise the identical error for the same geometry.
+
+## 2026-08-18/19 build (tiling_plan campaign module + F083 arc-trim promotion)
+- New engine-free demand-sized module pattern (tiling_plan.py, mirrors
+  tiling_census.py): lazy `_load_production_modules()`, never import
+  surrogate_census (pulls the engine at module load). Cost currency
+  SECONDS_PER_CALL=0.0903 reconciled against tiling_census's
+  _SECONDS_PER_LABEL=0.09 in an emitted note (deliberate ~0.3% gap, not a
+  DRY defect); total_calls = total_nodes * _LABELS_PER_NODE(8), single-
+  sourced from tiling_census. Escalation verdict is RECORDED
+  (should_escalate + reasons), never raised.
+- w-axis DD-ceiling clip bug pattern: an axis helper that reports a
+  MEASURED upper edge from demand records must also clip it to any
+  documented hard ceiling (here the DD engine ceiling, single-sourced via
+  census header `w_band_edges['w_ceiling_dd']`, propagated through every
+  call layer as a trailing `Optional[float]=None` kwarg with a lazy
+  fallback resolver) — clip BOTH the "records exist" branch and the
+  "empty records -> prior-box fallback" branch, and emit a distinguishing
+  source tag for each (e.g. 'measured_clipped_dd' /
+  'prior_box_fallback_clipped_dd') so downstream consumers/tests can tell
+  a clipped edge from a genuinely-measured one.
+- Adding a new trailing optional kwarg with a lazy-resolving default is the
+  standard backward-compat move when threading a new cross-cutting value
+  (ceiling, tolerance, etc.) through several existing helper layers whose
+  callers (esp. test fixtures) are all positional and pre-date the change.
+- Promoting a test-fixture algorithm into production (F083 tube arc-trim ->
+  `surrogate_training._trim_tube_arc`, keyword-only args): copy the tuned
+  scan verbatim (constants + point count), gate strictly on the parity
+  argument FIRST (`if parity != 1: return arc` — byte-identical passthrough
+  for the ungated case), and if the trimmed value feeds a closure default
+  bound at def-time (e.g. `arc=arc` in a nested builder), reassign the
+  loop-local variable BEFORE that closure is defined so the trim actually
+  propagates — a trim computed after the closure captures the old value
+  silently.

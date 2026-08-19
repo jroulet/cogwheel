@@ -791,3 +791,43 @@
   stays production, so earlier intercepts still return before any wave
   door is touched. Cheaper and more faithful than reimplementing the
   whole classify_draw dispatch with mocks.
+
+## 2026-08-18 (tiling_plan test suite + F083 arc-trim promotion re-point, consolidated)
+- TOOLING: `cat >> file <<EOF` appends via the shell are hook-BLOCKED
+  intermittently (works a couple of times then blocks mid-session); for
+  large test-class appends use `mcp__serena__insert_after_symbol` on the
+  last class in the file instead of a heredoc append.
+- ENGINE-FREE WHOLE-TOOL PROOF, mpmath refinement: "mpmath never in
+  sys.modules" is UNACHIEVABLE when the package under test imports mpmath
+  eagerly at package-import time (e.g. via a submodule constant) — the
+  load-bearing substitute is booby-trapping the actual special-function
+  entry point (e.g. `mpmath.gauss_quadrature`) with a sentinel exception
+  and asserting call_count==0, paired with a LIVE positive-control re-arm
+  that proves the same door actually raises when called (kills a
+  vacuous/mis-targeted patch). Same pattern for the other wave doors
+  (engine `.evaluate`, `f_schwinger`, `_f_schwinger_mpmath`) — assert each
+  sentinel is disjoint from the module's caught-refusal exception tuple so
+  a future widening of that tuple can't silently swallow the trap.
+- CALL-ORDER INJECTION for a pure-arithmetic scan helper composed of
+  several chained calls (source -> geometry -> frame_delays ->
+  fold-pair): let the early calls run for real (cheap, deterministic) so
+  only the LAST one is the actual signal source, then patch that one with
+  a call-counter mapping call index -> a synthetic bespoke profile. Lets
+  you inject an arbitrary Delta_tau(theta)-style profile engine-free and
+  pin the downstream affine/selection arithmetic bit-exact, plus run a
+  targeted self-falsification (swap two adjacent synthetic samples to move
+  a selected index by exactly one and assert the output changes).
+- DRY RE-POINT after promoting a fixture algorithm to production: retire
+  the fixture-local duplicate helper + its constants, replace with a
+  single call to the new production function; if the production constants
+  match the retired fixture literals byte-for-byte the downstream golden
+  values are provably unchanged, and any PRE-EXISTING assertion tied to
+  that code path (e.g. `refused==0`) becomes a guard on the production
+  implementation for free.
+- INDEPENDENT-ORACLE GRID ASYMMETRY: when validating a closed-form radius
+  formula against an independent polar-sweep oracle, an ON-AXIS extremum
+  (astroid) is exact to a coarse grid (hits a grid point, ~1e-16), but an
+  OFF-AXIS extremum (saddle/deltoid) can be missed by 6-9% on the same
+  coarse grid — don't extend the tight-tolerance oracle check to the
+  off-axis case; carry it via the closed form's own monotonicity instead
+  and scope the independent-oracle assertion to the axis-aligned case only.
