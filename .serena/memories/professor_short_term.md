@@ -1,47 +1,39 @@
-# Session: diffractive_w_low certificate reach — narrow-reading ruling (2026-08-19)
+## Ruling: INS-1-003 (diffractive_certificate_reach build) — COMPOSITION bug, not docstring
 
-Context: Build brief `.claude/handoff/diffractive_certificate_reach.md` says
-`diffractive_w_low` (Rung P, positive parity, `_diffractive.py:282`) "only ever
-searches DOWNWARD" and ships a conservative candidate verbatim; the fix is to serve
-up to the honest ceiling. A prior ruling #2 (mine, apparently) was read by the
-inspector as "remove the deep-optimistic self-refuse branch." The inspector found
-this collides with two shipped INS-1-001 honest-gate pins in
-`test_lensing_diffractive.py`:
-- `CertificateOptimismWitnessTestCase.test_optimistic_regime_is_refused`
-  (OPTIMISTIC_GAMMAS {0.4,0.5} -> None), and
-- `WLowMonotonicityWitnessTestCase.test_near_wall_band_is_refused`
-  (GAMMAS_TO_WALL 0.90..0.994 -> None).
+`_diffractive_bottom_ceiling` (band-aware) returns `w_low == w_hi` when the whole
+dense band clears the diffractive N/2N bar (`_rootfind_w_high` line 323: `if
+relerr(w_hi) <= target: return w_hi`). The nested-split composition reuses
+`_band_split_mask(dense_w, w_low)`, whose strict-interior test (`w_lo < split <
+w_hi`) fails at `w_low == w_hi`, so `band_split_low=False` and the
+`if band_split_low else zeros` branch empties `bottom_mask`; `host_mask` becomes
+the whole below-split region. F_P (Rung P) serves ZERO nodes.
 
-## Ruling (this session)
-The inspector's NARROW reading is CORRECT and I endorsed it. The ONLY bug is that a
-candidate already clearing the bar is shipped verbatim instead of being extended UP
-to the honest ceiling. Both None-returning branches STAY:
-- `honest_error > _DIFFRACTIVE_CERT_SAFETY * CERTIFICATION_BAR -> None` (deep
-  optimistic / near-wall) — this is the F009 / WLowMonotonicity physics: near the
-  parity wall the omitted tail is worst and MUST be declined. Removing it would let a
-  down/convergent search find a tiny positive w (relerr->0 as w->0) and ship a small
-  positive ceiling instead of None — physically wrong (serving where truncation is
-  worst) and overturns shipped pins.
-- The `_rootfind_w_low` down-search on the in-between over-reaching band STAYS.
+Key mis-anchor: HEAD's `diffractive_w_low` returned the CONSERVATIVE candidate
+(brief fact 1: 23-405x below the honest ceiling, never up-searched). For a
+whole-band-eligible low-gamma draw, HEAD's `w_low = candidate` sat STRICTLY inside
+`[w_lo, w_hi]` -> non-empty bottom (F_P served `[w_lo, candidate)`), chart hosted
+`[candidate, w_trust]`. HEAD only "hosted everything" when the candidate itself
+>= w_hi (rare). So the plan's "byte-identity where w_low >= w_hi" conflates the
+rare HEAD candidate-overshoot case with the NEW common whole-band-certified case;
+leaving the composition as-is REGRESSES HEAD (F_P serves nothing where HEAD served
+a non-empty bottom) and defeats the brief's "serve to the honest ceiling".
 
-The up-bracket is added ONLY on the `honest_error <= CERTIFICATION_BAR` path.
+Fix (composition-level, NOT in `_band_split_mask`): special-case
+`w_low >= float(dense_w.max())` -> `bottom_mask = below_mask` (full region),
+host empty. Do NOT relax `_band_split_mask`'s strict interior: the outer splits
+(w_split / w_trust / trained_floor) load-bear on "edge = no-op" (below_mask
+all-True null-split identity; trained-floor "genuine strict sub-band" guard
+`band_split_floor and ...`). Macro-saddle (gamma>1) returns None -> unaffected.
 
-## Two decisive sub-rulings
-- Q2 (ceiling target): the up-search targets the OUTER bar CERTIFICATION_BAR (1e-4),
-  NOT bar_inner (5e-6). Rationale: relerr is the full 2M-tail-ratio, already a
-  conservative over-estimate vs the exact engine (the honest verifier is N/2N tail
-  ratio, brief fact 4); the 20x safety margin is a CANDIDATE-PLACEMENT margin (keeps
-  the candidate away from the cliff so verification is stable), not a serving margin.
-  The honest verifier IS the oracle proxy; serving to relerr==CERTIFICATION_BAR is by
-  definition serving to the bar. Engine-honesty acceptance (brief) re-confirms this.
-  Tightness multiplier: 1.5x the ceiling must breach the bar (brief already says so).
-- Q3 (monotone): confirmed. Candidate-clears path grows (up-search only), refuse path
-  is None==None. Brief MONOTONE acceptance satisfied without touching refuse regime.
+Latent secondary: `_rootfind_w_low` (down-search branch) is NOT capped at w_hi,
+so `_diffractive_bottom_ceiling` can return w_low > w_hi there; the `>= w_hi`
+special-case covers it, but the certificate should cap BOTH branches (return w_hi
+whenever the certified region extends past the band top).
 
-## Watch item (raised in plan, not a blocker)
-_rootfind_w_low assumes relerr MONOTONE NON-DECREASING in w. The up-bracket must not
-overshoot into a region where that monotonicity fails (tail is
-(gamma' s w/2)^(M+1)/(M+1)! locally, monotone on low-w band). The up-search should
-bracket by DOUBLING from candidate until relerr>bar, then bisect down — a clean
-mirror of the existing down helper; cap at the brief's `cap`. Since candidate sits at
-bar_inner (20x under), first doubling is safe.
+Test pins needed: (1) composition value pin — a whole-band draw serves F_P over
+the full below-split region (host empty), asserted against the engine oracle
+within CERTIFICATION_BAR, not by path; (2) a dedicated engine-honesty pin at the
+served band top w_hi: the 0.9*w_low sweep uses the UNBOUNDED ceiling and
+deliberately stays off the zero-margin ceiling, so it can miss the top sliver in
+barely-whole-band draws, and the N/2N estimator at w_hi is demonstrably
+optimistic/non-monotone at low gamma (NONMONOTONE_DRAW gamma=0.1, breach ~0.9*w_low).

@@ -1,3 +1,3 @@
 # Architect Short-Term Observations
 
-(empty — last consolidated by Dreamer on 2026-08-19)
+(2026-08-19 diffractive_certificate_reach plan) diffractive_w_low only searched DOWNWARD; fix brackets UP to the honest ceiling (N/2N tail ratio). Professor narrow ruling: up-bracket ONLY on honest_error<=CERTIFICATION_BAR path; keep deep-optimistic None + down-search(bar_inner) branches. Up-search targets OUTER 1e-4 bar; thread kw-only w_lo/w_hi (w_hi=cap, floor-fail->None). N/2N is estimator not bound -> re-target engine sweep to [w_lo,0.9*w_low]; tightness via _honest_tail_ratio at w* and 1.5w* engine-free. THIRD consumer _low_w_diffractive_serve (likelihood:2014) must be threaded too. Order scan = post-build driver measurement; default stays 8. Hardening: _honest_tail_ratio must return inf on non-finite total/tail (nan>bar is False -> doubling overshoots).

@@ -266,10 +266,11 @@ def _load_production_modules() -> _ProductionModules:
     # UNINITIALIZED likelihood shell (``object.__new__``; ``__init__`` is
     # never run -- no event data, no engine).  The three Born host-band
     # helpers bound off it (`_ppgo_band_split` / `_ppgo_cell_ceiling` /
-    # `_diffractive_bottom_ceiling`) read ONLY their ``lens`` argument and
-    # the process-global certified-ppGO map, never instance state, so this
-    # reuses the production host-band derivation byte-for-byte instead of
-    # re-typing it.
+    # `_diffractive_bottom_ceiling`) read ONLY their ``lens`` argument (plus
+    # the ``w_lo``/``w_hi`` band for `_diffractive_bottom_ceiling`) and the
+    # process-global certified-ppGO map, never instance state, so this reuses
+    # the production host-band derivation byte-for-byte instead of re-typing
+    # it.
     born_band_host = object.__new__(LensedRelativeBinningLikelihood)
 
     return _ProductionModules(
@@ -821,7 +822,8 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     # derived by the SAME two nested splits -- the certified-ppGO band split
     # ``w_trust`` (`_ppgo_band_split`, ceiling-capped at ``min(parity_wall,
     # cell_ceiling)``) and the nested diffractive-bottom split ``w_low``
-    # (`_diffractive_bottom_ceiling`) -- through the production
+    # (`_diffractive_bottom_ceiling`, called with the band ``w_lo``/``w_hi``
+    # so the ceiling is band-aware) -- through the production
     # `_band_split_mask` arithmetic, every helper and wall constant bound
     # from `likelihood` / `ppgo_map` (never re-typed):
     #   * ``covered and not trained_band_escape`` (box-covered AND the host
@@ -844,7 +846,7 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
         lens = {'kappa': 0.0, 'beta': 0.0, 'gamma': gamma, 'y1': y1, 'y2': y2}
         # Host sub-band derivation -- the `_born_residual_analytic` lines in
         # production order: ppGO band split (ceiling-capped), nested
-        # diffractive-bottom split, host mask, host sub-band.
+        # band-aware diffractive-bottom split, host mask, host sub-band.
         w_trust = mods.ppgo_band_split(lens)
         if w_trust is not None:
             wall = (mods.astroid_wall if gamma < 1.0 else mods.saddle_wall)
@@ -854,7 +856,7 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
             if w_hi > eff_ceiling:
                 w_trust = None
         _band_split, below_mask = mods.band_split_mask(w_grid, w_trust)
-        w_low = mods.diffractive_bottom_ceiling(lens)
+        w_low = mods.diffractive_bottom_ceiling(lens, w_lo, w_hi)
         band_split_low, below_low = mods.band_split_mask(w_grid, w_low)
         bottom_mask = ((below_low & below_mask) if band_split_low
                        else np.zeros(w_grid.shape, dtype=bool))
@@ -911,9 +913,12 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
         w_floor = mods.farfield_w_floor(geom.delays, geom.real_mask)
         if w_lo < w_floor:
             if gamma < 1.0:
-                # Rung P admission mirror: the certificate admits an analytic
-                # sub-band iff ``w_low`` is finite and strictly inside the
-                # band (``w_low > w_lo``).  A ``HypergeometricDomainError``
+                # Rung P admission mirror: ``diffractive_w_low`` receives the
+                # band (``w_lo``/``w_hi``) and returns the HONEST ceiling its
+                # N/2N verifier supports (whole-band-certified -> ``w_hi``),
+                # so an analytic sub-band is admitted iff ``w_low`` is finite
+                # and strictly inside the band (``w_low > w_lo``).  A
+                # ``HypergeometricDomainError``
                 # (kernel out of the certified box) is production's
                 # decline-and-fall-through (``return None``); the gamma'-wall
                 # ``DiffractiveDomainError`` is a production refusal near
@@ -922,7 +927,9 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
                 # such a sliver into the engine-demand node pass below, never
                 # mislabel it as analytic closure).
                 try:
-                    w_low = mods.diffractive_w_low((y1, y2), gamma, 0.0, 0.0)
+                    w_low = mods.diffractive_w_low(
+                        (y1, y2), gamma, 0.0, 0.0,
+                        w_lo=w_lo, w_hi=w_hi)
                 except mods.diffractive_refusal_errors:
                     w_low = None
                 if w_low is not None and float(w_low) > w_lo:

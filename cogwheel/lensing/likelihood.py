@@ -2012,7 +2012,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             y = (lens['y1'], lens['y2'])
             try:
                 w_low = diffractive_w_low(
-                    y, gamma, lens['beta'], lens['kappa'])
+                    y, gamma, lens['beta'], lens['kappa'],
+                    w_lo=w_lo, w_hi=w_hi)
             except HypergeometricDomainError:
                 return None
             if w_low is None or w_low <= w_lo:
@@ -2717,7 +2718,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         envelope[below_mask] = ff_envelope[keep]
         return envelope
 
-    def _diffractive_bottom_ceiling(self, lens):
+    def _diffractive_bottom_ceiling(self, lens, w_lo=None, w_hi=None):
         """Low-``w`` diffractive truncation certificate ``w_low``, or ``None``.
 
         Thin wrapper over `diffractive_w_low`: the closed-form frequency
@@ -2727,6 +2728,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         band-split rungs -- the boundary between the analytic diffractive
         bottom ``[w_lo, w_low)`` (Rung P) and the engine/chart host
         ``[w_low, w_split)``.
+
+        The certificate is now BAND-AWARE: the optional ``w_lo`` / ``w_hi``
+        band bounds are forwarded verbatim to `diffractive_w_low`, so a
+        whole-band certificate (every node honest-verified under the bar)
+        returns ``w_hi`` and collapses the host region to empty, while a
+        band-floor failure self-refuses and returns ``None``.
 
         Returns ``None`` at the macro-saddle parity wall (``gamma >= 1``,
         `DiffractiveDomainError`), where there is NO positive-parity series
@@ -2741,16 +2748,20 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         ----------
         lens : dict
             Lens parameters from `_lens_params`.
+        w_lo, w_hi : float or None
+            Optional band bounds forwarded to `diffractive_w_low` (``None``
+            -> unbounded below / above, respectively).
 
         Returns
         -------
         float or None
-            ``w_low``; ``None`` at the parity wall or on a degenerate solve.
+            ``w_low``; ``w_hi`` when the whole band clears the bar;
+            ``None`` at the parity wall or on a degenerate solve.
         """
         try:
             return diffractive_w_low(
                 (lens['y1'], lens['y2']), lens['gamma'],
-                lens['beta'], lens['kappa'])
+                lens['beta'], lens['kappa'], w_lo=w_lo, w_hi=w_hi)
         except DiffractiveDomainError:
             return None
 
@@ -2861,9 +2872,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             # above-split residual stays zero.
             _band_split, below_mask = _band_split_mask(dense_w, w_split)
             # NESTED low split.  Conceptually the below-split region splits
-            # again at the diffractive certificate ``w_low``: the analytic
-            # bottom ``[w_lo, w_low)`` (Rung P) and the exact engine host
-            # ``[w_low, w_split)``.  For the macro saddle (``gamma > 1``)
+            # again at the diffractive certificate ``w_low`` (the band-aware
+            # honest ceiling): the analytic bottom ``[w_lo, honest_ceiling)``
+            # (Rung P) and the exact engine host ``[honest_ceiling, w_split)``.
+            # For the macro saddle (``gamma > 1``)
             # there is NO positive-parity diffractive series --
             # `_diffractive_bottom_ceiling` returns ``None`` at the parity
             # wall -- so ``band_split_low`` is ``False``, ``bottom_mask`` is
@@ -2873,7 +2885,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             # `_band_split_mask` calls reuse the shared split arithmetic (no
             # third copy); the bottom/host boolean composition is the only
             # inline logic.
-            w_low = self._diffractive_bottom_ceiling(lens)
+            w_low = self._diffractive_bottom_ceiling(
+                lens, float(dense_w.min()), float(dense_w.max()))
             band_split_low, below_low = _band_split_mask(dense_w, w_low)
             bottom_mask = ((below_low & below_mask) if band_split_low
                            else np.zeros(dense_w.shape, dtype=bool))
@@ -3056,14 +3069,16 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         _band_split, below_mask = _band_split_mask(dense_w, w_trust)
 
         # NESTED low split.  The below-split region ``[w_lo, w_trust)`` is
-        # split again at the diffractive certificate ``w_low``: the analytic
-        # diffractive bottom ``[w_lo, w_low)`` (Rung P, `F_P`) replaces the
-        # chart there, and the trained carrier + residual host the middle
-        # ``[w_low, w_trust)``.  ``chart_w`` -- the trained-band refusal
-        # probe -- is the HOST sub-band only: the analytic bottom does not
-        # consult the chart, so a draw whose bottom escapes the trained
-        # ``log_w`` range is no longer refused whole.
-        w_low = self._diffractive_bottom_ceiling(lens)
+        # split again at the diffractive certificate ``w_low`` (the band-aware
+        # honest ceiling): the analytic diffractive bottom
+        # ``[w_lo, honest_ceiling)`` (Rung P, `F_P`) replaces the chart there,
+        # and the trained carrier + residual host the middle
+        # ``[honest_ceiling, w_trust)``.  ``chart_w`` -- the trained-band
+        # refusal probe -- is the HOST sub-band only: the analytic bottom
+        # does not consult the chart, so a draw whose bottom escapes the
+        # trained ``log_w`` range is no longer refused whole.
+        w_low = self._diffractive_bottom_ceiling(
+            lens, float(dense_w.min()), float(dense_w.max()))
         band_split_low, below_low = _band_split_mask(dense_w, w_low)
         bottom_mask = ((below_low & below_mask) if band_split_low
                        else np.zeros(dense_w.shape, dtype=bool))

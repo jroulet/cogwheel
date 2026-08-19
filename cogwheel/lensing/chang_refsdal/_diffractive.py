@@ -11,9 +11,11 @@ in the POSITIVE-PARITY, reduced-shear regime (reduced shear
   ``F = exp[i gamma' D_0 / (2 w)] G_PM`` acting on the point-mass kernel
   ``G_PM(w, s)``, where ``D_0 = d_u**2 - d_v**2`` is the shear operator in the
   eigenframe and ``s = |y'|**2`` is the reduced squared source offset.
-* ``diffractive_w_low`` returns the per-draw frequency ``w_low`` at which the
-  leading OMITTED operator-tail term equals the certification bar -- the
-  truncation certificate.
+* ``diffractive_w_low`` returns the per-draw frequency ``w_low`` up to which
+  the operator truncation is provably within the certification bar -- the
+  truncation certificate.  A closed-form candidate is used as the lower-bracket
+  SEED and then bracket-searched UP to the honest ceiling (the largest ``w``
+  whose N/2N omitted-tail ratio clears the certification bar).
 
 WHY
 ---
@@ -280,15 +282,82 @@ def _rootfind_w_low(relerr, upper: float, target: float,
     return lo
 
 
+def _honest_tail_ratio(w: float, u0: float, v0: float, s: float,
+                       gamma_prime: float, order: int) -> float:
+    """Honest N/2N truncation error of the order-``order`` operator series.
+
+    Returns the magnitude of the full omitted tail ``sum(t_{M+1..2M})`` over
+    the truncated total ``|sum(t_0..M)|`` at frequency ``w``, using operator
+    terms up to order ``2M``.  ``math.inf`` is returned on a domain/overflow
+    error or when the truncated total vanishes or either sum is non-finite --
+    the hardened sentinel keeps the up-search doubling loop from ever computing
+    ``inf / inf = nan`` (whose comparison against the certification bar is
+    False, which would otherwise send the loop to ``max_iter`` on garbage).
+    """
+    try:
+        tail = _operator_terms(w, u0, v0, s, gamma_prime, 2 * order)
+    except (HypergeometricDomainError, OverflowError, ValueError):
+        return math.inf
+    total_trunc = sum(tail[:order + 1])
+    tail_sum = sum(tail[order + 1:])
+    if not (abs(total_trunc) > 0.0):
+        return math.inf
+    if not (math.isfinite(total_trunc.real) and math.isfinite(total_trunc.imag)
+            and math.isfinite(tail_sum.real) and math.isfinite(tail_sum.imag)):
+        return math.inf
+    return abs(tail_sum) / abs(total_trunc)
+
+
+def _rootfind_w_high(relerr, lower: float, target: float,
+                     w_lo: float | None, w_hi: float | None,
+                     max_iter: int = 100) -> float | None:
+    """Largest ``w`` in ``[lower, w_hi]`` whose true relative error is ``<= target``.
+
+    Up-search mirror of `_rootfind_w_low`: ``relerr`` is monotone non-decreasing
+    in ``w`` on the low-w band, so the boundary is bracketed by doubling ``hi``
+    from ``lo`` until the error exceeds ``target`` (or ``w_hi`` is reached, or
+    ``hi`` turns non-finite) and then refined by bisection.  ``w_lo`` floors the
+    band; a floor that already fails (``relerr(w_lo) > target``) returns
+    ``None``, and a whole band under ``target`` returns ``w_hi``.
+    """
+    if w_hi is not None and relerr(w_hi) <= target:
+        return w_hi
+    if w_lo is not None and relerr(w_lo) > target:
+        return None
+    lo = max(lower, w_lo) if w_lo is not None else lower
+    hi = lo
+    for _ in range(max_iter):
+        if relerr(hi) > target:
+            break
+        if w_hi is not None and hi >= w_hi:
+            break
+        hi *= 2.0
+        if not math.isfinite(hi):
+            break
+    if w_hi is not None and hi > w_hi:
+        hi = w_hi
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        if relerr(mid) <= target:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
 def diffractive_w_low(y, gamma: float, beta: float = 0.0, kappa: float = 0.0,
-                      max_order: int = _DEFAULT_MAX_ORDER) -> float | None:
+                      max_order: int = _DEFAULT_MAX_ORDER, *,
+                      w_lo: float | None = None,
+                      w_hi: float | None = None) -> float | None:
     """Truncation certificate ``w_low`` for `diffractive_amplification`.
 
-    Returns the frequency below which the order-``M`` operator truncation is
+    Returns the frequency up to which the order-``M`` operator truncation is
     provably within `CERTIFICATION_BAR` (relative) of the exact amplification.
-    A closed-form CANDIDATE is proposed and then VERIFIED against the actual
-    truncated series; when the candidate over-reaches it is root-found down to a
-    certified-smaller boundary rather than refused outright.
+    A closed-form CANDIDATE is proposed as a lower-bracket SEED and then VERIFIED
+    against the actual truncated series; when the candidate clears the bar the
+    boundary is bracket-searched UP to the honest ceiling (capped at ``w_hi``),
+    and when it over-reaches it is root-found down to a certified-smaller
+    boundary rather than refused outright.
 
     Candidate
     ---------
@@ -323,21 +392,34 @@ def diffractive_w_low(y, gamma: float, beta: float = 0.0, kappa: float = 0.0,
     tail ``sum(t_{M+1..2M})`` over the truncated total ``|sum(t_0..t_M)|``,
     evaluated at the worst (largest-``w``) point of the served band:
 
-    * within ``CERTIFICATION_BAR`` at the candidate -> serve the candidate;
+    * within ``CERTIFICATION_BAR`` at the candidate -> bracket-search UP to the
+      honest ceiling (the largest ``w <= w_hi`` whose honest error clears
+      `CERTIFICATION_BAR`);
     * beyond ``_DIFFRACTIVE_CERT_SAFETY * CERTIFICATION_BAR`` -> self-refuse
       (the deep-optimistic regime; consumers fall through to the exact engine);
     * in between -> ROOT-FIND the largest ``w <= candidate`` whose honest error
-      is within ``bar`` (a certified-smaller band, per the INS-4-001 ruling:
-      refusal at a recoverable config is wrong).
+      is within ``bar_inner`` (a certified-smaller band, per the INS-4-001
+      ruling: refusal at a recoverable config is wrong).
+
+    w_lo, w_hi (keyword-only)
+    -------------------------
+    Optional band bounds that cap the up-search.  ``w_lo`` floors the served
+    band (``None`` -> unbounded below, seeded at the candidate); a floor whose
+    honest error already exceeds `CERTIFICATION_BAR` self-refuses.  ``w_hi``
+    ceilings the served band (``None`` -> unbounded above); a whole band under
+    `CERTIFICATION_BAR` returns ``w_hi``.  Both default to ``None``, preserving
+    the pre-band behaviour up to the candidate-clears bracket-up.
 
     Returns
     -------
     float or None
         ``w_low``; ``0.0`` when there is no shear (``gamma' == 0``, series
-        exact); ``None`` (self-refuse) for degenerate geometry -- non-finite
-        ``sqrt_mu`` or omitted term, a vanishing omitted magnitude, an
-        out-of-domain reference kernel, or a candidate whose honest truncation
-        error lies in the deep-optimistic (unrecoverable) regime.
+        exact); ``w_hi`` when the whole band clears the bar; ``None``
+        (self-refuse) for degenerate geometry -- non-finite ``sqrt_mu`` or
+        omitted term, a vanishing omitted magnitude, an out-of-domain reference
+        kernel, a band floor ``w_lo`` whose honest truncation error already
+        exceeds the bar, or a candidate whose honest truncation error lies in
+        the deep-optimistic (unrecoverable) regime.
 
     Raises
     ------
@@ -388,21 +470,15 @@ def diffractive_w_low(y, gamma: float, beta: float = 0.0, kappa: float = 0.0,
     # the full omitted tail (orders ``M + 1 .. 2 M``) relative to the truncated
     # total, evaluated at the band top -- the worst point of ``[w_lo, w]``.
     def relerr(w: float) -> float:
-        try:
-            tail = _operator_terms(w, z_eig.real, z_eig.imag, s,
-                                   gamma_prime, 2 * order)
-        except (HypergeometricDomainError, OverflowError, ValueError):
-            return math.inf
-        total_trunc = sum(tail[:order + 1])
-        if not (abs(total_trunc) > 0.0):
-            return math.inf
-        return abs(sum(tail[order + 1:])) / abs(total_trunc)
+        return _honest_tail_ratio(w, z_eig.real, z_eig.imag, s, gamma_prime,
+                                  order)
 
     honest_error = relerr(candidate)
     if not math.isfinite(honest_error):
         return None
     if honest_error <= CERTIFICATION_BAR:
-        return candidate
+        return _rootfind_w_high(relerr, candidate, CERTIFICATION_BAR, w_lo,
+                                w_hi)
     if honest_error > _DIFFRACTIVE_CERT_SAFETY * CERTIFICATION_BAR:
         return None
     return _rootfind_w_low(relerr, candidate, bar_inner)
