@@ -40,7 +40,7 @@ import json
 import math
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -53,7 +53,9 @@ from cogwheel.lensing.waveform import dimensionless_frequency
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal.channels import (
     ChangRefsdalChannels, farfield_envelope_from_partition, farfield_w_floor,
-    INTERIOR_SACR_C, FARFIELD_KERNEL_SUM, FARFIELD_KERNEL_SUM_MINUS_GHOST)
+    INTERIOR_SACR_C, FARFIELD_KERNEL_SUM, FARFIELD_KERNEL_SUM_MINUS_GHOST,
+    _frame_delays)
+from cogwheel.lensing.chang_refsdal._airy_fold import _merging_fold_pair
 from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
 from cogwheel.lensing.ppgo_map import (
     CertifiedPpgoMap, UNKNOWN, caustic_rho, get_certified_ppgo_map)
@@ -126,6 +128,21 @@ _SADDLE_CUSP_MIN_HALFWIDTH = 0.08
 _CUSP_EXCLUSION_DISTANCE = 0.35
 #: Fractional shrink of each fold arc away from its bounding walls.
 _ARC_MARGIN_FRAC = 0.03
+#: Astroid tube arc-trim thresholds (promoted from F083, carried VERBATIM --
+#: never re-tune in-build).  Derive the robust servable sub-arc from the
+#: binding corner's live merging-pair Delta_tau profile: the full cusp-to-cusp
+#: arc has a NON-MONOTONE Delta_tau (near-cusp zones where `_merging_fold_pair`
+#: refuses) and must not be charted directly, so scan the arc, take the low
+#: knee as the first theta clearing ``_TUBE_TRIM_DTAU_FRAC`` of the peak, then
+#: stand both bounds inward off the steep-rise / turnover ends into the smooth
+#: core (parity==+1 only; saddle bands are byte-identical -- see
+#: `_trim_tube_arc`).
+_TUBE_TRIM_DTAU_FRAC = 0.6
+_TUBE_TRIM_LO_STANDOFF = 0.20
+_TUBE_TRIM_HI_STANDOFF = 0.05
+#: Theta-scan resolution for the astroid tube arc-trim knee search (F083,
+#: carried verbatim -- do NOT reduce, a coarser scan is a forbidden re-tune).
+_TUBE_TRIM_SCAN_POINTS = 80
 #: Number of theta samples used to integrate the tube's arc-length axis map
 #: ``s = integral |y'| dtheta`` across a fold arc (see `_tube_arc_length_map`).
 _TUBE_ARC_MAP_SIZE = 2001
@@ -450,6 +467,100 @@ def _tube_source(gamma: float, theta: float, eta: float, branch: int,
     ``theta``."""
     caust, normal = _tube_normal(gamma, theta, branch)
     return caust + sign * eta * normal
+
+
+def _trim_tube_arc(*, band: tuple[float, float], arc: FoldArc,
+                   eta_max: float, parity: int) -> FoldArc:
+    """Trim an astroid tube fold arc to its robustly resolvable sub-arc.
+
+    The full cusp-to-cusp fold arc has a NON-MONOTONE merging-pair delay gap
+    ``Delta_tau``: near each cusp `_merging_fold_pair` refuses (or the source
+    drops below four images), so charting the whole arc spreads spline knots
+    over dead regions and the near-cusp build nodes zero-fill.  Following F083,
+    scan the arc at the binding corner ``(gamma_hi, eta_max)`` -- which
+    resolves narrowest and whose ``Delta_tau`` turns over first -- locate the
+    ``Delta_tau`` peak, take the low knee as the first theta on the rise
+    clearing ``_TUBE_TRIM_DTAU_FRAC`` of the peak, then stand both bounds
+    inward off the steep-rise / turnover ends into the smooth core.  A sub-arc
+    robust at the binding corner is robust across the whole gamma band.
+
+    Parameters
+    ----------
+    band : tuple of float
+        ``(gamma_lo, gamma_hi)`` of the topology-stable gamma band.  The scan
+        is run at the binding corner ``gamma_hi = band[1]``.
+    arc : FoldArc
+        The full (untrimmed) fold arc.  Its ``branch`` and ``inward_sign`` fix
+        the source construction; ``theta_lo``/``theta_hi`` bound the scan.
+    eta_max : float
+        The outer tube-shell caustic distance (``f_max * R_c``), sized on the
+        FULL arc by the caller and left untouched here.
+    parity : int
+        Caustic parity.  ``+1`` (astroid) is trimmed; any other value
+        (``-1``, saddle deltoid) returns ``arc`` UNCHANGED, so saddle tube
+        charts stay byte-identical to the untrimmed build (F083 Fact 7).
+
+    Returns
+    -------
+    FoldArc
+        For ``parity != 1`` the input ``arc`` verbatim; otherwise a
+        `dataclasses.replace` copy with ``theta_lo``/``theta_hi`` narrowed to
+        the resolvable sub-arc.
+
+    Raises
+    ------
+    ValueError
+        If no scan node yields a resolvable ``Delta_tau`` along the astroid
+        arc (the trim cannot be derived -- a drifted-core LOUD failure).
+    """
+    if parity != 1:
+        # Saddle deltoid bands are left byte-identical (F083 Fact 7): the raw
+        # trim recipe never maps to the identity, so gate it to positive
+        # parity, the single canonical location for the astroid trim.
+        return arc
+
+    gamma_hi = band[1]
+
+    def _delta_tau(theta: float) -> float:
+        """Merging-pair delay gap ``Delta_tau`` at one tube node, or NaN.
+
+        NaN wherever the source is non-finite, drops below four images, or
+        `_merging_fold_pair` refuses -- the exact conditions under which the
+        beat-free residual (hence a servable node) is undefined.
+        """
+        source = _tube_source(gamma_hi, float(theta), eta_max, arc.branch,
+                              arc.inward_sign)
+        if not np.all(np.isfinite(source)):
+            return np.nan
+        try:
+            matrix = geometry.macro_matrix(gamma_hi, 0.0, 0.0)
+            images, _absolute, _t_min = _frame_delays(source, matrix)
+        except geometry.LensDomainError:
+            return np.nan
+        if len(images) != 4:
+            return np.nan
+        pair = _merging_fold_pair(images, source, matrix)
+        if pair is None:
+            return np.nan
+        return float(pair[1] - pair[0])
+
+    scan = np.linspace(arc.theta_lo, arc.theta_hi, _TUBE_TRIM_SCAN_POINTS)
+    dtau = np.array([_delta_tau(float(theta)) for theta in scan])
+    finite = np.isfinite(dtau)
+    if not np.any(finite):
+        raise ValueError(
+            'no resolvable merging-pair Delta_tau along the astroid tube arc '
+            '-- the trim cannot be derived.')
+    peak_idx = int(np.nanargmax(dtau))
+    peak_val = float(dtau[peak_idx])
+    lo_candidates = np.where(finite & (dtau >= _TUBE_TRIM_DTAU_FRAC
+                                       * peak_val))[0]
+    lo_knee = float(scan[int(lo_candidates[0])])
+    hi_peak = float(scan[peak_idx])
+    span = hi_peak - lo_knee
+    theta_lo = lo_knee + _TUBE_TRIM_LO_STANDOFF * span
+    theta_hi = hi_peak - _TUBE_TRIM_HI_STANDOFF * span
+    return replace(arc, theta_lo=theta_lo, theta_hi=theta_hi)
 
 
 def _branch_speed_profile(gamma: float, branch: int, theta_lo: float,
@@ -4978,6 +5089,13 @@ def _train_band_charts(*, box: 'PriorBox', config: TrainingConfig,
         eta_floor = config.f_floor * r_min
         assert eta_max >= 1e-3, (
             f'eta_max={eta_max} too small (R_c={r_min})')
+        # Trim the astroid fold arc to its robustly resolvable sub-arc (F083):
+        # eta sizing above stays on the FULL arc; the trimmed arc then feeds
+        # `_build_tube_chart`, `_tube_heldout_samples` and the report
+        # `theta_range` via the `build_tube` closure below.  Saddle parity
+        # returns the arc unchanged, keeping those charts byte-identical.
+        arc = _trim_tube_arc(band=band, arc=arc, eta_max=eta_max,
+                             parity=parity)
         tag = f'chart_{label}_tube_{idx}'
         path = outdir / f'{tag}.npz'
 

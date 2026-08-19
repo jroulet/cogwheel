@@ -2899,6 +2899,77 @@ Tag conventions:
   restore them mid-redesign.
 
 
+- **NEXT-SESSION ORDER 7a/7 — THE TRAINING CAMPAIGN, demand-first
+  (REWRITTEN 2026-08-15 after the gamma-slice launch was stopped)**
+  `[→ spec]` — owner doctrine, verbatim intent: analytics serve first;
+  charts exist ONLY where the analytic ladder cannot serve; every axis is
+  sized by the problem's own scales, never a bare count.
+  SADDLE-BOTTOM ANCHOR-RESIDUAL CHARTS (owner, 2026-08-18): the low-w
+  saddle band is INTERIM-hosted by Rung S (direct f_schwinger, census
+  route `diffractive_engine_hosted` — engine demand by construction; 7b
+  cannot pass while it serves). This campaign retires it: train charts
+  storing the residual against the EXACT anchor
+  F(w->0) = -1j*sqrt(mu_macro) (the divergent-series band's one exact
+  analytic object — the Professor's R1/R2 rulings, low-w rung build),
+  demand sized by the census's diffractive_engine_hosted route,
+  optimal-representation clause in force
+  ([[lensing_born_farfield_completion]]). The stopped
+  first launch (332-chart gamma slice, killed at 4%) failed this bar
+  three ways, all now on record: one 0.04-wide gamma band per parity
+  (~4%/~7% of the prior); 7 gamma nodes per sliver band (a count against
+  the wrong measure); and 82% of the budget training the astroid
+  exterior that the Born intercept / c3 certificate / certified map
+  already serve — tables PREEMPTING the analytics (the surrogate is
+  first in the ladder).
+
+  ORDER OF WORK:
+  1. SERVE-ROUTE DEMAND CENSUS (build: `serve_route_census`, engine-free
+     route classification, no surrogate attached): classify a dense
+     prior sample — both parities, full physical w reach (the prior
+     reaches w ~ 444; do NOT cap at the old training wall, see
+     [[lensing_saddle_above_the_training_cap_is_unmeasured]]) — by which
+     ANALYTIC rung serves each draw (certificate, Born, map, arms,
+     geometric) or that all refuse. The residual (all-analytics-refuse)
+     is the ONLY chart demand. Output: machine-readable demand map
+     (draws + refusal chains, aggregated to region x gamma x w cells
+     with prior mass). The SAME tool, re-run with the trained artifact
+     attached, is 7b's acceptance census (zero engine-served, or the
+     survivor list with owners).
+  2. DEMAND-SIZED TILING: tile the residual only; axes from the
+     collocation scales (1e-family); gamma bands from the caustic-
+     relative measure (wide away from the wall); re-price via the
+     tiling census. Expectation: a small fraction of the slice's 2M
+     calls.
+  3. PRE-TRAIN CHECKLIST (all cheap, all owed before any bake):
+     `f_floor` measured (not ratio-preserving; the sweep is a driver
+     step); `N_map = 501` (the 2001 sizing note); tube 2-D gamma map
+     decision recorded (defer-with-reason is acceptable — eps-gated);
+     band-merge packing verified.
+  4. TRAIN the residual set once, monitored; attach; then 7b.
+
+  Also retained from the old order: retrain certified_ppgo_map
+  --production with the F080 edge-biased worst-over-cell binding and the
+  fan-asymmetry question resolved first; born_residual_chart is clean.
+  The deltoid far-field keeps its standing redesign fragment and trains
+  nothing until it lands.
+
+
+- **NEXT-SESSION ORDER 7b/7 — FINAL ACCEPTANCE: THE NO-ENGINE-SERVE
+  CENSUS** `[→ spec]` — the owner's bar, verbatim: every region of
+  (y1, y2, w, reduced gamma) — astroid inside/outside, deltoid inside,
+  the origin-connecting exterior, the outward exterior, every cusp
+  neighborhood — served by a table or analytic rung, NEVER by live
+  quadrature or the exact engine at runtime (engine = offline oracle
+  only). Sweep both parities on a dense grid, classify every draw's
+  actual serve route (byte-equality against candidate serves identifies
+  the route; the F077 lesson — a trace, not an inventory), and report:
+  zero engine-served cells, or the exact list of survivors with owners.
+  Beware the dead census categories flagged 2026-08-14 (the cusp-window
+  fall-through category reports zero structurally — losses appear as
+  eta-floor/w-cap categories). This census is REPORTED acceptance
+  evidence; only invariants that survive refactors get pinned as tests.
+
+
 - **TUBE ANGULAR AXIS GRADUATION — spline in the delay-uniformized
   coordinate; the node count becomes Nyquist, not a knob** `[→ spec]` —
   F083 + owner direction 2026-08-17. The tube theta axis is the LAST
@@ -3035,107 +3106,6 @@ Tag conventions:
   ACCEPTANCE: drift at both band edges falls to the map's own round-trip
   tolerance; tube held-out eps at fixed node count does not regress; the serve
   cost delta is measured and stated.
-
-
-- **THE TUBE TRAINER MUST TRIM TO THE RESOLVABLE SUB-ARC — full-arc
-  astroid charts fail the bar at production density** `[→ spec]` —
-  measured 2026-08-17 ((f_max, f_floor) sweep on beat-free charts,
-  `.claude/handoff/f_fraction_sweep_results.json`, 108 points): astroid
-  full-arc tube charts read eps 0.13–0.85 across EVERY (f_max, f_floor)
-  at production density (n_theta=7), while the F083 falsification proved
-  eps 4.3e-3 at n_theta=10 on the TRIMMED sub-arc of the same gamma=0.4
-  band — the full cusp-to-cusp arc has near-cusp zones where
-  `_merging_fold_pair` refuses, build nodes zero-fill, and spline knots
-  spread over dead regions. The saddle legs are healthy (eps 0.003–0.14;
-  post-F081 lobe-edge arcs resolve throughout), so this is
-  positive-parity-specific. The trim ALGORITHM already exists, derived
-  and tested, in `cogwheel/tests/test_lensing_tube_beat_free.py`
-  (`_f083_shared_tube`: binding-corner (gamma_hi, eta_max) Delta_tau
-  profile, low knee at `_F083_DTAU_FRAC` of peak, stand inward off the
-  steep-rise/turnover ends) — PROMOTE it into `surrogate_training` (the
-  test then imports the production helper, DRY) and have
-  `_build_tube_chart`/`_tube_training_arcs` train on the trimmed span.
-  The excluded near-cusp zones are the cusp/Pearcey arm's serving
-  domain (the owner's earlier question answered: yes, something else
-  serves there); the serve-side F_ref probe already declines queries in
-  the unresolvable zone, so no coverage hole — but verify the
-  boundary interval (last resolvable knot to the fence) does not
-  interpolate into zero-filled rows (the Professor's silent-r=0 watch
-  item). BLOCKS the training campaign's astroid tube legs and the
-  demand-sized tiling design's tube theta-spans; the astroid
-  (f_max, f_floor) constants are re-measured on trimmed arcs (driver
-  sweep, in progress). Sequence: with/before the tiling design.
-
-
-- **NEXT-SESSION ORDER 7a/7 — THE TRAINING CAMPAIGN, demand-first
-  (REWRITTEN 2026-08-15 after the gamma-slice launch was stopped)**
-  `[→ spec]` — owner doctrine, verbatim intent: analytics serve first;
-  charts exist ONLY where the analytic ladder cannot serve; every axis is
-  sized by the problem's own scales, never a bare count.
-  SADDLE-BOTTOM ANCHOR-RESIDUAL CHARTS (owner, 2026-08-18): the low-w
-  saddle band is INTERIM-hosted by Rung S (direct f_schwinger, census
-  route `diffractive_engine_hosted` — engine demand by construction; 7b
-  cannot pass while it serves). This campaign retires it: train charts
-  storing the residual against the EXACT anchor
-  F(w->0) = -1j*sqrt(mu_macro) (the divergent-series band's one exact
-  analytic object — the Professor's R1/R2 rulings, low-w rung build),
-  demand sized by the census's diffractive_engine_hosted route,
-  optimal-representation clause in force
-  ([[lensing_born_farfield_completion]]). The stopped
-  first launch (332-chart gamma slice, killed at 4%) failed this bar
-  three ways, all now on record: one 0.04-wide gamma band per parity
-  (~4%/~7% of the prior); 7 gamma nodes per sliver band (a count against
-  the wrong measure); and 82% of the budget training the astroid
-  exterior that the Born intercept / c3 certificate / certified map
-  already serve — tables PREEMPTING the analytics (the surrogate is
-  first in the ladder).
-
-  ORDER OF WORK:
-  1. SERVE-ROUTE DEMAND CENSUS (build: `serve_route_census`, engine-free
-     route classification, no surrogate attached): classify a dense
-     prior sample — both parities, full physical w reach (the prior
-     reaches w ~ 444; do NOT cap at the old training wall, see
-     [[lensing_saddle_above_the_training_cap_is_unmeasured]]) — by which
-     ANALYTIC rung serves each draw (certificate, Born, map, arms,
-     geometric) or that all refuse. The residual (all-analytics-refuse)
-     is the ONLY chart demand. Output: machine-readable demand map
-     (draws + refusal chains, aggregated to region x gamma x w cells
-     with prior mass). The SAME tool, re-run with the trained artifact
-     attached, is 7b's acceptance census (zero engine-served, or the
-     survivor list with owners).
-  2. DEMAND-SIZED TILING: tile the residual only; axes from the
-     collocation scales (1e-family); gamma bands from the caustic-
-     relative measure (wide away from the wall); re-price via the
-     tiling census. Expectation: a small fraction of the slice's 2M
-     calls.
-  3. PRE-TRAIN CHECKLIST (all cheap, all owed before any bake):
-     `f_floor` measured (not ratio-preserving; the sweep is a driver
-     step); `N_map = 501` (the 2001 sizing note); tube 2-D gamma map
-     decision recorded (defer-with-reason is acceptable — eps-gated);
-     band-merge packing verified.
-  4. TRAIN the residual set once, monitored; attach; then 7b.
-
-  Also retained from the old order: retrain certified_ppgo_map
-  --production with the F080 edge-biased worst-over-cell binding and the
-  fan-asymmetry question resolved first; born_residual_chart is clean.
-  The deltoid far-field keeps its standing redesign fragment and trains
-  nothing until it lands.
-
-
-- **NEXT-SESSION ORDER 7b/7 — FINAL ACCEPTANCE: THE NO-ENGINE-SERVE
-  CENSUS** `[→ spec]` — the owner's bar, verbatim: every region of
-  (y1, y2, w, reduced gamma) — astroid inside/outside, deltoid inside,
-  the origin-connecting exterior, the outward exterior, every cusp
-  neighborhood — served by a table or analytic rung, NEVER by live
-  quadrature or the exact engine at runtime (engine = offline oracle
-  only). Sweep both parities on a dense grid, classify every draw's
-  actual serve route (byte-equality against candidate serves identifies
-  the route; the F077 lesson — a trace, not an inventory), and report:
-  zero engine-served cells, or the exact list of survivors with owners.
-  Beware the dead census categories flagged 2026-08-14 (the cusp-window
-  fall-through category reports zero structurally — losses appear as
-  eta-floor/w-cap categories). This census is REPORTED acceptance
-  evidence; only invariants that survive refactors get pinned as tests.
 
 
 - **wave_refused MUST GO TO ZERO — physics-based extrapolation covers

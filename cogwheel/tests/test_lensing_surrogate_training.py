@@ -6394,3 +6394,341 @@ class DegenerateExteriorBandIsRecordedTestCase(_CountingTestCase):
             len(degenerate), 0,
             f'healthy sub-band {sub} must not be flagged degenerate; '
             f'got {degenerate}')
+
+
+# ---------------------------------------------------------------------------
+# WP1 (F083 promotion): astroid tube arc-trim + parity-only gate.
+#
+# `_trim_tube_arc` scans the merging-pair delay gap `Delta_tau(theta)` along a
+# fold arc at the binding corner, finds the `Delta_tau` peak, takes the low
+# knee as the FIRST finite theta clearing `_TUBE_TRIM_DTAU_FRAC` of the peak,
+# then stands both bounds inward by the LO/HI standoffs.  For saddle parity
+# (`!= 1`) the arc is returned UNCHANGED (byte-identical saddle charts).
+#
+# These two suites pin, engine-free:
+#   * the pure index/affine knee/peak arithmetic on a SYNTHETIC `Delta_tau`
+#     profile injected through the merging-pair path (no wave engine touched),
+#     BIT-EXACT so an off-by-one in knee/peak selection cannot hide; and
+#   * the parity gate -- saddle returns the same object verbatim, astroid
+#     strictly narrows the theta span.
+# ---------------------------------------------------------------------------
+
+#: Length-80 synthetic `Delta_tau` profile layout (must match
+#: `_TUBE_TRIM_SCAN_POINTS`).  The four regions are arranged so the crossing
+#: points land EXACTLY on grid samples: leading NaN dead region, a linear rise
+#: whose 0.6*peak crossing sits on the knee sample, a single interior maximum
+#: at the peak sample, then a gentle monotone decline (so `nanargmax` is
+#: unambiguous).
+_TRIM_NAN_END = 10       #: samples [0, 10) are NaN (merging pair refuses).
+_TRIM_KNEE_IDX = 22      #: first FINITE sample clearing 0.6*peak (the knee).
+_TRIM_PEAK_IDX = 30      #: the single interior maximum (the peak).
+_TRIM_PEAK_VAL = 5.0     #: peak `Delta_tau`; 0.6*5.0 == 3.0 is exact float64.
+_TRIM_ARC_THETA_LO = 0.2   #: synthetic arc lens-plane theta lower bound (rad).
+_TRIM_ARC_THETA_HI = 1.4   #: synthetic arc lens-plane theta upper bound (rad).
+
+
+def _synthetic_trim_dtau(peak_idx: int = _TRIM_PEAK_IDX) -> np.ndarray:
+    """Build the length-`_TUBE_TRIM_SCAN_POINTS` synthetic `Delta_tau` profile.
+
+    Regions (bit-exact crossings on grid samples):
+      * ``[0, _TRIM_NAN_END)`` -- NaN (the merging pair refuses / non-finite
+        source: exercises the 'first FINITE theta on the rise' clause);
+      * ``[_TRIM_NAN_END, peak_idx]`` -- linear rise reaching ``_TRIM_PEAK_VAL``
+        at ``peak_idx`` and exactly ``_TUBE_TRIM_DTAU_FRAC*_TRIM_PEAK_VAL`` at
+        ``_TRIM_KNEE_IDX`` (the sample before it stays strictly below);
+      * ``peak_idx`` -- the single interior maximum (unique `nanargmax`);
+      * ``(peak_idx, end)`` -- a gentle monotone decline.
+
+    Slope: ``b = (peak - threshold) / (peak_idx - knee)`` gives a rise passing
+    through ``(knee, threshold)`` and ``(peak_idx, peak)``, so the knee sample
+    equals the threshold to float64 and the preceding sample is ``threshold-b``.
+    """
+    n_points = training._TUBE_TRIM_SCAN_POINTS
+    threshold = training._TUBE_TRIM_DTAU_FRAC * _TRIM_PEAK_VAL
+    slope = (_TRIM_PEAK_VAL - threshold) / (peak_idx - _TRIM_KNEE_IDX)
+    dtau = np.full(n_points, np.nan)
+    for i in range(_TRIM_NAN_END, peak_idx + 1):
+        dtau[i] = threshold + slope * (i - _TRIM_KNEE_IDX)
+    for i in range(peak_idx + 1, n_points):
+        dtau[i] = _TRIM_PEAK_VAL - 0.1 * (i - peak_idx)
+    return dtau
+
+
+def _synthetic_trim_arc() -> training.FoldArc:
+    """A minimal astroid `FoldArc` whose theta bounds fix the scan linspace."""
+    return training.FoldArc(
+        branch=1,
+        theta_lo=_TRIM_ARC_THETA_LO,
+        theta_hi=_TRIM_ARC_THETA_HI,
+        inward_sign=1,
+        image_count=4,
+        cusp_windows=(),
+    )
+
+
+def _run_trim_on_profile(dtau_values: np.ndarray,
+                         arc: training.FoldArc) -> training.FoldArc:
+    """Run `_trim_tube_arc` with `Delta_tau` injected via the merging pair.
+
+    `_trim_tube_arc`'s inner `_delta_tau` calls, per scan node in order:
+    ``_tube_source`` -> ``geometry.macro_matrix`` -> ``_frame_delays`` ->
+    ``_merging_fold_pair``.  Forcing the first three to succeed (finite source,
+    four images) makes the merging pair the SOLE `Delta_tau` source and it is
+    called exactly once per node 0..N-1, so a call counter maps 1:1 to the
+    scan index.  A NaN sample is delivered as ``pair is None`` (production then
+    returns ``np.nan``); a finite sample ``v`` as ``(0.0, v)`` so
+    ``pair[1] - pair[0] == v``.  No amplitude/wave engine is touched.
+    """
+    counter = {'i': 0}
+
+    def fake_pair(images, source, matrix):
+        i = counter['i']
+        counter['i'] += 1
+        value = dtau_values[i]
+        if np.isnan(value):
+            return None
+        return (0.0, float(value))
+
+    with mock.patch.object(training, '_tube_source',
+                           lambda *a, **k: np.zeros(2)), \
+            mock.patch.object(training.geometry, 'macro_matrix',
+                              lambda *a, **k: np.eye(2)), \
+            mock.patch.object(training, '_frame_delays',
+                              lambda *a, **k: (np.zeros((4, 2)),
+                                               np.zeros(4), 0.0)), \
+            mock.patch.object(training, '_merging_fold_pair', fake_pair):
+        return training._trim_tube_arc(
+            band=(0.2, 0.4), arc=arc, eta_max=0.01, parity=1)
+
+
+class AstroidTubeTrimKneeArithmeticTestCase(_CountingTestCase):
+    """BIT-EXACT knee/peak/standoff arithmetic on a synthetic `Delta_tau`.
+
+    The trimmed bracket is a pure affine function of the knee and peak scan
+    samples; a loose tolerance would mask an off-by-one in either index, so
+    every assertion here is `assertEqual`, not `assertAlmostEqual`.
+    """
+
+    def _expected_bracket(self, arc: training.FoldArc, knee_idx: int,
+                          peak_idx: int) -> tuple[float, float]:
+        """Recompute the bracket from the SAME linspace and constant objects."""
+        scan = np.linspace(arc.theta_lo, arc.theta_hi,
+                           training._TUBE_TRIM_SCAN_POINTS)
+        lo_knee = float(scan[knee_idx])
+        hi_peak = float(scan[peak_idx])
+        span = hi_peak - lo_knee
+        exp_lo = lo_knee + training._TUBE_TRIM_LO_STANDOFF * span
+        exp_hi = hi_peak - training._TUBE_TRIM_HI_STANDOFF * span
+        return exp_lo, exp_hi
+
+    def test_knee_and_peak_bracket_is_bit_exact(self) -> None:
+        """theta_lo/theta_hi match the affine knee/peak formula bit-for-bit."""
+        arc = _synthetic_trim_arc()
+        dtau = _synthetic_trim_dtau()
+        out = _run_trim_on_profile(dtau, arc)
+        exp_lo, exp_hi = self._expected_bracket(
+            arc, _TRIM_KNEE_IDX, _TRIM_PEAK_IDX)
+
+        self.comparisons += 1
+        self.assertEqual(
+            out.theta_lo, exp_lo,
+            'theta_lo must equal scan[knee] + 0.20*(scan[peak]-scan[knee]) '
+            'to float64; a mismatch means the knee sample was mis-selected')
+        self.comparisons += 1
+        self.assertEqual(
+            out.theta_hi, exp_hi,
+            'theta_hi must equal scan[peak] - 0.05*(scan[peak]-scan[knee]) '
+            'to float64; a mismatch means the peak sample was mis-selected')
+
+    def test_knee_skips_leading_nans(self) -> None:
+        """The knee is the first FINITE clearing sample, not sample 0.
+
+        The leading NaN dead region must be skipped: were the knee taken from
+        the raw array start (or a NaN-poisoned comparison), the bracket would
+        anchor at sample 0, not `_TRIM_KNEE_IDX`.
+        """
+        arc = _synthetic_trim_arc()
+        dtau = _synthetic_trim_dtau()
+        # Independent selection oracle: first finite sample >= 0.6*peak.
+        threshold = training._TUBE_TRIM_DTAU_FRAC * _TRIM_PEAK_VAL
+        finite = np.isfinite(dtau)
+        first_clear = int(np.where(finite & (dtau >= threshold))[0][0])
+        self.comparisons += 1
+        self.assertEqual(
+            first_clear, _TRIM_KNEE_IDX,
+            'the synthetic fixture must clear the threshold first at the knee '
+            'sample (leading NaNs skipped)')
+
+        out = _run_trim_on_profile(dtau, arc)
+        exp_lo, _ = self._expected_bracket(
+            arc, _TRIM_KNEE_IDX, _TRIM_PEAK_IDX)
+        self.comparisons += 1
+        self.assertEqual(
+            out.theta_lo, exp_lo,
+            'theta_lo must anchor at the first finite clearing sample')
+
+    def test_peak_shift_by_one_changes_bracket(self) -> None:
+        """SELF-FALSIFICATION: moving the peak one sample changes the bracket.
+
+        Swap the peak value with its right neighbour so `nanargmax` lands on
+        ``_TRIM_PEAK_IDX + 1``.  The rise (hence the knee) is untouched, so a
+        trim that ignored the peak index would return the SAME bracket; the
+        real trim must not.
+        """
+        arc = _synthetic_trim_arc()
+        base = _synthetic_trim_dtau()
+        shifted = base.copy()
+        shifted[_TRIM_PEAK_IDX], shifted[_TRIM_PEAK_IDX + 1] = (
+            base[_TRIM_PEAK_IDX + 1], base[_TRIM_PEAK_IDX])
+        # Confirm the peak actually moved by exactly one index.
+        self.comparisons += 1
+        self.assertEqual(
+            int(np.nanargmax(shifted)), _TRIM_PEAK_IDX + 1,
+            'the swap must relocate the single maximum one sample right')
+
+        out_base = _run_trim_on_profile(base, arc)
+        out_shift = _run_trim_on_profile(shifted, arc)
+        self.comparisons += 1
+        self.assertNotEqual(
+            (out_shift.theta_lo, out_shift.theta_hi),
+            (out_base.theta_lo, out_base.theta_hi),
+            'a one-sample peak shift must move the trimmed bracket -- if it '
+            'does not, the peak selection is not load-bearing')
+
+        # And it must match the shifted-peak affine formula exactly.
+        exp_lo, exp_hi = self._expected_bracket(
+            arc, _TRIM_KNEE_IDX, _TRIM_PEAK_IDX + 1)
+        self.comparisons += 1
+        self.assertEqual((out_shift.theta_lo, out_shift.theta_hi),
+                         (exp_lo, exp_hi),
+                         'shifted bracket must follow the peak+1 affine form')
+
+    def test_diagnostic_plot_of_synthetic_profile(self) -> None:
+        """Diagnostic: Delta_tau vs theta with knee/peak/standoff markers."""
+        arc = _synthetic_trim_arc()
+        dtau = _synthetic_trim_dtau()
+        out = _run_trim_on_profile(dtau, arc)
+        scan = np.linspace(arc.theta_lo, arc.theta_hi,
+                           training._TUBE_TRIM_SCAN_POINTS)
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+        except Exception:  # pragma: no cover - plotting is best-effort
+            self.comparisons += 1
+            self.assertTrue(True, 'matplotlib unavailable; skipped plot only')
+            return
+        figure, axis = plt.subplots(figsize=(7, 4))
+        axis.plot(scan, dtau, '.-', label=r'synthetic $\Delta\tau$')
+        axis.axvline(scan[_TRIM_KNEE_IDX], color='tab:green', ls='--',
+                     label='knee')
+        axis.axvline(scan[_TRIM_PEAK_IDX], color='tab:red', ls='--',
+                     label='peak')
+        axis.axvspan(out.theta_lo, out.theta_hi, color='tab:blue', alpha=0.15,
+                     label='trimmed bracket')
+        axis.set_xlabel(r'$\theta$ (rad)')
+        axis.set_ylabel(r'$\Delta\tau$')
+        axis.set_title('astroid tube arc-trim knee/peak selection')
+        axis.legend(loc='best', fontsize=8)
+        _save_plot(figure, 'tube_trim_knee_synthetic_profile.png')
+        plt.close(figure)
+        # The bracket must sit strictly inside the (knee, peak) sample window.
+        self.comparisons += 1
+        self.assertTrue(
+            scan[_TRIM_KNEE_IDX] < out.theta_lo < out.theta_hi
+            < scan[_TRIM_PEAK_IDX],
+            'the standoffs must place the bracket strictly inside '
+            '(knee, peak)')
+
+
+
+#: Topology-stable gamma bands for the parity-gate pins.  The saddle band lies
+#: above the astroid/saddle transition (gamma > 1) and yields a two-edge
+#: deltoid lobe; the astroid band lies below it and yields a single fold arc.
+_PARITY_GATE_SADDLE_BAND = (1.1, 1.2)
+_PARITY_GATE_ASTROID_BAND = (0.2, 0.4)
+
+
+class TubeTrimParityGateTestCase(_CountingTestCase):
+    """The trim fires for astroid parity ONLY; saddle is byte-identical.
+
+    Uses caustic-geometry arc detection (`band_caustic_structure`,
+    `_tube_training_arcs`, `_min_curvature_radius`) -- no amplitude/wave
+    engine -- and drives the real `_trim_tube_arc` with the exact `eta_max`
+    the training loop computes (`config.f_max * r_min`).
+    """
+
+    def _representative_arc(
+            self, band: tuple[float, float], parity: int,
+    ) -> tuple[training.FoldArc, float]:
+        """The band's first tube arc and its loop-computed ``eta_max``."""
+        config = training.TrainingConfig()
+        structure = training.band_caustic_structure(band, parity)
+        arcs = training._tube_training_arcs(structure, parity)
+        self.assertGreater(
+            len(arcs), 0,
+            f'band {band} (parity {parity}) must yield >= 1 tube arc')
+        arc = arcs[0]
+        r_min = training._min_curvature_radius(
+            band, arc, config.n_caustic_samples)
+        eta_max = config.f_max * r_min
+        return arc, eta_max
+
+    def test_saddle_arc_returned_field_identical(self) -> None:
+        """Saddle (parity -1): the same object, every field unchanged."""
+        arc, eta_max = self._representative_arc(
+            _PARITY_GATE_SADDLE_BAND, -1)
+        out = training._trim_tube_arc(
+            band=_PARITY_GATE_SADDLE_BAND, arc=arc, eta_max=eta_max,
+            parity=-1)
+
+        # The parity gate returns the input verbatim (identity), so saddle
+        # tube charts stay byte-identical to the untrimmed build (F083 Fact 7).
+        self.comparisons += 1
+        self.assertIs(
+            out, arc,
+            'saddle parity must return the SAME arc object (identity), not a '
+            'trimmed copy')
+        # Field-by-field, per the spec, so a future non-identity refactor that
+        # happened to preserve identity-by-accident still cannot drift a field.
+        for field in ('branch', 'theta_lo', 'theta_hi', 'inward_sign',
+                      'image_count', 'cusp_windows'):
+            self.comparisons += 1
+            self.assertEqual(
+                getattr(out, field), getattr(arc, field),
+                f'saddle arc field {field!r} must be unchanged by the gate')
+
+    def test_astroid_arc_span_strictly_narrower(self) -> None:
+        """Astroid (parity +1): theta span shrinks; other fields unchanged."""
+        arc, eta_max = self._representative_arc(
+            _PARITY_GATE_ASTROID_BAND, 1)
+        out = training._trim_tube_arc(
+            band=_PARITY_GATE_ASTROID_BAND, arc=arc, eta_max=eta_max,
+            parity=1)
+
+        in_span = arc.theta_hi - arc.theta_lo
+        out_span = out.theta_hi - out.theta_lo
+        self.comparisons += 1
+        self.assertLess(
+            out_span, in_span,
+            'astroid parity must STRICTLY narrow the theta span (the trim '
+            'fired); '
+            f'in={in_span!r} out={out_span!r}')
+        # A trimmed copy, not the original object.
+        self.comparisons += 1
+        self.assertIsNot(
+            out, arc,
+            'astroid parity must return a trimmed replace-copy, not the '
+            'input object')
+        # The trim narrows ONLY the theta bounds; the source-construction
+        # fields must be carried through untouched.
+        for field in ('branch', 'inward_sign', 'image_count', 'cusp_windows'):
+            self.comparisons += 1
+            self.assertEqual(
+                getattr(out, field), getattr(arc, field),
+                f'astroid trim must not alter arc field {field!r}')
+        # And the trimmed bounds must lie strictly inside the original arc.
+        self.comparisons += 1
+        self.assertTrue(
+            arc.theta_lo <= out.theta_lo < out.theta_hi <= arc.theta_hi,
+            'the trimmed bracket must lie within the original arc bounds')

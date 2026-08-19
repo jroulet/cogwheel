@@ -368,6 +368,9 @@ _ABSORBER_ALLOWLIST: frozenset[tuple[str, str]] = frozenset({
     ('cogwheel/lensing/likelihood.py', '_PPGO_INTERIOR_SAFETY'),  # Measured margin on the interior c3 certificate (worst ratio 0.980, p99 0.953 over 1248 oracle points), not a discretization absorber
     ('cogwheel/lensing/likelihood.py', '_SADDLE_FARFIELD_SAFETY'),  # Measured margin on the EXTERIOR c3 certificate (covers the 9.4x worst measured c3 shortfall with ~2.1x headroom; zero false admits over 672 calibration points, scripts/calibration_pilot_followup.json), not a discretization absorber
     ('cogwheel/lensing/chang_refsdal/_diffractive.py', '_DIFFRACTIVE_CERT_SAFETY'),  # Reuse of the shipped high-w c3 certificate safety factor (== likelihood._SADDLE_FARFIELD_SAFETY == 20.0, the `_saddle_c3_split_point` precedent; no new safety policy): it tightens the closed-form candidate bar, and `diffractive_w_low` honest-verifies that candidate against the actual truncated series before serving -- not a discretization absorber
+    ('cogwheel/lensing/surrogate_training.py', '_TUBE_TRIM_DTAU_FRAC'),  # F083 knee threshold (0.6 of the Delta_tau peak), carried VERBATIM from the falsified-and-shipped F083 fixture (test_lensing_tube_beat_free) where the trimmed 10-node chart measured eps 4.3e-3 vs the 0.0237 bar; a profile-shape landmark, not a discretization absorber
+    ('cogwheel/lensing/surrogate_training.py', '_TUBE_TRIM_LO_STANDOFF'),  # F083 inward stand-off (0.20 of the knee-to-peak span) off the steep-rise end, verbatim F083 provenance as above -- geometric bracket placement, not a discretization absorber
+    ('cogwheel/lensing/surrogate_training.py', '_TUBE_TRIM_HI_STANDOFF'),  # F083 inward stand-off (0.05 of the span) off the turnover end, verbatim F083 provenance as above -- geometric bracket placement, not a discretization absorber
 })
 
 

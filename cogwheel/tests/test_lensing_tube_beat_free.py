@@ -111,6 +111,7 @@ import functools
 import itertools
 import math
 import os
+import types
 import unittest
 from unittest import mock
 
@@ -122,7 +123,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from cogwheel.lensing import surrogate as sg
-from cogwheel.lensing.surrogate import _tube_f_ref, LensAmplificationSurrogate
+from cogwheel.lensing.surrogate import (
+    _tube_f_ref, _tube_theta_inframe, _tube_serves, LensAmplificationSurrogate)
 from cogwheel.lensing.chang_refsdal._airy_fold import (
     airy_fold_value, _merging_fold_pair)
 from cogwheel.lensing.chang_refsdal.channels import (
@@ -130,7 +132,7 @@ from cogwheel.lensing.chang_refsdal.channels import (
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.surrogate_training import (
     TrainingConfig, band_caustic_structure, _tube_training_arcs,
-    _min_curvature_radius, _tube_source, _build_tube_chart,
+    _min_curvature_radius, _tube_source, _build_tube_chart, _trim_tube_arc,
     _tube_heldout_samples, _ENGINE_REFUSALS)
 
 #: Gamma band + representative gamma whose astroid tube arc supplies the
@@ -1033,14 +1035,6 @@ _F083_EPS_BAR: float = 0.0237
 #: Held-out queries sit at ``eta = 0.5 * eta_max`` (mid-shell interior).
 _F083_ETA_FRAC: float = 0.5
 
-#: Delta_tau knee threshold and inward stand-offs used to derive the robust
-#: servable sub-arc from the binding corner's live merging-pair profile (the
-#: full cusp-to-cusp arc has a non-monotone Delta_tau and must not be used).
-_F083_DTAU_FRAC: float = 0.6
-_F083_LO_STANDOFF: float = 0.20
-_F083_HI_STANDOFF: float = 0.05
-
-
 @dataclasses.dataclass(frozen=True)
 class _F083Fixture:
     """The shared trimmed-sub-arc ``n_theta = 10`` beat-free tube chart."""
@@ -1055,32 +1049,6 @@ class _F083Fixture:
     refused: int
 
 
-def _f083_delta_tau(arc, gamma: float, theta: float,
-                    eta: float) -> float | None:
-    """Merging-pair delay gap ``Delta_tau`` at a tube node.
-
-    Returns ``None`` wherever the source is non-finite, drops below four
-    images, or the merging fold pair refuses -- the exact conditions under
-    which `_tube_f_ref` (hence the beat-free residual) is undefined.  Used to
-    locate the sub-arc where the fold resolves robustly along the whole run.
-    """
-    source = _tube_source(gamma, float(theta), eta, arc.branch,
-                          arc.inward_sign)
-    if not np.all(np.isfinite(source)):
-        return None
-    try:
-        matrix = geometry.macro_matrix(gamma, 0.0, 0.0)
-        images, _absolute, _t_min = _frame_delays(source, matrix)
-    except geometry.LensDomainError:
-        return None
-    if len(images) != 4:
-        return None
-    pair = _merging_fold_pair(images, source, matrix)
-    if pair is None:
-        return None
-    return float(pair[1] - pair[0])
-
-
 @functools.lru_cache(maxsize=1)
 def _f083_shared_tube() -> _F083Fixture:
     """Build the trimmed-sub-arc ``n_theta = 10`` beat-free tube chart ONCE.
@@ -1091,13 +1059,16 @@ def _f083_shared_tube() -> _F083Fixture:
     lets both `TubeF083AccuracySweepTestCase` and `RawSourceReModulationTest\
 Case` share a SINGLE build, so the file pays it once.
 
-    The servable sub-arc is derived from the LIVE merging-pair boundary, NOT
-    pinned: scan the binding corner ``(gamma_hi, eta_max)`` -- which resolves
-    narrowest and whose ``Delta_tau`` turns over first -- for the ``Delta_tau``
-    peak, take the low knee as the first theta on the rise clearing
-    ``_F083_DTAU_FRAC`` of the peak, then stand both bounds inward off the
-    steep-rise / turnover ends into the smooth core.  A sub-arc robust at the
-    binding corner is robust across the whole gamma axis.
+    The servable sub-arc is trimmed by the PRODUCTION `_trim_tube_arc` helper
+    (F083 promoted into `surrogate_training` at WP1): it scans the binding
+    corner ``(gamma_hi, eta_max)`` -- which resolves narrowest and whose
+    ``Delta_tau`` turns over first -- for the ``Delta_tau`` peak, takes the low
+    knee as the first theta on the rise clearing ``_TUBE_TRIM_DTAU_FRAC`` of
+    the peak, then stands both bounds inward off the steep-rise / turnover ends
+    into the smooth core.  The fixture threads the SHIPPING trim so
+    `test_trimmed_run_refused_no_build_nodes` guards the production recipe: a
+    drifted core that leaves a refusing build node makes ``refused > 0`` and
+    fails LOUDLY.
     """
     config = dataclasses.replace(
         TrainingConfig(), n_gamma=4, n_u=4, n_theta=_F083_N_THETA,
@@ -1109,23 +1080,7 @@ Case` share a SINGLE build, so the file pays it once.
     eta_floor = config.f_floor * r_min
     gamma_grid = np.linspace(_BAND[0], _BAND[1], config.n_gamma)
 
-    scan = np.linspace(arc.theta_lo, arc.theta_hi, 80)
-    dtau = np.array([_f083_delta_tau(arc, _BAND[1], float(t), eta_max)
-                     or np.nan for t in scan])
-    finite = np.isfinite(dtau)
-    if not np.any(finite):
-        raise AssertionError(
-            'fixture premise lost: no resolvable merging-pair Delta_tau along '
-            'the gamma=0.4 astroid tube arc -- the trim cannot be derived.')
-    peak_idx = int(np.nanargmax(dtau))
-    peak_val = float(dtau[peak_idx])
-    lo_candidates = np.where(finite & (dtau >= _F083_DTAU_FRAC * peak_val))[0]
-    lo_knee = float(scan[int(lo_candidates[0])])
-    hi_peak = float(scan[peak_idx])
-    span = hi_peak - lo_knee
-    theta_lo = lo_knee + _F083_LO_STANDOFF * span
-    theta_hi = hi_peak - _F083_HI_STANDOFF * span
-    arc2 = dataclasses.replace(arc, theta_lo=theta_lo, theta_hi=theta_hi)
+    arc2 = _trim_tube_arc(band=_BAND, arc=arc, eta_max=eta_max, parity=1)
 
     chart, calls, refused = _build_tube_chart(
         gamma_grid=gamma_grid, arc=arc2, parity=1, w_range=_F083_W_RANGE,
@@ -1274,6 +1229,122 @@ class TubeF083AccuracySweepTestCase(unittest.TestCase):
         fig.savefig(os.path.join(
             _OUTPUT_DIR, 'tube_beat_free_f083_eps_sweep.png'), dpi=110)
         plt.close(fig)
+
+
+class TubeTrimExcisedRegionDeclineTestCase(unittest.TestCase):
+    """WP1 boundary-decline: a query in the trim-EXCISED sliver is refused.
+
+    F083's arc-trim (promoted into `surrogate_training._trim_tube_arc` at WP1)
+    narrows the charted tube from the full cusp-to-cusp arc ``[untrimmed.\
+theta_lo, untrimmed.theta_hi]`` down to the robustly-resolvable sub-arc
+    ``[chart.theta_grid[0], chart.theta_grid[-1]]``.  The invariant this pins
+    is the SERVE-SIDE consequence of that build-side trim: a gauge angle
+    lying STRICTLY BETWEEN the trimmed fence (``chart.theta_grid[-1]``) and the
+    untrimmed cusp window -- a theta the UNTRIMMED chart would have served --
+    must now DECLINE, so the serving ladder (Pearcey arm, exact engine) takes
+    over instead of the spline interpolating a residual across the excised gap.
+
+    This is DISTINCT from the generic off-frame decline in
+    ``test_lensing_tube_d2_fold.TubeThetaInframeClosedFormTestCase`` (theta =
+    1.5 rad, outside even the full untrimmed arc): that probe would NOT flip if
+    the trim were reverted, because 1.5 lies beyond both frames.  Here the
+    teeth are trim-specific -- the SAME excised theta serves against a stand-in
+    untrimmed frame (`_tube_theta_inframe` returns a value) and declines
+    against the trimmed chart -- so a regression that widened the served span
+    back toward the untrimmed arc would flip this test red.
+
+    The decline is isolated to the theta gate: `_tube_serves` is driven with
+    gamma / log w / eta / image-count all IN-BAND (eta at the shell midpoint),
+    so the ONLY failing guard is the D2 gauge-image search
+    `_tube_theta_inframe`.  ``require_fref=False`` keeps the probe on the
+    structural arc-membership question (the F_ref serve-time reference is
+    orthogonal and is never reached -- the theta gate returns first).  No value
+    tensor is read for the off-span theta: `_tube_serves` returns a bool
+    without touching the spline.
+    """
+
+    comparisons: int
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.fx = _f083_shared_tube()
+        # Re-derive the UNTRIMMED arc (cheap geometry, no DD engine) so the
+        # excised sliver -- and the trim-revert teeth -- are anchored to the
+        # live full-arc span, not a pinned literal.
+        structure = band_caustic_structure(_BAND, 1, n_samples=_N_SAMPLES)
+        cls.untrimmed = _tube_training_arcs(structure, 1)[0]
+
+    def setUp(self) -> None:
+        self.comparisons = 0
+
+    def tearDown(self) -> None:
+        self.assertGreater(
+            self.comparisons, 0,
+            'no serve-guard comparisons executed -- the decline probe was '
+            'vacuous.')
+
+    def test_excised_sliver_theta_declines_but_would_serve_untrimmed(
+            self) -> None:
+        fx = self.fx
+        chart = fx.chart
+        theta_nodes = np.sort(chart.theta_grid)
+        frame_hi = float(theta_nodes[-1])
+        untrimmed_hi = float(self.untrimmed.theta_hi)
+
+        # Premise: the production trim actually excised a high sliver, else
+        # there is no off-span region to probe (fixture premise lost).
+        self.assertLess(
+            frame_hi, untrimmed_hi,
+            'trim excised nothing on the high end -- the WP1 trim is inert; '
+            'the excised-sliver probe has no region to test.')
+
+        # A gauge angle in the excised sliver: between the trimmed fence and
+        # the untrimmed cusp-side end of the full arc.
+        excised_theta = 0.5 * (frame_hi + untrimmed_hi)
+        interior_theta = 0.5 * (float(theta_nodes[0]) + frame_hi)
+
+        # (a) The trimmed chart's D2 gauge-image search declines the excised
+        # gauge angle: no image of the four D2 reflections lands in the frame.
+        self.comparisons += 1
+        self.assertIsNone(
+            _tube_theta_inframe(chart, excised_theta),
+            f'excised gauge angle {excised_theta:.5f} unexpectedly mapped into '
+            f'the trimmed frame [{theta_nodes[0]:.5f}, {frame_hi:.5f}].')
+
+        # (b) Trim-revert teeth: the SAME excised angle DOES land in a stand-in
+        # UNTRIMMED frame -- so it is the trim, not some unrelated D2 quirk,
+        # that removed serving.  Widening the served span back would flip (a).
+        untrimmed_frame = types.SimpleNamespace(
+            theta_grid=np.array([self.untrimmed.theta_lo, untrimmed_hi]))
+        self.comparisons += 1
+        self.assertIsNotNone(
+            _tube_theta_inframe(untrimmed_frame, excised_theta),
+            'excised angle would not serve even on the untrimmed frame -- the '
+            'probe is not trim-specific; pick a theta inside the full arc.')
+
+        # (c) Real serve guard, off-span theta, all OTHER gates in-band: the
+        # tube declines.  eta at the shell midpoint, gamma/log w/image-count
+        # matched, so the sole failing guard is the theta gate.  No value
+        # tensor is read (the guard returns a bool).
+        eta_mid = 0.5 * (chart.eta_floor + chart.eta_max)
+        log_w_min = float(chart.log_w_grid[0])
+        log_w_max = float(chart.log_w_grid[-1])
+        self.comparisons += 1
+        self.assertFalse(
+            _tube_serves(chart, _GAMMA, log_w_min, log_w_max, eta_mid,
+                         excised_theta, chart.image_count, require_fref=False),
+            'tube served an off-span (excised) gauge angle -- it interpolated '
+            'the residual across the trim gap.')
+
+        # (d) Harness teeth: the SAME guard, same in-band gates, an INTERIOR
+        # theta -> served, proving (c)'s False is the theta gate, not an
+        # always-decline artefact of the other inputs.
+        self.comparisons += 1
+        self.assertTrue(
+            _tube_serves(chart, _GAMMA, log_w_min, log_w_max, eta_mid,
+                         interior_theta, chart.image_count, require_fref=False),
+            'an interior gauge angle failed to serve -- the decline probe is '
+            'always-False and has no teeth.')
 
 
 class RawSourceReModulationTestCase(unittest.TestCase):

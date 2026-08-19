@@ -1,6 +1,5 @@
 ---
 section: Backlog
-depends_on: [lensing_tube_trainer_resolvable_subarc_trim]
 ---
 
 - **NEXT-SESSION ORDER 7a/7 — THE TRAINING CAMPAIGN, demand-first
