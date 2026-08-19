@@ -33,27 +33,21 @@ already c3-served; the rest is chart territory); residual-chart
 representation settled (two-image GO carrier, one definition).
 Honest ledger: engine_residual ~41%, all named chart demand or 2b.
 
-QUEUE:
-5c. born_farfield_completion build — LAUNCH when brief + close-out
-    done. Plan review: the two-carrier reference derivation is the
-    load-bearing item (optimal-representation clause, owner doctrine);
-    carrier-only = analytic side ONLY with a real truncation bound.
-6. Tube trainer resolvable-subarc trim build (small; F083 knee-scan
-   promoted from test fixture; astroid tube legs blocked on it).
-7. Demand-sized tiling design + ONE campaign (consumes: engine_residual
-   24.10% + diffractive_engine_hosted 14.93% [anchor-residual charts,
-   exact -1j*sqrt(mu) reference] + per-band n_theta density flags
-   [astroid 0.10-0.40, saddle ~1.1] + w_split/w_low band edges).
-   Cost estimate FIRST, monitored.
-8. 2b arm-extension (wave_refused 2.13% -> 0; unresolved near-caustic
+QUEUE (campaign UNBLOCKED — dependency list empty as of 6a5e8dd):
+1. DEMAND-SIZED TILING DESIGN + THE ONE CAMPAIGN (7a) — next major
+   step. All inputs settled: honest demand map ~41% engine_residual
+   (post-Born: 44.62 - 3.43 revived; demand_census_post_born_10k.json),
+   representations settled (tube beat-free r=E/F_ref; far-field
+   residual vs the two-image GO carrier; saddle-bottom residual vs the
+   exact -1j*sqrt(mu) anchor), f-constants ruled (0.40/0.08), per-band
+   density flags (astroid 0.10-0.40, saddle ~1.1), trainer trim live
+   (parity-gated), per-draw w_split/w_low band edges in the census
+   details. COST ESTIMATE FIRST (owner standing rule), monitored,
+   no-explosion gate.
+2. 2b arm-extension (wave_refused 2.13% -> 0; unresolved near-caustic
    above-150 corner). Before 7b.
-9. Certified-map retrain (F080 + fan asymmetry). Then 7b census
+3. Certified-map retrain (F080 + fan asymmetry). Then 7b census
    (--with-artifact; zero engine-served, zero hosted, zero refused).
-
-STANDING RULES: cost estimate before engine runs; pairing gate before
-oracle claims; diff-verify escalation-fix claims (require the diff hunk
-quoted in change reports); no bare git commit during builds; push at
-milestones; test parsimony at plan gates; owner doctrines: symmetry,
-demand-first, no-explosion, analytic-coordinates, optimal
-representation for every kept chart, engine fall-through unacceptable
-at ANY band edge (low-w ruling generalizes).
+PARKED: doc-sync backlog (~7 commits); sdk_fix_round_edit_fence
+investigation; lensing_force_direct_bypasses_analytic_intercepts;
+post_build_sweeps (slow tiers) for the day's production changes.
