@@ -363,8 +363,17 @@ IN-DAG (the build runs these itself -- do NOT re-run on a clean build):
     /dream                          # short-term memories are tail-capped (F021):
                                     # a busy day evicts findings before consolidation
 POSTBUILD
-echo "ARM THIS MONITOR (persistent=true) -- do NOT hand-roll one:
+# ARM THIS MONITOR is a Claude Code convention only. opencode/codex use the
+# quiet-monitoring doctrine (AGENTS.md): no persistent monitor, no log
+# polling -- the driver is woken by the resume_driver callback sidecar that
+# the SDK already arms for plan_ready/escalation/terminal events. Printing
+# this for those providers actively misled the driver (measured 2026-08-19:
+# opencode driver armed a redundant monitor and hand-polled, twice against
+# the quiet-monitoring rule).
+if [[ "$AGENT_PROVIDER" == "claude" ]]; then
+  echo "ARM THIS MONITOR (persistent=true) -- do NOT hand-roll one:
   .claude/sdk/build_monitor.sh $LOG 120 $BUILD_PID"
+fi
 if [[ "$AUTO" != "--auto" ]]; then
   echo "PLAN APPROVAL: on the plan-ready log line,"
   echo "  read:    $APPROVAL_DIR/plan.json"
