@@ -92,8 +92,18 @@ _DIFFRACTIVE_FIT_POLY_COEFFS = (
 )
 
 #: Number of 4-fold harmonics in `w_low_fit` (``cos(4 k theta)`` for
-#: ``k = 1 .. _DIFFRACTIVE_FIT_N_HARM``).  Held at `_DEFAULT_MAX_ORDER`.
-_DIFFRACTIVE_FIT_N_HARM = _DEFAULT_MAX_ORDER
+#: ``k = 1 .. _DIFFRACTIVE_FIT_N_HARM``).
+#:
+#: A FIT property (the angular basis size the calibration grid resolves),
+#: DECOUPLED from the series truncation order `_DEFAULT_MAX_ORDER` (16).
+#: The k-th harmonic ``cos(4 k theta)`` has ``4k`` full cycles over
+#: ``[0, 2 pi)``, needing ``> 8k`` theta samples to resolve (Nyquist); the
+#: calibration grid samples 32 thetas per cell, so ``k <= 4`` is the largest
+#: alias-free harmonic set.  Holding this at `_DEFAULT_MAX_ORDER` while the
+#: grid sampled only 8 thetas ALIASED every ``k >= 2`` onto a low-order
+#: pattern, producing a degenerate fit that oscillated catastrophically
+#: off-grid.
+_DIFFRACTIVE_FIT_N_HARM = 4
 
 #: 4-fold harmonic coefficients ``a_k`` of `w_low_fit`, for
 #: ``k = 1 .. _DIFFRACTIVE_FIT_N_HARM``.  Baked by

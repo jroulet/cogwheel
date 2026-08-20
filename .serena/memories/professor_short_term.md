@@ -1,31 +1,26 @@
-diffractive_certificate_fit REVIEW (Professor, 2026-08-19) — VERDICT FAIL.
+# Diffractive w_low_fit re-bake consult (2026-08-19)
 
-The `w_low_fit` surface OVER-SERVES off-grid in angle by up to ~5x. Root cause:
-`_DIFFRACTIVE_FIT_N_HARM = _DEFAULT_MAX_ORDER = 16` harmonics `cos(4k theta)`
-fitted on only 8 eigenframe thetas (multiples of pi/4) + 12 random
-(beta,kappa,r,theta) rows. At the 8 grid angles `cos(4k theta)` aliases to 2
-patterns (even-k -> +1, odd-k -> (-1)^m), so 16 angular DOFs are wildly
-underdetermined and lstsq produces catastrophic off-grid oscillation.
+Domain ruling on the Chang–Refsdal truncation-certificate fit fix
+(`cogwheel/lensing/chang_refsdal/_diffractive.py::w_low_fit`).
 
-MEASURED (independent, reusing scripts/fit_diffractive_certificate.py's
-`_measure_w_low_true`/`_unreduced_source`, exact `f_schwinger` oracle):
-- gamma=0.2, r=0.9 (beta=kappa=0), theta sweep [0, pi/2]: w_low_fit oscillates
-  0.004 .. 60.0 (the DD cap) while w_low_true stays 13.7-21.4; 8/33 off-grid
-  probe angles OVER-SERVE, worst ratio ~4.2x (theta=pi/8: fit 60 vs true 14.4).
-- gamma=0.3 r=0.9: worst ratio ~5.0x (theta=pi/8, fit 36.8 vs true 7.4).
-- End-to-end at (gamma=0.2,r=0.9,theta=0.6): w_low_fit=32.93 but series
-  breaches CERTIFICATION_BAR=1e-4 at w~20 (rel 3.7e-4) and hits 9e-2 at w=32;
-  honest ceiling ~17.3. Silent interior 1e-4 breach — the bug class under repair.
-- Tightness ALSO broken off-grid: ratios as low as 0.004-0.05 (Y_REF=(0.8,0.4)
-  at gamma=0.1 gives fit 2.16 vs true 40.9).
-
-Why the committed suite is green: FullGridCertificateOracleTestCase probes only
-the SAME 8 on-grid thetas + 12 random rows (which never land in aliasing
-troughs); TruncationCertifiedBandTestCase uses only CLEAN_GAMMAS at Y_REF. The
-INS-1-001 migration DELETED the exact tests that would have caught this:
-NONMONOTONE_DRAW, CeilingTightnessTestCase, CeilingMonotonicityTestCase.
-The derate 0.745 (=1/max_on_grid_overpred) cannot bound the ~5x off-grid
-over-prediction. The `_DIFFRACTIVE_FIT_N_HARM = _DEFAULT_MAX_ORDER` coupling is
-the latent trap, now realized. Fix: cut harmonics to ~k<=4 (resolvable at 8
-thetas) OR >=32-theta re-bake + an off-grid over-serve re-validation; re-derate
-against the off-grid worst.
+- **Angular symmetry is exactly 4-fold (π/2-periodic), NOT merely cos(4kθ) as a
+  convenience.** Physics: D_0 = ∂_u²-∂_v² is a spin-2 quadrupole; D_0^n applied to
+  the radial point-mass kernel G_PM(|y|²) spans cos(2mθ), m≤n. |F| satisfies
+  |F(θ+π/2; γ')| = |F(θ; -γ')| and |F| is even in γ', so |F| (hence w_low_true) is
+  π/2-periodic → only cos(4kθ) harmonics survive. Leading angular correction to |F| is
+  cos(4θ) (the cos(2θ) from t_1 enters |F|² only through |t_1|² ∝ cos²2θ and
+  Re(t_0* t_1) is pure-imaginary). Harmonic content genuinely extends to k ~ 8
+  (floor(M+1)/2 of the leading omitted term t_17), but amplitude decays with k.
+- **Nyquist for k≤4 is 32 thetas, NOT 16.** At N=16 equispaced over [0,2π):
+  cos(4θ) distinct; cos(8θ)=(-1)^j (Nyquist, marginal); cos(12θ_j)=cos(3πj/2)≡cos(4θ_j)
+  (aliased to k=1); cos(16θ_j)=cos(2πj)=1 (aliased to CONSTANT). So k=3,4 carry zero
+  independent information at 16 points. Rule: N ≥ 8K for k=1..K; K=4 → N≥32.
+- **De-rate 0.85 floor suffices; do not double bake cost with off-grid midpoints.**
+  Post-fix off-grid θ over-pred is small (smooth low-order minima dominate the
+  over-serve risk; sharp peaks are in the conservative direction).
+- **Oracle bias direction:** `_measure_w_low_true` returns `lo` (always-honest lower
+  bound after 24 log-bisections); relative width ~3.4e-7. So w_low_true is a LOWER
+  bound → ratio w_low_fit/w_low_true is biased UP (over-serve flagged more readily),
+  and a literal zero-tolerance `<=` can false-positive only if the ratio sits within
+  ~1e-7 of 1.0 — impossible under the 0.85 derate. Tiny eps 1e-5 relative on the ratio
+  is justified insurance, not a widened tolerance.

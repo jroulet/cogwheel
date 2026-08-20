@@ -45,11 +45,13 @@ Usage::
     python scripts/fit_diffractive_certificate.py --scale smoke   # in-build
     python scripts/fit_diffractive_certificate.py --scale full    # in-build
 
-The SMOKE scale is a few dozen points (seconds) proving the pipeline end to
-end; the FULL scale (hundreds of points, ~7-8 min serial) is the IN-BUILD
-bake that finalizes the coefficients -- the baked state MUST be the full
-emission block, never the smoke fit.  The emission block is pasted verbatim
-into ``_diffractive.py``'s module constants.
+The SMOKE scale is a reduced-subset run (a few minutes) proving the pipeline
+end to end on a non-collinear basis; the FULL scale (hundreds of grid points
+plus ~240 off-grid midpoint probes, ~40 min serial) is the IN-BUILD FINAL
+BAKE that finalizes the
+coefficients -- the baked state MUST be the full emission block, never the
+smoke fit.  The emission block is pasted verbatim into ``_diffractive.py``'s
+module constants.
 """
 from __future__ import annotations
 
@@ -79,6 +81,20 @@ _W_MIN = 0.2
 #: even when the calibration grid shows no over-prediction anywhere.
 _HARD_DERATE_CEILING = 0.85
 
+#: Number of theta samples per (gamma, r) cell of the calibration grid.
+#: The k-th 4-fold harmonic ``cos(4 k theta)`` has ``4k`` full cycles over
+#: ``[0, 2 pi)``, so it needs ``> 8k`` samples to resolve (Nyquist).  With
+#: `_DIFFRACTIVE_FIT_N_HARM = 4` (k = 1..4, up to 16 cycles), 32 samples
+#: exactly resolve the largest harmonic -- unlike the 8-theta grid that
+#: ALIASED the harmonic basis (every ``k >= 2`` collapsed onto a low-order
+#: pattern) and produced a degenerate fit.
+_N_THETAS = 32
+
+#: Number of theta-midpoint probes per (gamma, r) cell of the off-grid set
+#: (a stride over the `_N_THETAS` midpoints).  8 keeps the full-scale
+#: off-grid set at ~240 points while still exercising off-node thetas.
+_OFF_GRID_PROBES_PER_CELL = 8
+
 
 def _rot_minus_beta(beta: float) -> np.ndarray:
     """Eigenframe rotation ``R(-beta)`` (2x2)."""
@@ -106,13 +122,21 @@ def _grid_points(scale: str, seed: int) -> list[tuple[float, float, float, float
     """Calibration grid: ``(gamma, beta, kappa, r, theta)`` rows.
 
     ``r = sqrt(s)`` is the reduced source magnitude and ``theta`` the
-    eigenframe angle.  ``full`` spans hundreds of points (post-build);
-    ``smoke`` is a deterministic few-dozen subset (in-build).
+    eigenframe angle.  ``full`` spans hundreds of points and ``smoke`` a
+    deterministic reduced-subset run; both feed the IN-BUILD FINAL BAKE (the
+    shipped constants are always the full-scale emission block).
+
+    Each ``(gamma, r)`` cell samples ``_N_THETAS = 32`` equally-spaced thetas
+    over ``[0, 2 pi)``.  The density matters: the k-th 4-fold harmonic
+    ``cos(4 k theta)`` has ``4k`` full cycles, needing ``> 8k`` samples to
+    resolve (Nyquist); 32 thetas resolve ``k <= 4`` (the shipped
+    `_DIFFRACTIVE_FIT_N_HARM`).  The earlier 8-theta grid ALIASED every
+    harmonic beyond ``k = 1`` and produced a degenerate fit.
     """
     if scale == 'smoke':
         gammas = (0.1, 0.2, 0.3)
         radii = (0.5, 0.9)
-        thetas = np.linspace(0.0, 2.0 * math.pi, 8, endpoint=False)
+        thetas = np.linspace(0.0, 2.0 * math.pi, _N_THETAS, endpoint=False)
         rows = [(g, 0.0, 0.0, r, float(t))
                 for g in gammas for r in radii for t in thetas]
         rows += [(0.2, 0.7, 0.0, 0.9, 1.1),
@@ -125,13 +149,43 @@ def _grid_points(scale: str, seed: int) -> list[tuple[float, float, float, float
     radii = np.linspace(0.3, 1.3, 5)
     for gamma in gammas:
         for r in radii:
-            for theta in np.linspace(0.0, 2.0 * math.pi, 8, endpoint=False):
+            for theta in np.linspace(0.0, 2.0 * math.pi, _N_THETAS,
+                                     endpoint=False):
                 rows.append((float(gamma), 0.0, 0.0, float(r), float(theta)))
     for _ in range(12):
         rows.append((float(rng.uniform(0.05, 0.4)), float(rng.uniform(-1.0, 1.0)),
                      float(rng.uniform(0.0, 0.4)), float(rng.uniform(0.3, 1.3)),
                      float(rng.uniform(0.0, 2.0 * math.pi))))
     return rows
+
+
+def _off_grid_points(scale: str, seed: int) -> list[tuple[float, float, float, float, float]]:
+    """Theta-midpoint probes, derived as a theta-offset of `_grid_points`.
+
+    For each ``(gamma, r)`` cell of `_grid_points`, the grid samples
+    ``_N_THETAS`` thetas ``theta_j = 2 pi j / _N_THETAS``; these probes sit at
+    the MIDPOINTS ``theta_j + pi / _N_THETAS`` between consecutive nodes --
+    the points a harmonic fit is LEAST constrained at, so they are the honest
+    out-of-sample witnesses.  A stride keeps the probe count at
+    `_OFF_GRID_PROBES_PER_CELL` per cell (~240 total at full scale).
+
+    Derived as a theta-offset of `_grid_points` output (single source of
+    truth) rather than a hand-rolled second grid, so the two stay coupled.
+    The off-grid rows are used for de-rating and the margin report ONLY,
+    never the least-squares fit -- they remain a genuine held-out set.
+    """
+    cells: dict[tuple[float, float], list[float]] = {}
+    for gamma, beta, kappa, r, theta in _grid_points(scale, seed):
+        if beta == 0.0 and kappa == 0.0:
+            cells.setdefault((gamma, r), []).append(theta)
+    offset = math.pi / _N_THETAS
+    probes: list[tuple[float, float, float, float, float]] = []
+    for (gamma, r), thetas in sorted(cells.items()):
+        thetas = sorted(thetas)
+        stride = max(1, len(thetas) // _OFF_GRID_PROBES_PER_CELL)
+        for j in range(0, len(thetas), stride):
+            probes.append((gamma, 0.0, 0.0, r, thetas[j] + offset))
+    return probes
 
 
 def _engine_full(w: float, y_eig: np.ndarray, lam: float,
@@ -251,6 +305,56 @@ def _provenance_sha() -> str:
         return 'unknown'
 
 
+
+def _measure_rows(rows: list[tuple[float, float, float, float, float]],
+                  n_w: int, label: str):
+    """Measure `_measure_w_low_true` over ``rows``.
+
+    Returns ``(measured_rows, w_low_true, n_skipped)``: the subset of
+    ``rows`` with a finite honest ceiling, the ceilings themselves, and the
+    number of rows that refused to measure.
+    """
+    t0 = time.time()
+    measured_rows: list[tuple[float, float, float, float, float]] = []
+    w_low_true: list[float] = []
+    n_skipped = 0
+    for i, (gamma, beta, kappa, r, theta) in enumerate(rows):
+        y1, y2 = _unreduced_source(r, theta, gamma, beta, kappa)
+        w_true = _measure_w_low_true(gamma, beta, kappa, y1, y2, n_w)
+        if w_true is None or not math.isfinite(w_true):
+            n_skipped += 1
+            continue
+        measured_rows.append((gamma, beta, kappa, r, theta))
+        w_low_true.append(w_true)
+        if (i + 1) % 25 == 0:
+            print(f'  ... {i + 1}/{len(rows)} {label} measured '
+                  f'({time.time() - t0:.1f} s)')
+    return measured_rows, w_low_true, n_skipped
+
+
+def _margin_report(label: str, rows: list[tuple[float, float, float, float, float]],
+                   w_low_true: list[float], coeffs, n_poly: int, n_harm: int,
+                   derate: float) -> None:
+    """Print the de-rated conservative/tight margin of ``coeffs`` on ``rows``."""
+    if not rows:
+        print(f'# {label} margin: (no measurable points)')
+        return
+    ratios = []
+    for (gamma, beta, kappa, r, theta), w_true in zip(rows, w_low_true):
+        w_fit = derate * _evaluate_fit(coeffs, n_poly, n_harm, gamma, beta,
+                                       kappa, r, theta)
+        w_fit = min(w_fit, W_CEILING_SCHWINGER)
+        ratios.append(w_fit / w_true)
+    ratios = np.asarray(ratios)
+    n = len(ratios)
+    n_served = int(np.sum(ratios <= 1.0))
+    n_tight = int(np.sum(ratios >= 0.5))
+    print(f'# {label} margin: {n_served}/{n} conservative (fit <= true), '
+          f'{n_tight}/{n} tight (fit >= 0.5 * true), '
+          f'worst ratio {ratios.max():.4f}, median {np.median(ratios):.4f}, '
+          f'p90 {np.percentile(ratios, 90):.4f}')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--scale', choices=('smoke', 'full'), default='smoke')
@@ -262,23 +366,14 @@ def main() -> None:
 
     t0 = time.time()
     rows = _grid_points(args.scale, args.seed)
-    print(f'# grid: {len(rows)} points ({args.scale}), n_w={args.n_w}, '
-          f'degree={args.degree}')
+    off_rows = _off_grid_points(args.scale, args.seed)
+    print(f'# grid: {len(rows)} points ({args.scale}), off-grid: '
+          f'{len(off_rows)} points, n_w={args.n_w}, degree={args.degree}')
 
-    w_low_true: list[float] = []
-    measured_rows: list[tuple[float, float, float, float, float]] = []
-    n_skipped = 0
-    for i, (gamma, beta, kappa, r, theta) in enumerate(rows):
-        y1, y2 = _unreduced_source(r, theta, gamma, beta, kappa)
-        w_true = _measure_w_low_true(gamma, beta, kappa, y1, y2, args.n_w)
-        if w_true is None or not math.isfinite(w_true):
-            n_skipped += 1
-            continue
-        measured_rows.append((gamma, beta, kappa, r, theta))
-        w_low_true.append(w_true)
-        if (i + 1) % 25 == 0:
-            print(f'  ... {i + 1}/{len(rows)} measured '
-                  f'({time.time() - t0:.1f} s)')
+    measured_rows, w_low_true, n_skipped = _measure_rows(rows, args.n_w, 'grid')
+    off_measured, off_w_low_true, off_skipped = _measure_rows(
+        off_rows, args.n_w, 'off-grid')
+    print(f'# skipped: {n_skipped} grid, {off_skipped} off-grid')
 
     if not measured_rows:
         raise SystemExit('no measurable grid points; the grid is degenerate')
@@ -291,41 +386,35 @@ def main() -> None:
     # natural de-rate, but it is always clamped to <= 0.85 (>= 15% headroom)
     # as a deliberate conservative margin against grid-sparsity / out-of-sample
     # over-prediction -- the fitted certificate is never served un-de-rated,
-    # even when the calibration grid shows no over-prediction anywhere.
-    overpreds = []
-    for i, (gamma, beta, kappa, r, theta) in enumerate(measured_rows):
-        w_undec = _evaluate_fit(coeffs, n_poly, n_harm, gamma, beta, kappa, r,
-                                theta)
-        overpreds.append(w_undec / w_low_true[i])
-    max_overpred = max(overpreds)
+    # even when the calibration grid shows no over-prediction anywhere.  The
+    # worst case is taken over BOTH the calibration grid AND the off-grid
+    # midpoint probes, so the off-grid points participate in the de-rate.
+    grid_overpreds = [
+        _evaluate_fit(coeffs, n_poly, n_harm, gamma, beta, kappa, r, theta)
+        / w_true
+        for (gamma, beta, kappa, r, theta), w_true
+        in zip(measured_rows, w_low_true)]
+    off_overpreds = [
+        _evaluate_fit(coeffs, n_poly, n_harm, gamma, beta, kappa, r, theta)
+        / w_true
+        for (gamma, beta, kappa, r, theta), w_true
+        in zip(off_measured, off_w_low_true)]
+    max_overpred = max(grid_overpreds + off_overpreds)
     derate = min(_HARD_DERATE_CEILING, 1.0 / max_overpred)
     print(f'# max un-de-rated over-prediction = {max_overpred:.4f} '
+          f'(grid {max(grid_overpreds):.4f}, off-grid '
+          f'{max(off_overpreds) if off_overpreds else 0.0:.4f}) '
           f'-> de-rate = {derate:.4f}')
 
-    # Margin report on the de-rated fit (conservative / tight distribution).
-    # Uses the freshly-fitted surface (with the derate applied), NOT the
-    # module's currently-baked `w_low_fit` constants, so the reported margin
-    # reflects THIS fit.
-    ratios = []
-    n_served = 0
-    n_tight = 0
-    for i, (gamma, beta, kappa, r, theta) in enumerate(measured_rows):
-        w_fit = derate * _evaluate_fit(coeffs, n_poly, n_harm, gamma, beta,
-                                       kappa, r, theta)
-        w_fit = min(w_fit, W_CEILING_SCHWINGER)
-        w_true = w_low_true[i]
-        ratio = w_fit / w_true
-        ratios.append(ratio)
-        if ratio <= 1.0:
-            n_served += 1
-        if ratio >= 0.5:
-            n_tight += 1
-    ratios = np.asarray(ratios)
-    n = len(ratios)
-    print(f'# margin: {n_served}/{n} conservative (fit <= true), '
-          f'{n_tight}/{n} tight (fit >= 0.5 * true), '
-          f'worst ratio {ratios.max():.4f}, median {np.median(ratios):.4f}, '
-          f'p90 {np.percentile(ratios, 90):.4f}')
+    # Margin report on the de-rated fit (conservative / tight distribution),
+    # printed separately for the calibration grid and the held-out off-grid
+    # midpoint probes.  Uses the freshly-fitted surface (with the derate
+    # applied), NOT the module's currently-baked `w_low_fit` constants, so
+    # the reported margin reflects THIS fit.
+    _margin_report('grid', measured_rows, w_low_true, coeffs, n_poly, n_harm,
+                   derate)
+    _margin_report('off-grid', off_measured, off_w_low_true, coeffs, n_poly,
+                   n_harm, derate)
 
     print()
     print('# PASTE INTO _diffractive.py --------------------------------')
