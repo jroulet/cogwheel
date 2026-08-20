@@ -101,11 +101,12 @@ _DIFFRACTIVE_FIT_DEGREE = 2
 #: Polynomial coefficients of `w_low_fit`, one per monomial of the
 #: `_DIFFRACTIVE_FIT_DEGREE` log-feature basis (same enumeration as
 #: `_fit_poly_exponents`).  Baked by `scripts/fit_diffractive_certificate.py`.
-# PROVISIONAL -- driver re-bakes at --scale full
+#: FINAL -- full bake at 5adb029 (2293.8 s); grid 950/950 + off-grid 234/234
+#: conservative AND tight, de-rate 0.716, median 0.71
 _DIFFRACTIVE_FIT_POLY_COEFFS = (
-    1.1486760545301573, 1.526949650602595, 0.8717651174724659, -2.074344678010659,
-    -2.755138697376363, 1.1575045245244224, -0.04816374031429832, 0.8122537203967878,
-    0.384579593915149, -0.23937381525663678,
+    -110.87645612139974, -40.98597354907916, -0.3094278602205789, -52.07121542457959,
+    -2.4344788160006625, 0.061930791573770294, -0.05702555068850229, 106.46881823090128,
+    -0.11829682797626047, -6.468749406722436,
 )
 
 #: Number of even harmonics in `w_low_fit` (``cos(2 k theta)`` for
@@ -124,10 +125,10 @@ _DIFFRACTIVE_FIT_N_HARM = 7
 #: Even-harmonic coefficients ``a_k`` of `w_low_fit`, for
 #: ``k = 1 .. _DIFFRACTIVE_FIT_N_HARM``.  Baked by
 #: `scripts/fit_diffractive_certificate.py`.
-# PROVISIONAL -- driver re-bakes at --scale full
+#: FINAL -- full bake at 5adb029
 _DIFFRACTIVE_FIT_HARMONIC_COEFFS = (
-    0.08823929874286128, -0.34399871169454654, -0.021613817206027907, 0.07460091840159909,
-    7.481543489110371e-05, -0.012899568764444305, 0.0014882457009251198,
+    0.036741585752783266, -0.3060162587978441, -0.020324773538662955, 0.0756720902975168,
+    -0.0034289910592988446, -0.02932422939136277, 0.005841489227116231,
 )
 
 #: Coefficient of the parametric-caustic feature
@@ -135,15 +136,15 @@ _DIFFRACTIVE_FIT_HARMONIC_COEFFS = (
 #: `scripts/fit_diffractive_certificate.py`; expected NEGATIVE -- the
 #: honest ceiling dips as the source approaches / crosses the fold, so the
 #: caustic log-ratio is anti-correlated with ``log w_low``.
-# PROVISIONAL -- driver re-bakes at --scale full
-_DIFFRACTIVE_FIT_CAUSTIC_COEFF = -0.8236838383495544
+#: FINAL -- full bake at 5adb029
+_DIFFRACTIVE_FIT_CAUSTIC_COEFF = -0.6250079394041849
 
 #: De-rating factor applied to the exponentiated fit so the fitted ceiling is
 #: CONSERVATIVE on the calibration grid (never above the engine-honest
 #: ceiling).  Baked by `scripts/fit_diffractive_certificate.py` as the
 #: reciprocal of the worst un-de-rated over-prediction (clamped to <= 0.85).
-# PROVISIONAL -- driver re-bakes at --scale full
-_DIFFRACTIVE_FIT_DERATE = 0.85
+#: FINAL -- full bake at 5adb029
+_DIFFRACTIVE_FIT_DERATE = 0.715964
 
 #: Coefficient of the ``log(lam * sqrt_mu)`` feature, held at ``1 / (M + 1)``
 #: by construction (the amplitude-space normalisation the fitted surface
@@ -177,6 +178,21 @@ _DIFFRACTIVE_FIT_FENCE_RHO_LO = 0.6
 #: in the Professor's 0.35-0.5 range, lower-bounded by the corner defect at
 #: ``rho ~ 1.34`` (the marginal-resonance fold dip, INS-1-001).
 _DIFFRACTIVE_FIT_FENCE_DELTA = 0.4
+
+#: Calibration-domain gamma ceiling.  The fitted surface is calibrated on
+#: ``gamma in [0.05, 0.5]``; above it the ``log(1 - gamma')`` feature
+#: EXTRAPOLATES (its calibrated range ends at ``log(1 - 0.5) ~ -0.7``, and
+#: at ``gamma' -> 1`` it runs to ``-inf``, blowing the fitted value up to a
+#: ``min(w_fit, CEILING) = 60`` clip).  The order-16 series has a
+#: convergence-radius collapse at the parity wall (gamma' -> 1): the
+#: ``sqrt(mu_macro) = 1/sqrt(1 - gamma'^2)`` divergence is a square-root
+#: branch point not representable at any practical order (40% error at
+#: M=16, 10% even at M=64, at gamma'=0.98).  So above this ceiling the
+#: diffractive rung DECLINES (returns None) and the draw routes to the
+#: exact Schwinger engine, which is the correct serve there.  The wall
+#: band is ~6-12% of shear prior mass; engine-serving it is a performance
+#: cost, never a correctness loss.
+_DIFFRACTIVE_FIT_GAMMA_MAX = 0.5
 
 
 class DiffractiveDomainError(geometry.LensDomainError):
@@ -519,6 +535,13 @@ def w_low_fit(y, gamma: float, beta: float = 0.0, kappa: float = 0.0, *,
     lam, gamma_prime = _reduced_shear(gamma, kappa)
     if gamma_prime == 0.0:
         return 0.0
+    if abs(gamma_prime) > _DIFFRACTIVE_FIT_GAMMA_MAX:
+        # Calibration-domain fence: the fit is calibrated only for
+        # gamma' <= 0.5, and the order-16 series cannot serve the
+        # convergence-radius collapse toward the wall (gamma' -> 1).  Decline
+        # so the draw routes to the exact Schwinger engine, the correct serve
+        # there.
+        return None
     y = np.asarray(y, dtype=float)
     if y.shape != (2,):
         raise ValueError(f'Source position must have shape (2,), got {y.shape}.')
