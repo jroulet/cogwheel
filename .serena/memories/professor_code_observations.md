@@ -804,3 +804,55 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   conservative 0.88x/0.69x) — the gated honest-serve skip reason is
   accurate and the suite genuinely red. Corner re-pin CORNER_R=1.1 verified
   (rho=2.188, raw/w_true 1.006, caustic coeff -0.824, drop-caustic 2.34).
+
+## 2026-08-20 (low_w_diffractive_chart rung review, verdict PASS)
+
+- LowWDiffractiveChart serve rung (Rung P, gamma<1; near-fold shell + wall
+  band), reviewed numerically: (1) node-exact re-modulation matches
+  `_engine_reference_kappa` to 1e-16..1e-14 (kappa=0.2 mass-sheet round-off
+  at the high end) — prefactor_c and the mass-sheet phase are each applied
+  EXACTLY once, and 1/lam folds into sqrt_mu_full via the
+  sqrt(mu_macro)/sqrt(mu_pure) ratio. (2) DC anchor |F_serve|/sqrt(mu_macro)
+  = 1.00079 -> 1.00786 over w=1e-3..1e-2 (the O(w)~0.79*w correction), arg
+  ~-0.024 rad — the anchor is sqrt(mu_macro), never 1. (3) r_pure =
+  f_pure*sqrt(1-gamma'^2)/C(w) is bounded/smooth near the parity wall (->1
+  as w->0 at gamma'=0.9/0.95, genuinely varies to 0.48-0.88 at w=1) — the
+  residual strip removes the sqrt(mu_macro)=1/sqrt(1-gamma'^2) divergence
+  as designed. (4) unit-derate cubic overshoot 1.5785, conservative derate
+  0.576 restores one-sidedness (self-falsification has teeth).
+- SCALAR DE-RATE SCOPE: one-sided conservativeness holds ONLY on the
+  calibration set (grid nodes + theta midpoints); arbitrary 4-D off-grid
+  points are the full-bake margin report's job (operator deferred). Shipped
+  npz absent -> rung DORMANT (auto-load falls to None, pure engine +
+  RuntimeWarning) until the driver bake.
+- NOTE: `low_w_diffractive_chart.py`'s `_WALL_GAMMA_PRIME` docstring
+  slightly conflates the w_low_fit SERIES calibration ceiling (0.5) with
+  the chart's OWN gamma grid ceiling (1-DELTA_GAMMA_P ~ 0.995) — doc
+  wording issue only; the wall-band clause is LIVE not dead.
+
+## 2026-08-20 (diffractive certificate wall-approach over-serve ruling)
+
+- CAUSTIC-RELATIVE rho ≠ ABSOLUTE small parameter: the fence discriminator
+  rho=|y'|/|y_c(theta)| is CAUSTIC-RELATIVE, while the honest ceiling is
+  governed by the ABSOLUTE small parameter gamma'*s*w/2 (s=|y'|^2). Near
+  the wall |y_c|->inf (F036), so rho<RHO_LO does NOT imply small s — a
+  "deep interior" source at gamma'=0.98 can have O(1) absolute offset,
+  making the order-16 series dishonest at w=60; the two coincide only where
+  |y_c|=O(1) (away from the wall).
+- PARITY-WALL CONVERGENCE RADIUS (dominant near the wall, INDEPENDENT
+  mechanism): the shear-operator series has convergence radius EXACTLY the
+  parity wall (gamma'=1); its resummed value carries
+  sqrt(mu_macro)=1/sqrt(1-gamma'^2) which diverges there, so the order-M
+  truncation has relative error ~ gamma'^(2M+2)/(1-gamma'^2) — O(10) at
+  gamma'=0.98, M=16 even at w->0. So the series is dishonest at ALL w,
+  independent of rho — distinct from the small-parameter (w-axis)
+  convergence. DELTA_GAMMA_P=5e-3 is a convergence-radius margin, NOT a
+  truncation-accuracy fence (dishonesty sets in ~gamma'>0.8, far wider).
+- RULING: remove the `rho<RHO_LO -> ceiling(60)` branch; serve the interior
+  via the fitted honest ceiling (saturates at 60 only where honest).
+  Decline to the engine above the fit's calibration ceiling (gamma grid
+  stops at 0.5) — the wall-approach band gamma in [0.9,1) is extrapolated
+  AND dishonest-at-all-w, so it must route to the exact Schwinger engine
+  (no coverage loss, only ~6% performance cost). Implement as the fitted
+  ceiling + a calibration-domain fence, NEVER a hard gamma constant or
+  hard-coded 60.

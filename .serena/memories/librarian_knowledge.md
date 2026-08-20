@@ -1,3 +1,5 @@
+# Librarian Long-Term Knowledge
+
 - Before trusting the caller's framing of what changed, verify
   independently: `git show --stat --name-only <hash>` per commit and
   `git diff --name-only <first>~1 <last>` should match the claimed
@@ -463,3 +465,25 @@
   the min(.,CEILING) clip-as-conservativeness trap — an uncalibrated fit
   clipped to 60 silently re-serves the interior up to ~2.9x over the
   engine-honest ~4-41 ceiling. Same family as F069/F073/F076.
+
+## 2026-08-20 (low_w_near_fold_chart doc sync, INS-1-003)
+
+- CENSUS-ROUTE-LIST ENUMERATION STALENESS: a SPEC paragraph that enumerates
+  a route COUNT/LIST (e.g. "exactly one of EIGHT MECE serve routes" + an
+  itemized `SERVE_ROUTES` list) goes stale after EVERY build that
+  adds/removes a route, not only when the census module itself changes —
+  here it was stale since the born-carrier-only + diffractive-route builds
+  (2026-08-18), i.e. two builds late. Sweep route-enumerating paragraphs
+  after every SERVE_ROUTES/ROUTE_KINDS/per-record-detail change (same
+  family as 'SPEC cites a function by name', at list scale).
+- DATA_CONTRACTS.yaml gained the `low_w_diffractive_chart` artifact entry
+  (producer scripts/train_low_w_diffractive_chart.py::main; consumers
+  _low_w_diffractive_chart_serve + serve_route_census.classify_draw; npz
+  fields incl. scalar `derate` + per-cell `declined_mask`; schema
+  low_w_diffractive_v1; content-hash provenance). schema_version 3.3.1 ->
+  3.4.0 (minor, new artifact). SPEC.md LOW-W DIFFRACTIVE RUNGS "near-fold
+  shell DECLINED" sentence flipped to the chart-serve statement; spec
+  0.49.1 -> 0.49.2. todo.d `lensing_low_w_near_fold_serve` moved to
+  completed.d `2026-08-20_low_w_near_fold_chart_serve.md`; changelog entry
+  added. WALL-BAND RULING REVERSAL recorded (050d4cf reverted the
+  gamma-domain fence: chart covers the UNION shell OR wall).

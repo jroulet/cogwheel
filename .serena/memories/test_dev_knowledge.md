@@ -867,3 +867,68 @@
 - TOOLING: serena insert_at_line can land MID-BLOCK when the target index
   is the last line of a preceding multi-line tuple — verify surrounding
   structure after every insert.
+
+## 2026-08-20 (low_w_diffractive_chart suite, test_lensing_low_w_diffractive_chart.py)
+
+- ARTIFACT-HASH HELPER MUST TRACK PRODUCTION (INS-2-002): the test-side
+  `_save_chart_artifact` MUST store AND hash the new field (8 fields) in
+  the SAME pass the production fix lands — a helper frozen at the pre-fix
+  7-field hash strands the whole suite green-then-red on the day the fix
+  lands. Authoring-time state is honest-RED (round-trip fails until
+  production adopts the contract); the red round-trip IS the signal, and a
+  probe (patched production load) confirming flip-green is the proof. Twin
+  test: re-hash an all-False mask and assert it loads cleanly — proves the
+  tamper refusal is hash-bytes, not a shape/dtype guard; premise-assert the
+  fixture mask is non-trivial (`any()` and `not all()`) so a future
+  all-False collapse can't make the tamper a no-op.
+- FROZEN-DATACLASS INSTANCE PATCH TARGET: `mock.patch.object` on a frozen
+  dataclass INSTANCE raises FrozenInstanceError (dataclass __setattr__ is
+  blocked) — patch the CLASS, not the instance, when spying on a frozen
+  chart's method (e.g. LowWDiffractiveChart.covers).
+- DE-RATE SELF-FALSIFICATION worst-INIT: init `worst=0.0`, NOT 1.0 — with
+  init 1.0 the conservative-derate side returns the INIT (all ratios <1),
+  making `assertLessEqual(cons, 1.0)` vacuous against itself.
+  unit_worst=1.5785 (>1 teeth), cons_worst=0.9091 (real). Pin the FLIP
+  (conservative derate restores one-sidedness), not just unit>1.
+- SERVE-INTERCEPTION PATTERN: to test a likelihood serve engine-free, bind
+  the UNBOUND method to a `types.SimpleNamespace` with the chart +
+  `_reduce_dense_kernels`/`_image_delays` lambdas (instance attrs are NOT
+  descriptor-bound, so the lambdas get only their own args) and
+  `mock.patch.object(likelihood, 'reconstruct_farfield', _capture)` to grab
+  the envelope arg. `geom` MUST carry `delays`/`saddle_kernels`/`real_mask`/
+  `t_min` even though reconstruct is patched — the serve evaluates those
+  `geom.*` args BEFORE the patched call. With `t_min=0` the captured
+  envelope IS the re-modulated F_serve.
+- FIXTURES MUST BE INTERIOR GRID NODES: the serve reconstructs
+  gamma'/rho/theta from the source with ~1e-16 float roundoff, so a fixture
+  exactly ON a grid edge is pushed just outside and `covers` (inclusive <=)
+  returns False -> serve declines. Use interior nodes (index 1..n-2).
+- D2-FOLD OCTANT BIT-IDENTITY + NO-FOLD TEETH: chart coeffs cos(2θ) (even +
+  pi-periodic, 8 theta nodes) — four octants fold to the SAME query point,
+  so evaluate() must be bit-identical (allclose rtol/atol=1e-12). Teeth: a
+  no-fold RegularGridInterpolator queried at raw pi-theta extrapolates and
+  diverges; premise-assert the residual varies >0.1 in theta.
+- CONSTANT-RESIDUAL CHART ISOLATES RE-MODULATION (engine-free): a
+  residual=1 chart gives |F_serve|/sqrt(mu_macro) == |prefactor_c(w)|
+  EXACTLY and arg == arg(prefactor_c) + 0.5*w*(log lam - kappa s).
+  Self-falsification magnitudes: doubled prefactor -> rel err |C(w)-1|
+  (0.48@w=0.5, 6.0@w=8); unit anchor -> 0.40 at gamma'=0.8. Node-exact
+  oracle: an exact-residual chart (r_pure=f_pure*sqrt(1-gp^2)/prefactor_c)
+  through the serve equals `_engine_reference_kappa` to 1.66e-14 at nodes —
+  assert 1e-10 (6000x margin); cache the ~8s 256-node build via a module-
+  level lru_cache shared by all test classes. `_born_factors` returns a
+  5-tuple (sqrt_mu, phi_geo, q2r, b1, a0); sqrt_mu ==
+  1/sqrt(|lam^2-gamma^2|) == sqrt(mu_macro) exactly.
+- COVERAGE-UNION FIXTURE BOX: the coverage chart's grid BOX must contain
+  every witness (gamma' 0.1-0.95, rho 0.2-3.0) so the band predicate, not
+  box containment, decides; derive witnesses from the LIVE gate constants
+  (the test-file fixture shear can differ from the prod gate constant).
+  `covers` reads RHO_LO/RHO_HI/_WALL_GAMMA_PRIME as module globals ->
+  `mock.patch.object(_lwd_module, ...)` gives teeth.
+- CENSUS ROUTE-WITNESS GAUGE (witness scalar rho vs directional rho_dir):
+  the witness's scalar caustic_rho gauge and the directional
+  `_caustic_rho(gamma_prime, s, theta)` gauge can nearly coincide at
+  theta≈90° (1.2472 vs 1.2473) — the invariant under test is that the
+  `caustic_rho` FIELD stays in the SCALAR gauge while `covers` receives the
+  DIRECTIONAL value; assert the spy arg and the field separately, don't
+  rely on the numeric coincidence.

@@ -1057,3 +1057,45 @@
 - BETA-ROTATION IDENTITY: y_eig = [[cosB,sinB],[-sinB,cosB]] @ (y/sqrt(lam))
   is exactly complex exp(-1j*beta) multiplication — verified equal; use
   whichever form keeps the surrounding code real/complex-native.
+
+## 2026-08-20 (low_w_diffractive_chart build, WPs + INS-1-001/2-001/2-002 fixes)
+
+- CONTENT-HASH COMPLETENESS CONTRACT (INS-2-002): a field stored in a
+  hashed artifact (npz) must be folded into the content hash at EVERY site
+  (train bake + load recompute) — never omit a correctness-critical field
+  (e.g. declined_mask) "to avoid breaking a test helper"; the test helper is
+  the intended contract, match production to it in the SAME pass (hash
+  fields in IDENTICAL order; bool->float64 hashing is byte-deterministic).
+  A missing field lets a tampered/all-False mask load silently and serve
+  above the certification bar.
+- CLOSURE-CAPTURED SCALAR REBIND (INS-2-001): in a dispatch function, don't
+  rebind a closure-captured scalar gauge (e.g. rho) to a different-gauge
+  value — use a fresh local (rho_dir) so the recorded field's gauge stays
+  invariant. Here rebinding rho to the DIRECTIONAL _diffractive._caustic_rho
+  (gauges differ ~1.45-6.2x) silently corrupted residual_demand's 3-way
+  split buckets for every subsequent fall-through draw.
+- TWO-SIDED SERVED-ERROR MARGIN + PER-CELL DECLINE MASK (INS-1-001): the
+  margin report must measure |derate*r_interp - r_engine|/|r_engine| sup
+  over the FULL grid (grid + off-grid theta midpoints), never raw
+  interpolation error; derate = min(1.0, 1/max_overshoot) (NO hard 0.85
+  amplitude cap — see architect_knowledge; a cap makes serves 15% low at
+  exact-interp cells). Where served error (or the 1-derate uniform bias)
+  exceeds CERTIFICATION_BAR, bake a per-cell DECLINE mask (3-D bool,
+  D2-folded declined() lookup); serve returns None -> exact engine; census
+  mirror reads the mask engine-free, declined covered draws stay
+  engine_residual.
+- SCALAR DE-RATE IS GRID-RESOLUTION-LIMITED (WP2 flag, NOT redesigned):
+  derate = 1/max_overshoot is dominated by the single worst overshoot — a
+  smoke w-grid (5 nodes) under-resolves the w-oscillation and crashes the
+  de-rate to 0.05-0.15 (median ratio ~0.06-0.2); full bake (14 w nodes)
+  expected toward 0.85, but the (1-derate) systematic magnitude bias is in
+  TENSION with a two-sided "agree <= 1e-4" acceptance; the far-exterior
+  wall band (rho~8, s~16) needs >>14 log-w nodes, so it may be
+  interpolation-limited.
+- RPURE ORACLE + NODE GRID (WP2): oracle r_pure = f_schwinger(w, y_eig,
+  gp)*sqrt(1-gp^2)/prefactor_c(w); node source inverted from the fence
+  discriminator (|y'| = rho*|caustic_point(gp,theta)|) — chart is pure
+  reduced frame, no _reduced_shear/_rot_minus_beta. Full rho grid =
+  [min(RHO_LO, 0.8*lo), max(RHO_HI, 1.1*hi)] from MEASURED wall-band
+  2-image spread (measured [0.0775, 7.6115], seed 42) — never a literal;
+  theta 16 full nodes (8 = harmonic Nyquist); log w [log 0.02, log 60].

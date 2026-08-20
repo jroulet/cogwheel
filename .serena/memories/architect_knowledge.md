@@ -897,7 +897,11 @@
   floor (min(0.85, 1/max_overpred)) even when the raw ratio says otherwise;
   remove the DEAD outer clamp (min(1.0, ...)) + its unreachable comment
   (behavior-preserving). De-rate stays the SOLE margin; no region-specific
-  de-rate (breaks census mirror fidelity).
+  de-rate (breaks census mirror fidelity). SCOPE (2026-08-20): this 0.85
+  floor applies ONLY to the w_low_fit CEILING de-rate, which repositions a
+  served BOUNDARY (values stay unbiased). The low_w_diffractive_chart
+  AMPLITUDE de-rate must be CAP-FREE — see the 2026-08-20 near-fold chart
+  section below.
 - STALE-GREEN ACCEPTANCE ORACLE (INS-3-001/002): a fit's acceptance oracle
   must sweep the FULL calibration grid — an oracle that sweeps only the
   conservative region (CLEAN_GAMMAS at one Y_REF) ships a smoke bake GREEN
@@ -911,3 +915,39 @@
   the resonance-limited value and give the test its OWN skip reason — a
   shared "flips green after bake" reason that contradicts the pin's own
   docstring ("NOT expected to flip green") is a mislabelled gate.
+
+## 2026-08-20 (low_w_nearfold_chart build, INS-1-001/INS-2-002 triage + plan)
+
+- AMPLITUDE DE-RATE MUST BE CAP-FREE (INS-1-001 ruling): a hard 0.85 clamp
+  on the low_w_diffractive_chart AMPLITUDE de-rate is arithmetically
+  incompatible with the two-sided |F_serve-F_engine|/|F_engine|<=1e-4 bar
+  (0.85 serve = 15% low at exact-interp cells, ~1500x bar); the 0.85 clamp
+  is an inapplicable transplant from the w_low_fit CEILING de-rate (there
+  de-rate repositions a served boundary, values stay unbiased). Ruling:
+  derate = min(1.0, 1/max_overpred) over the FULL calibration grid (cap
+  removed), sole role = never-over-serve + center the worst overpred, so
+  served two-sided error ~ raw interp error. _margin_report must measure
+  the SERVED value |derate*r_interp - r_engine|/|r_engine| sup over the
+  full grid (stale-green oracle rule). Un-certifiable (resonance-limited)
+  cells get a baked per-cell DECLINE mask -> serve returns None -> exact
+  engine (never amplitude-scale); census mirror reads the mask engine-free,
+  declined covered draws stay engine_residual. Driver: post-build bake must
+  meet 1e-4 raw on the full grid. Test Dev must re-target the derate tests
+  to two-sided served-value agreement.
+- HASH-FIELD COMPLETENESS BEFORE BAKE (INS-2-002 triage): a correctness-
+  critical stored field (declined_mask) omitted from the artifact content
+  hash at train + load sites lets a tampered/all-False mask load silently
+  and serve above the certification bar. Fix = one variadic arg at BOTH
+  sites; must land BEFORE the driver bake so the shipped artifact hash
+  covers the mask (no shipped artifact yet -> no back-compat concern;
+  in-build smoke bakes are transient). bool->float64 hashing is
+  byte-deterministic. LoadContractTestCase tamper case -> Test Developer.
+- low_w_nearfold_chart plan (4 Coder WPs: chart class -> training script ->
+  likelihood serve wiring -> serve_route_census mirror). Professor rulings:
+  reduced-frame residual r_pure = f_schwinger(w,y_eig,gamma')/
+  [sqrt(1-gamma'^2)*prefactor_c(w)]; serve re-modulates F_serve =
+  mass_sheet_phase*prefactor_c*sqrt_mu_full(*born_factors[0])*r_fit;
+  coverage = union {rho in [0.6,1.4]} OR {gamma'>0.5}; scalar de-rate;
+  theta D2-fold [0,pi/2]; w in [w_lo,60]. Simplifier: separate class (no
+  N-D base yet), share covers() predicate serve+census, no new ROUTE_KIND
+  (draw-level route w/ empty kinds), don't write a 3rd _content_hash.

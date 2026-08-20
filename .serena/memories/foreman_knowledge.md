@@ -171,3 +171,20 @@
   Same class: a de-rate docstring 'never over-serves' must be qualified to
   the calibration grid + held-out probes ('extrapolated off-grid points
   can over-serve').
+
+## 2026-08-20 (INS-1-002, low_w_diffractive_chart docstring)
+
+- DOC-FIX CANONICAL-SOURCE RULE: when a chart's module/evaluate docstrings are
+  stale but the likelihood serve docstring (and the training script) describe
+  the representation correctly, take the formula VERBATIM from that canonical
+  production source (`r_pure = f_pure / (sqrt(mu_pure) * prefactor_c(w))` and
+  `F_serve = mass_sheet_phase * prefactor_c(w) * sqrt_mu_full * r_pure`) —
+  never re-derive a paraphrase. Here the stale "anchor" framing
+  (`F_serve = r * anchor`, anchor = single factor sqrt(mu_macro)*exp(phase))
+  was subtly wrong because the real normalization is a PRODUCT of two analytic
+  factors (sqrt(mu_pure) AND prefactor_c(w) = C(w), |C| ~1.4 at w=0.5); the
+  fix names both. Same-class trap as the "paraphrase grep miss" entry: grep
+  the EXACT string from the finding, not a paraphrase.
+- Doc-only fix verify recipe: ast.parse (pyflakes absent in cogwheel-newlal)
+  + live import + read-back of both edited regions; no pytest run needed —
+  zero code behavior changed.

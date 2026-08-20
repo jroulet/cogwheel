@@ -613,3 +613,34 @@
   NEAR_FOLD_DECLINED_WITNESSES) and skip them in the sweep, adding a
   dedicated test that asserts the band IS declined — don't silently drop
   witnesses or claim the sweep covers them.
+
+## 2026-08-20 (diffractive_wall_nearfold_chart, pass-4 FINAL)
+
+- HASH-CONTRACT COMPLETENESS VERIFICATION (INS-2-002, RESOLVED both sites):
+  a correctness-critical field folded into an artifact content hash must be
+  byte-identical at EVERY site (train bake, load recompute, test helper —
+  identical float64 bytes, identical field ORDER), and the tamper test must
+  premise-assert the tampered field is non-trivial (`declined_mask.any()`
+  and `not .all()`) so a future all-False collapse can't silently make the
+  tamper a no-op. Round-trip/rehashed-tamper-loads-cleanly positive
+  controls + non-vacuous tamper-refuses all green (36 passed); train script
+  self-check asserts `np.array_equal(loaded.declined_mask, declined_mask)`.
+- NEW-CHANGE AUDIT confirms (no new findings): serve reconstruction identity
+  verified vs the test oracle — `sqrt(mu_pure) = lam*sqrt_mu` cancels the
+  `1/lam`, so `F = mass_sheet_phase*prefactor_c(w)*sqrt_mu_full*r_pure`
+  holds exactly; mass_sheet_phase `exp(0.5j*w*(log(lam)-kappa*s))` matches
+  the oracle; reconstruction tail (demod by t_min -> reconstruct_farfield ->
+  _reduce_dense_kernels -> _image_delays) byte-identical to
+  `_low_w_diffractive_serve`. `_AUTO_LOW_W_CHART` sentinel + get_init_dict
+  handling mirrors the born_residual_chart pattern exactly. rho_dir =
+  caustic_rho(abs(gamma'),s,theta) is a FRESH LOCAL — it does NOT rebind the
+  outer scalar `rho` gauge (INS-2-001). SERVE_ROUTES 11->12 widening is
+  laggard-safe: the census invariant test derives from dynamic
+  `src.SERVE_ROUTES` (no hardcoded 11).
+- RESOLVED -> Librarian: the SPEC.md "near-fold shell DECLINED" staleness +
+  missing DATA_CONTRACTS.yaml entry (INS-1-003) were fixed by the in-DAG
+  Librarian (chart entry + spec_version/schema_version bumps + completion
+  fragment). Do not re-open from memory alone.
+- ADVISORY (driver): shipped `cogwheel/data/low_w_diffractive_chart.npz`
+  still absent — full bake is a DRIVER post-build step; the content hash now
+  covers declined_mask, so bake AFTER the hash-fix commit.
