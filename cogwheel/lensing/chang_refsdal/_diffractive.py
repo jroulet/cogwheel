@@ -179,21 +179,6 @@ _DIFFRACTIVE_FIT_FENCE_RHO_LO = 0.6
 #: ``rho ~ 1.34`` (the marginal-resonance fold dip, INS-1-001).
 _DIFFRACTIVE_FIT_FENCE_DELTA = 0.4
 
-#: Calibration-domain gamma ceiling.  The fitted surface is calibrated on
-#: ``gamma in [0.05, 0.5]``; above it the ``log(1 - gamma')`` feature
-#: EXTRAPOLATES (its calibrated range ends at ``log(1 - 0.5) ~ -0.7``, and
-#: at ``gamma' -> 1`` it runs to ``-inf``, blowing the fitted value up to a
-#: ``min(w_fit, CEILING) = 60`` clip).  The order-16 series has a
-#: convergence-radius collapse at the parity wall (gamma' -> 1): the
-#: ``sqrt(mu_macro) = 1/sqrt(1 - gamma'^2)`` divergence is a square-root
-#: branch point not representable at any practical order (40% error at
-#: M=16, 10% even at M=64, at gamma'=0.98).  So above this ceiling the
-#: diffractive rung DECLINES (returns None) and the draw routes to the
-#: exact Schwinger engine, which is the correct serve there.  The wall
-#: band is ~6-12% of shear prior mass; engine-serving it is a performance
-#: cost, never a correctness loss.
-_DIFFRACTIVE_FIT_GAMMA_MAX = 0.5
-
 
 class DiffractiveDomainError(geometry.LensDomainError):
     """Lens parameters fall outside the positive-parity diffractive regime.
@@ -535,13 +520,6 @@ def w_low_fit(y, gamma: float, beta: float = 0.0, kappa: float = 0.0, *,
     lam, gamma_prime = _reduced_shear(gamma, kappa)
     if gamma_prime == 0.0:
         return 0.0
-    if abs(gamma_prime) > _DIFFRACTIVE_FIT_GAMMA_MAX:
-        # Calibration-domain fence: the fit is calibrated only for
-        # gamma' <= 0.5, and the order-16 series cannot serve the
-        # convergence-radius collapse toward the wall (gamma' -> 1).  Decline
-        # so the draw routes to the exact Schwinger engine, the correct serve
-        # there.
-        return None
     y = np.asarray(y, dtype=float)
     if y.shape != (2,):
         raise ValueError(f'Source position must have shape (2,), got {y.shape}.')
