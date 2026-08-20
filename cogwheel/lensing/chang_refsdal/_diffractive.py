@@ -66,14 +66,33 @@ from cogwheel.lensing.chang_refsdal._schwinger import W_CEILING_SCHWINGER
 _DEFAULT_MAX_ORDER = 16
 
 #: ---- Calibration provenance ------------------------------------------
-#: The fit constants below were baked by
-#: `scripts/fit_diffractive_certificate.py` at FULL scale (252-point
-#: engine grid, 236/236 measurable) and pasted verbatim: de-rate 0.7452,
-#: margin worst ratio 1.0000 / median 0.7506 / p90 0.8852, 236/236
-#: conservative (fit <= true) and 236/236 tight (fit >= 0.5 * true).
-#: Provenance SHA 7eeedee (440.3 s).  Re-bake with
-#: ``python scripts/fit_diffractive_certificate.py --scale full`` and
-#: paste the emission block verbatim.
+#: The fit constants below are PROVISIONAL -- baked by
+#: `scripts/fit_diffractive_certificate.py` at SMOKE scale (259 grid +
+#: 64 off-grid rows, corner-inclusive) as a pipeline proof, and MUST be
+#: re-baked at FULL scale by the driver before release.  Smoke margins:
+#: de-rate 0.5034, grid 259/259 conservative / 147/259 tight, off-grid
+#: 62/64 conservative / 44/64 tight, corner raw over-prediction 1.986x
+#: at gamma=0.41, r=0.55, theta=2.454.  Provenance SHA 3827f48 (754.2 s).
+#: Final bake: ``python scripts/fit_diffractive_certificate.py --scale
+#: full`` and paste the emission block verbatim.
+#:
+#: CORNER-RESONANCE LIMITATION (INS-1-001): the ~1.99x corner
+#: over-prediction is NOT a representation deficiency -- it is dominated
+#: by narrow MARGINAL resonances in the order-`_DEFAULT_MAX_ORDER` series
+#: near the fold, where ``rel(w)`` barely exceeds `CERTIFICATION_BAR`
+#: (~1.1-1.2e-4 vs 1e-4) in ~0.1-wide ``w``-windows at the
+#: outside-caustic diagonal directions.  The honest ceiling therefore
+#: oscillates between a ~3.5 resonance floor and a ~6.9 smooth level, and
+#: the calibration's ``n_w=16`` coarse scan samples the resonances
+#: INCONSISTENTLY (caught at the off-grid midpoint, missed at the on-grid
+#: diagonal), so no smooth O(1) fit can follow the resulting sharp angular
+#: step.  The even-harmonic + caustic representation captures the BROAD
+#: inside/outside-caustic modulation (the caustic coefficient is
+#: load-bearing), but the narrow resonance floor is irreducible.  The
+#: driver's de-rate target is LOWERED to the resonance-limited value
+#: (~0.5, NOT >= 0.70); reaching 0.70 requires a future
+#: measurement-robustness fix (a dense ``w`` scan that reliably catches the
+#: marginal resonances), a separate work package.
 
 #: Degree of the log-log polynomial ``P`` in the fitted certificate
 #: `w_low_fit` (see `_fit_poly_features`).  The three log-features are
@@ -84,45 +103,49 @@ _DIFFRACTIVE_FIT_DEGREE = 2
 #: Polynomial coefficients of `w_low_fit`, one per monomial of the
 #: `_DIFFRACTIVE_FIT_DEGREE` log-feature basis (same enumeration as
 #: `_fit_poly_exponents`).  Baked by `scripts/fit_diffractive_certificate.py`.
+# PROVISIONAL -- driver re-bakes at --scale full
 _DIFFRACTIVE_FIT_POLY_COEFFS = (
-    9.605021772432762, -11.422747999010443, -0.6228709189768966,
-    0.17920524341265792, -13.418797194240739, 0.14513967710558642,
-    -0.06572995920967026, -24.068104751521076, -0.14143727808347514,
-    -0.3425759016661124,
+    -66.73151460196522, -37.29530888348038, 0.1783523826060509, -34.38176371760148,
+    -12.160987118574718, 0.8268920664642397, -0.08355815704084146, 52.86119915185035,
+    0.04440691542210376, -4.533621927985663,
 )
 
-#: Number of 4-fold harmonics in `w_low_fit` (``cos(4 k theta)`` for
+#: Number of even harmonics in `w_low_fit` (``cos(2 k theta)`` for
 #: ``k = 1 .. _DIFFRACTIVE_FIT_N_HARM``).
 #:
 #: A FIT property (the angular basis size the calibration grid resolves),
 #: DECOUPLED from the series truncation order `_DEFAULT_MAX_ORDER` (16).
-#: The k-th harmonic ``cos(4 k theta)`` has ``4k`` full cycles over
-#: ``[0, 2 pi)``, needing ``> 8k`` theta samples to resolve (Nyquist); the
-#: calibration grid samples 32 thetas per cell, so ``k <= 4`` is the largest
-#: alias-free harmonic set.  Holding this at `_DEFAULT_MAX_ORDER` while the
-#: grid sampled only 8 thetas ALIASED every ``k >= 2`` onto a low-order
-#: pattern, producing a degenerate fit that oscillated catastrophically
-#: off-grid.
-_DIFFRACTIVE_FIT_N_HARM = 4
+#: The k-th even harmonic ``cos(2 k theta)`` has ``2k`` full cycles over
+#: ``[0, 2 pi)``, needing ``> 4k`` theta samples to resolve (Nyquist); the
+#: calibration grid samples 32 thetas per cell, so ``k <= 7`` is the
+#: largest alias-free harmonic set.  The earlier 8-theta grid ALIASED
+#: every harmonic beyond ``k = 1`` onto a low-order pattern, producing a
+#: degenerate fit that oscillated catastrophically off-grid.
+_DIFFRACTIVE_FIT_N_HARM = 7
 
-#: 4-fold harmonic coefficients ``a_k`` of `w_low_fit`, for
+#: Even-harmonic coefficients ``a_k`` of `w_low_fit`, for
 #: ``k = 1 .. _DIFFRACTIVE_FIT_N_HARM``.  Baked by
 #: `scripts/fit_diffractive_certificate.py`.
+# PROVISIONAL -- driver re-bakes at --scale full
 _DIFFRACTIVE_FIT_HARMONIC_COEFFS = (
-    -2.194815891133371, -0.6922675418142367, -0.7393624023476256,
-    0.10328680455790058, 1.0975367672404386, -0.31667311164922346,
-    0.8107119967838469, 1.0622755228096508, 0.9829421223842966,
-    1.1823402102995237, -0.013882208004386968, 0.6444597210945835,
-    -0.3551444588230961, -1.042554026273715, 0.27864372489563183,
-    0.19118490622650733,
+    0.040414356141018785, -0.35196561421759714, -0.025667426752977975, 0.08078753309232789,
+    0.0025724477139819845, -0.02340049884679754, -0.002993272478629193,
 )
+
+#: Coefficient of the parametric-caustic feature
+#: ``log(|y'| / |y_c(theta)|)`` (see `_fit_features`).  Fitted by
+#: `scripts/fit_diffractive_certificate.py`; expected NEGATIVE -- the
+#: honest ceiling dips as the source approaches / crosses the fold, so the
+#: caustic log-ratio is anti-correlated with ``log w_low``.
+# PROVISIONAL -- driver re-bakes at --scale full
+_DIFFRACTIVE_FIT_CAUSTIC_COEFF = -0.7266888888338595
 
 #: De-rating factor applied to the exponentiated fit so the fitted ceiling is
 #: CONSERVATIVE on the calibration grid (never above the engine-honest
 #: ceiling).  Baked by `scripts/fit_diffractive_certificate.py` as the
-#: reciprocal of the worst un-de-rated over-prediction (clamped to <= 0.85;
-#: 0.745168 is the un-clamped reciprocal, below the ceiling).
-_DIFFRACTIVE_FIT_DERATE = 0.745168
+#: reciprocal of the worst un-de-rated over-prediction (clamped to <= 0.85).
+# PROVISIONAL -- driver re-bakes at --scale full
+_DIFFRACTIVE_FIT_DERATE = 0.503444
 
 #: Coefficient of the ``log(lam * sqrt_mu)`` feature, held at ``1 / (M + 1)``
 #: by construction (the amplitude-space normalisation the fitted surface
@@ -346,21 +369,31 @@ def _fit_poly_features(log_gamma_prime: float, log_s: float,
 
 def _fit_features(gamma_prime: float, s: float, theta: float, lam: float,
                   sqrt_mu: float) -> tuple[float, ...]:
-    """Feature vector of the fitted certificate (poly terms + 4-fold harmonics).
+    """Feature vector of the fitted certificate (poly + harmonics + caustic).
 
-    The last `_DIFFRACTIVE_FIT_N_HARM` entries are ``cos(4 k theta)`` for
-    ``k = 1 .. _DIFFRACTIVE_FIT_N_HARM``.  The ``log(lam * sqrt_mu)`` feature
-    is NOT part of the fitted vector -- its coefficient is held at
-    `_DIFFRACTIVE_FIT_LIP` by construction (added by `w_low_fit`, not
-    fitted).
+    The ``_DIFFRACTIVE_FIT_N_HARM`` entries after the polynomial are
+    ``cos(2 k theta)`` for ``k = 1 .. _DIFFRACTIVE_FIT_N_HARM``; the final
+    trailing entry is the parametric-caustic feature
+    ``log(|y'| / |y_c(theta)|)``, the log ratio of the reduced source
+    offset ``|y'| = sqrt(s)`` to the reduced caustic radius
+    ``|y_c(theta)| = |geometry.caustic_point(gamma_prime, theta)|`` in the
+    same eigenframe direction.  It is negative well inside the caustic,
+    positive outside, and passes through zero at the fold -- capturing the
+    steep ceiling collapse toward the positive-parity wall.  The
+    ``log(lam * sqrt_mu)`` feature is NOT part of the fitted vector -- its
+    coefficient is held at `_DIFFRACTIVE_FIT_LIP` by construction (added by
+    `w_low_fit`, not fitted).
     """
     poly = _fit_poly_features(
         math.log(abs(gamma_prime)), math.log(s),
         math.log(1.0 - abs(gamma_prime)),
         _fit_poly_exponents(_DIFFRACTIVE_FIT_DEGREE))
-    harmonics = tuple(math.cos(4.0 * k * theta)
+    harmonics = tuple(math.cos(2.0 * k * theta)
                       for k in range(1, _DIFFRACTIVE_FIT_N_HARM + 1))
-    return poly + harmonics
+    caustic = geometry.caustic_point(gamma_prime, theta)
+    caustic_radius = math.hypot(caustic[0], caustic[1])
+    caustic_feature = math.log(math.sqrt(s) / caustic_radius)
+    return poly + harmonics + (caustic_feature,)
 
 
 def w_low_fit(y, gamma: float, beta: float = 0.0, kappa: float = 0.0, *,
@@ -377,13 +410,15 @@ def w_low_fit(y, gamma: float, beta: float = 0.0, kappa: float = 0.0, *,
     The surface is
 
         log w_low = P(log gamma', log s, log(1 - gamma'))
-                  + sum_{k=1.._DIFFRACTIVE_FIT_N_HARM} a_k cos(4 k theta)
+                  + sum_{k=1.._DIFFRACTIVE_FIT_N_HARM} a_k cos(2 k theta)
+                  + a_c * log(|y'| / |y_c(theta)|)
                   + (1 / (M + 1)) * log(lam * sqrt_mu),
 
     with ``P`` a degree-`_DIFFRACTIVE_FIT_DEGREE` polynomial, ``lam =
     1 - kappa``, ``sqrt_mu`` the macro amplitude, ``s = |y'|**2`` the reduced
-    squared offset, and ``theta`` the eigenframe angle.  The exponentiated
-    surface is de-rated by `_DIFFRACTIVE_FIT_DERATE` and clipped to
+    squared offset, ``theta`` the eigenframe angle, and ``|y_c(theta)|`` the
+    reduced caustic radius in that direction (see `_fit_features`).  The
+    exponentiated surface is de-rated by `_DIFFRACTIVE_FIT_DERATE` and clipped to
     `_DIFFRACTIVE_FIT_CEILING` so the result never over-serves.  There is no
     deep-optimistic ``None`` branch: the fitted surface IS the certificate,
     and `_reduced_shear`'s wall refusal is the only domain refusal.
@@ -443,10 +478,12 @@ def w_low_fit(y, gamma: float, beta: float = 0.0, kappa: float = 0.0, *,
 
     features = _fit_features(abs(gamma_prime), s, theta, lam, sqrt_mu)
     n_poly = len(_fit_poly_exponents(_DIFFRACTIVE_FIT_DEGREE))
+    n_harm = _DIFFRACTIVE_FIT_N_HARM
     fitted = sum(coeff * feat for coeff, feat in zip(
         _DIFFRACTIVE_FIT_POLY_COEFFS, features[:n_poly]))
     fitted += sum(coeff * feat for coeff, feat in zip(
-        _DIFFRACTIVE_FIT_HARMONIC_COEFFS, features[n_poly:]))
+        _DIFFRACTIVE_FIT_HARMONIC_COEFFS, features[n_poly:n_poly + n_harm]))
+    fitted += _DIFFRACTIVE_FIT_CAUSTIC_COEFF * features[n_poly + n_harm]
     fitted += _DIFFRACTIVE_FIT_LIP * math.log(lam * sqrt_mu)
 
     w_fit = _DIFFRACTIVE_FIT_DERATE * math.exp(fitted)

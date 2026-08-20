@@ -28,13 +28,17 @@ pure-shear `f_schwinger` would bias the ratio by the ``1/lam`` amplitude
 
 Fit
 ---
-``log w_low = P(log gamma', log s, log(1 - gamma')) + sum_k a_k cos(4k theta)
-+ (1/(M+1)) * log(lam * sqrt_mu)`` with ``P`` a degree-2 polynomial, fitted by
-linear least squares on the three log-features plus the 4-fold harmonics.  The
-``(1/(M+1))`` amplitude feature is held FIXED (not fitted); only ``P`` and the
-harmonics are regressed.  The exponentiated surface is then DE-RATED by the
-reciprocal of the worst un-de-rated over-prediction (clamped to ~0.85) so the
-shipped `w_low_fit` never over-serves on the calibration grid.
+``log w_low = P(log gamma', log s, log(1 - gamma')) + sum_k a_k cos(2k theta)
++ a_c * log(|y'| / |y_c(theta)|) + (1/(M+1)) * log(lam * sqrt_mu)`` with ``P``
+a degree-2 polynomial, fitted by linear least squares on the three
+log-features, the even harmonics ``cos(2 k theta)`` (``k = 1 .. 7``) and the
+parametric-caustic feature ``log(|y'| / |y_c(theta)|)`` (the log ratio of the
+reduced source offset to the reduced caustic radius in the same direction).
+The ``(1/(M+1))`` amplitude feature is held FIXED (not fitted); only ``P``,
+the harmonics and the caustic coefficient are regressed.  The exponentiated
+surface is then DE-RATED by the reciprocal of the worst un-de-rated
+over-prediction (clamped to ~0.85) so the shipped `w_low_fit` never
+over-serves on the calibration grid.
 
 The feature basis MUST match `_diffractive._fit_features` / the enumeration in
 `_diffractive._fit_poly_exponents`; this script imports both from shipping code
@@ -82,12 +86,12 @@ _W_MIN = 0.2
 _HARD_DERATE_CEILING = 0.85
 
 #: Number of theta samples per (gamma, r) cell of the calibration grid.
-#: The k-th 4-fold harmonic ``cos(4 k theta)`` has ``4k`` full cycles over
-#: ``[0, 2 pi)``, so it needs ``> 8k`` samples to resolve (Nyquist).  With
-#: `_DIFFRACTIVE_FIT_N_HARM = 4` (k = 1..4, up to 16 cycles), 32 samples
-#: exactly resolve the largest harmonic -- unlike the 8-theta grid that
-#: ALIASED the harmonic basis (every ``k >= 2`` collapsed onto a low-order
-#: pattern) and produced a degenerate fit.
+#: The k-th even harmonic ``cos(2 k theta)`` has ``2k`` full cycles over
+#: ``[0, 2 pi)``, so it needs ``> 4k`` samples to resolve (Nyquist).  With
+#: `_DIFFRACTIVE_FIT_N_HARM = 7` (k = 1..7, up to 14 cycles), 32 samples
+#: resolve the largest harmonic -- unlike the 8-theta grid that ALIASED the
+#: harmonic basis (every ``k >= 2`` collapsed onto a low-order pattern) and
+#: produced a degenerate fit.
 _N_THETAS = 32
 
 #: Number of theta-midpoint probes per (gamma, r) cell of the off-grid set
@@ -127,18 +131,28 @@ def _grid_points(scale: str, seed: int) -> list[tuple[float, float, float, float
     shipped constants are always the full-scale emission block).
 
     Each ``(gamma, r)`` cell samples ``_N_THETAS = 32`` equally-spaced thetas
-    over ``[0, 2 pi)``.  The density matters: the k-th 4-fold harmonic
-    ``cos(4 k theta)`` has ``4k`` full cycles, needing ``> 8k`` samples to
-    resolve (Nyquist); 32 thetas resolve ``k <= 4`` (the shipped
+    over ``[0, 2 pi)``.  The density matters: the k-th even harmonic
+    ``cos(2 k theta)`` has ``2k`` full cycles, needing ``> 4k`` samples to
+    resolve (Nyquist); 32 thetas resolve ``k <= 7`` (the shipped
     `_DIFFRACTIVE_FIT_N_HARM`).  The earlier 8-theta grid ALIASED every
     harmonic beyond ``k = 1`` and produced a degenerate fit.
+
+    The ``smoke`` grid adds the high-gamma / small-r corner cells
+    (``gamma in {0.41, 0.5}`` x ``r = 0.55``) to the smooth-region anchor
+    cells, so the fit is constrained where the honest ceiling collapses
+    steeply toward the positive-parity wall -- the region the parametric
+    caustic feature is meant to capture.
     """
     if scale == 'smoke':
         gammas = (0.1, 0.2, 0.3)
         radii = (0.5, 0.9)
+        corner_gammas = (0.41, 0.5)
+        corner_r = 0.55
         thetas = np.linspace(0.0, 2.0 * math.pi, _N_THETAS, endpoint=False)
         rows = [(g, 0.0, 0.0, r, float(t))
                 for g in gammas for r in radii for t in thetas]
+        rows += [(g, 0.0, 0.0, corner_r, float(t))
+                 for g in corner_gammas for t in thetas]
         rows += [(0.2, 0.7, 0.0, 0.9, 1.1),
                  (0.1, 0.0, 0.3, 0.5, 0.0),
                  (0.3, 0.7, 0.3, 0.9, 2.0)]
@@ -213,6 +227,20 @@ def _measure_w_low_true(gamma: float, beta: float, kappa: float, y1: float,
     """Largest honest ``w`` up to the engine ceiling (sup-over-w semantics).
 
     ``None`` when the series is already beyond the bar at the grid floor.
+
+    Notes
+    -----
+    ``n_w``-SENSITIVE near the fold: when the source sits OUTSIDE the
+    caustic, ``rel(w)`` has narrow MARGINAL resonances (~0.1-wide ``w``
+    windows where ``rel`` barely exceeds `CERTIFICATION_BAR`, ~1.1-1.2e-4
+    vs 1e-4).  The coarse ``n_w`` scan samples those resonances
+    INCONSISTENTLY, so the returned ceiling can jump between the ~3.5
+    resonance floor and the ~6.9 smooth level for the same source at
+    slightly different ``n_w`` (or theta) -- a spurious sharp angular step
+    the fitted surface cannot follow (INS-1-001).  A robust measurement
+    needs a dense ``w`` scan (spacing << 0.014 in log-w) to catch the
+    resonances reliably; that is cost-prohibitive for the calibration grid
+    and is left as a separate work package.
     """
     lam, gamma_prime = _reduced_shear(gamma, kappa)
     root = math.sqrt(lam)
@@ -266,11 +294,11 @@ def _measure_w_low_true(gamma: float, beta: float, kappa: float, y1: float,
 
 def _fit_model(rows: list[tuple[float, float, float, float, float]],
                w_low_true: list[float], degree: int):
-    """Linear-least-squares fit of the polynomial + harmonic coefficients."""
+    """Linear-least-squares fit of the polynomial + harmonic + caustic coeffs."""
     n = len(rows)
     n_poly = len(_fit_poly_exponents(degree))
     n_harm = _DIFFRACTIVE_FIT_N_HARM
-    design = np.empty((n, n_poly + n_harm))
+    design = np.empty((n, n_poly + n_harm + 1))
     target = np.empty(n)
     for i, (gamma, beta, kappa, r, theta) in enumerate(rows):
         lam, gamma_prime = _reduced_shear(gamma, kappa)
@@ -303,7 +331,6 @@ def _provenance_sha() -> str:
         return out.stdout.strip()
     except Exception:
         return 'unknown'
-
 
 
 def _measure_rows(rows: list[tuple[float, float, float, float, float]],
@@ -380,7 +407,8 @@ def main() -> None:
 
     coeffs, n_poly, n_harm = _fit_model(measured_rows, w_low_true, args.degree)
     poly_coeffs = tuple(float(c) for c in coeffs[:n_poly])
-    harmonic_coeffs = tuple(float(c) for c in coeffs[n_poly:])
+    harmonic_coeffs = tuple(float(c) for c in coeffs[n_poly:n_poly + n_harm])
+    caustic_coeff = float(coeffs[n_poly + n_harm])
 
     # De-rating factor: the worst-residual reciprocal 1/max_overpred is the
     # natural de-rate, but it is always clamped to <= 0.85 (>= 15% headroom)
@@ -406,6 +434,22 @@ def main() -> None:
           f'{max(off_overpreds) if off_overpreds else 0.0:.4f}) '
           f'-> de-rate = {derate:.4f}')
 
+    # Corner witness: the RAW (un-de-rated) over-prediction at the off-grid
+    # midpoint that motivated this representation change (the high-gamma /
+    # small-r cell where the ceiling collapses steeply toward the wall).
+    # The witness angle is the off-grid midpoint of the grid node
+    # theta_j = 3 pi / 4 (== 2.454369 + offset), the direction the previous
+    # 4-harmonic fit over-predicted by 2.06x.
+    witness_theta = 3.0 * math.pi / 4.0 + math.pi / _N_THETAS
+    for (gamma, beta, kappa, r, theta), w_true, overpred in zip(
+            off_measured, off_w_low_true, off_overpreds):
+        if (beta == 0.0 and kappa == 0.0
+                and abs(gamma - 0.41) < 1e-9 and abs(r - 0.55) < 1e-9
+                and abs(theta - witness_theta) < 1e-9):
+            print(f'# corner raw over-prediction gamma={gamma} r={r} '
+                  f'theta={theta:.6f}: {overpred:.4f}x '
+                  f'(fit {overpred * w_true:.4f} vs true {w_true:.4f})')
+
     # Margin report on the de-rated fit (conservative / tight distribution),
     # printed separately for the calibration grid and the held-out off-grid
     # midpoint probes.  Uses the freshly-fitted surface (with the derate
@@ -427,6 +471,7 @@ def main() -> None:
     for line in _chunk_floats(harmonic_coeffs, 4):
         print('   ', line)
     print(')')
+    print('_DIFFRACTIVE_FIT_CAUSTIC_COEFF =', repr(caustic_coeff))
     print('_DIFFRACTIVE_FIT_DERATE =', repr(round(derate, 6)))
     print('# provenance: SHA', _provenance_sha(), f'{time.time() - t0:.1f} s')
     print('# -----------------------------------------------------------')

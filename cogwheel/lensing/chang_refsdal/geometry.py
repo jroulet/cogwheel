@@ -1362,6 +1362,64 @@ def _caustic_source(theta: float, gamma: float, beta: float,
     return caustic
 
 
+def caustic_point(gamma: float, theta: float, *, beta: float = 0.0,
+                  kappa: float = 0.0, branch: float = 1.0
+                  ) -> tuple[float, float]:
+    """Parametric Chang-Refsdal caustic source point ``y_c(theta)``.
+
+    Pure-python, O(1) mirror of the numba `_caustic_source` (the same
+    closed-form critical-curve -> caustic arithmetic, without the
+    Hessian eigendecomposition and eigenframe construction): the
+    source-plane point ``macro_matrix @ x - x / |x|**2`` at the critical
+    point ``x`` of polar angle ``theta`` and square-root branch
+    ``branch``.  Kept free of numba and numpy so
+    `_diffractive.w_low_fit` can evaluate it without pulling an ndarray
+    onto its O(1) value path; any change to the arithmetic here must
+    mirror `_caustic_source` exactly.
+
+    Parameters
+    ----------
+    gamma : float
+        External shear magnitude.
+    theta : float
+        Polar angle of the critical point, radians.
+    beta : float, optional
+        Shear orientation, radians (default 0.0).
+    kappa : float, optional
+        Convergence (default 0.0).  ``1 - kappa > 0`` must already hold;
+        this helper does not guard it.
+    branch : float, optional
+        Sign (``+1.0`` or ``-1.0``) of the square-root branch; ``+1.0``
+        is the only real branch at positive parity.
+
+    Returns
+    -------
+    tuple of float
+        ``(y_c_x, y_c_y)``, the caustic point in the source plane.
+    """
+    lam = 1.0 - kappa
+    effective_gamma = gamma / lam
+    phase = theta - beta
+    discriminant = 1.0 - effective_gamma**2 * math.sin(2.0 * phase)**2
+    if discriminant < 0.0:
+        discriminant = 0.0
+    effective_u = (effective_gamma * math.cos(2.0 * phase)
+                   + branch * math.sqrt(discriminant))
+    radius = 1.0 / math.sqrt(lam * effective_u)
+    image_x = radius * math.cos(theta)
+    image_y = radius * math.sin(theta)
+    cos2b = math.cos(2.0 * beta)
+    sin2b = math.sin(2.0 * beta)
+    # macro_matrix = (1 - kappa) * I - gamma * [[cos2b, sin2b],
+    #                                           [sin2b, -cos2b]].
+    m00 = (1.0 - kappa) - gamma * cos2b
+    m01 = -gamma * sin2b
+    m11 = (1.0 - kappa) + gamma * cos2b
+    caustic_x = m00 * image_x + m01 * image_y - image_x / radius**2
+    caustic_y = m01 * image_x + m11 * image_y - image_y / radius**2
+    return caustic_x, caustic_y
+
+
 @numba.njit(cache=True, fastmath=False)
 def _coarse_squared_distances(grid: np.ndarray, gamma: float, beta: float,
                               kappa: float, source: np.ndarray,

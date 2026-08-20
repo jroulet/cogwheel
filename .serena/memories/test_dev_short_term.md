@@ -1,5 +1,137 @@
 # Test Dev Short-Term Observations
 
+## 2026-08-20 (INS-2-001 corner-pin re-point to resonance-limited 2.0x bar — test_lensing_diffractive.py)
+
+- INS-2-001 resolved (corner pin + teeth alignment).  The corner raw-over-prediction
+  pin now asserts the RESONANCE-LIMITED twofold bar: assertLess(ratio, 2.0) with a
+  message citing INS-1-001 (de-rate ~0.5), replacing the abandoned 1.5x/1.43x/0.70
+  target.  MEASURED ratio at the CURRENT smoke coefficients: 1.9863 (raw_fit 6.8656
+  vs w_low_true 3.4564, un-clipped vs ceiling 60) -- ALREADY inside the 2.0 bar, so
+  the pin is green-with-gate-lifted even at smoke and flips/keeps green post-bake.
+- Renamed test_raw_fit_over_prediction_below_150_percent ->
+  test_raw_fit_over_prediction_within_twofold_bar (old name contradicted the 2.0 bar).
+  Own skip reason constant _CORNER_RAW_OVER_PREDICTION_REASON (NOT the shared
+  _COGWHEEL_DIFFRACTIVE_FULL_BAKE_REASON, whose 'red in-build BY DESIGN' claim is
+  full-grid-sweep-specific and would have mislabelled the pin as a red-until-bake
+  gate).  Class docstring rewritten so docstring/skip-reason/assertion agree the pin
+  WILL satisfy < 2.0 post-bake (0.70/1.43 abandoned per Professor-backed resonance
+  ruling; a future dense-w-scan measurement-robustness fix is the real path to a
+  tighter cert).
+- Teeth alignment (INS-2-003 interaction): the teeth test test_dropping_caustic_
+  feature_inflates_over_prediction ALREADY used the monotone comparison
+  raw_nocaustic > raw_with_caustic * 1.05 (not a fixed '> 1.5' bar) -- satisfies the
+  Inspector's suggested alternative; measured margin 1.238x vs the 1.05 floor.
+  Updated its docstring parenthetical: with the twofold bar, the with-caustic ratio
+  1.986 is just UNDER the pin, so a bare 'above-the-pin' comparison WOULD be
+  satisfiable by a no-op surface -- the monotone form is load-bearing.  Teeth probe:
+  dropping the caustic coeff gives ratio 2.459 > 2.0 -> pin goes RED when the feature
+  is inert (assertion load-bearing, verified live).
+- All premise checks kept intact (off-grid midpoint witness via script._off_grid_
+  points('full', 42), w_low_true not None and > 0, raw_fit < ceiling, n_compared += 1).
+  Backward-compat grep: no other test file pins the retired 1.5/1.43/0.70 target
+  (all 0.70/1.5x hits elsewhere are unrelated gamma/threshold literals).
+- VERIFIED: default fast tier = 33 passed / 3 skipped / 0 failed (3 distinct skip
+  reasons, all accurate); with COGWHEEL_DIFFRACTIVE_FULL_BAKE=1 the corner-pin class
+  is 2 passed.  NOTE: serena insert_at_line can land mid-block when the target line
+  index is the LAST line of a preceding multi-line tuple -- verify surrounding
+  structure after insert (caught a displaced closing line and repaired).
+
+## 2026-08-20 (D2 symmetry re-scope — test_lensing_part0_mechanical.py)
+
+- D2 symmetry re-scope (WP-1 even-harmonic basis landed): renamed
+  `TestWLlowFitFourFoldSymmetry` -> `TestWLlowFitD2Symmetry` and
+  `_FOURFOLD_TOL` -> `_D2_TOL`.  Replaced the retired `test_pi2_rotation_
+  invariance` (pinned the WRONG cos(4k theta) 4-fold symmetry) with THREE
+  tests using EIGENFRAME transforms via new `_eig_z`/`_from_eig` helpers
+  (complex `z_eig = exp(-i beta) y'`; theta+pi = -z, reflection = z.conjugate(),
+  pi/2 = 1j*z): test_period_pi_invariance + test_reflection_invariance (both
+  to ~1e-15, pass) and test_pi2_rotation_changes_value (self-falsification,
+  diff ~0.075-0.42).  41 passed.
+- EMPIRICAL CORRECTION TO THE OTHER RUN'S MEMORY CLAIM: `|y_c(theta)| =
+  |geometry.caustic_point(gamma_prime, theta)|` is period-PI and
+  reflection-symmetric (D2), NOT period-pi/2.  The astroid caustic SET is
+  4-fold symmetric, but the critical-ANGLE parametrisation is only 2-fold:
+  under theta->theta+pi/2 the `gamma_prime cos(2 theta)` term in effective_u
+  flips sign, so |y_c| changes (measured diff ~0.02-0.47 at gp in 0.15-0.45).
+  So the pi/2 non-symmetry comes from BOTH the odd harmonics AND the caustic
+  feature, not just the odd harmonics.  Teeth check: zeroing the odd harmonics
+  (a_1,a_3,a_5,a_7) still leaves pi/2 diff ~0.42-0.65 (caustic feature alone
+  breaks pi/2).  Docstrings written to the accurate D2 story.
+- Corner raw-over-prediction pin NOT duplicated: it already lives in
+  test_lensing_diffractive.py (CornerRawOverPredictionTestCase, other run's
+  suite) and is RED BY DESIGN (1.986x > 1.5, de-rate 0.5034 = 1/1.986) --
+  flips green when the driver's FULL bake (de-rate >= 0.70) lands.  part0_
+  mechanical stays engine-free.
+- Monotonicity re-verification (cross-suite): GammaMonotonicity / SMonotonicity
+  / CeilingCapAndWallCollapse / DerateTeeth all PASS with provisional
+  coefficients (caustic coeff -0.72669 < 0 reinforces wall-collapse + falling
+  s-dependence) -- no re-derivation needed; the peak bounds are already
+  LIVE-derived.  No other test file pins the retired 4-fold w_low_fit symmetry
+  (the "4-fold" hits in ppgo_map / caustic_cusps / interior_wedge_chart are
+  about the astroid caustic's geometric symmetry, unrelated to the fit basis).
+
+## 2026-08-20 (WP-1 even-harmonic + caustic corner pin + off-grid oracle gating — test_lensing_diffractive.py)
+
+- Sole owned suite test_lensing_diffractive.py (36 tests). WP-1 (even-harmonic
+  basis cos(2k theta) k=1..7 + parametric-caustic feature) landed with
+  PROVISIONAL smoke coefficients: de-rate 0.503444, caustic coeff -0.72669,
+  provenance SHA 3827f48 (corner raw over-prediction 1.986x at gamma=0.41
+  r=0.55 theta=3pi/4+pi/32=2.454369).
+- Off-grid midpoint zero-over-serve oracle (spec 1): extended
+  `_full_grid_sweep` to iterate BOTH `_grid_points('full',42)` (252 on-grid)
+  AND `_off_grid_points('full',42)` (240 theta-MIDPOINT probes), tagging rows
+  with an `off_grid` bool (9-tuple).  The on-grid-only sweep was BLIND to the
+  sub-grid caustic dip (passed GREEN while the smoke surface over-served
+  off-grid).  Gated the ENTIRE zero-over-serve sweep + diagnostic plot behind
+  COGWHEEL_DIFFRACTIVE_FULL_BAKE=1 via `@unittest.skipUnless` with a LOUD
+  reason (can only pass with FINAL driver-baked coefficients; smoke coeffs are
+  de-rated over the smoke grid only).  Added `import unittest` (file used
+  `from unittest import TestCase, main, mock`).  MEASURED the extended off-grid
+  sweep: 240 off-grid rows, 2 marginal over-serves (worst rel 1.00000005e-4 vs
+  bar 1e-4) at (0.41, 0.55, theta~5.596) -- red-with-provisional, green once
+  the full bake lands.  The derate falsification (test_removing_derate_trips_
+  overserve) stays UNGATED in the fast tier (~39s measured, independent of
+  final coefficients).
+- Corner raw-over-prediction pin (cross-suite, NEW permanent): added
+  CornerRawOverPredictionTestCase (2 tests).  Measures w_low_true at
+  (gamma=0.41,kappa=0,beta=0,r=0.55,theta=3pi/4+pi/32) via script
+  _measure_w_low_true(n_w=16) and raw_fit via w_low_fit with
+  _DIFFRACTIVE_FIT_DERATE patched to 1.0; asserts raw_fit/w_low_true < 1.5
+  (driver target <=1.43 = de-rate>=0.70).  MEASURED 1.986x -> RED BY DESIGN
+  at authoring time (the smoke de-rate 0.5034 = 1/1.986 does NOT meet the
+  driver's 0.70 target); flips green with zero edits when the driver's FULL
+  bake lands.  Kept honest (no expectedFailure).  Teeth test patches
+  _DIFFRACTIVE_FIT_CAUSTIC_COEFF to 0.0 -> ratio 2.459 > 1.5 (green now),
+  proving the negative caustic coeff is load-bearing.  Premise assertions:
+  corner witness IS in the script's off-grid set; raw_fit < ceiling (not
+  clipped); caustic coeff < 0.
+- CRITICAL _measure_w_low_true n_w SENSITIVITY (non-monotone rel): at the
+  corner, rel(w) has a REAL truncation bump (peak 1.22e-4 > bar 1e-4 at
+  w~3.48, dips back below until ~6.4, then rises monotonically).  n_w=16
+  bisection LANDS on the bump -> w_low_true=3.456 (first breach, CORRECT
+  conservative); n_w=48 bisection SKIPS it -> 6.54 (last breach, WRONG
+  over-optimistic).  The bake's default n_w=16 is therefore the CORRECT
+  choice here (matches the certificate's prefix-closed semantics); a higher
+  n_w silently over-certifies.  Documented in the pin's docstring.
+- CROSS-SUITE BACKWARD-COMPAT FINDING (NOT mine, flagged): WP-1's even-harmonic
+  basis breaks test_lensing_part0_mechanical.py::TestWLlowFitFourFoldSymmetry
+  ::test_pi2_rotation_invariance (1 failed: pi/2 rotation diff 0.424 vs tol
+  2.3e-12) -- the OLD cos(4k theta) basis was 4-fold symmetric, the NEW
+  cos(2k theta) basis (odd k) is only 2-fold (pi-periodic) BY DESIGN.  The
+  caustic feature is 4-fold symmetric (astroid |y_c| period pi/2), so the
+  break is purely from odd harmonics.  Owner must REWRITE the 4-fold test to
+  2-fold (theta->theta+pi), NOT retire it (physical: F(-y)=F(y) => pi-periodic
+  honest ceiling).  I do NOT edit test_lensing_part0_mechanical.py.
+- Monotonicity re-verification (cross-suite): TestWLlowFitGammaMonotonicity /
+  SMonotonicity / CeilingCapAndWallCollapse / DerateTeeth all PASS (9/9) with
+  the provisional coefficients -- no re-derivation needed (caustic coeff
+  negative reinforces wall-collapse and the falling s-dependence past the
+  small-s peak; gamma-monotonicity holds).
+- File final state: 33 passed, 2 skipped (gated sweep+plot, loud reason), 1
+  failed (corner pin, RED by design).  My ONLY change is
+  test_lensing_diffractive.py; production _diffractive.py / geometry.py /
+  fit_diffractive_certificate.py are the WP-1 coder's (pre-existing).
+
 ## 2026-08-19 (INS-3-002 diffractive full-grid oracle + SMonotonicity closure — MY work)
 
 - Added `FullGridCertificateOracleTestCase` (3 tests) to test_lensing_diffractive.py:

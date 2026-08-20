@@ -1155,6 +1155,62 @@ class RCausticBenchmarkTestCase(GeometryTestCase):
         except Exception:  # pragma: no cover - environment dependent
             pass
 
+class CausticPointMirrorFidelityTestCase(GeometryTestCase):
+    """`caustic_point` mirrors the numba `_caustic_source` exactly.
+
+    `geometry.caustic_point` (pure-python, O(1)) is a documented mirror
+    of the numba `geometry._caustic_source`: the same closed-form
+    critical-curve -> caustic arithmetic, sharing the C math/numpy scalar
+    path.  The mirror's docstring mandates exact fidelity, but it is only
+    exercised indirectly through `_diffractive.w_low_fit`, so an
+    arithmetic drift in the mirror would silently change the fitted
+    certificate's caustic feature with no dedicated red.  This class is
+    that red: it evaluates both over a sweep of (gamma, theta, beta,
+    kappa) at branch ``+1`` and asserts agreement to ~1e-15 relative.
+    """
+
+    #: Reduced shears ``gamma' = gamma / (1 - kappa)`` swept at positive
+    #: parity, where branch ``+1`` is the only real branch and the
+    #: discriminant clamp is inert.
+    MIRROR_GAMMA_PRIMES = (0.3, 0.6, 0.8)
+
+    #: Convergences swept alongside the reduced shears.
+    MIRROR_KAPPAS = (0.0, 0.2, 0.4)
+
+    #: Shear orientations (radians) exercised in the mirror sweep.
+    MIRROR_BETAS = (0.0, 0.7, -1.1)
+
+    #: Polar angles covering the whole critical curve (incl. endpoints).
+    MIRROR_THETAS = tuple(np.linspace(0.0, 2.0 * np.pi, 33))
+
+    #: Relative agreement bar: both paths share the C libm scalar
+    #: implementations, so the true agreement is exact (measured worst
+    #: relative error 0.0 over the positive-parity domain); 1e-15 leaves
+    #: headroom for a libm ULP difference while still catching real drift.
+    MIRROR_RTOL = 1e-15
+
+    def test_caustic_point_matches_caustic_source(self) -> None:
+        """`caustic_point` agrees with `_caustic_source` to ~1e-15 over a
+        (gamma, theta, beta, kappa) sweep at branch +1."""
+        for gamma_prime in self.MIRROR_GAMMA_PRIMES:
+            for kappa in self.MIRROR_KAPPAS:
+                gamma = gamma_prime * (1.0 - kappa)
+                for beta in self.MIRROR_BETAS:
+                    for theta in self.MIRROR_THETAS:
+                        produced = np.asarray(geometry.caustic_point(
+                            gamma, float(theta), beta=beta, kappa=kappa,
+                            branch=1.0))
+                        reference = geometry._caustic_source(
+                            float(theta), gamma, beta, kappa, 1.0)
+                        self.assertTrue(
+                            np.allclose(produced, reference,
+                                        rtol=self.MIRROR_RTOL, atol=1e-15),
+                            f'caustic_point drifted from _caustic_source at '
+                            f'gamma_prime={gamma_prime}, kappa={kappa}, '
+                            f'beta={beta}, theta={theta:.6f}: produced='
+                            f'{produced} reference={reference}')
+                        self.n_checks += 1
+
 
 if __name__ == '__main__':
     main()

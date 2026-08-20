@@ -15,14 +15,15 @@ computation. Budget: < 2 s total.
 
 The file also hosts the numerical ``w_low_fit`` certificate-behaviour
 tests (``WLlowFitBaseTestCase`` and subclasses): monotonicity in reduced
-shear and source magnitude, 4-fold angular symmetry, and the DD-ceiling
-cap / parity-wall collapse.  Those import the fitted-certificate module
+shear and source magnitude, D2 angular symmetry (period-``pi`` +
+reflection), and the DD-ceiling cap / parity-wall collapse.  Those import the fitted-certificate module
 LAZILY (``_load_w_low_fit``) and call only the O(1), engine-free
 ``w_low_fit`` — they stay far under the fast-tier budget.
 """
 from __future__ import annotations
 
 import ast
+import cmath
 import json
 import math
 import pathlib
@@ -910,13 +911,18 @@ class TestSelfFalsification(unittest.TestCase):
 # NUMERICAL ``w_low_fit`` BEHAVIOUR TESTS
 # ===========================================================================
 
-#: Relative tolerance for the 4-fold angular-symmetry check.  The fitted
-#: surface's only angular dependence is the ``cos(4 k theta)`` harmonic basis
-#: (period ``pi/2``), and ``s = |y'|^2`` / ``sqrt_mu`` are rotation-invariant,
-#: so the four eigenframe ``pi/2`` rotations agree to float round-off
-#: (measured ~6e-15).  1e-12 leaves two decades of headroom while still
-#: catching any angular model that is not restricted to the 4-fold subspace.
-_FOURFOLD_TOL: float = 1e-12
+#: Relative tolerance for the D2 angular-symmetry check.  The fitted
+#: surface's angular dependence is the even-harmonic basis
+#: ``cos(2 k theta)`` (period ``pi``) plus the parametric-caustic feature
+#: ``log(|y'| / |y_c(theta)|)`` whose astroid radius ``|y_c(theta)|`` is
+#: period-``pi`` and reflection-symmetric (the astroid caustic SET is
+#: 4-fold symmetric, but its critical-angle parametrisation is only
+#: 2-fold); ``s = |y'|**2`` / ``sqrt_mu`` are rotation-invariant, so the
+#: eigenframe ``pi`` rotation and reflection agree to float round-off
+#: (measured ~1e-15).  1e-12 leaves three decades of headroom while still
+#: catching any angular model that is not restricted to the D2-invariant
+#: (period-``pi`` + reflection) subspace.
+_D2_TOL: float = 1e-12
 
 #: Relative slop for the monotonicity sweeps.  ``w_low_fit`` is a smooth
 #: log-log polynomial, so its monotone branches are exact to float round-off
@@ -1099,46 +1105,89 @@ class TestWLlowFitSMonotonicity(WLlowFitBaseTestCase):
                 self._assert_non_increasing(values[peak:])
 
 
-class TestWLlowFitFourFoldSymmetry(WLlowFitBaseTestCase):
+class TestWLlowFitD2Symmetry(WLlowFitBaseTestCase):
     """
-    ``w_low_fit`` is invariant under eigenframe ``pi/2`` rotations.
+    ``w_low_fit`` is D2-symmetric in the eigenframe angle ``theta``.
 
-    The fitted angular model is the ``cos(4 k theta)`` basis (period
-    ``pi/2``), and the remaining features (``s = |y'|^2``, ``sqrt_mu``) are
-    rotation-invariant, so rotating the source by ``pi/2`` leaves the
-    certificate unchanged to float round-off.  The companion
-    `TestWLlowFitSelfFalsification` shows the surface DOES vary at ``pi/4``,
-    so this equality is a genuine 4-fold symmetry rather than a
-    theta-independent fit.
+    The fitted angular model is the even-harmonic basis
+    ``cos(2 k theta)`` (``k = 1 .. _DIFFRACTIVE_FIT_N_HARM``) plus the
+    parametric-caustic feature ``log(|y'| / |y_c(theta)|)``.  Each
+    ``cos(2 k theta)`` has period ``pi`` and is reflection-invariant
+    (``cos(2 k theta) = cos(-2 k theta)``), and the astroid caustic radius
+    ``|y_c(theta)|`` is period-``pi`` and reflection-symmetric (the astroid
+    caustic SET is 4-fold symmetric, but its critical-angle parametrisation
+    is only 2-fold), while ``s = |y'|**2`` and ``sqrt_mu`` are
+    rotation-invariant -- so rotating the eigenframe source by ``pi`` or
+    reflecting it leaves the certificate unchanged to float round-off.
+    ``pi/2`` is NOT a symmetry: the odd harmonics ``cos(2 theta)``,
+    ``cos(6 theta)``, ... flip sign under a ``pi/2`` rotation AND the
+    caustic radius is only period-``pi``, so `test_pi2_rotation_changes_value`
+    shows the value genuinely moves there.  (The retired ``cos(4 k theta)``
+    basis was 4-fold symmetric; the even-harmonic basis is only 2-fold,
+    period ``pi``.)
     """
+
+    #: Interior fixtures exercising non-trivial ``beta``/``kappa``; the D2
+    #: symmetry is a property of the fit in ``theta``, so the eigenframe
+    #: transformations (not the lens-plane ones) are the honest probes.
+    _CONFIGS: tuple[tuple[tuple[float, float], float, float, float], ...] = (
+        ((0.4, 0.7), 0.3, 0.5, 0.2),
+        ((1.1, -0.2), 0.15, -0.9, 0.1),
+        ((0.05, 0.9), 0.45, 1.3, 0.0),
+    )
 
     @staticmethod
-    def _rot90(y, k: int):
-        """Rotate source position ``y`` by ``k * pi/2`` (exact, no trig)."""
-        y0, y1 = float(y[0]), float(y[1])
-        for _ in range(k % 4):
-            y0, y1 = -y1, y0
-        return (y0, y1)
+    def _eig_z(y, beta: float, kappa: float) -> complex:
+        """Eigenframe complex source ``z_eig = exp(-i beta) y'``."""
+        root = math.sqrt(1.0 - kappa)
+        z = complex(float(y[0]) / root, float(y[1]) / root)
+        return cmath.exp(-1j * float(beta)) * z
 
-    def test_pi2_rotation_invariance(self) -> None:
-        """The three pi/2 rotations reproduce the base value to ~1e-12."""
-        configs = [
-            ((0.4, 0.7), 0.3, 0.5, 0.2),
-            ((1.1, -0.2), 0.15, -0.9, 0.1),
-            ((0.05, 0.9), 0.45, 1.3, 0.0),
-        ]
-        for y, gamma, beta, kappa in configs:
+    @staticmethod
+    def _from_eig(z_eig: complex, beta: float, kappa: float):
+        """Lens-plane source ``y = sqrt(lam) R(beta) y_eig`` for ``z_eig``."""
+        root = math.sqrt(1.0 - kappa)
+        z = cmath.exp(1j * float(beta)) * z_eig
+        return (root * z.real, root * z.imag)
+
+    def test_period_pi_invariance(self) -> None:
+        """``theta -> theta + pi`` (eigenframe negation) reproduces the value."""
+        for y, gamma, beta, kappa in self._CONFIGS:
             base = self._evaluate(y, gamma, beta, kappa)
-            for k in (1, 2, 3):
-                with self.subTest(y=y, k=k):
-                    value = self._evaluate(
-                        self._rot90(y, k), gamma, beta, kappa)
-                    self._n_checks += 1
-                    self.assertLessEqual(
-                        abs(value - base),
-                        _FOURFOLD_TOL * max(1.0, abs(base)),
-                        f'pi/2-rotation {k} broke 4-fold symmetry: '
-                        f'{base!r} vs {value!r}')
+            z = self._eig_z(y, beta, kappa)
+            shifted = self._from_eig(-z, beta, kappa)
+            value = self._evaluate(shifted, gamma, beta, kappa)
+            self._n_checks += 1
+            self.assertLessEqual(
+                abs(value - base), _D2_TOL * max(1.0, abs(base)),
+                f'period-pi symmetry broke: {base!r} vs {value!r} '
+                f'at (y={y}, gamma={gamma}, beta={beta}, kappa={kappa})')
+
+    def test_reflection_invariance(self) -> None:
+        """``theta -> -theta`` (eigenframe reflection) reproduces the value."""
+        for y, gamma, beta, kappa in self._CONFIGS:
+            base = self._evaluate(y, gamma, beta, kappa)
+            z = self._eig_z(y, beta, kappa)
+            reflected = self._from_eig(z.conjugate(), beta, kappa)
+            value = self._evaluate(reflected, gamma, beta, kappa)
+            self._n_checks += 1
+            self.assertLessEqual(
+                abs(value - base), _D2_TOL * max(1.0, abs(base)),
+                f'reflection symmetry broke: {base!r} vs {value!r} '
+                f'at (y={y}, gamma={gamma}, beta={beta}, kappa={kappa})')
+
+    def test_pi2_rotation_changes_value(self) -> None:
+        """A ``pi/2`` rotation is NOT a symmetry (odd harmonics + caustic)."""
+        for y, gamma, beta, kappa in self._CONFIGS:
+            base = self._evaluate(y, gamma, beta, kappa)
+            z = self._eig_z(y, beta, kappa)
+            rotated = self._from_eig(1j * z, beta, kappa)
+            value = self._evaluate(rotated, gamma, beta, kappa)
+            self._n_checks += 1
+            self.assertGreater(
+                abs(value - base), _D2_TOL * max(1.0, abs(base)),
+                f'pi/2 rotation did not change w_low_fit: {base!r} vs '
+                f'{value!r} -- the D2 symmetry tests would be vacuous')
 
 
 class TestWLlowFitCeilingCapAndWallCollapse(WLlowFitBaseTestCase):
@@ -1210,7 +1259,7 @@ class TestWLlowFitSelfFalsification(WLlowFitBaseTestCase):
     """
     Prove the numerical ``w_low_fit`` checks can go red.
 
-    The 4-fold symmetry test would pass vacuously if ``w_low_fit`` ignored
+    The D2 symmetry tests would pass vacuously if ``w_low_fit`` ignored
     ``theta``, and the monotonicity tests would pass vacuously if the
     surface were flat.  These tests show the surface genuinely varies in the
     directions the invariants pin, so a green suite is evidence rather than
@@ -1218,7 +1267,7 @@ class TestWLlowFitSelfFalsification(WLlowFitBaseTestCase):
     """
 
     def test_surface_varies_at_pi4(self) -> None:
-        """A pi/4 rotation (not a 4-fold symmetry) must change the value."""
+        """A pi/4 rotation (not a D2 symmetry) must change the value."""
         y = (0.4, 0.7)
         gamma, beta, kappa = 0.3, 0.5, 0.2
         base = self._evaluate(y, gamma, beta, kappa)
@@ -1227,9 +1276,9 @@ class TestWLlowFitSelfFalsification(WLlowFitBaseTestCase):
         value = self._evaluate(rotated, gamma, beta, kappa)
         self._n_checks += 1
         self.assertGreater(
-            abs(value - base), _FOURFOLD_TOL * max(1.0, abs(base)),
-            'pi/4 rotation did not change w_low_fit; the 4-fold symmetry '
-            'test would be vacuous')
+            abs(value - base), _D2_TOL * max(1.0, abs(base)),
+            'pi/4 rotation did not change w_low_fit; the D2 symmetry '
+            'tests would be vacuous')
 
     def test_monotone_check_detects_an_increase(self) -> None:
         """The non-increasing check rejects a sequence with an increase."""

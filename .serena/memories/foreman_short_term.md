@@ -1,40 +1,22 @@
-# Foreman Short-Term Observations
-
-## 2026-08-19 (tiling_plan_refresh_order16)
-- TILING-PLAN DEMAND GATE IS BINARY, SO CENSUS SHRINK ≠ PLAN SHRINK: the
-  `tiling_plan` demand gate admits a (region, gamma-band) band whenever the
-  census cell's `engine_residual` count > 0 (`_residual_by_region_band`), and
-  sizes it from the measured w-range of those residual draws. After the
-  order-16 diffractive certificate fix the 10k census `engine_residual` share
-  fell 42.06% -> 33.15% (routes: diffractive_analytic +812, born_analytic
-  +79, engine_residual -891), but the plan came out BYTE-IDENTICAL
-  (11252 nodes / 90016 calls): the exterior:+1 cell still has residual
-  demand in the same measured w-range (0.0248-4.97), so its 19-tile / 6080-
-  node plan persists and exterior:+1 is still 54.0% of planned nodes ->
-  escalation does NOT clear. Lesson: an escalation cleared by reducing
-  residual COUNT must be re-checked against the demand GATE, not assumed.
-- Long census runs (order-16, ~1.1 draws/s, 10k = ~2.4h): `serve_route_census.
-  run` prints nothing, and Serena's `execute_shell_command` + the opencode
-  Bash tool both hang on the background process (tool waits on the child's
-  stdout). Working recipe: `setsid nohup python script > log 2>&1 < /dev/null
-  &` then poll the log with short foreground Bash calls — the setsid detach
-  is what lets the Bash tool return. To get per-250-draw progress, monkeypatch
-  the module-global `classify_draw` in a driver BEFORE calling the shipped
-  `tiling_plan.run` (wrap the shipped predicate, don't re-type it) — that
-  keeps mirror-fidelity while emitting draw-level progress.
-- NUMBA warm cache: `/tmp/numba_census_shared` is the shared cache the brief
-  prescribes (`NUMBA_CACHE_DIR=...`); first census in a fresh shell still pays
-  ~10-15s warmup but steady-state was ~1.1-1.2 draws/s at order 16 / n_freq
-  128.
-- Parallel-session contamination on a long run: the tree was clean at launch
-  (14:53) but had 6+ source files modified by a PARALLEL build session by
-  17:11 (timestamps inside my run window). My census ran against HEAD-as-loaded
-  at process start, so results are valid; verify with mtime ordering before
-  attributing blame.
-- 10k order-16 refresh vs the brief's 3k measurement: engine_residual 3315/
-  10000 = 33.15% vs 3280/10000 scaled from 3k (32.80%) — +0.35 pct-pts, within
-  the 1-2 pct-pt allowance; all six major routes within ~1 pct-pt. Acceptance
-  bars (within 1-2 of 32.80%, clearly below 42.06%) PASS.
-- `render_fragments.py` emits "Repoint to the completed.d record" WARNINGS for
-  dangling wiki-links in unrelated fragments — pre-existing, exit 0, TODO.md
-  still regenerates. Not caused by my edit.
+## 2026-08-20 (INS-2-003 caustic-feature self-falsification teeth fix)
+- FIXED-FLOOR VACUITY, RE-PROBE PATTERN: a self-falsification "feature is
+  load-bearing" test that asserts an absolute floor (raw_nocaustic/w_low_true
+  > 1.5) can be satisfiable even when the feature is a no-op when the
+  WITH-feature value already clears the floor (here 1.986 > 1.5). The correct
+  teeth is a MONOTONE-WORSENING comparison between the two raw surfaces
+  measured under identical conditions (both derate=1.0): raw_nocaustic >
+  raw_with_caustic * 1.05. Re-probed measured values first: with-caustic
+  ratio 1.986, no-caustic 2.459, so raw_nocaustic/raw_with_caustic ~1.238 —
+  the 1.05 factor has real headroom (~19% below measured inflation). Teeth
+  verified by patching caustic_coeff back to its ORIGINAL value (a no-op
+  drop => raw_nocaustic == raw_with_caustic): the assertion trips red.
+- This also lets the honest-ceiling `_measure_w_low_true` (~1.2s engine
+  probe) be DROPPED from the test — the relative comparison needs no engine
+  oracle, making the test purely O(1) `w_low_fit` calls. Keep the measured
+  1.986 -> 2.459 ratios in the docstring as the calibrated context.
+- DIFF TRAP reconfirmed in this session: the edited method sits inside a
+  parallel build's uncommitted block, so `git diff` shows the WHOLE test
+  class as `+` — verified the fix via targeted source-string asserts
+  (old needle absent, new needle present at the expected line) plus a fresh
+  pytest run, never diff isolation. ast.parse + full-file pytest (33 passed,
+  3 skipped) green.
