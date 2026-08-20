@@ -59,3 +59,29 @@ section: Backlog
   territory with measured cost), and the serve-route census no longer counts
   the shell as engine demand. Then the tiling-plan refresh and campaign
   sizing can proceed on the honest post-serve demand map.
+
+  BINDING REPRESENTATION + COORDINATES (owner, 2026-08-20 — "as always"):
+  the chart must use the codebase's established representation doctrine,
+  NEVER a raw serve or a decline-to-engine.  Concretely:
+  - REPRESENTATION = residual against a KNOWN ANALYTIC ANCHOR, following the
+    settled pattern (tube r = E/F_ref; far-field vs two-image GO carrier;
+    saddle-bottom vs exact -1j*sqrt(mu_macro)).  The wall-band anchor is the
+    EXACT w->0 limit F(w->0) = sqrt(mu_macro)*exp(-i*pi*n/2): store
+    r(w) = F_engine(w) / [sqrt(mu_macro)*exp(phase)], the smooth residual
+    (I measured the series' deficit C(gamma') = |F(0)|/sqrt(mu_macro) is a
+    smooth 1D function: 1.0001 at gamma'=0.5 -> 0.60 at 0.98).  The known
+    scaling sqrt(mu_macro) = 1/sqrt(1-gamma'^2) is factored OUT analytically
+    so the fitted object is smooth, low-dimensional and safe to extrapolate.
+  - COORDINATES = the reduced/caustic-relative ones, never raw lens-plane
+    (gamma, y1, y2): rho = |y'|/|y_c(theta)| (the fence discriminator,
+    geometry.caustic_point), 1-gamma' (wall-collapse scale), the eigenframe
+    angle theta (even-harmonic basis), and w (or log w).  Same doctrine as
+    the low-w series' relative-error currency (lam*sqrt_mu normalization).
+  - SCHWINGER = OFFLINE ORACLE ONLY.  Train the chart against f_schwinger;
+    the runtime serve is the fitted surface (a lookup).  NEVER a Schwinger
+    call at serve, NEVER a decline-to-engine for the band the chart owns.
+  - De-rated conservatively (never over-serve), certified off-grid (theta
+    midpoints), the de-rate the sole margin.
+  - The chart is a NEW artifact (data product) with its own data contract;
+    it joins the campaign's trained-artifact family and is saved/loaded like
+    the others, not a hand-baked constant table.
