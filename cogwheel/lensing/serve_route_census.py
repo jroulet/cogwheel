@@ -3,7 +3,7 @@
 WHAT
 ----
 `run` draws full-reach lens prior samples and classifies each draw into
-EXACTLY ONE of eleven mutually-exclusive serve routes -- the analytic rung
+EXACTLY ONE of twelve mutually-exclusive serve routes -- the analytic rung
 that WOULD answer it (or the exact-wave engine that would have to) -- WITHOUT
 ever evaluating a wave-optics amplitude.  It then aggregates the draw-level
 routes into ``(region x gamma-band x w-band)`` cells and splits the
@@ -82,7 +82,7 @@ from cogwheel.lensing.chang_refsdal import geometry
 # Route vocabulary
 # ---------------------------------------------------------------------------
 
-#: The eleven MECE draw-level serve routes, listed in label-enumeration order.
+#: The twelve MECE draw-level serve routes, listed in label-enumeration order.
 #: The DECISION order (a first-admitting waterfall) is DIFFERENT and is
 #: documented on `classify_draw`; it mirrors the PRODUCTION rung order of
 #: ``likelihood._amplification_coefficients``: ``engine_refused`` is decided
@@ -95,7 +95,11 @@ from cogwheel.lensing.chang_refsdal import geometry
 #: (the carrier-only truncation admitted by the shared production
 #: certificate),
 #: then the low-w diffractive rung splits by parity into
-#: ``diffractive_analytic`` (positive-parity Rung P, an ANALYTIC-side serve)
+#: ``low_w_diffractive_chart`` (positive-parity Rung P, served whole-band
+#: from the trained low-w diffractive residual chart -- an ANALYTIC-side
+#: serve that short-circuits the ``diffractive_analytic`` split below),
+#: ``diffractive_analytic`` (positive-parity Rung P, the ``w_low_fit``
+#: truncation-certificate series, an ANALYTIC-side serve)
 #: and ``diffractive_engine_hosted`` (macro-saddle Rung S, an ENGINE-HOSTED
 #: serve -- under the zero-engine-served bar it is engine demand, never an
 #: analytic closure), and finally the per-node pass resolves
@@ -107,6 +111,7 @@ SERVE_ROUTES: tuple[str, ...] = (
     'saddle_c3',
     'born_analytic',
     'born_carrier_only',
+    'low_w_diffractive_chart',
     'diffractive_analytic',
     'diffractive_engine_hosted',
     'analytics_engine_hosted',
@@ -207,6 +212,7 @@ class _ProductionModules:
     saddle_min_sep_floor: float           # likelihood._SADDLE_FARFIELD_MIN...
     born_carrier_serves: Any              # likelihood._born_carrier_certif...
     born_chart: Any                       # BornResidualChart.load() or None
+    low_w_chart: Any                      # LowWDiffractiveChart.load() or None
     band_split_mask: Any                  # likelihood._band_split_mask
     ppgo_band_split: Any                  # likelihood.LensedRelativeBinning...
     ppgo_cell_ceiling: Any                # ...Likelihood._ppgo_cell_ceiling
@@ -215,6 +221,8 @@ class _ProductionModules:
     saddle_wall: float                    # ppgo_map.SADDLE_WALL
     farfield_w_floor: Any                 # channels.farfield_w_floor
     w_low_fit: Any                        # _diffractive.w_low_fit
+    reduced_shear: Any                    # _diffractive._reduced_shear
+    caustic_rho: Any                      # _diffractive._caustic_rho
     diffractive_refusal_errors: tuple[type[BaseException], ...]  # w_low wall
     macro_matrix: Any                     # geometry.macro_matrix
     select_branch: Any                    # operator.select_branch
@@ -241,9 +249,10 @@ def _load_production_modules() -> _ProductionModules:
     from cogwheel.lensing.chang_refsdal import ChangRefsdalChannels, _schwinger
     from cogwheel.lensing.chang_refsdal import operator as op
     from cogwheel.lensing.chang_refsdal._diffractive import (
-        DiffractiveDomainError, w_low_fit)
+        DiffractiveDomainError, _caustic_rho, _reduced_shear, w_low_fit)
     from cogwheel.lensing.chang_refsdal.channels import farfield_w_floor
     from cogwheel.lensing.born_residual_chart import BornResidualChart
+    from cogwheel.lensing.low_w_diffractive_chart import LowWDiffractiveChart
     from cogwheel.lensing.likelihood import (
         _SADDLE_FARFIELD_MIN_IMAGE_SEP, LensedRelativeBinningLikelihood,
         _band_split_mask, _born_carrier_certificate_serves,
@@ -261,6 +270,18 @@ def _load_production_modules() -> _ProductionModules:
         born_chart = BornResidualChart.load()
     except (OSError, ValueError, KeyError):
         born_chart = None
+
+    # The low-w diffractive residual chart (positive-parity Rung P).  Loaded
+    # engine-free from the registered NPZ, mirroring production's auto-attach
+    # (`likelihood._AUTO_LOW_W_CHART`): a load anomaly leaves the census with
+    # no chart, exactly as the production chart rung goes inactive when the
+    # chart is unavailable (both then fall Rung-P draws through to the
+    # `w_low_fit` split / exact engine).  ``load`` reads a plain NPZ -- no
+    # engine call.
+    try:
+        low_w_chart = LowWDiffractiveChart.load()
+    except (OSError, ValueError, KeyError):
+        low_w_chart = None
 
     # UNINITIALIZED likelihood shell (``object.__new__``; ``__init__`` is
     # never run -- no event data, no engine).  The three Born host-band
@@ -282,6 +303,7 @@ def _load_production_modules() -> _ProductionModules:
         saddle_min_sep_floor=float(_SADDLE_FARFIELD_MIN_IMAGE_SEP),
         born_carrier_serves=_born_carrier_certificate_serves,
         born_chart=born_chart,
+        low_w_chart=low_w_chart,
         band_split_mask=_band_split_mask,
         ppgo_band_split=born_band_host._ppgo_band_split,
         ppgo_cell_ceiling=born_band_host._ppgo_cell_ceiling,
@@ -290,6 +312,8 @@ def _load_production_modules() -> _ProductionModules:
         saddle_wall=float(ppgo_map.SADDLE_WALL),
         farfield_w_floor=farfield_w_floor,
         w_low_fit=w_low_fit,
+        reduced_shear=_reduced_shear,
+        caustic_rho=_caustic_rho,
         diffractive_refusal_errors=(DiffractiveDomainError,),
         macro_matrix=geometry.macro_matrix,
         select_branch=op.select_branch,
@@ -717,10 +741,14 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
        intercept (production returns ``None`` before any serve, carrier-only
        included).
     6. low-w diffractive rung (far-field exterior, ``w_lo < farfield_w_
-       floor``), SPLIT BY PARITY onto opposite ledger sides: ``diffractive_
-       analytic`` for the positive-parity Rung P (analytic ``F_P`` admitted
-       by the ``w_low_fit`` truncation certificate -- an ANALYTIC
-       serve), and ``diffractive_engine_hosted`` for the macro-saddle Rung S
+       floor``), SPLIT BY PARITY onto opposite ledger sides:
+       ``low_w_diffractive_chart`` (positive-parity Rung P, served whole-band
+       from the trained low-w diffractive residual chart when the production
+       ``chart.covers`` predicate admits the draw -- an ANALYTIC serve that
+       short-circuits the split below), else ``diffractive_analytic`` for the
+       same Rung P (analytic ``F_P`` admitted by the ``w_low_fit``
+       truncation certificate -- an ANALYTIC serve), and
+       ``diffractive_engine_hosted`` for the macro-saddle Rung S
        (exact engine hosting the whole band under the per-draw reachability
        cap ``min(w_split, W_CEILING_SCHWINGER)`` -- an ENGINE-HOSTED serve,
        so the 7b zero-engine-served bar counts it as engine demand, NEVER an
@@ -898,9 +926,12 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
     # real images) and only when the band dips below the per-draw
     # ``farfield_w_floor`` (else the far-field rungs / engine own the band).
     # The rung SPLITS BY PARITY onto OPPOSITE sides of the ledger:
-    #   * gamma < 1 (positive parity, Rung P) -> ``diffractive_analytic``:
-    #     the analytic ``F_P`` series admitted by the fitted truncation
-    #     certificate ``w_low_fit`` (an ANALYTIC-side serve).
+    #   * gamma < 1 (positive parity, Rung P) -> ``low_w_diffractive_chart``
+    #     when the trained low-w chart's ``covers`` predicate admits the draw
+    #     (an ANALYTIC-side whole-band serve, consulted FIRST), else
+    #     ``diffractive_analytic``: the analytic ``F_P`` series admitted by
+    #     the fitted truncation certificate ``w_low_fit`` (an ANALYTIC-side
+    #     serve).
     #   * gamma >= 1 (macro saddle, Rung S) -> ``diffractive_engine_hosted``:
     #     the exact engine hosts the whole band under the per-draw
     #     reachability cap ``W_reach = min(w_split, W_CEILING_SCHWINGER)``.
@@ -914,6 +945,45 @@ def classify_draw(mods: _ProductionModules, *, gamma: float,
         w_floor = mods.farfield_w_floor(geom.delays, geom.real_mask)
         if w_lo < w_floor:
             if gamma < 1.0:
+                # Rung P chart-first consult: the trained low-w diffractive
+                # residual chart owns the near-fold shell (where ``w_low_fit``
+                # declines -> None) and the wall band (which ``w_low_fit``
+                # would split into a tiny analytic sub-band plus an engine
+                # host), so a full-band chart serve short-circuits the
+                # ``w_low_fit`` split below.  The census fixes kappa = beta =
+                # 0, so the reduced frame is the lens frame itself: gamma' =
+                # gamma, y' = y, s = y1^2 + y2^2 and theta = atan2(y2, y1).
+                # ``rho_dir`` is the DIRECTION-DEPENDENT reduced caustic reach
+                # via the production `_caustic_rho` (NOT the scalar
+                # `_caustic_rho_or_none`, which has no theta); it is a FRESH
+                # local so the outer scalar ``rho`` (the `caustic_rho` field
+                # gauge, consumed by `residual_demand`) is left untouched --
+                # the two gauges differ by ~1.45-6.2x, so rebinding would
+                # corrupt the demand buckets.  A covered draw in a per-cell
+                # DECLINED cell (the training oracle flagged the served
+                # two-sided error as unable to meet the certification bar) is
+                # NOT the chart route: it falls through to the ``w_low_fit``
+                # mirror below (and, for the near-fold shell, on to
+                # ``engine_residual``), exactly as production's chart rung
+                # returns None there.  On any other miss (chart absent, out of
+                # coverage, or a degenerate/wall-adjacent draw) it likewise
+                # falls through byte-for-byte.
+                if mods.low_w_chart is not None:
+                    try:
+                        _, gamma_prime = mods.reduced_shear(gamma, 0.0)
+                    except mods.diffractive_refusal_errors:
+                        gamma_prime = None
+                    if gamma_prime is not None and gamma_prime != 0.0:
+                        s = y1 * y1 + y2 * y2
+                        if s > 0.0:
+                            theta = math.atan2(y2, y1)
+                            rho_dir = mods.caustic_rho(
+                                abs(gamma_prime), s, theta)
+                            if (mods.low_w_chart.covers(gamma_prime, rho_dir,
+                                                        w_grid)
+                                    and not mods.low_w_chart.declined(
+                                        gamma_prime, rho_dir, theta)):
+                                return _result('low_w_diffractive_chart', ())
                 # Rung P admission mirror: ``w_low_fit`` receives the band
                 # ceiling cap (``w_hi``) and returns the FITTED conservative
                 # ceiling (``w_hi``-capped); the band floor (``w_low > w_lo``)
@@ -1134,7 +1204,8 @@ def run(config: ServeRouteCensusConfig | None = None,
             'serve_routes_decision_order': [
                 'engine_refused', 'surrogate', 'ppgo_above_ceiling',
                 'saddle_c3', 'born_analytic|born_carrier_only',
-                'diffractive_analytic|diffractive_engine_hosted',
+                'low_w_diffractive_chart|diffractive_analytic'
+                '|diffractive_engine_hosted',
                 'wave_refused|engine_residual|analytics_engine_hosted'],
             'serve_routes': list(SERVE_ROUTES),
             'route_kinds': list(ROUTE_KINDS),

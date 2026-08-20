@@ -81,6 +81,7 @@ Frequencies in Hz, times in GPS seconds, delays in seconds; lens mass
 """
 from __future__ import annotations
 
+import cmath
 import math
 import types
 import warnings
@@ -104,8 +105,11 @@ from cogwheel.lensing.chang_refsdal.geometry import (
 from cogwheel.lensing.chang_refsdal._schwinger import (
     W_CEILING_SCHWINGER, W_CEILING_SCHWINGER_QD, SchwingerCertificationError)
 from cogwheel.lensing.chang_refsdal._diffractive import (
-    DiffractiveDomainError, diffractive_amplification, w_low_fit)
-from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
+    DiffractiveDomainError, diffractive_amplification, w_low_fit,
+    _reduced_shear, _caustic_rho)
+from cogwheel.lensing.chang_refsdal._hyp1f1 import (
+    HypergeometricDomainError, prefactor_c)
+from cogwheel.lensing.chang_refsdal._born import _born_factors
 from cogwheel.lensing.chang_refsdal.operator import RHO_END
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
@@ -113,6 +117,7 @@ from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
                                        CERTIFICATION_BAR, caustic_rho,
                                        get_certified_ppgo_map)
 from cogwheel.lensing.born_residual_chart import BornResidualChart
+from cogwheel.lensing.low_w_diffractive_chart import LowWDiffractiveChart
 
 __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
 
@@ -123,6 +128,13 @@ __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
 #: stay distinguishable from "argument not supplied", which is why a plain
 #: ``None`` default cannot serve here.
 _AUTO_BORN_CHART = object()
+
+#: Sentinel for the ``low_w_diffractive_chart`` constructor argument,
+#: mirroring `_AUTO_BORN_CHART`: when the caller omits it, the shipped
+#: low-w diffractive residual chart is auto-loaded (refusing to ``None`` on
+#: any load anomaly).  An *explicit* ``None`` is the pure-engine opt-out;
+#: a caller-supplied in-memory instance is stored verbatim.
+_AUTO_LOW_W_CHART = object()
 
 #: Highest frequency moment retained for the data term ``(d|h)``.  The
 #: candidate component ratio is expanded to first order across a bin and
@@ -1111,7 +1123,8 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                  spline_degree=3, bin_delay_tol=_DEFAULT_BIN_DELAY_TOL,
                  kernel_subsamples=_DEFAULT_KERNEL_SUBSAMPLES,
                  amplification_surrogate=None,
-                 born_residual_chart=_AUTO_BORN_CHART):
+                 born_residual_chart=_AUTO_BORN_CHART,
+                 low_w_diffractive_chart=_AUTO_LOW_W_CHART):
         if isinstance(waveform_generator, LensedWaveformGenerator):
             base_generator = waveform_generator.waveform_generator
         else:
@@ -1159,6 +1172,29 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 self.born_residual_chart = None
         else:
             self.born_residual_chart = born_residual_chart
+
+        # Optional trained low-w diffractive residual chart; same
+        # auto-load / refuse-to-None / round-trip pattern as
+        # `born_residual_chart` (see the comments and `get_init_dict`
+        # override there).  Default (`_AUTO_LOW_W_CHART` sentinel):
+        # auto-load the shipped artifact, refusing to `None` on any load
+        # anomaly so an absent / corrupt artifact degrades to the
+        # `_low_w_diffractive_serve` fall-through instead of raising.
+        self._low_w_diffractive_chart_is_default = (
+            low_w_diffractive_chart is _AUTO_LOW_W_CHART)
+        if low_w_diffractive_chart is _AUTO_LOW_W_CHART:
+            try:
+                self.low_w_diffractive_chart = LowWDiffractiveChart.load()
+            except (OSError, ValueError, KeyError) as error:
+                warnings.warn(
+                    f'Low-w diffractive chart unavailable ({error}); the '
+                    f'near-fold-shell and wall-band draws will fall through '
+                    f'to the exact engine. Regenerate with '
+                    f'scripts/train_low_w_diffractive_chart.py.',
+                    RuntimeWarning)
+                self.low_w_diffractive_chart = None
+        else:
+            self.low_w_diffractive_chart = low_w_diffractive_chart
 
         # Populated by ``_set_summary`` (triggered by the ``fbin`` setter
         # inside ``super().__init__``).
@@ -1262,6 +1298,20 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 'not embedded in the init dict.  Reconstruct with the shipped '
                 'auto-loaded default by omitting `born_residual_chart`, or '
                 'opt out of the Born rung with `born_residual_chart=None`.  '
+                'Pickle preserves an in-memory chart for sampler workers.')
+        if self._low_w_diffractive_chart_is_default:
+            init_dict.pop('low_w_diffractive_chart', None)
+        elif self.low_w_diffractive_chart is None:
+            init_dict['low_w_diffractive_chart'] = None
+        else:
+            raise NotImplementedError(
+                'JSON serialization of a caller-supplied in-memory '
+                '`low_w_diffractive_chart` is unsupported: the chart carries '
+                'no source path to reference and its interpolation tables '
+                'are not embedded in the init dict.  Reconstruct with the '
+                'shipped auto-loaded default by omitting '
+                '`low_w_diffractive_chart`, or opt out of the low-w '
+                'diffractive rung with `low_w_diffractive_chart=None`.  '
                 'Pickle preserves an in-memory chart for sampler workers.')
         return init_dict
 
@@ -1918,6 +1968,107 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             return None
         return exact
 
+    def _low_w_diffractive_chart_serve(self, lens, dense_w, geom):
+        """Serve the low-w band from the trained diffractive residual chart.
+
+        Charts the low-w diffractive residual for the positive-parity
+        far-field exterior directly, bypassing the `w_low_fit` band split
+        and the exact engine entirely for the band the chart owns: the
+        near-fold shell (`w_low_fit` declines there -> ``None``) and the
+        wall band (`w_low_fit` would split into a tiny analytic sub-band
+        plus an engine host).  Mirrors `_low_w_diffractive_serve`'s
+        re-modulation and reconstruction tail exactly -- the same
+        ``FARFIELD_DIFFRACTIVE`` gauge, ``t_min`` demod/re-mod pair, and
+        ``(delays, k0, k1, geom)`` result -- so a chart serve is a drop-in
+        replacement for the two-rung serve over the band it covers.
+
+        The residual ``r_pure`` interpolated by the chart is the reduced
+        point-mass kernel in units of the macro amplitude times the exact
+        point-mass prefactor ``C(w)``: the full amplitude reconstructs as
+        ``F = mass_sheet_phase * prefactor_c(w) * sqrt_mu_full * r_pure``,
+        with ``mass_sheet_phase = exp(0.5j*w*(log(lam) - kappa*s))`` and
+        ``sqrt_mu_full`` from `_born_factors` -- the SAME mass-sheet
+        decomposition as the test oracle ``_engine_reference_kappa``
+        (``mass_sheet_phase * f_pure / lam``) with ``1/lam`` folded into
+        ``sqrt_mu_full``.  `_schwinger.f_schwinger` is NEVER called on this
+        path: the chart is the sole serve-time source for the band it owns.
+
+        Parameters
+        ----------
+        lens : dict
+            Lens parameters (``gamma, beta, kappa, y1, y2``).
+        dense_w : np.ndarray
+            Full dimensionless-frequency grid, 1-D, strictly positive.
+        geom : ChangRefsdalGeometryPartition
+            Geometry-only partition over ``dense_w`` (delays, saddle
+            kernels, real mask, ``t_min``) already in hand.
+
+        Returns
+        -------
+        tuple or None
+            ``(delays, k0, k1, geom)`` on a full-band chart serve, or
+            ``None`` to fall through (chart absent, out of coverage, a
+            reduced-shear domain refusal, or a draw in a per-cell declined
+            cell the training oracle flagged as unable to meet the
+            certification bar).
+        """
+        chart = self.low_w_diffractive_chart
+        if chart is None:
+            return None
+
+        gamma = float(lens['gamma'])
+        beta = float(lens['beta'])
+        kappa = float(lens['kappa'])
+        try:
+            lam, gamma_prime = _reduced_shear(gamma, kappa)
+        except DiffractiveDomainError:
+            return None
+        if gamma_prime == 0.0:
+            # No shear -> no caustic frame; `_caustic_rho` would divide by
+            # a degenerate zero-radius caustic.  Fall through to the
+            # `w_low_fit` path, which returns 0.0 (series exact) here.
+            return None
+
+        root = math.sqrt(lam)
+        y1 = float(lens['y1'])
+        y2 = float(lens['y2'])
+        yp0, yp1 = y1 / root, y2 / root
+        s = yp0 * yp0 + yp1 * yp1
+        if not s > 0.0:
+            return None
+        z_eig = cmath.exp(-1j * beta) * complex(yp0, yp1)
+        theta = math.atan2(z_eig.imag, z_eig.real)
+
+        rho = _caustic_rho(abs(gamma_prime), s, theta)
+
+        if not chart.covers(gamma_prime, rho, dense_w):
+            return None
+
+        if chart.declined(gamma_prime, rho, theta):
+            # A measured per-cell decline: the served two-sided error cannot
+            # meet the certification bar in this cell (near-fold resonance),
+            # so fall through to the exact engine -- never an amplitude scale.
+            return None
+
+        r_fit = chart.evaluate(dense_w, gamma_prime, rho, theta) * chart.derate
+        sqrt_mu_full = _born_factors(y1, y2, gamma, beta, kappa)[0]
+
+        mass_sheet_phase = np.exp(
+            0.5j * dense_w * (math.log(lam) - kappa * s))
+        prefactor = np.array(
+            [prefactor_c(float(w)) for w in dense_w], dtype=complex)
+        farfield = mass_sheet_phase * prefactor * sqrt_mu_full * r_fit
+
+        # Demodulate F by t_min into the far-field envelope and reconstruct
+        # via the SAME tail as `_low_w_diffractive_serve` (FARFIELD_DIFFRACTIVE).
+        envelope = farfield * np.exp(1j * _frame_phase(dense_w, geom.t_min))
+        kernels, _total = reconstruct_farfield(
+            dense_w, envelope, geom.delays, geom.saddle_kernels,
+            geom.real_mask, FARFIELD_DIFFRACTIVE, geom.t_min)
+        k0, k1 = self._reduce_dense_kernels(kernels)
+        delays = self._image_delays(lens, geom)
+        return delays, k0, k1, geom
+
     def _low_w_diffractive_serve(self, lens, dense_w, geom, w_lo, w_hi):
         """Serve the far-field diffractive bottom below ``farfield_w_floor``.
 
@@ -2010,6 +2161,17 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         farfield = np.zeros(dense_w.shape, dtype=complex)
 
         if gamma < 1.0:
+            # Rung P: consult the trained low-w diffractive residual chart
+            # FIRST.  The chart owns the near-fold shell (where `w_low_fit`
+            # declines -> None) and the wall band (which `w_low_fit` would
+            # split into a tiny analytic sub-band plus an engine host), so
+            # a full-band chart serve short-circuits the split below.  On
+            # any miss (chart absent or out of coverage) it returns None
+            # and the `w_low_fit` split runs unchanged.
+            served = self._low_w_diffractive_chart_serve(lens, dense_w, geom)
+            if served is not None:
+                return served
+
             # Rung P: analytic F_P below the truncation certificate w_low,
             # exact engine host above it.
             y = (lens['y1'], lens['y2'])

@@ -13,7 +13,7 @@
 #   MINOR: new artifacts, conventions, or consumer/producer entries
 #   PATCH: field list corrections, wording fixes
 
-schema_version: "3.3.1"
+schema_version: "3.4.0"
 
 # ── Conventions ──────────────────────────────────────────────────────────
 # Define project-wide data conventions here. These are referenced by
@@ -384,3 +384,15 @@ artifacts:
         function: "LensedRelativeBinningLikelihood._born_residual_analytic"
       - module: "cogwheel/lensing/likelihood.py"
         function: "LensedRelativeBinningLikelihood._surrogate_coefficients"
+
+  low_w_diffractive_chart:
+    description: "Trained low-w diffractive residual interpolation artifact shipped as package data at cogwheel/data/low_w_diffractive_chart.npz (schema `low_w_diffractive_v1`). Holds a 4-D tensor-product cubic interpolation of the REDUCED-frame low-w diffractive residual r_pure(w; gamma', rho, theta) = f_pure / (sqrt(mu_pure) * prefactor_c(w)) — f_pure the exact pure-shear Schwinger value, sqrt(mu_pure) = 1/sqrt(1-gamma'^2) the macro amplitude that diverges at the parity wall, prefactor_c(w) = C(w) the exact point-mass w*ln(w) diffraction phase; BOTH known analytic factors are stripped so the stored object is smooth and bounded (measured |r_pure| ~ 0.6-1.0 across the band), and the serve re-modulates F = mass_sheet_phase * prefactor_c(w) * sqrt_mu_full * r_pure. Coordinates are reduced / caustic-relative, never raw lens-plane: gamma' reduced shear (grid spans the positive-parity range below the parity wall), rho = |y'|/|y_c(theta)| caustic-relative distance (the same near-fold fence discriminator, geometry.caustic_point / _caustic_rho), theta eigenframe angle folded to the D2 fundamental domain [0, pi/2], log w the natural log of the dimensionless frequency. Fields: gamma_prime_grid, rho_grid, theta_grid, log_w_grid (1-D ascending axes), real_coeffs (4-D, shape n_gamma' x n_rho x n_theta x n_w), imag_coeffs (4-D, same shape), derate (scalar, min(1.0, 1/max_overshoot), the SOLE conservativeness margin — never a hard ceiling), declined_mask (3-D bool, shape n_gamma' x n_rho x n_theta, per-cell flag where the training oracle measured the SERVED two-sided error as unable to meet CERTIFICATION_BAR ~ 1e-4; the serve falls through to the exact engine for a covered draw in a declined cell — never an amplitude scale; empty = pre-mask artifact), provenance (JSON dict: driver, source SHA, training date, scale, seed, grid shape/ranges, measured wall-band rho spread, derate, max_overshoot, margin stats, declined-cell count), content_hash (SHA1 over all 8 hashed fields incl. derate and declined_mask), schema. Trained OFFLINE against the exact _schwinger.f_schwinger oracle (never called at serve time) by scripts/train_low_w_diffractive_chart.py (--scale smoke in-build, --scale full driver bake). Loaded and hash-verified via LowWDiffractiveChart.load (frozen dataclass, cogwheel/lensing/low_w_diffractive_chart.py); auto-attached at LensedRelativeBinningLikelihood construction time (sentinel default, refusing to None on any schema/content-hash anomaly; opt out with low_w_diffractive_chart=None). Consulted FIRST in the positive-parity low-w diffractive Rung-P branch by LensedRelativeBinningLikelihood._low_w_diffractive_chart_serve: covers() admits exactly the union band (near-fold shell RHO_LO <= rho <= 1+DELTA OR wall band gamma' > _WALL_GAMMA_PRIME = 0.5) inside the trained grid box plus the served w band inside the trained log-w range (refusing rather than cubic-extrapolating off the frequency axis), serving the whole band and returning the same (delays, k0, k1, geom) reconstruction tail as _low_w_diffractive_serve; any miss (chart absent, out of coverage, or a declined cell) falls through to the w_low_fit split / exact engine. w, gamma', rho are dimensionless; theta in radians (folded to [0, pi/2])."
+    format: "npz"
+    producer:
+      module: "scripts/train_low_w_diffractive_chart.py"
+      function: "main"
+    consumers:
+      - module: "cogwheel/lensing/likelihood.py"
+        function: "LensedRelativeBinningLikelihood._low_w_diffractive_chart_serve"
+      - module: "cogwheel/lensing/serve_route_census.py"
+        function: "classify_draw"

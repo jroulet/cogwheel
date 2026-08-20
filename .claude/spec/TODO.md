@@ -1688,91 +1688,6 @@ Tag conventions:
   net it off.
 
 
-- **LOW-W NEAR-FOLD ANALYTIC SERVE — the near-fold shell has no dedicated
-  serve (owner ruling 2026-08-20, DO NEXT — the fence build has LANDED)**
-  `[→ spec]` — the near-fold band of the diffractive rung has NO analytic
-  serve at low w. The fence build (diffractive_certificate_fit_fenced +
-  interior-fix + gamma-fence, SHIPPED: near-fold shell declines, deep
-  interior served by the calibrated fit, wall band gamma'>0.5 routes to
-  Schwinger) declines draws with `rho = |y'|/|y_c(theta)|` in `[RHO_LO ~
-  0.6, 1+DELTA ~ 1.4]` (returning None) so they fall through to the serving
-  ladder. BUT the uniform Airy fold arm (`_airy_fold.fold_amplification`)
-  REFUSES at all w in the diffractive band (measured at the fence corner
-  gamma=0.41, r=0.55: refuses at w=0.5..10): its control `xi = (3 w
-  Delta_tau / 4)^(2/3)` is a large-w asymptotic, and the arm is only OFFERED
-  in the ladder for w > 60 (the DD band w <= 60 is unconditional exact-wave
-  `f_schwinger`). So the fenced near-fold shell routes to the EXACT ENGINE,
-  not the fold arm. Measured: the shell (rho 0.9-1.2) is 332/4462 = 7.4% of
-  engine-residual demand (demand_census_post_born_10k.json). This is
-  correct-but-expensive and leaves the low-w near-fold band without a
-  dedicated analytic rung. The WALL band (gamma'>0.5) is SEPARATE and is
-  RESOLVED by routing to Schwinger (owner ruling: the order-16 series has a
-  convergence-radius collapse there — a square-root branch point not
-  representable at any practical order — so Schwinger is the correct serve,
-  and a fold-adapted serve is the right target for the NEAR-FOLD shell, not
-  the wall).
-
-  ORDERING CONSTRAINT (owner): this MUST land before any demand-census-
-  driven work (the tiling-plan refresh / campaign sizing), because the
-  engine-residual number changes when the shell stops being engine-served.
-  The fence build itself is the prerequisite (it defines the shell geometry
-  and the `_caustic_rho` discriminator).
-
-  DESIGN QUESTIONS (Professor to rule):
-  - Is a physically sound low-w near-fold serve realizable? The diffractive
-    series (weak-deflection, shear-operator expansion) is wrong near the
-    fold; the fold arm (large-xi asymptotic) is wrong at low w. At small w
-    the wave field near the fold is SMOOTH (long wavelength resolves no
-    caustic structure), so the amplification should be close to the
-    geometric/fold-limit value with O(w^2)-ish corrections — suggesting the
-    low-w near-fold serve may be a smooth function of (w, distance-to-fold)
-    rather than a hard expansion. If so, is it:
-    (a) a low-w uniform-Airy-CORRECTED diffractive series (two-image beat
-        near the fold, like the tube charts' two-carrier F_ref);
-    (b) a low-w fold-adapted expansion in distance-to-caustic;
-    (c) or is the 7.4% shell small enough that fence-to-engine is the right
-        engineering call and the serve is not worth building?
-  - The fence discriminator rho_code is monotone-but-miscalibrated
-    (`caustic_point` parametrizes by critical-curve angle phi != theta, up
-    to 1.75x under-estimate of distance-to-fold); any new serve must use the
-    same O(1)/engine-free discriminator or a cheap correction, never a
-    per-draw numerical root-find.
-  - MUST be validated against the exact engine (sup-over-w, CERTIFICATION_BAR
-    = 1e-4) and must never over-serve (the fence's whole point).
-
-  ACCEPTANCE: the near-fold low-w band is served analytically at <= 1e-4
-  against the exact engine (or the shell is explicitly ruled engine
-  territory with measured cost), and the serve-route census no longer counts
-  the shell as engine demand. Then the tiling-plan refresh and campaign
-  sizing can proceed on the honest post-serve demand map.
-
-  BINDING REPRESENTATION + COORDINATES (owner, 2026-08-20 — "as always"):
-  the chart must use the codebase's established representation doctrine,
-  NEVER a raw serve or a decline-to-engine.  Concretely:
-  - REPRESENTATION = residual against a KNOWN ANALYTIC ANCHOR, following the
-    settled pattern (tube r = E/F_ref; far-field vs two-image GO carrier;
-    saddle-bottom vs exact -1j*sqrt(mu_macro)).  The wall-band anchor is the
-    EXACT w->0 limit F(w->0) = sqrt(mu_macro)*exp(-i*pi*n/2): store
-    r(w) = F_engine(w) / [sqrt(mu_macro)*exp(phase)], the smooth residual
-    (I measured the series' deficit C(gamma') = |F(0)|/sqrt(mu_macro) is a
-    smooth 1D function: 1.0001 at gamma'=0.5 -> 0.60 at 0.98).  The known
-    scaling sqrt(mu_macro) = 1/sqrt(1-gamma'^2) is factored OUT analytically
-    so the fitted object is smooth, low-dimensional and safe to extrapolate.
-  - COORDINATES = the reduced/caustic-relative ones, never raw lens-plane
-    (gamma, y1, y2): rho = |y'|/|y_c(theta)| (the fence discriminator,
-    geometry.caustic_point), 1-gamma' (wall-collapse scale), the eigenframe
-    angle theta (even-harmonic basis), and w (or log w).  Same doctrine as
-    the low-w series' relative-error currency (lam*sqrt_mu normalization).
-  - SCHWINGER = OFFLINE ORACLE ONLY.  Train the chart against f_schwinger;
-    the runtime serve is the fitted surface (a lookup).  NEVER a Schwinger
-    call at serve, NEVER a decline-to-engine for the band the chart owns.
-  - De-rated conservatively (never over-serve), certified off-grid (theta
-    midpoints), the de-rate the sole margin.
-  - The chart is a NEW artifact (data product) with its own data contract;
-    it joins the campaign's trained-artifact family and is saved/loaded like
-    the others, not a hand-baked constant table.
-
-
 - **SERVE ppGO WHERE THE EXACT ENGINE CANNOT REACH, INSTEAD OF REFUSING**
   `[→ spec]` — owner-directed 2026-08-06. Distinct from the ppGO ROUTING item
   in [[lensing_exterior_followup_four_items]] (which is about choosing ppGO
@@ -2998,7 +2913,7 @@ Tag conventions:
   analytic object — the Professor's R1/R2 rulings, low-w rung build),
   demand sized by the census's diffractive_engine_hosted route,
   optimal-representation clause in force
-  ([[lensing_born_farfield_completion]]). The stopped
+  ([[2026-08-18_born_farfield_completion]]). The stopped
   first launch (332-chart gamma slice, killed at 4%) failed this bar
   three ways, all now on record: one 0.04-wide gamma band per parity
   (~4%/~7% of the prior); 7 gamma nodes per sliver band (a count against

@@ -16,7 +16,7 @@ section: Backlog
   analytic object — the Professor's R1/R2 rulings, low-w rung build),
   demand sized by the census's diffractive_engine_hosted route,
   optimal-representation clause in force
-  ([[lensing_born_farfield_completion]]). The stopped
+  ([[2026-08-18_born_farfield_completion]]). The stopped
   first launch (332-chart gamma slice, killed at 4%) failed this bar
   three ways, all now on record: one 0.04-wide gamma band per parity
   (~4%/~7% of the prior); 7 gamma nodes per sliver band (a count against

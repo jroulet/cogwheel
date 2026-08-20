@@ -54,6 +54,8 @@ section: Backlog
   SPEC.md's LOW-W DIFFRACTIVE RUNGS paragraph (Rung P) was corrected to
   the shipped fitted-surface mechanism (see
   `2026-08-20_diffractive_certificate_interior` spec-changelog
-  fragment); the next build is the low-w near-fold analytic serve
-  (`[[lensing_low_w_near_fold_serve]]`, still open — the fence build
-  this completes was its prerequisite).
+  fragment); the next build — the low-w near-fold analytic serve
+  (todo.d stem `lensing_low_w_near_fold_serve`, which this fence build
+  was the prerequisite for) — was completed 2026-08-20 by the
+  chart-serve build, whose completion record is
+  `[[2026-08-20_low_w_near_fold_chart_serve]]`.
