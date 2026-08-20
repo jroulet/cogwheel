@@ -100,6 +100,15 @@ CLEAN_GAMMAS = (0.1, 0.2, 0.3)
 #: Eigenframe rotations exercised for the frame-pairing oracle (kappa = 0).
 BETAS = (0.0, 0.7, -1.1)
 
+#: (gamma, beta) combos at `Y_REF` that fall INSIDE the near-fold fence
+#: (``rho = _caustic_rho(abs(gamma), s, theta)`` in ``[RHO_LO, 1 + DELTA]``)
+#: and are therefore DECLINED by `w_low_fit` (returns None) rather than
+#: served.  `TruncationCertifiedBandTestCase` skips these in its over-serve
+#: sweep and asserts the decline in `test_near_fold_shell_is_declined`.  At
+#: ``gamma=0.3, beta=-1.1`` the reduced caustic ratio is ``rho=1.247``
+#: (inside ``[0.6, 1.4]``).
+NEAR_FOLD_DECLINED_WITNESSES = ((0.3, -1.1),)
+
 #: Small frequencies probing the DC (w -> 0) anchor.  Kept well inside the
 #: engine's exact double-double band (w <= 60).
 ANCHOR_WS = (1e-2, 3e-3, 1e-3)
@@ -155,22 +164,20 @@ _COGWHEEL_DIFFRACTIVE_FULL_BAKE_REASON = (
 #: Skip reason for `CornerRawOverPredictionTestCase` (its OWN gate, NOT the
 #: shared `_COGWHEEL_DIFFRACTIVE_FULL_BAKE_REASON`, whose 'red in-build by
 #: design' claim is specific to the full-grid zero-over-serve sweep).  The
-#: corner pin certifies the RESONANCE-LIMITED twofold bar: INS-1-001 ruled
-#: that no smooth O(1) fit can track the ~0.1-wide marginal series
-#: resonances near the fold, so the raw corner surface over-claims by ~1.99x
-#: and the achievable de-rate is ~0.5 (NOT >= 0.70).  The < 2.0 bar is that
-#: acceptance.  The pin pays an engine probe (`_measure_w_low_true`,
-#: ~1.2 s), so it is gated out of the fast tier; it measures 1.986x at the
-#: provisional smoke coefficients -- already inside the bar -- and the
+#: corner pin certifies the DE-RATE-TARGET bar (< 1.5x): the near-fold shell
+#: is FENCED out (INS-1-001's marginal-resonance corner, which previously
+#: forced the bar up to < 2.0, is no longer served), so the raw surface's
+#: worst over-prediction returns toward the 0.70 de-rate target (<= 1.43x)
+#: and a < 1.5x bar has teeth again.  The pin pays an engine probe
+#: (`_measure_w_low_true`, ~1.2 s), so it is gated out of the fast tier; the
 #: driver re-runs it after the full bake to confirm the FINAL coefficients
 #: still satisfy it.
 _CORNER_RAW_OVER_PREDICTION_REASON = (
     'corner raw-over-prediction pin gated behind COGWHEEL_DIFFRACTIVE_FULL_BAKE=1: '
     'it pays an engine probe (_measure_w_low_true) to certify the '
-    'resonance-limited < 2.0x bar (de-rate ~0.5, INS-1-001). Measured 1.986x '
-    'at the provisional smoke coefficients -- already inside the bar; the '
-    'driver re-runs it after the full bake to confirm the FINAL coefficients '
-    'still satisfy it.')
+    'de-rate-target < 1.5x bar on the SERVED near-exterior witness (the '
+    'near-fold shell is fenced). The driver re-runs it after the full bake '
+    'to confirm the FINAL coefficients still satisfy it.')
 
 
 def _rot_minus_beta(beta: float) -> np.ndarray:
@@ -586,9 +593,17 @@ class TruncationCertifiedBandTestCase(DiffractiveTestCase):
     """
 
     def test_truncation_within_bar_over_band(self):
-        """max rel-err(w) <= CERTIFICATION_BAR across [w_lo, 0.9*w_low_fit]."""
+        """max rel-err(w) <= CERTIFICATION_BAR across [w_lo, 0.9*w_low_fit].
+
+        The near-fold shell is fenced: combos in
+        `NEAR_FOLD_DECLINED_WITNESSES` are declined by `w_low_fit` (None) and
+        are skipped here -- their decline is pinned by
+        `test_near_fold_shell_is_declined`.
+        """
         for gamma in CLEAN_GAMMAS:
             for beta in BETAS:
+                if (gamma, beta) in NEAR_FOLD_DECLINED_WITNESSES:
+                    continue  # fenced; decline pinned by the sibling test
                 worst, w_worst, w_low, _, _ = _band_worst_relerr(
                     Y_REF, gamma, beta)
                 self.n_compared += 1
@@ -599,6 +614,29 @@ class TruncationCertifiedBandTestCase(DiffractiveTestCase):
                         f'gamma={gamma} beta={beta} worst={worst:.3e} '
                         f'@w={w_worst:.3f} (w_low={w_low:.3f}) '
                         f'> bar={CERTIFICATION_BAR:.1e}')
+
+    def test_near_fold_shell_is_declined(self):
+        """`w_low_fit` declines (None) the near-fold-shell witnesses.
+
+        Inside the fence shell ``[RHO_LO, 1 + DELTA]`` the diffractive rung
+        declines (returns None) so the draw falls through to the fold arm /
+        exact engine.  Premise: the witness's reduced caustic ratio ``rho``
+        -- computed with the SAME `_caustic_rho` discriminator the fence uses
+        -- falls inside the shell, so the decline is the fence doing its job,
+        not a degenerate refusal.
+        """
+        s = Y_REF[0] ** 2 + Y_REF[1] ** 2
+        for gamma, beta in NEAR_FOLD_DECLINED_WITNESSES:
+            z_eig = cmath.exp(-1j * beta) * complex(Y_REF[0], Y_REF[1])
+            theta = math.atan2(z_eig.imag, z_eig.real)
+            rho = _diffractive_mod._caustic_rho(abs(gamma), s, theta)
+            self.n_compared += 1
+            with self.subTest(gamma=gamma, beta=beta):
+                self.assertGreaterEqual(
+                    rho, _diffractive_mod._DIFFRACTIVE_FIT_FENCE_RHO_LO)
+                self.assertLessEqual(
+                    rho, 1.0 + _diffractive_mod._DIFFRACTIVE_FIT_FENCE_DELTA)
+                self.assertIsNone(w_low_fit(Y_REF, gamma, beta, 0.0))
 
     def test_band_is_nonempty_on_clean_domain(self):
         """Every clean geometry yields a positive, finite served band."""
@@ -830,13 +868,14 @@ class FullGridCertificateOracleTestCase(DiffractiveTestCase):
         """SELF-FALSIFICATION: derate=1.0 must over-serve somewhere on the grid.
 
         The de-rate is the load-bearing conservative margin (the raw least-
-        squares surface over-predicts by up to ~2x, the smoke de-rate being
-        0.5034), so with it set to 1.0 the served ceiling inflates and the
-        served series MUST exceed the bar at some grid row -- if none does,
-        the zero-over-serve assertion has no teeth.  Early-exits at the first
-        over-serve row (measured ~39 s).  Runs on the shipped coefficients
-        with ONLY the de-rate perturbed, and bypasses the `_full_grid_sweep`
-        cache.  This teeth test stays in the FAST tier (it does not depend on
+        squares surface over-predicts by up to ~1.18x, the fenced smoke de-
+        rate being 0.844967), so with it set to 1.0 the served ceiling
+        inflates and the served series MUST exceed the bar at some grid row
+        -- if none does, the zero-over-serve assertion has no teeth.
+        Early-exits at the first over-serve row (measured ~39 s).  Runs on
+        the shipped coefficients with ONLY the de-rate perturbed, and
+        bypasses the `_full_grid_sweep` cache.  This teeth test stays in the
+        FAST tier (it does not depend on
         the final coefficients: ANY bake over-serves without a de-rate),
         unlike the gated zero-over-serve sweep above.
         """
@@ -864,7 +903,7 @@ class FullGridCertificateOracleTestCase(DiffractiveTestCase):
 
 
 class CornerRawOverPredictionTestCase(DiffractiveTestCase):
-    """WP-1 -- the corner raw-over-prediction pin (the fix is real, not re-de-rated).
+    """WP-1 + fence -- the corner raw-over-prediction pin (the fix is real).
 
     The even-harmonic + parametric-caustic representation replaced the
     incumbent ``cos(4k theta)`` degree-2 surface because the old surface
@@ -876,7 +915,7 @@ class CornerRawOverPredictionTestCase(DiffractiveTestCase):
     any grid gate), so this pin strips the de-rate and measures the RAW
     fitted surface directly::
 
-        raw_fit / w_low_true < 2.0   (the resonance-limited twofold bar, de-rate ~0.5)
+        raw_fit / w_low_true < 1.5   (the de-rate-target bar, de-rate >= 0.70)
 
     ``w_low_true`` is the engine-honest ceiling measured by the calibration
     script's own `_measure_w_low_true` (the order-`_DEFAULT_MAX_ORDER` series
@@ -884,52 +923,45 @@ class CornerRawOverPredictionTestCase(DiffractiveTestCase):
     the `CERTIFICATION_BAR` sup-over-w semantics, ``n_w=16`` -- the bake's
     default), and ``raw_fit`` is `w_low_fit` evaluated with
     `_DIFFRACTIVE_FIT_DERATE` patched to 1.0.  The ratio is the factor by
-    which the raw surface over-claims the honest ceiling.  < 2.0 (twofold)
-    means the surface captures the corner's collapse to within a factor of
-    two -- the de-rate (~0.5, the resonance-limited floor) is a safety
-    margin, not the whole story.
+    which the raw surface over-claims the honest ceiling.  < 1.5 means the
+    raw surface stays inside the de-rate-target regime (de-rate >= 0.70 <=>
+    worst raw over-prediction <= 1.43x), so the de-rate is a safety margin,
+    not the whole story.
 
-    CORNER-RESONANCE LIMITATION (INS-1-001): the corner over-prediction is
-    NOT a representation deficiency -- it is dominated by narrow MARGINAL
-    resonances in the order-16 series near the fold.  There, ``rel(w)``
-    (series vs engine) barely exceeds `CERTIFICATION_BAR` (1.1-1.2e-4 vs
-    1e-4) in ~0.1-wide ``w``-windows at the outside-caustic diagonal
-    directions, so the honest ceiling oscillates between a ~3.5 resonance
-    floor and a ~6.9 smooth level.  The ``n_w=16`` coarse scan samples these
-    resonances INCONSISTENTLY (caught at the off-grid midpoint
-    ``theta = 3pi/4 + pi/32``, missed at the on-grid diagonal ``3pi/4``),
-    so the fitted surface sees a spurious sharp angular step it cannot
-    follow.  No smooth O(1) fit -- including the even-harmonic + caustic
-    representation -- can capture a ~0.1-wide marginal resonance, so the
-    raw corner surface is ~1.99x and the achievable de-rate is ~0.5, NOT
-    >= 0.70.  The 0.70/1.43 target (de-rate >= 0.70) was abandoned in
-    favour of the resonance-limited acceptance: the pin certifies the
-    < 2.0 twofold bar, which the raw corner surface satisfies at the
-    provisional smoke coefficients (measured 1.986x) and is expected to
-    keep satisfying with the FINAL driver-baked coefficients (the corner
-    over-prediction is resonance-limited at ~1.99x for any smooth fit).
-    The pin is gated behind ``COGWHEEL_DIFFRACTIVE_FULL_BAKE=1`` only
-    because it pays an engine probe; a future measurement-robustness fix
-    (dense ``w`` scan that reliably catches the marginal resonances) is
-    the real path to a tighter certificate, and is a separate work
-    package.
+    NEAR-FOLD FENCE: the ORIGINAL corner (``gamma=0.41, r=0.55``) is now
+    INSIDE the near-fold shell -- ``w_low_fit`` FENCES it out (its reduced
+    caustic ratio ``rho ~ 1.34`` falls in ``[RHO_LO, 1 + DELTA]``), returning
+    None there so the draw falls through to the fold arm / exact engine.  The
+    raw over-prediction pin can therefore no longer probe that point, and the
+    marginal-resonance limitation that previously forced the bar up to < 2.0
+    (INS-1-001) is fenced out too.  The witness is re-derived to a SERVED
+    near-exterior point at the SAME diagonal direction
+    (``theta = 3pi/4 + pi/32``) but high-gamma / just-outside-the-caustic
+    (``gamma=0.5, r=1.05``, reduced caustic ratio ``rho ~ 2.09`` > ``1 +
+    DELTA``): a fenced off-grid theta midpoint of the full calibration grid
+    where the raw surface still over-claims the honest ceiling (measured
+    ~1.19x at the provisional smoke coefficients).  With the shell fenced,
+    the original < 1.5 bar (abandoned to < 2.0 only because of the
+    resonance) is restored.
 
     Cost: one `_measure_w_low_true` (n_w=16, ~36 series+engine probes, ~1.2 s
     measured) plus one `w_low_fit` (O(1)) -- well inside the fast-tier budget
     when the gate is lifted.
     """
 
-    #: The corner witness: high-gamma / small-r cell at the off-grid theta
-    #: midpoint ``3pi/4 + pi/_N_THETAS`` (the direction the old 4-harmonic
-    #: surface over-predicted by ~2.06x).  ``_N_THETAS = 32`` is single-sourced
+    #: The corner witness: a SERVED near-exterior point at the off-grid theta
+    #: midpoint ``3pi/4 + pi/_N_THETAS`` -- the same diagonal direction the old
+    #: 4-harmonic surface over-predicted by ~2.06x, moved OUT of the fenced
+    #: near-fold shell to ``gamma=0.5, r=1.05`` (reduced caustic ratio
+    #: ``rho ~ 2.09`` > ``1 + DELTA``).  ``_N_THETAS = 32`` is single-sourced
     #: from `scripts/fit_diffractive_certificate.py` via the premise assertion
-    #: in `test_raw_fit_over_prediction_within_twofold_bar` (the witness must be
-    #: an actual off-grid midpoint of the grid, not a pinned literal that
-    #: could drift from the bake).
-    CORNER_GAMMA = 0.41
+    #: in `test_raw_fit_over_prediction_within_derate_target` (the witness
+    #: must be an actual fenced off-grid midpoint of the grid, not a pinned
+    #: literal that could drift from the bake).
+    CORNER_GAMMA = 0.5
     CORNER_BETA = 0.0
     CORNER_KAPPA = 0.0
-    CORNER_R = 0.55
+    CORNER_R = 1.05
     CORNER_THETA = 3.0 * math.pi / 4.0 + math.pi / 32.0  # ~2.454 rad (midpoint)
 
     def _corner_source(self, script):
@@ -940,11 +972,12 @@ class CornerRawOverPredictionTestCase(DiffractiveTestCase):
 
     @unittest.skipUnless(_COGWHEEL_DIFFRACTIVE_FULL_BAKE,
                          _CORNER_RAW_OVER_PREDICTION_REASON)
-    def test_raw_fit_over_prediction_within_twofold_bar(self):
-        """raw_fit / w_low_true < 2.0 at the corner (resonance-limited bar)."""
+    def test_raw_fit_over_prediction_within_derate_target(self):
+        """raw_fit / w_low_true < 1.5 at the served near-exterior witness."""
         script = _load_fit_certificate_script()
-        # Premise: the witness IS an off-grid theta midpoint of the calibration
-        # grid (derived from the script's own off-grid set).
+        # Premise: the witness IS a fenced off-grid theta midpoint of the
+        # calibration grid (derived from the script's own off-grid set) -- a
+        # SERVED point, not a declined one.
         off_rows = [row for row in script._off_grid_points('full', 42)
                     if abs(row[0] - self.CORNER_GAMMA) < 1e-9
                     and abs(row[3] - self.CORNER_R) < 1e-9
@@ -967,7 +1000,11 @@ class CornerRawOverPredictionTestCase(DiffractiveTestCase):
                                '_DIFFRACTIVE_FIT_DERATE', 1.0):
             raw_fit = w_low_fit(y, self.CORNER_GAMMA, self.CORNER_BETA,
                                 self.CORNER_KAPPA)
-        self.assertIsNotNone(raw_fit)
+        self.assertIsNotNone(
+            raw_fit,
+            'premise lost: the served near-exterior witness was declined '
+            '(w_low_fit -> None) -- the fence boundary moved or the witness '
+            'drifted into the shell')
         self.assertLess(
             raw_fit, _diffractive_mod._DIFFRACTIVE_FIT_CEILING,
             'premise lost: raw fit clipped at the ceiling -- the ratio would '
@@ -976,27 +1013,25 @@ class CornerRawOverPredictionTestCase(DiffractiveTestCase):
         ratio = raw_fit / w_low_true
         self.n_compared += 1
         self.assertLess(
-            ratio, 2.0,
+            ratio, 1.5,
             f'corner raw over-prediction {ratio:.3f}x exceeds the '
-            f'resonance-limited 2.0x bar (de-rate ~0.5, INS-1-001): '
+            f'de-rate-target 1.5x bar (de-rate >= 0.70 <=> raw <= 1.43x): '
             f'raw_fit={raw_fit:.3f} vs honest ceiling '
             f'w_low_true={w_low_true:.3f} -- the fitted surface over-claims '
-            'the corner ceiling beyond what the resonance-limited certificate '
-            'can de-rate')
+            'the served near-exterior ceiling beyond what the de-rate target '
+            'can absorb')
 
     def test_dropping_caustic_feature_inflates_over_prediction(self):
         """SELF-FALSIFICATION: the parametric-caustic feature is load-bearing.
 
         Patching `_DIFFRACTIVE_FIT_CAUSTIC_COEFF` to 0.0 (dropping the WP-1
-        caustic feature) must monotonically WORSEN the raw corner over-
-        prediction (measured with-caustic ratio 1.986 -> without-caustic
-        2.459, i.e. ~24% higher), both under `derate=1.0`, so the test goes
-        red if the feature stops reducing over-prediction -- a fixed
-        absolute floor cannot carry that claim: once the corner pin sits at
-        the resonance-limited twofold bar, the with-caustic ratio 1.986 is
-        just UNDER it, so a bare 'above-the-pin' comparison would be
-        satisfiable by a no-op surface.  Two `w_low_fit` calls
-        (O(1)); no engine probes.
+        caustic feature) must monotonically INFLATE the raw served witness's
+        over-prediction (measured: dropping the feature raises the raw
+        surface ~1.66x at the provisional smoke coefficients), both under
+        `derate=1.0`, so the test goes red if the feature stops reducing
+        over-prediction -- a fixed absolute floor cannot carry that claim,
+        and a bare 'above-the-pin' comparison would be satisfiable by a no-op
+        surface.  Two `w_low_fit` calls (O(1)); no engine probes.
         """
         script = _load_fit_certificate_script()
         self.assertLess(

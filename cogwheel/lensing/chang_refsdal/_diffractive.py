@@ -16,7 +16,11 @@ in the POSITIVE-PARITY, reduced-shear regime (reduced shear
   truncation certificate.  It is an O(1) parametric surface fitted to the
   ENGINE-HONEST ceiling (the largest ``w`` whose order-``M`` series stays
   within the bar of the exact Schwinger engine), with coefficients baked by
-  ``scripts/fit_diffractive_certificate.py``.
+  ``scripts/fit_diffractive_certificate.py``.  It is FENCED: it declines the
+  near-fold shell (returning ``None`` so the draw falls through to the fold
+  arm / exact engine) and serves the deep interior and the smooth exterior
+  via the fit (see `_caustic_rho` and the `_DIFFRACTIVE_FIT_FENCE_*`
+  constants).
 
 WHY
 ---
@@ -67,32 +71,25 @@ _DEFAULT_MAX_ORDER = 16
 
 #: ---- Calibration provenance ------------------------------------------
 #: The fit constants below are PROVISIONAL -- baked by
-#: `scripts/fit_diffractive_certificate.py` at SMOKE scale (259 grid +
-#: 64 off-grid rows, corner-inclusive) as a pipeline proof, and MUST be
-#: re-baked at FULL scale by the driver before release.  Smoke margins:
-#: de-rate 0.5034, grid 259/259 conservative / 147/259 tight, off-grid
-#: 62/64 conservative / 44/64 tight, corner raw over-prediction 1.986x
-#: at gamma=0.41, r=0.55, theta=2.454.  Provenance SHA 3827f48 (754.2 s).
-#: Final bake: ``python scripts/fit_diffractive_certificate.py --scale
+#: `scripts/fit_diffractive_certificate.py` at SMOKE scale on the FENCED
+#: domain (the near-fold shell ``rho`` in ``[RHO_LO, 1 + DELTA]`` is
+#: excluded; see `_DIFFRACTIVE_FIT_FENCE_*`), and MUST be re-baked at FULL
+#: scale by the driver before release.  Smoke margins: de-rate 0.844967,
+#: grid 196/196 conservative / 196/196 tight, off-grid 48/48 conservative /
+#: 48/48 tight, excluded-shell 63/259 grid rows (24.3%).  Provenance SHA
+#: 9e09bdd (653.0 s).  Final bake: ``python scripts/fit_diffractive_certificate.py --scale
 #: full`` and paste the emission block verbatim.
 #:
-#: CORNER-RESONANCE LIMITATION (INS-1-001): the ~1.99x corner
-#: over-prediction is NOT a representation deficiency -- it is dominated
-#: by narrow MARGINAL resonances in the order-`_DEFAULT_MAX_ORDER` series
-#: near the fold, where ``rel(w)`` barely exceeds `CERTIFICATION_BAR`
-#: (~1.1-1.2e-4 vs 1e-4) in ~0.1-wide ``w``-windows at the
-#: outside-caustic diagonal directions.  The honest ceiling therefore
-#: oscillates between a ~3.5 resonance floor and a ~6.9 smooth level, and
-#: the calibration's ``n_w=16`` coarse scan samples the resonances
-#: INCONSISTENTLY (caught at the off-grid midpoint, missed at the on-grid
-#: diagonal), so no smooth O(1) fit can follow the resulting sharp angular
-#: step.  The even-harmonic + caustic representation captures the BROAD
-#: inside/outside-caustic modulation (the caustic coefficient is
-#: load-bearing), but the narrow resonance floor is irreducible.  The
-#: driver's de-rate target is LOWERED to the resonance-limited value
-#: (~0.5, NOT >= 0.70); reaching 0.70 requires a future
-#: measurement-robustness fix (a dense ``w`` scan that reliably catches the
-#: marginal resonances), a separate work package.
+#: NEAR-FOLD FENCE: the corner (high-gamma / small-r) region -- where the
+#: honest ceiling collapses steeply toward the positive-parity wall and
+#: narrow MARGINAL resonances (INS-1-001) make the ceiling
+#: measurement-unstable -- is FENCED OUT of the fit's domain.  `w_low_fit`
+#: serves the deep interior (``rho < RHO_LO``) AND the smooth exterior
+#: (``rho > 1 + DELTA``) via the fit; the near-fold shell
+#: (``RHO_LO <= rho <= 1 + DELTA``) is DECLINED (returns ``None`` -> the draw
+#: falls through to the fold arm / exact engine).  Fencing the shell lets
+#: the de-rate return toward the 0.85 hard floor instead of paying for a
+#: corner the diffractive rung should not own.
 
 #: Degree of the log-log polynomial ``P`` in the fitted certificate
 #: `w_low_fit` (see `_fit_poly_features`).  The three log-features are
@@ -105,9 +102,9 @@ _DIFFRACTIVE_FIT_DEGREE = 2
 #: `_fit_poly_exponents`).  Baked by `scripts/fit_diffractive_certificate.py`.
 # PROVISIONAL -- driver re-bakes at --scale full
 _DIFFRACTIVE_FIT_POLY_COEFFS = (
-    -66.73151460196522, -37.29530888348038, 0.1783523826060509, -34.38176371760148,
-    -12.160987118574718, 0.8268920664642397, -0.08355815704084146, 52.86119915185035,
-    0.04440691542210376, -4.533621927985663,
+    -7.1584279141398355, -32.090195389523466, 0.18017435498735318, -10.554471704462383,
+    -23.858934833005495, 0.005697311313124095, 0.15169731420395685, -19.80581720444554,
+    -0.07178813488809696, -1.9699492914293213,
 )
 
 #: Number of even harmonics in `w_low_fit` (``cos(2 k theta)`` for
@@ -128,8 +125,8 @@ _DIFFRACTIVE_FIT_N_HARM = 7
 #: `scripts/fit_diffractive_certificate.py`.
 # PROVISIONAL -- driver re-bakes at --scale full
 _DIFFRACTIVE_FIT_HARMONIC_COEFFS = (
-    0.040414356141018785, -0.35196561421759714, -0.025667426752977975, 0.08078753309232789,
-    0.0025724477139819845, -0.02340049884679754, -0.002993272478629193,
+    0.03153210610150576, -0.37167067873450005, -0.013437051392246302, 0.07373345405204876,
+    0.005081354470044086, -0.02186959339488262, -0.006146390438591959,
 )
 
 #: Coefficient of the parametric-caustic feature
@@ -138,14 +135,14 @@ _DIFFRACTIVE_FIT_HARMONIC_COEFFS = (
 #: honest ceiling dips as the source approaches / crosses the fold, so the
 #: caustic log-ratio is anti-correlated with ``log w_low``.
 # PROVISIONAL -- driver re-bakes at --scale full
-_DIFFRACTIVE_FIT_CAUSTIC_COEFF = -0.7266888888338595
+_DIFFRACTIVE_FIT_CAUSTIC_COEFF = -0.6870606032955108
 
 #: De-rating factor applied to the exponentiated fit so the fitted ceiling is
 #: CONSERVATIVE on the calibration grid (never above the engine-honest
 #: ceiling).  Baked by `scripts/fit_diffractive_certificate.py` as the
 #: reciprocal of the worst un-de-rated over-prediction (clamped to <= 0.85).
 # PROVISIONAL -- driver re-bakes at --scale full
-_DIFFRACTIVE_FIT_DERATE = 0.503444
+_DIFFRACTIVE_FIT_DERATE = 0.844967
 
 #: Coefficient of the ``log(lam * sqrt_mu)`` feature, held at ``1 / (M + 1)``
 #: by construction (the amplitude-space normalisation the fitted surface
@@ -155,6 +152,30 @@ _DIFFRACTIVE_FIT_LIP = 1.0 / (_DEFAULT_MAX_ORDER + 1)
 #: Hard ceiling of the fitted certificate: the double-double Schwinger engine
 #: domain (`W_CEILING_SCHWINGER`), imported -- never re-typed.
 _DIFFRACTIVE_FIT_CEILING = W_CEILING_SCHWINGER
+
+#: Near-fold fence: the fit is NOT certified inside a shell around the
+#: directional caustic.  ``rho = |y'| / |y_c(theta)|`` (see `_caustic_rho`)
+#: is the reduced-caustic distance ratio -- 1.0 ON the caustic, > 1 outside
+#: (smooth region), < 1 inside.  ``w_low_fit`` declines ONLY the near-fold
+#: shell (``RHO_LO <= rho <= 1 + DELTA`` -> returns ``None`` so the draw
+#: falls through to the fold arm / exact engine); the deep interior
+#: (``rho < _DIFFRACTIVE_FIT_FENCE_RHO_LO``) and the smooth exterior
+#: (``rho > 1 + DELTA``) are BOTH served by the fit.  Fencing the shell lets
+#: the de-rate return toward the 0.85 hard floor instead of paying for a
+#: corner the diffractive rung should not own.
+#:
+#: PROVISIONAL -- tuned at the driver full bake.  ``rho`` is a
+#: monotone-but-miscalibrated distance-to-fold discriminator: it is the ratio
+#: of the source offset to the CRITICAL-CURVE-derived caustic radius (a
+#: critical-curve vs source-angle proxy) and under-estimates the true
+#: distance-to-fold by up to ~1.75x, so the fence boundary is a conservative
+#: guard, not an exact fold map.
+_DIFFRACTIVE_FIT_FENCE_RHO_LO = 0.6
+
+#: Outer shell boundary ``RHO_HI = 1.0 + DELTA ~ 1.4``.  ``DELTA = 0.4`` sits
+#: in the Professor's 0.35-0.5 range, lower-bounded by the corner defect at
+#: ``rho ~ 1.34`` (the marginal-resonance fold dip, INS-1-001).
+_DIFFRACTIVE_FIT_FENCE_DELTA = 0.4
 
 
 class DiffractiveDomainError(geometry.LensDomainError):
@@ -367,6 +388,21 @@ def _fit_poly_features(log_gamma_prime: float, log_s: float,
         for exps in exponents)
 
 
+def _caustic_rho(gamma_prime: float, s: float, theta: float) -> float:
+    """Reduced caustic distance ratio ``rho = sqrt(s) / |y_c(theta)|``.
+
+    The SINGLE source of the near-fold fence discriminator (shared by
+    `w_low_fit`, `_fit_features`, and
+    `scripts/fit_diffractive_certificate.py`).  ``sqrt(s) = |y'|`` is the
+    reduced source offset and ``|y_c(theta)| = |geometry.caustic_point(
+    gamma_prime, theta)|`` the reduced caustic radius in the same eigenframe
+    direction; ``rho`` is 1.0 on the caustic, > 1 outside, < 1 inside.  Pure
+    python, O(1) -- no numba and no ndarray on the `w_low_fit` value path.
+    """
+    caustic = geometry.caustic_point(gamma_prime, theta)
+    return math.sqrt(s) / math.hypot(caustic[0], caustic[1])
+
+
 def _fit_features(gamma_prime: float, s: float, theta: float, lam: float,
                   sqrt_mu: float) -> tuple[float, ...]:
     """Feature vector of the fitted certificate (poly + harmonics + caustic).
@@ -390,9 +426,7 @@ def _fit_features(gamma_prime: float, s: float, theta: float, lam: float,
         _fit_poly_exponents(_DIFFRACTIVE_FIT_DEGREE))
     harmonics = tuple(math.cos(2.0 * k * theta)
                       for k in range(1, _DIFFRACTIVE_FIT_N_HARM + 1))
-    caustic = geometry.caustic_point(gamma_prime, theta)
-    caustic_radius = math.hypot(caustic[0], caustic[1])
-    caustic_feature = math.log(math.sqrt(s) / caustic_radius)
+    caustic_feature = math.log(_caustic_rho(gamma_prime, s, theta))
     return poly + harmonics + (caustic_feature,)
 
 
@@ -419,9 +453,18 @@ def w_low_fit(y, gamma: float, beta: float = 0.0, kappa: float = 0.0, *,
     squared offset, ``theta`` the eigenframe angle, and ``|y_c(theta)|`` the
     reduced caustic radius in that direction (see `_fit_features`).  The
     exponentiated surface is de-rated by `_DIFFRACTIVE_FIT_DERATE` and clipped to
-    `_DIFFRACTIVE_FIT_CEILING` so the result never over-serves.  There is no
-    deep-optimistic ``None`` branch: the fitted surface IS the certificate,
-    and `_reduced_shear`'s wall refusal is the only domain refusal.
+    `_DIFFRACTIVE_FIT_CEILING` so the result never over-serves.
+
+    The surface is FENCED around the directional caustic (see `_caustic_rho`
+    and the `_DIFFRACTIVE_FIT_FENCE_*` constants): the near-fold shell
+    (``rho = |y'| / |y_c(theta)|`` in
+    ``[_DIFFRACTIVE_FIT_FENCE_RHO_LO, 1 + _DIFFRACTIVE_FIT_FENCE_DELTA]``)
+    is NOT certified and is DECLINED (``None``), so the draw falls through
+    to the fold arm / exact engine.  Both the deep interior
+    (``rho < RHO_LO``) and the smooth exterior (``rho > 1 + DELTA``) are
+    served by the fit.  The wall refusal from `_reduced_shear` is unchanged;
+    the fence ``None`` is a DISTINCT near-caustic decline, not a domain
+    error.
 
     Parameters
     ----------
@@ -436,9 +479,11 @@ def w_low_fit(y, gamma: float, beta: float = 0.0, kappa: float = 0.0, *,
     Returns
     -------
     float or None
-        The fitted ceiling; ``0.0`` at ``gamma' == 0`` (series exact); ``None``
-        on a degenerate (non-finite) ``sqrt_mu`` or a non-finite fitted
-        value; ``w_hi`` when the fitted value reaches ``w_hi``.
+        The de-rated, clipped fitted ceiling (``w_hi``-capped) in the served
+        domain (``rho < RHO_LO`` deep interior or ``rho > 1 + DELTA`` smooth
+        exterior); ``0.0`` at ``gamma' == 0`` (series exact); ``None`` in the
+        near-fold shell (``RHO_LO <= rho <= 1 + DELTA``) and on a degenerate
+        (non-finite) ``sqrt_mu`` or non-finite fitted value.
 
     Raises
     ------
@@ -455,6 +500,15 @@ def w_low_fit(y, gamma: float, beta: float = 0.0, kappa: float = 0.0, *,
     the certificate boundary) is owned by the CALL SITES via
     ``_band_split_mask(dense_w, w_low)`` plus the ``w_low >=
     dense_w.max()`` whole-band branch, not by this function.
+
+    The fence declines ONLY the near-fold shell: the deep interior
+    (``rho < RHO_LO``) is served by the SAME fit as the smooth exterior (the
+    fit is calibrated on the interior cell, so it serves it conservatively --
+    NOT at the ceiling, whose engine-honest value deep inside the caustic is
+    ~4-34, not ``W_CEILING_SCHWINGER``).  The fence discriminator ``rho`` is
+    monotone but miscalibrated (it under-estimates the distance-to-fold by
+    up to ~1.75x), so the boundaries are conservative guards tuned at the
+    driver full bake.
     """
     lam, gamma_prime = _reduced_shear(gamma, kappa)
     if gamma_prime == 0.0:
@@ -475,6 +529,10 @@ def w_low_fit(y, gamma: float, beta: float = 0.0, kappa: float = 0.0, *,
         return None
     z_eig = cmath.exp(-1j * float(beta)) * complex(yp0, yp1)
     theta = math.atan2(z_eig.imag, z_eig.real)
+
+    rho = _caustic_rho(abs(gamma_prime), s, theta)
+    if _DIFFRACTIVE_FIT_FENCE_RHO_LO <= rho <= 1.0 + _DIFFRACTIVE_FIT_FENCE_DELTA:
+        return None
 
     features = _fit_features(abs(gamma_prime), s, theta, lam, sqrt_mu)
     n_poly = len(_fit_poly_exponents(_DIFFRACTIVE_FIT_DEGREE))

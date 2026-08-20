@@ -1,5 +1,116 @@
 # Test Dev Short-Term Observations
 
+## 2026-08-20 (fenced-domain grid oracle + consumer fall-through — MY work, test_lensing_part0_mechanical.py)
+
+- WP-1 fence (RHO_LO=0.6, DELTA=0.4, shell->None DECLINE) landed; this shard
+  added the two REMAINING specs to part0_mechanical.py.  Sole file, 51->62
+  tests, 62 passed ~17s.
+- Spec "grid generators fenced" -> TestFenceGridGenerators (3 tests): pins
+  `_grid_points('full',42)` / `_off_grid_points('full',42)` return ONLY
+  non-shell rows (rho outside [RHO_LO,RHO_HI], both interior+exterior
+  present), that the fence drops exactly the shell rows (63/259 dropped,
+  anti-vacuity), and that `_fence_excluded` single-sources `_caustic_rho` +
+  `_DIFFRACTIVE_FIT_FENCE_*` (AST Name-node check, no re-typed 0.6/1.4).
+  This is the UPSTREAM fact that makes the diffractive suite's
+  `_full_grid_sweep` fenced; that sweep's engine-oracle re-scope is the
+  DIFFRACTIVE run's (out of my scope).
+- Spec "fence fall-through byte-identity" -> TestFenceFallThroughByteIdentity
+  (4 tests, RUNTIME): binds REAL `_diffractive_bottom_ceiling` to an
+  UNINITIALIZED `LensedRelativeBinningLikelihood` shell
+  (`object.__new__`, the census's own idiom; likelihood import ~3.5s lazy in
+  setUpClass), asserts a fenced lens -> None and that fence-None and
+  wall-None are byte-identical DOWN TO `_band_split_mask` (same split flag,
+  `np.array_equal` below-mask).  AST teeth: wrapper's try body returns
+  `w_low_fit(...)` transparently, sole except is DiffractiveDomainError (no
+  new exception class).  NOTE the degenerate-sqrt_mu None path is UNREACHABLE
+  on positive parity (det_a=0 => gamma'=1 already refused at the wall; y=0
+  raises ValueError in `_born_factors` math.log(0) BEFORE the s<=0 branch) --
+  documented, pinned the two reachable None paths instead.
+- Spec "census mirror fenced draw" -> TestCensusMirrorFencedDrawRouting
+  (4 tests, AST+runtime): every `_result('diffractive_analytic', ...)` in
+  `classify_draw` is inside an `If` guarded by `w_low is not None`
+  (helper `_test_requires_w_low_not_none`/`_guarded_bodies`), so a fenced
+  draw (w_low=None) can never be labelled analytic; self-falsification
+  test proves the guard detector flags an unguarded synthetic route; runtime
+  tie-in `w_low_fit` returns None for the mid-shell draw.
+- GOTCHAS: (1) method name `_ceiling` COLLIDES with WLlowFitBaseTestCase's
+  `cls._ceiling` (=DD ceiling 60.0, set in setUpClass) -- the base setUpClass
+  OVERWRITES a subclass method of the same name; rename to `_wrapped_ceiling`.
+  (2) `_band_split_mask` stored as a class attr is a plain FUNCTION -> binds
+  `self` via descriptor protocol (the known footgun) -- call via
+  `type(self)._band_split_mask`.
+- OUT-OF-SCOPE (flagged, diffractive run owns): test_lensing_diffractive.py
+  has 2 failures from the fence -- TruncationCertifiedBandTestCase::
+  test_truncation_within_bar_over_band and CornerRawOverPredictionTestCase::
+  test_dropping_caustic_feature_inflates_over_prediction (corner witness
+  gamma=0.41 r=0.55 now rho=1.341 in-shell -> w_low_fit None ->
+  assertIsNotNone fails).  Both are the OTHER run's re-scope (the
+  FullGridCertificateOracleTestCase / corner re-point specs).
+
+## 2026-08-20 (just-outside-shell conservative pin — MY work, test_lensing_part0_mechanical.py)
+
+- Spec 1 (Just outside the shell is conservative) IMPLEMENTED as new class
+  TestWLlowFitJustOutsideShellConservative (3 tests: conservative pin + derate
+  teeth + diagnostic plot).  Engine-oracle pin: sources DERIVED at the fold
+  (cusp) directions theta=7pi/32 & 25pi/32 (off-grid theta midpoints) of
+  gamma=0.3, r = rho*|y_c(theta)| for rho in (1.42,1.5,1.6,1.7) just above
+  RHO_HI=1.4; asserts w_low_fit <= _measure_w_low_true(n_w=16) and w_low_fit>0.
+  8 engine probes (~1.2s each) paid ONCE in setUpClass, shared by all 3 tests
+  (~16s total).  Measured wf/wt ~0.87-0.95 (conservative); raw(derate=1.0)/wt
+  ~1.03-1.13 (teeth: raw over-serves).  File 48->51 tests, 51 passed ~17s.
+- FINDING (flagged, NOT in my pin): at gamma=0.3 the SMOKE fit OVER-SERVES just
+  outside the shell at the pi/2 (max-|y_c|) direction -- wf/wt = 1.08 at
+  rho=1.6, 1.29 at rho=1.8 (w_fit 6.41/6.47 > w_true 5.92/5.00).  That is a
+  smoke-grid COVERAGE GAP: gamma=0.3 r=0.5/0.9 at pi/2 are fenced (rho<1.4), so
+  the fit extrapolates there; the FULL bake's r=1.05 row covers it.  Spec 1 is
+  therefore correctly scoped to the fold direction (its example).
+- Spec 3 (monotonicity re-scope) ALREADY DONE in a prior shard: Gamma/S
+  monotonicity filter _fence_rho > RHO_HI (exterior only); deep-interior
+  ceiling-serve asserted by TestWLlowFitDeepInteriorCeiling.  Verified green.
+- Spec 2 (re-scope CornerRawOverPredictionTestCase) OUT-OF-SCOPE: it names
+  test_lensing_diffractive.py's CornerRawOverPredictionTestCase (another run's
+  file; scope discipline forbids editing it).  CONFIRMED the fence broke it:
+  test_dropping_caustic_feature_inflates_over_prediction now FAILS in the fast
+  tier (w_low_fit returns None at the corner, rho=1.34 in-shell) --
+  assertIsNotNone(raw_with_caustic).  The diffractive run must re-point it
+  (test_raw_fit_over_prediction_within_twofold_bar is gated and dead too).
+
+## 2026-08-20 (near-fold fence: part0_mechanical fence pins + backward-compat repair — MY work)
+
+- WP-1 two-sided near-fold fence landed in `w_low_fit` (RHO_LO=0.6, DELTA=0.4,
+  RHO_HI=1.4; `_caustic_rho(gamma_prime, s, theta) = sqrt(s)/|caustic_point|`;
+  interior->ceiling, shell->None DECLINE, exterior->fit).  It BROKE 8 pre-existing
+  tests in my sole suite test_lensing_part0_mechanical.py by returning None for
+  fixtures/sweeps that now fall in the shell (monotonicity sweeps at fixed y cross
+  exterior->shell->interior; DerateTeeth/SelfFals/D2 fixture (0.05,0.9,g=0.45) has
+  rho=1.29 in shell; wall-collapse fixture y=(0.5,0.3) becomes interior (rho<0.6)
+  as gamma->wall since |yc| blows up).  Fixed all 8 + added the 2 new fence pins.
+- NEW pins (Architect specs): TestWLlowFitNearFoldFence (3 tests) sweeps (theta,r)
+  across the directional caustic at gamma=0.41 beta=kappa=0, derives rho live via
+  `_caustic_rho`, asserts None EXACTLY where rho in [RHO_LO, RHO_HI] with served
+  values on both sides (non-vacuity) + diagnostic rho-vs-return scatter PNG + teeth
+  (patch DELTA=-0.4 collapses shell -> mid-shell point served).
+  TestWLlowFitDeepInteriorCeiling (3 tests): DERIVED fixtures at fixed witness rho
+  {0.3,0.5} (r = rho*|yc(theta)| live), asserts == _DIFFRACTIVE_FIT_CEILING (or w_hi
+  cap), never None; teeth patch RHO_LO=0 -> deep interior now declined (assertNotEqual
+  raw vs ceiling proves interior branch load-bearing).  D2 verify: fixture 3 moved
+  (0.05,0.9,g=0.45)->(0.8,0.6,g=0.35,beta=kappa=0) (at g=0.45 no r~0.8-1.1 source is
+  rho>1.4 for BOTH the base and its pi/2 image -> fence would None the self-fals
+  image); added test_fixtures_are_outside_the_shell premise.
+- Backward-compat repairs: GammaMonotonicity re-scoped to served exterior (filter
+  `_fence_rho > RHO_HI`, monotone 0 viols); SMonotonicity re-scoped to exterior
+  falling branch (exterior start -> live argmin) -- the PROVISIONAL fence-smoke
+  coeffs (poly log(s)^2 = +0.1517) reintroduce a ~1-4% large-s up-turn past the
+  minimum, so the "no up-turn to s_max" claim is DROPPED (documented; full bake
+  expected to remove it; conservativeness is separately certified by the diffractive
+  full-grid oracle).  never_exceeds_ceiling now `value is None or <= ceiling`.
+  wall_collapse_monotone_and_finite RETIRED -> test_wall_serves_ceiling_or_declines
+  (fence makes the fit's log(1-gamma') collapse unreachable: fixed source goes deep
+  interior as |yc| blows up).  SelfFals pi/4 + DerateTeeth fixture 3 moved out of shell.
+- Shared helper: WLlowFitBaseTestCase.setUpClass now also loads `_module` + `_rho_lo`/
+  `_rho_hi`; added `_fence_rho(y,gamma,beta,kappa)` (mirrors w_low_fit's discriminator).
+  48 passed ~4.7s.
+
 ## 2026-08-20 (INS-2-001 corner-pin re-point to resonance-limited 2.0x bar — test_lensing_diffractive.py)
 
 - INS-2-001 resolved (corner pin + teeth alignment).  The corner raw-over-prediction

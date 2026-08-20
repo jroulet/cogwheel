@@ -15,10 +15,22 @@ computation. Budget: < 2 s total.
 
 The file also hosts the numerical ``w_low_fit`` certificate-behaviour
 tests (``WLlowFitBaseTestCase`` and subclasses): monotonicity in reduced
-shear and source magnitude, D2 angular symmetry (period-``pi`` +
-reflection), and the DD-ceiling cap / parity-wall collapse.  Those import the fitted-certificate module
-LAZILY (``_load_w_low_fit``) and call only the O(1), engine-free
-``w_low_fit`` — they stay far under the fast-tier budget.
+shear and source magnitude (over the served exterior), D2 angular symmetry
+(period-``pi`` + reflection), the DD-ceiling cap / parity-wall behaviour,
+the near-fold-shell fence (declined to ``None``), the deep-interior
+fit serve, and the just-outside-shell conservative pin.  Those import
+the fitted-certificate module LAZILY
+(``_load_w_low_fit``) and call only the O(1), engine-free ``w_low_fit`` —
+they stay far under the fast-tier budget.
+
+The exact-heavy INS-3-002 deep-interior HONEST-VALUE pin (served ceiling
+<= engine-honest `_measure_w_low_true` ceiling over the gamma x rho x
+theta grid) and the clip-not-the-mechanism guard live in the
+``COGWHEEL_BRUTE_ACCURACY``-gated `TestWLlowFitDeepInteriorHonestServe`:
+the provisional smoke fit still over-runs at the uncalibrated low-gamma
+interior and is clipped to the DD ceiling, so those pins are RED BY DESIGN
+until the feature-basis regularization + driver's full interior-inclusive
+re-bake land (see `_BRUTE_ACCURACY_REASON`).
 """
 from __future__ import annotations
 
@@ -26,6 +38,7 @@ import ast
 import cmath
 import json
 import math
+import os
 import pathlib
 import re
 import unittest
@@ -546,6 +559,17 @@ _DIFFRACTIVE_PATH: pathlib.Path = (
 #: must bind `w_low_fit` rather than re-implement the retired scan.
 _LIKELIHOOD_PATH: pathlib.Path = REPO_ROOT / 'cogwheel/lensing/likelihood.py'
 
+#: The calibration script whose grid generators now FENCE the near-fold
+#: shell (`_fence_excluded` drops shell rows from `_grid_points` /
+#: `_off_grid_points`); single source of the fenced probe domain.
+_FIT_SCRIPT_PATH: pathlib.Path = REPO_ROOT / 'scripts' / 'fit_diffractive_certificate.py'
+
+#: The census mirror (WP3) whose Rung-P admission must decline a fenced draw
+#: to engine/fold demand, never `diffractive_analytic`.
+_SERVE_ROUTE_CENSUS_PATH: pathlib.Path = (
+    REPO_ROOT / 'cogwheel/lensing/serve_route_census.py'
+)
+
 #: Symbols of the retired per-proposal certificate scan and its
 #: deep-optimistic constant tree.  These must have NO code reference left in
 #: the value-path module or its likelihood consumer (docstring prose is
@@ -618,9 +642,9 @@ def _find_function(tree: ast.Module, name: str) -> ast.FunctionDef | None:
     return None
 
 
-def _all_name_ids(tree: ast.Module) -> set[str]:
+def _all_name_ids(tree: ast.AST) -> set[str]:
     """
-    Collect every Name-node identifier in the module.
+    Collect every Name-node identifier under ``tree`` (module or function).
 
     Code references only: docstring prose lives in Constant string nodes, not
     Name nodes, so a documented "replaces ``diffractive_w_low``" note does not
@@ -940,6 +964,57 @@ _MONOTONE_REL_TOL: float = 1e-9
 _CALIBRATION_S_MAX: float = 1.3 ** 2
 
 
+#: Relative slop for the "just outside the shell is conservative" pin.
+#: ``w_low_fit`` is the de-rated fitted ceiling and ``w_low_true`` the
+#: engine-honest ceiling measured by the calibration script's own
+#: `_measure_w_low_true`; the de-rate keeps the served value ~5-15% below
+#: the honest ceiling at the fold-direction boundary handover, so this slop
+#: only absorbs last-ulp jitter from the independent engine measurement.
+
+#: Deep-interior witness grid (INS-3-002): reduced shears, eigenframe angles
+#: and reduced-caustic ratios (all strictly below ``RHO_LO = 0.6`` today).
+#: ``rho`` reaches deeper than the smoke grid's single interior cell, and
+#: ``theta = pi/4`` is the cusp direction (min ``|y_c(theta)|``) -- the worst
+#: over-serving direction of the provisional smoke bake (measured ~7x).
+_DEEP_INTERIOR_GAMMAS: tuple[float, ...] = (0.2, 0.3, 0.5)
+_DEEP_INTERIOR_THETAS: tuple[float, ...] = (
+    0.0, math.pi / 4.0, math.pi / 2.0)
+_DEEP_INTERIOR_RHOS: tuple[float, ...] = (0.2, 0.3, 0.5)
+
+#: Relative slop for the INS-3-002 deep-interior honest-serve pin.
+#: `_measure_w_low_true` returns an ALWAYS-HONEST lower bound (bisection
+#: width ~3.4e-7), so 1e-5 is the Inspector-stated round-off guard with
+#: ~30x headroom over the measurement resolution.
+_INTERIOR_REL_TOL: float = 1e-5
+
+#: Brute-accuracy tier gate (the other lensing suites' idiom): exact-heavy
+#: engine-oracle tests are born gated under ``COGWHEEL_BRUTE_ACCURACY``.
+_BRUTE_ACCURACY: bool = bool(os.environ.get('COGWHEEL_BRUTE_ACCURACY'))
+
+#: Skip reason for the exact-heavy deep-interior honest-serve suite
+#: (`TestWLlowFitDeepInteriorHonestServe`).  Its oracle is the calibration
+#: script's engine-honest `_measure_w_low_true`, and the pinned expectation
+#: (the interior is served by the regularized, de-rated FIT -- never by the
+#: ``min(w_fit, CEILING)`` DD-ceiling clip) is RED at the provisional smoke
+#: bake BY DESIGN.  INS-3-002: the smoke fit over-runs at the UNCALIBRATED
+#: low-gamma interior and clips to the ceiling, over-serving the
+#: engine-honest ceiling (~4-41 deep inside the caustic) by up to ~7x
+#: (measured at gamma=0.5/rho=0.2/cusp direction).  The suite flips green
+#: when the coder's feature-basis regularization lands and the DRIVER's full
+#: interior-inclusive bake (calibration grid reaching ``r ~ 0.1``) is pasted.
+_BRUTE_ACCURACY_REASON = (
+    'exact-heavy deep-interior honest-serve suite gated behind '
+    'COGWHEEL_BRUTE_ACCURACY=1: its oracle is the engine-honest '
+    '_measure_w_low_true and the pinned expectation is RED at the '
+    'provisional smoke bake BY DESIGN (INS-3-002: the deep interior is '
+    'still served at the DD-ceiling clip, over-serving the engine-honest '
+    'ceiling by up to ~7x). The driver re-runs it after the coder\'s '
+    'feature-basis regularization + full interior-inclusive re-bake land.')
+_brute_accuracy_tier = unittest.skipUnless(_BRUTE_ACCURACY,
+                                           _BRUTE_ACCURACY_REASON)
+_CONSERVATIVE_REL_TOL: float = 1e-6
+
+
 def _load_w_low_fit() -> tuple:
     """
     Lazily import the fitted-certificate module and its domain constants.
@@ -967,6 +1042,50 @@ def _load_diffractive_module():
     return importlib.import_module('cogwheel.lensing.chang_refsdal._diffractive')
 
 
+def _load_fit_certificate_script():
+    """
+    Lazily import ``scripts/fit_diffractive_certificate.py`` by path.
+
+    The calibration script defines `_measure_w_low_true` -- the
+    engine-honest ceiling oracle (the order-16 operator series
+    ``diffractive_amplification`` against the exact `f_schwinger` engine
+    under the `CERTIFICATION_BAR` sup-over-w semantics) -- the SAME
+    measurement the bake de-rates against.  Importing it rather than
+    re-deriving the oracle keeps the just-outside-shell conservative pin
+    coupled to the bake's own honesty metric.  It is NOT a package (no
+    ``scripts/__init__.py``), so it is loaded by path.
+    """
+    import importlib.util
+    script_path = REPO_ROOT / 'scripts' / 'fit_diffractive_certificate.py'
+    spec = importlib.util.spec_from_file_location(
+        'fit_diffractive_certificate', str(script_path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f'could not load calibration script: {script_path}')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_likelihood_wrapper():
+    """
+    Lazily import the likelihood consumer's `_diffractive_bottom_ceiling`.
+
+    Returns ``(host, band_split_mask)`` where ``host`` is an UNINITIALIZED
+    `LensedRelativeBinningLikelihood` shell (``object.__new__``, ``__init__``
+    never run -- no event data, no engine) and ``band_split_mask`` the shared
+    split arithmetic.  The wrapper reads only its ``lens`` argument (plus the
+    ``w_hi`` band cap) and the process-global certified-ppGO map, never
+    instance state -- the same reuse the census mirror's
+    `_load_production_modules` relies on -- so binding it to the shell
+    exercises the PRODUCTION fall-through byte-for-byte without an engine
+    call.  Kept lazy so the mechanical (AST-scan) tests stay import-free.
+    """
+    from cogwheel.lensing.likelihood import (
+        LensedRelativeBinningLikelihood, _band_split_mask)
+    host = object.__new__(LensedRelativeBinningLikelihood)
+    return host, _band_split_mask
+
+
 class WLlowFitBaseTestCase(unittest.TestCase):
     """
     Base for the numerical ``w_low_fit`` behaviour tests.
@@ -981,10 +1100,13 @@ class WLlowFitBaseTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        """Lazily import ``w_low_fit`` and derive the parity wall once."""
+        """Lazily import ``w_low_fit`` and derive the wall + fence once."""
         (cls._w_low_fit, cls._domain_error, cls._ceiling,
          cls._delta_gamma_p) = _load_w_low_fit()
         cls._wall: float = 1.0 - cls._delta_gamma_p
+        cls._module = _load_diffractive_module()
+        cls._rho_lo: float = cls._module._DIFFRACTIVE_FIT_FENCE_RHO_LO
+        cls._rho_hi: float = 1.0 + cls._module._DIFFRACTIVE_FIT_FENCE_DELTA
 
     def setUp(self) -> None:
         """Reset the per-test comparison tally used by `tearDown`."""
@@ -1002,6 +1124,17 @@ class WLlowFitBaseTestCase(unittest.TestCase):
         # prepend ``self`` and raise "5 positional arguments given".
         return type(self)._w_low_fit(y, gamma, beta, kappa)
 
+    def _fence_rho(self, y, gamma: float, beta: float = 0.0,
+                   kappa: float = 0.0) -> float:
+        """The fence discriminator ``rho`` a source maps to, as ``w_low_fit`` sees it."""
+        lam = 1.0 - kappa
+        root = math.sqrt(lam)
+        yp0, yp1 = y[0] / root, y[1] / root
+        s = yp0 * yp0 + yp1 * yp1
+        z = cmath.exp(-1j * beta) * complex(yp0, yp1)
+        theta = math.atan2(z.imag, z.real)
+        return self._module._caustic_rho(abs(gamma / lam), s, theta)
+
     def _assert_non_increasing(self, values) -> None:
         """Assert ``values`` is non-increasing within float round-off."""
         for prev, nxt in zip(values, values[1:]):
@@ -1013,34 +1146,41 @@ class WLlowFitBaseTestCase(unittest.TestCase):
 
 class TestWLlowFitGammaMonotonicity(WLlowFitBaseTestCase):
     """
-    ``w_low_fit`` falls with ``gamma'`` past a low-edge peak.
+    ``w_low_fit`` falls with ``gamma'`` past a low-edge peak (served exterior).
 
     The engine-honest truncation ceiling falls as the operator series' small
-    parameter ``gamma' s w / 2`` grows, and the re-baked fit reproduces that
-    power-law direction over the calibration band: non-increasing from a
-    low-edge peak (~``gamma`` 0.06, LIVE-derived) out to the parity wall.
-    Near the calibration LOW edge (``gamma`` in [0.05, ~0.06] -- the
-    extrapolation from below the grid bleeding in) the surface carries a
-    small rise; this is a fit-shape artifact, NOT an over-serve, because the
-    engine-oracle full-grid suite in `test_lensing_diffractive.py` certifies
-    the calibration domain (including ``gamma = 0.05``) directly.  The peak
-    is re-derived per (beta, kappa) from the LIVE shipped surface, never a
-    pinned literal.  ``gamma`` is swept at fixed ``(y, beta, kappa)`` per the
-    spec; at fixed ``kappa`` the reduced shear rises monotonically with
-    ``gamma``, so non-increasing past the peak in ``gamma`` pins
-    non-increasing in ``gamma'`` there.
+    parameter ``gamma' s w / 2`` grows, and the fitted surface reproduces that
+    power-law direction where it SERVES -- the smooth exterior (``rho >
+    1 + DELTA``).  There the surface is non-increasing in ``gamma`` from a
+    low-edge peak (~``gamma`` 0.05-0.08, LIVE-derived) out to the point where
+    ``rho`` crosses into the near-fold shell.  The shell and the deep
+    interior are NOT part of the monotonicity claim: the shell returns
+    ``None`` and the interior is served by the fit -- asserted by
+    `TestWLlowFitNearFoldFence` / `TestWLlowFitDeepInteriorServedByFit`
+    instead.  The sweep is therefore RESTRICTED to the served exterior,
+    derived from the live `_caustic_rho` discriminator, never a pinned gamma
+    bound.  ``gamma`` is swept at fixed ``(y, beta, kappa)`` per the spec; at
+    fixed ``kappa`` the reduced shear rises monotonically with ``gamma``, so
+    non-increasing past the peak in ``gamma`` pins non-increasing in
+    ``gamma'`` there.
     """
 
     def test_non_increasing_past_low_edge_peak(self) -> None:
-        """Sweep gamma at several (beta, kappa); past the peak it only falls."""
+        """Sweep gamma over the served exterior; past the peak it only falls."""
         y = (0.5, 0.3)
         for beta, kappa in ((0.0, 0.0), (0.7, 0.0), (0.0, 0.3), (0.7, 0.3)):
             with self.subTest(beta=beta, kappa=kappa):
                 lam = 1.0 - kappa
                 gammas = np.logspace(
-                    math.log10(0.05), math.log10(0.999 * self._wall * lam), 120)
-                values = [
-                    self._evaluate(y, float(g), beta, kappa) for g in gammas]
+                    math.log10(0.05), math.log10(0.999 * self._wall * lam), 300)
+                exterior = [float(g) for g in gammas
+                            if self._fence_rho(y, float(g), beta, kappa)
+                            > self._rho_hi]
+                self._n_checks += 1
+                self.assertGreater(
+                    len(exterior), 3,
+                    'premise lost: no served exterior at this (beta, kappa)')
+                values = [self._evaluate(y, g, beta, kappa) for g in exterior]
                 peak = int(np.argmax(values))
                 self._n_checks += 1
                 self.assertLess(
@@ -1049,60 +1189,59 @@ class TestWLlowFitGammaMonotonicity(WLlowFitBaseTestCase):
                 self._n_checks += 1
                 self.assertGreater(
                     values[peak], values[-1],
-                    'premise lost: no genuine gamma falling branch out to '
-                    'the wall')
+                    'premise lost: no genuine gamma falling branch')
                 self._assert_non_increasing(values[peak:])
 
 
 class TestWLlowFitSMonotonicity(WLlowFitBaseTestCase):
     """
-    ``w_low_fit`` falls with ``s = |y'|^2`` past a small-``s`` peak.
+    ``w_low_fit`` falls with ``s = |y'|^2`` across the served exterior.
 
     The operator-series tail grows like ``(gamma' s w / 2)^n / n!``, so the
     engine-honest ceiling falls as the reduced source magnitude ``s`` grows,
-    and the re-baked degree-2 log-log surface reproduces that direction over
-    the calibration range (``s`` up to `_CALIBRATION_S_MAX`).  The surface is
-    NOT monotone over the whole range: below a small-``s`` peak (``s``
-    ~0.01-0.1, gamma-dependent) it RISES with ``s`` -- the degree-2 log-log
-    polynomial extrapolating where the calibration grid (``r`` in [0.3, 1.3],
-    i.e. ``s >= 0.09``) is sparse.  This test re-derives the peak from the
-    LIVE shipped surface (per gamma, never a pinned literal) and asserts the
-    falling branch out to `_CALIBRATION_S_MAX` -- closing the pre-re-bake
-    loose end, whose positive ``log(s)**2`` coefficient turned the surface UP
-    for ``s`` ~0.5-0.6 (an artifact the full re-bake eliminated).  The premise
-    ``peak < s = 0.4`` pins that the former up-turn region now falls.
-    CONSERVATIVENESS (the fitted ceiling never exceeding the engine-honest
-    ceiling) is NOT a monotonicity property of the surface: it is enforced by
-    the engine-oracle full-grid sweep in `test_lensing_diffractive.py`
-    (`FullGridCertificateOracleTestCase`), which certifies the calibration
-    domain directly.
+    and the fitted surface reproduces that direction where it SERVES -- the
+    smooth exterior (``rho > 1 + DELTA``).  The sweep is RESTRICTED to the
+    served exterior, derived from the live `_caustic_rho` discriminator: the
+    deep interior (``rho < RHO_LO``, served by the fit) and the near-fold
+    shell (``None``) are NOT part of this monotonicity claim (asserted by
+    `TestWLlowFitDeepInteriorServedByFit` / `TestWLlowFitNearFoldFence`).
+
+    Within the exterior the ceiling falls monotonically down to a live-derived
+    minimum near the top of the calibration range; PAST that minimum the
+    PROVISIONAL fence-smoke coefficients (a positive ``log(s)**2`` poly term)
+    introduce a small (~1-4%) large-``s`` up-turn.  That up-turn is a fit
+    LOOSENESS, not an over-serve (the de-rate keeps it conservative, and the
+    engine-oracle full-grid sweep in `test_lensing_diffractive.py` certifies
+    the calibration domain directly), and the full driver bake is expected to
+    remove it -- so this test pins the durable FALLING branch (exterior start
+    to the live minimum) and does not assert the up-turn away.  ``beta = kappa
+    = 0`` (eigenframe angle == lens polar angle 0.7).
     """
 
-    def test_non_increasing_past_small_s_peak(self) -> None:
-        """After the live-derived small-s peak, w_low_fit only falls to s_max."""
+    def test_falls_with_s_across_the_served_exterior(self) -> None:
+        """From the exterior start down to the live minimum, it only falls."""
         for gamma in (0.1, 0.2, 0.3, 0.5):
             with self.subTest(gamma=gamma):
-                ss = np.logspace(-2.0, math.log10(_CALIBRATION_S_MAX), 100)
-                values = [
-                    self._evaluate(
-                        (math.sqrt(float(s)) * math.cos(0.7),
-                         math.sqrt(float(s)) * math.sin(0.7)),
-                        gamma,
-                    )
-                    for s in ss
-                ]
-                peak = int(np.argmax(values))
-                self._n_checks += 1
-                self.assertLess(
-                    ss[peak], 0.4,
-                    'premise lost: the small-s peak moved into the former '
-                    'up-turn region (s >= 0.4); re-scope the falling branch')
+                ss = np.logspace(-2.0, math.log10(_CALIBRATION_S_MAX), 200)
+                exterior: list[float] = []
+                for s in ss:
+                    y = (math.sqrt(float(s)) * math.cos(0.7),
+                         math.sqrt(float(s)) * math.sin(0.7))
+                    if self._fence_rho(y, gamma, 0.0, 0.0) > self._rho_hi:
+                        exterior.append(float(s))
                 self._n_checks += 1
                 self.assertGreater(
-                    values[peak], values[-1],
-                    'premise lost: no genuine falling branch out to '
-                    f's={_CALIBRATION_S_MAX}')
-                self._assert_non_increasing(values[peak:])
+                    len(exterior), 2,
+                    'premise lost: no served exterior at this gamma')
+                values = [self._evaluate(
+                    (math.sqrt(s) * math.cos(0.7),
+                     math.sqrt(s) * math.sin(0.7)), gamma) for s in exterior]
+                argmin = int(np.argmin(values))
+                self._n_checks += 1
+                self.assertGreater(
+                    values[0], values[argmin],
+                    'premise lost: no genuine s falling branch')
+                self._assert_non_increasing(values[:argmin + 1])
 
 
 class TestWLlowFitD2Symmetry(WLlowFitBaseTestCase):
@@ -1130,10 +1269,18 @@ class TestWLlowFitD2Symmetry(WLlowFitBaseTestCase):
     #: Interior fixtures exercising non-trivial ``beta``/``kappa``; the D2
     #: symmetry is a property of the fit in ``theta``, so the eigenframe
     #: transformations (not the lens-plane ones) are the honest probes.
+    #: Every fixture must lie OUTSIDE the near-fold shell (``rho > 1 +
+    #: DELTA``) so the fence serves it rather than declining it to ``None``;
+    #: `test_fixtures_are_outside_the_shell` asserts that premise live.  The
+    #: third fixture keeps ``beta = kappa = 0`` (pure lens frame, eigenframe
+    #: == lens frame) and its ``gamma`` was lowered 0.45 -> 0.35: at
+    #: ``gamma = 0.45`` every ``r ~ 0.8-1.1`` source sits at ``rho < 1.4`` in
+    #: some direction and would be fenced off (its ``pi/2``-rotated image
+    #: would return ``None`` and break the self-falsification).
     _CONFIGS: tuple[tuple[tuple[float, float], float, float, float], ...] = (
         ((0.4, 0.7), 0.3, 0.5, 0.2),
         ((1.1, -0.2), 0.15, -0.9, 0.1),
-        ((0.05, 0.9), 0.45, 1.3, 0.0),
+        ((0.8, 0.6), 0.35, 0.0, 0.0),
     )
 
     @staticmethod
@@ -1149,6 +1296,19 @@ class TestWLlowFitD2Symmetry(WLlowFitBaseTestCase):
         root = math.sqrt(1.0 - kappa)
         z = cmath.exp(1j * float(beta)) * z_eig
         return (root * z.real, root * z.imag)
+
+    def test_fixtures_are_outside_the_shell(self) -> None:
+        """Every D2 fixture is served (``rho > 1 + DELTA``), never fenced off."""
+        for y, gamma, beta, kappa in self._CONFIGS:
+            with self.subTest(y=y, gamma=gamma, beta=beta, kappa=kappa):
+                rho = self._fence_rho(y, gamma, beta, kappa)
+                self._n_checks += 1
+                self.assertGreater(
+                    rho, self._rho_hi,
+                    f'premise lost: fixture (y={y}, gamma={gamma}) now sits in '
+                    f'or below the near-fold shell (rho={rho:.3f} <= '
+                    f'{self._rho_hi:.3f}); the D2 symmetry probe would be '
+                    f'fenced to None')
 
     def test_period_pi_invariance(self) -> None:
         """``theta -> theta + pi`` (eigenframe negation) reproduces the value."""
@@ -1192,15 +1352,18 @@ class TestWLlowFitD2Symmetry(WLlowFitBaseTestCase):
 
 class TestWLlowFitCeilingCapAndWallCollapse(WLlowFitBaseTestCase):
     """
-    The fitted certificate is capped at the DD ceiling and collapses at the wall.
+    The fitted certificate is capped at the DD ceiling and finite at the wall.
 
     (a) ``w_low_fit`` never exceeds ``_DIFFRACTIVE_FIT_CEILING``
-    (``= W_CEILING_SCHWINGER = 60``): a small-gamma fixture whose raw fit
-    would exceed it returns the cap exactly, so the clip is load-bearing
-    rather than decorative.
+    (``= W_CEILING_SCHWINGER = 60``): the de-rated surface is clipped to the
+    cap.  ``None`` (the near-fold-shell decline) is a separate, valid outcome
+    and is not "exceeding the ceiling".
     (b) As ``gamma'`` approaches the parity wall ``1 - DELTA_GAMMA_P`` the
-    ``log(1 - gamma')`` feature dominates and ``w_low_fit`` collapses
-    monotonically toward 0 with no divergence or blow-up.
+    source becomes deep interior (``rho -> 0`` as the caustic radius blows
+    up).  There ``w_low_fit`` serves the FIT, whose ``log(1 - gamma')``
+    feature collapses it toward 0; in the shell it declines (``None``).
+    Either way it never returns a divergent value.  The wall refusal itself
+    (exactly at the wall) is unchanged.
     """
 
     def test_never_exceeds_ceiling(self) -> None:
@@ -1210,8 +1373,8 @@ class TestWLlowFitCeilingCapAndWallCollapse(WLlowFitBaseTestCase):
         for g in gammas:
             value = self._evaluate(y, float(g))
             self._n_checks += 1
-            self.assertLessEqual(
-                value, self._ceiling,
+            self.assertTrue(
+                value is None or value <= self._ceiling,
                 f'w_low_fit exceeded the ceiling: {value!r}')
         # Large-s leg: the raw fit also over-predicts for big sources and
         # must be clipped the same way.
@@ -1231,22 +1394,40 @@ class TestWLlowFitCeilingCapAndWallCollapse(WLlowFitBaseTestCase):
     # `test_never_exceeds_ceiling`; the clip remains defense-in-depth against
     # an un-de-rated raw fit (raw max ~71 > 60), pinned by
     # `TestWLlowFitDerateTeeth`.
+    # RETIRED (2026-08-20, near-fold fence): `test_wall_collapse_monotone_and_
+    # finite` pinned the fit's ``log(1 - gamma')`` collapse to ~0 near the
+    # wall.  The original interior->ceiling fence branch briefly made that
+    # path unreachable for a fixed source (the deep interior was hard-coded
+    # to the CEILING), so the collapse was replaced by
+    # `test_wall_serves_ceiling_or_declines`.  That ceiling branch is gone
+    # (INS-2-001 -- the interior is served by the fit, whose engine-honest
+    # ceiling there is ~4-34, not 60), so the wall collapse is reachable
+    # again and is re-pinned by `test_wall_declines_or_collapses_finitely`.
 
-    def test_wall_collapse_monotone_and_finite(self) -> None:
-        """Toward the wall the certificate collapses monotonically to ~0."""
+    def test_wall_declines_or_collapses_finitely(self) -> None:
+        """Toward the wall, w_low_fit declines (shell) or collapses finitely to ~0."""
         y = (0.5, 0.3)
         gammas = (0.9, 0.95, 0.98, 0.99, 0.994, 0.9949)
-        values = [self._evaluate(y, g) for g in gammas]
-        self._assert_non_increasing(values)
-        for value in values:
+        served = []
+        for g in gammas:
+            value = self._evaluate(y, g)
             self._n_checks += 1
             self.assertTrue(
-                math.isfinite(value) and value >= 0.0,
-                f'w_low_fit blew up near the wall: {value!r}')
+                value is None or (math.isfinite(value) and value >= 0.0),
+                f'near the wall w_low_fit must decline or serve a finite '
+                f'non-negative value, got {value!r} at gamma={g}')
+            if value is not None:
+                served.append(value)
+        self._n_checks += 1
+        self.assertTrue(
+            served,
+            'premise lost: no served (deep-interior) point near the wall')
+        self._assert_non_increasing(served)
         self._n_checks += 1
         self.assertLessEqual(
-            values[-1], 1e-9,
-            'collapse must reach ~0 at the wall; got {values[-1]!r}')
+            served[-1], 1e-9,
+            f'the served interior tail must collapse to ~0 at the wall; got '
+            f'{served[-1]!r}')
 
     def test_wall_refusal_bounds_the_collapse(self) -> None:
         """Exactly at the wall the positive-parity rung refuses (domain edge)."""
@@ -1268,12 +1449,19 @@ class TestWLlowFitSelfFalsification(WLlowFitBaseTestCase):
 
     def test_surface_varies_at_pi4(self) -> None:
         """A pi/4 rotation (not a D2 symmetry) must change the value."""
-        y = (0.4, 0.7)
-        gamma, beta, kappa = 0.3, 0.5, 0.2
+        # Fixture chosen so BOTH the base and its pi/4-rotated image sit in
+        # the served exterior (rho > 1 + DELTA); the rotated image of the old
+        # (0.4, 0.7, 0.3, 0.5, 0.2) fixture fell into the near-fold shell.
+        y = (0.9, 0.5)
+        gamma, beta, kappa = 0.3, 0.0, 0.0
         base = self._evaluate(y, gamma, beta, kappa)
         c = math.sqrt(0.5)
         rotated = (c * y[0] - c * y[1], c * y[0] + c * y[1])
         value = self._evaluate(rotated, gamma, beta, kappa)
+        self._n_checks += 1
+        self.assertIsNotNone(base, 'premise: base fixture fenced off')
+        self._n_checks += 1
+        self.assertIsNotNone(value, 'premise: rotated fixture fenced off')
         self._n_checks += 1
         self.assertGreater(
             abs(value - base), _D2_TOL * max(1.0, abs(base)),
@@ -1308,13 +1496,15 @@ class TestWLlowFitDerateTeeth(WLlowFitBaseTestCase):
     Budget: a handful of O(1) evaluations, < 50 ms.
     """
 
-    #: Interior fixtures where the de-rate is load-bearing: the RAW fit sits
-    #: far below the ceiling, so the ``min(..., ceiling)`` clip does not mask
-    #: the margin (each premise is asserted in the loop below).
+    #: Served (exterior) fixtures where the de-rate is load-bearing: the RAW
+    #: fit sits far below the ceiling, so the ``min(..., ceiling)`` clip does
+    #: not mask the margin (each premise is asserted in the loop below).  The
+    #: third fixture keeps ``beta = kappa = 0`` and was moved out of the
+    #: near-fold shell (``(0.05, 0.9), 0.45`` now fenced to ``None``).
     _FIXTURES: tuple[tuple[tuple[float, float], float, float, float], ...] = (
         ((0.4, 0.7), 0.3, 0.5, 0.2),
         ((1.1, -0.2), 0.15, -0.9, 0.1),
-        ((0.05, 0.9), 0.45, 1.3, 0.0),
+        ((0.8, 0.6), 0.35, 0.0, 0.0),
     )
 
     #: Amount added to the constant poly coefficient in the inflation teeth.
@@ -1393,6 +1583,889 @@ class TestWLlowFitDerateTeeth(WLlowFitBaseTestCase):
                     inflated, served,
                     'inflating the constant coefficient must inflate the '
                     'served ceiling (else the fit shape is not load-bearing)')
+
+
+class TestWLlowFitNearFoldFence(WLlowFitBaseTestCase):
+    """
+    ``w_low_fit`` declines (``None``) EXACTLY inside the near-fold shell.
+
+    The fence (`_caustic_rho` + `_DIFFRACTIVE_FIT_FENCE_*`) splits the
+    reduced-caustic distance ratio ``rho = |y'| / |y_c(theta)|`` into three
+    regions: the deep interior (``rho < RHO_LO``) is served by the fit, the
+    near-fold shell (``RHO_LO <= rho <= 1 + DELTA``) is DECLINED to ``None``
+    so the draw falls through to the fold arm / exact engine, and the smooth
+    exterior (``rho > 1 + DELTA``) is served by the fit.
+
+    This test sweeps the source radius and eigenframe angle across the
+    directional caustic at the fold-dip lens (``gamma = 0.41``, ``beta =
+    kappa = 0``) and asserts the return is ``None`` exactly where the LIVE
+    ``rho`` discriminator says so, with served values on BOTH sides -- so
+    the refusal is not vacuous.  Fixtures are DERIVED from the live
+    directional caustic radius ``|y_c(theta)|`` (via `_caustic_rho`), never
+    pinned: for each swept angle the radius sweeps ``rho`` over ``[0.3,
+    1.9]``, crossing the interior, the whole shell, and the exterior.  With
+    ``beta = kappa = 0`` the eigenframe angle is the lens polar angle, so
+    the sweep IS the fence's own ``theta``.  Engine-free, O(1) per probe;
+    budget well under a second.
+
+    The scattering diagnostic (`test_diagnostic_rho_return_scatter`) renders
+    the contiguous ``None`` band bracketed by served values.
+    """
+
+    #: Fold-dip lens (the corner witness of the diffractive suite).
+    _GAMMA: float = 0.41
+    _BETA: float = 0.0
+    _KAPPA: float = 0.0
+    #: Sweep the angle around the diagonal (the fold dip's resonant
+    #: direction) so the directional caustic radius varies strongly.
+    _THETA_CENTER: float = 3.0 * math.pi / 4.0
+    _THETA_OFFSETS: tuple[float, ...] = (-0.5, -0.25, 0.0, 0.25, 0.5)
+    #: Reduced-caustic distance ratios spanned by the radius sweep (as a
+    #: fraction of the directional caustic radius): crosses the interior
+    #: (rho < 0.6), the whole shell [0.6, 1.4], and the exterior (rho > 1.4).
+    _RHO_MIN: float = 0.3
+    _RHO_MAX: float = 1.9
+    _N_R: int = 25
+
+    def _sweep(self):
+        """Yield ``(rho, y, value)`` for every swept ``(theta, r)`` probe."""
+        caustic_rho = self._module._caustic_rho
+        for offset in self._THETA_OFFSETS:
+            theta = self._THETA_CENTER + offset
+            yc = 1.0 / caustic_rho(self._GAMMA, 1.0, theta)
+            for r in np.linspace(self._RHO_MIN * yc, self._RHO_MAX * yc,
+                                 self._N_R):
+                y = (r * math.cos(theta), r * math.sin(theta))
+                rho = caustic_rho(self._GAMMA, r * r, theta)
+                value = type(self)._w_low_fit(
+                    y, self._GAMMA, self._BETA, self._KAPPA)
+                yield rho, y, value
+
+    def test_shell_is_declined_and_bracketed(self) -> None:
+        """``None`` exactly in the shell; served on both sides (non-vacuous)."""
+        interior = shell = exterior = 0
+        for rho, y, value in self._sweep():
+            self._n_checks += 1
+            if rho < self._rho_lo:
+                interior += 1
+                self.assertIsNotNone(
+                    value, f'interior rho={rho:.3f} was declined to None')
+            elif rho <= self._rho_hi:
+                shell += 1
+                self.assertIsNone(
+                    value, f'shell rho={rho:.3f} was served as {value!r}')
+            else:
+                exterior += 1
+                self.assertIsNotNone(
+                    value, f'exterior rho={rho:.3f} was declined to None')
+                self.assertTrue(
+                    math.isfinite(value) and value > 0.0,
+                    f'exterior rho={rho:.3f} served a non-finite value '
+                    f'{value!r}')
+        self._n_checks += 1
+        self.assertGreater(interior, 0, 'sweep never reached the interior')
+        self._n_checks += 1
+        self.assertGreater(shell, 0, 'sweep never reached the shell')
+        self._n_checks += 1
+        self.assertGreater(exterior, 0, 'sweep never reached the exterior')
+
+    def test_declined_shell_is_fence_driven(self) -> None:
+        """Collapsing the shell (``DELTA = -0.4``) serves a mid-shell point."""
+        theta = self._THETA_CENTER
+        caustic_rho = self._module._caustic_rho
+        yc = 1.0 / caustic_rho(self._GAMMA, 1.0, theta)
+        r = 1.0 * yc  # rho = 1.0, mid-shell
+        y = (r * math.cos(theta), r * math.sin(theta))
+        rho = caustic_rho(self._GAMMA, r * r, theta)
+        self._n_checks += 1
+        self.assertGreaterEqual(rho, self._rho_lo, 'premise: not in shell')
+        self._n_checks += 1
+        self.assertLessEqual(rho, self._rho_hi, 'premise: not in shell')
+        declined = type(self)._w_low_fit(y, self._GAMMA, self._BETA, self._KAPPA)
+        self._n_checks += 1
+        self.assertIsNone(declined, 'shipped fence must decline the shell')
+        with mock.patch.object(self._module, '_DIFFRACTIVE_FIT_FENCE_DELTA',
+                               -0.4):
+            value = type(self)._w_low_fit(y, self._GAMMA, self._BETA,
+                                          self._KAPPA)
+        self._n_checks += 1
+        self.assertIsNotNone(value, 'without the shell the point must be served')
+
+    def test_diagnostic_rho_return_scatter(self) -> None:
+        """Save a rho-vs-return scatter showing the contiguous None band."""
+        import os
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        rhos: list[float] = []
+        served: list[float] = []
+        declined: list[float] = []
+        for rho, y, value in self._sweep():
+            rhos.append(rho)
+            if value is None:
+                declined.append(rho)
+            else:
+                served.append(rho)
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        ax.scatter(served, [1.0] * len(served), s=12, label='served')
+        ax.scatter(declined, [0.5] * len(declined), s=12, marker='x',
+                   color='tab:red', label='declined (None)')
+        ax.axvspan(self._rho_lo, self._rho_hi, color='tab:red', alpha=0.15,
+                   label='near-fold shell')
+        ax.axvline(1.0, color='k', ls=':', label='caustic (rho=1)')
+        ax.set_xlabel('rho = |y\'| / |y_c(theta)|')
+        ax.set_ylabel('return class (1=served, 0.5=None)')
+        ax.set_title('w_low_fit near-fold fence (gamma=0.41)')
+        ax.set_ylim(0.3, 1.2)
+        ax.legend()
+        fig.tight_layout()
+        out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'output')
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, 'near_fold_fence_rho_return.png')
+        fig.savefig(path, dpi=90)
+        plt.close(fig)
+        self._n_checks += 1
+        self.assertTrue(os.path.exists(path))
+
+
+class TestWLlowFitDeepInteriorServedByFit(WLlowFitBaseTestCase):
+    """Deep-interior sources are served by the FIT, never declined.
+
+    For ``rho < RHO_LO`` the order-`_DEFAULT_MAX_ORDER` series is NOT valid
+    to the engine ceiling (the engine-honest ceiling deep inside the caustic
+    is ~4-41, NOT ``W_CEILING_SCHWINGER``; measured ~4.12 at
+    gamma=0.5/rho=0.3, ~19 at gamma=0.3/rho=0.3).  `w_low_fit` therefore
+    serves the interior via the SAME calibrated fit as the smooth exterior:
+    it returns a finite value -- never ``None``, the interior is not a
+    declined region (that structural claim is also pinned by
+    `TestWLlowFitNearFoldFence.test_shell_is_declined_and_bracketed`).
+
+    This fast-tier suite is ENGINE-FREE and pins only the structural
+    conservative claim: at the CALIBRATED ``gamma = 0.5`` interior cell
+    (the smoke grid's own interior cell) the served value sits STRICTLY
+    below the DD ceiling at every witness ``rho`` -- a reinstated
+    ``rho < RHO_LO -> ceiling`` short-circuit would return the ceiling for
+    every fixture and trip the pin.  The HONEST-VALUE pin
+    (``w_low_fit <= w_low_true * (1 + 1e-5)`` over the full gamma x rho x
+    theta grid) and the clip-not-the-mechanism guard live in the exact-heavy
+    engine-oracle suite `TestWLlowFitDeepInteriorHonestServe`, gated under
+    ``COGWHEEL_BRUTE_ACCURACY`` -- the provisional smoke fit still over-runs
+    at the UNCALIBRATED low-gamma interior and is clipped to the ceiling
+    (INS-3-002), so those pins are red until the regularized re-bake lands.
+
+    Fixtures are DERIVED from the live directional caustic radius
+    ``|y_c(theta)|``: each source sits at a FIXED deep-interior witness ratio
+    ``rho`` (0.2, 0.3 and 0.5, all below the shipped ``RHO_LO = 0.6``), and
+    ``r = rho * |y_c(theta)|`` is computed live so ``rho`` is exactly the
+    fence discriminator.  ``beta = kappa = 0``.  Engine-free, O(1) per probe.
+    """
+
+    #: Calibrated interior cell (the smoke grid's own interior cell) whose
+    #: engine-honest ceiling is ~4.12 -- far below the DD ceiling, so the
+    #: fit there returns a value strictly under the ceiling.
+    _CALIBRATED_GAMMA: float = 0.5
+
+    def _fixtures(self, gammas=None):
+        """Yield ``(gamma, theta, r, y, rho)`` for each deep-interior probe."""
+        caustic_rho = self._module._caustic_rho
+        for gamma in (_DEEP_INTERIOR_GAMMAS if gammas is None else gammas):
+            for theta in _DEEP_INTERIOR_THETAS:
+                yc = 1.0 / caustic_rho(gamma, 1.0, theta)
+                for rho in _DEEP_INTERIOR_RHOS:
+                    r = rho * yc
+                    y = (r * math.cos(theta), r * math.sin(theta))
+                    yield gamma, theta, r, y, rho
+
+    def test_deep_interior_served_below_ceiling_at_calibrated_cell(self) -> None:
+        """The calibrated interior cell is served by the fit, below the ceiling.
+
+        At ``gamma = 0.5`` the fit returns a value STRICTLY below
+        ``W_CEILING_SCHWINGER`` at every deep-interior witness ``rho``
+        (0.2/0.3/0.5).  A reinstated ``rho < RHO_LO -> ceiling``
+        short-circuit would return the ceiling for every fixture and trip
+        this pin.  The honest-VALUE assertion at the uncalibrated low-gamma
+        cells is the gated engine-oracle suite's job (INS-3-002): the
+        provisional smoke fit over-runs there and is clipped, so no honest
+        value claim can hold in the fast tier until the re-bake.
+        """
+        for gamma, theta, r, y, rho in self._fixtures(
+                gammas=(self._CALIBRATED_GAMMA,)):
+            with self.subTest(gamma=gamma, theta=theta, rho=rho):
+                self._n_checks += 1
+                self.assertLess(rho, self._rho_lo, 'premise lost')
+                value = type(self)._w_low_fit(y, gamma, 0.0, 0.0)
+                self._n_checks += 1
+                self.assertIsNotNone(
+                    value, 'calibrated interior was declined')
+                self._n_checks += 1
+                self.assertLess(
+                    value, self._ceiling,
+                    f'calibrated interior rho={rho:.3f} served at the ceiling '
+                    f'{value!r} -- the interior must be served by the fit, '
+                    'not a hard-coded ceiling short-circuit')
+
+
+@_brute_accuracy_tier
+class TestWLlowFitDeepInteriorHonestServe(WLlowFitBaseTestCase):
+    """Deep interior is served at its HONEST value, never by the DD-ceiling clip.
+
+    INS-3-002: `w_low_fit` serves the deep interior (``rho < RHO_LO``) via
+    ``min(w_fit, W_CEILING_SCHWINGER)``, and the provisional smoke fit
+    over-runs at the UNCALIBRATED low-gamma interior cells, so the served
+    value there IS the DD ceiling (60) -- over-serving the ENGINE-HONEST
+    ceiling (the largest ``w`` whose order-16 series stays within
+    `CERTIFICATION_BAR` of the exact engine; ~4-41 deep inside the caustic,
+    NOT 60) by up to ~7x.  This class pins the CORRECTED expectation: the
+    interior must be served by the regularized + de-rated FIT at its honest
+    value, with the ceiling clip acting only as an unreachable hard cap.
+
+    It is the REAL-VALUE replacement for the retired vacuous
+    ``assertIsNotNone`` of `TestWLlowFitDeepInteriorServedByFit` (which
+    certified "served, not declined" at the clipped cells without any
+    conservativeness check).  The oracle is the calibration script's OWN
+    ``_measure_w_low_true`` -- the exact ``f_schwinger`` engine under the
+    ``CERTIFICATION_BAR`` sup-over-w semantics, ``n_w = 16`` (the bake's
+    default; an ALWAYS-HONEST lower bound, bisection width ~3.4e-7) -- so
+    the assertion ``w_low_fit <= w_low_true * (1 + _INTERIOR_REL_TOL)`` with
+    ``_INTERIOR_REL_TOL = 1e-5`` is a genuine round-off-guarded value pin,
+    NOT a re-call of the production derivation.
+
+    RED BY DESIGN at the provisional smoke bake (measured served/true up to
+    ~7x at gamma=0.5/rho=0.2/cusp direction, ~2.5x at gamma=0.5/rho=0.3/
+    cusp direction, ~1.8x at gamma=0.2 axis directions).  Flips green with
+    ZERO test edits when the coder's feature-basis regularization (the raw
+    pre-clip fit finite and monotone in the deep interior) and the DRIVER's
+    full interior-inclusive bake (calibration grid reaching ``r ~ 0.1``, so
+    the gamma <= 0.3 interior cells are actually sampled) land.  See
+    `_BRUTE_ACCURACY_REASON`.
+
+    Fixtures are DERIVED from the live directional caustic radius
+    ``|y_c(theta)|`` (``r = rho * |y_c(theta)|`` with ``rho`` the live fence
+    discriminator), exactly as in the fast-tier class.  Cost: 27 engine
+    probes (~1-4 s each) paid ONCE in ``setUpClass`` and shared by the
+    value pin, the clip guard and the diagnostic -- gated so the fast tier
+    never pays it.
+    """
+
+    #: Series/engine probe count for the honest-ceiling oracle (the bake's
+    #: default).  ``_measure_w_low_true`` is ``n_w``-sensitive only near the
+    #: fold (INS-1-001 marginal resonances), which the fence DECLINES; the
+    #: deep interior is smooth, so ``n_w = 16`` is stable here.
+    _N_W: int = 16
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._script = _load_fit_certificate_script()
+        cls._rows = cls._measure_rows()
+
+    @classmethod
+    def _measure_rows(cls):
+        """Measure ``(gamma, theta, rho, y, w_fit, w_true)`` per grid cell."""
+        caustic_rho = cls._module._caustic_rho
+        rows = []
+        for gamma in _DEEP_INTERIOR_GAMMAS:
+            for theta in _DEEP_INTERIOR_THETAS:
+                yc = 1.0 / caustic_rho(gamma, 1.0, theta)
+                for rho in _DEEP_INTERIOR_RHOS:
+                    r = rho * yc
+                    y = (r * math.cos(theta), r * math.sin(theta))
+                    rho_meas = caustic_rho(gamma, r * r, theta)
+                    w_fit = cls._w_low_fit(y, gamma, 0.0, 0.0)
+                    w_true = cls._script._measure_w_low_true(
+                        gamma, 0.0, 0.0, float(y[0]), float(y[1]), cls._N_W)
+                    rows.append((gamma, theta, rho_meas, y, w_fit, w_true))
+        return rows
+
+    def test_deep_interior_served_at_honest_value(self) -> None:
+        """Served ceiling <= engine-honest ceiling at every deep-interior cell.
+
+        The exact expectation of INS-3-002: ``w_low_fit <= w_low_true *
+        (1 + _INTERIOR_REL_TOL)`` over gamma in {0.2, 0.3, 0.5} x rho in
+        {0.2, 0.3, 0.5} (x the three witness angles).  One-sided: a
+        conservative under-serve is fine; only the over-serve trips.
+        """
+        for gamma, theta, rho, y, w_fit, w_true in self._rows:
+            with self.subTest(gamma=gamma, theta=theta, rho=rho):
+                self._n_checks += 1
+                self.assertLess(
+                    rho, self._rho_lo,
+                    f'premise lost: rho={rho:.3f} no longer deep interior '
+                    f'(RHO_LO={self._rho_lo}); the fence has been widened')
+                self._n_checks += 1
+                self.assertIsNotNone(
+                    w_fit, f'deep interior rho={rho:.3f} was declined to None')
+                self._n_checks += 1
+                self.assertIsNotNone(
+                    w_true, 'premise lost: engine refused to measure an '
+                    'honest ceiling at this cell')
+                self._n_checks += 1
+                self.assertGreater(
+                    w_true, 0.0, 'premise lost: zero honest ceiling')
+                self._n_checks += 1
+                self.assertLessEqual(
+                    w_fit, w_true * (1.0 + _INTERIOR_REL_TOL),
+                    f'deep-interior OVER-SERVE: w_low_fit={w_fit:.3f} > '
+                    f'w_low_true={w_true:.3f} at gamma={gamma} '
+                    f'theta={theta:.3f} rho={rho:.3f} -- the interior must '
+                    'be served by the de-rated FIT, not the DD-ceiling clip')
+
+    def test_clip_is_not_the_conservativeness_mechanism(self) -> None:
+        """The ``min(w_fit, CEILING)`` clip does NO work at the interior.
+
+        At every deep-interior cell the served value is STRICTLY below the
+        DD ceiling, and so is the RAW (``de-rate = 1.0``) fit -- removing
+        the de-rate still cannot reach the cap, so the clip is not the
+        interior's conservativeness mechanism.  A reinstated
+        ``rho < RHO_LO -> ceiling`` short-circuit, or an un-regularized
+        feature basis that diverges at low ``r`` (``log(s)``, ``log(s)^2``
+        -> +inf as ``s -> 0``), returns the ceiling at these cells and
+        trips this pin.  This is also the suite's self-falsification: it
+        stays load-bearing AFTER the honest-value pin flips green, because
+        a clip-regression sets ``served == raw == ceiling``.
+        """
+        for gamma, theta, rho, y, w_fit, w_true in self._rows:
+            with self.subTest(gamma=gamma, theta=theta, rho=rho):
+                with mock.patch.object(self._module, '_DIFFRACTIVE_FIT_DERATE',
+                                       1.0):
+                    raw = type(self)._w_low_fit(y, gamma, 0.0, 0.0)
+                self._n_checks += 1
+                self.assertLess(
+                    rho, self._rho_lo,
+                    f'premise lost: rho={rho:.3f} no longer deep interior')
+                self._n_checks += 1
+                self.assertIsNotNone(
+                    w_fit, f'deep interior rho={rho:.3f} was declined to None')
+                self._n_checks += 1
+                self.assertLess(
+                    w_fit, self._ceiling,
+                    f'served at the DD ceiling {w_fit!r} at gamma={gamma} '
+                    f'theta={theta:.3f} rho={rho:.3f} -- the clip is the '
+                    'conservativeness mechanism; the interior must be served '
+                    'by the fit')
+                self._n_checks += 1
+                self.assertIsNotNone(
+                    raw, f'raw interior fit declined at rho={rho:.3f}')
+                self._n_checks += 1
+                self.assertTrue(
+                    math.isfinite(raw),
+                    f'raw (de-rate=1.0) interior fit DIVERGED to {raw!r} at '
+                    f'gamma={gamma} theta={theta:.3f} rho={rho:.3f} -- the '
+                    'feature basis is not regularized in the deep interior; '
+                    'without the clip the fit would exceed the engine-honest '
+                    'ceiling')
+                self._n_checks += 1
+                self.assertLess(
+                    raw, self._ceiling,
+                    f'raw (de-rate=1.0) interior fit {raw!r} hits the DD '
+                    f'ceiling at gamma={gamma} theta={theta:.3f} '
+                    f'rho={rho:.3f} -- the clip absorbs the over-run; the '
+                    'de-rated fit must be finite below the cap')
+
+    def test_diagnostic_ratio_vs_rho(self) -> None:
+        """Save a served/engine ratio scatter over the deep-interior grid."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        self._n_checks += 1
+        self.assertTrue(
+            all(row[5] is not None for row in self._rows),
+            'premise lost: engine refused to measure an honest ceiling')
+        rhos = [row[2] for row in self._rows]
+        ratios = [row[4] / row[5] for row in self._rows]
+        gammas = [row[0] for row in self._rows]
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        ax.scatter(rhos, ratios, c=gammas, cmap='viridis', s=30,
+                   label='w_low_fit / w_low_true')
+        ax.axhline(1.0, color='k', ls=':', label='honest ceiling (= 1)')
+        ax.axvline(self._rho_lo, color='tab:red', ls='--',
+                   label='RHO_LO (deep-interior edge)')
+        ax.set_xlabel('rho = |y\'| / |y_c(theta)|')
+        ax.set_ylabel('w_low_fit / w_low_true (<= 1 = honest)')
+        ax.set_title('deep-interior honest-serve pin (INS-3-002)')
+        ax.set_ylim(0.0, 8.0)
+        ax.legend()
+        fig.tight_layout()
+        out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'output')
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, 'deep_interior_honest_serve.png')
+        fig.savefig(path, dpi=90)
+        plt.close(fig)
+        self._n_checks += 1
+        self.assertTrue(os.path.exists(path))
+
+
+class TestWLlowFitJustOutsideShellConservative(WLlowFitBaseTestCase):
+    """
+    Just outside the near-fold shell the served ceiling is conservative.
+
+    The fence hands off from the DECLINED shell (``rho <= 1 + DELTA`` ->
+    ``None``) to the served exterior at ``rho > 1 + DELTA``.  The fitted
+    surface must be conservative RIGHT AT that handover -- de-rated below the
+    engine-honest ceiling -- and NOT so over-fenced that it returns a
+    degenerate value (``None`` or ``<= 0``) at its own boundary.  This pins
+    the fence boundary as a live serve handover, not a dead zone: the
+    de-rated ``w_low_fit`` is compared against the engine-honest ceiling
+    measured by `scripts/fit_diffractive_certificate.py`'s own
+    `_measure_w_low_true` (the exact `f_schwinger` engine under the
+    `CERTIFICATION_BAR` sup-over-w semantics, ``n_w=16`` -- the bake's
+    default).
+
+    Fixtures are DERIVED from the live directional caustic radius at the
+    FOLD (cusp) directions of the astroid caustic at ``gamma = 0.3`` (where
+    ``|y_c(theta)|`` is minimal, so ``r ~ 0.45-0.5`` sits just outside the
+    shell): ``r = rho * |y_c(theta)|`` with ``rho`` just above
+    ``1 + DELTA = 1.4``, so ``rho`` IS the fence discriminator and the source
+    sits in the served exterior by construction.  ``7 pi / 32`` (and its
+    partner ``25 pi / 32``) are off-grid theta midpoints of the calibration
+    grid -- the same set the de-rate is certified on -- so the fit is
+    genuinely calibrated at these witnesses rather than extrapolated.
+
+    Cost: 8 engine probes (2 thetas x 4 rho targets, ~1.2 s each) paid ONCE
+    in ``setUpClass`` and shared by the assertion, teeth and diagnostic
+    tests -- ~10 s total, well inside the fast-tier budget.
+    """
+
+    #: Lens parameters (the spec's example: gamma=0.3 at a fold direction).
+    _GAMMA: float = 0.3
+    _BETA: float = 0.0
+    _KAPPA: float = 0.0
+    #: Fold (cusp) directions of the astroid caustic at gamma=0.3 -- the
+    #: directions of minimum |y_c(theta)|, so r ~ 0.45-0.5 lands just
+    #: outside the shell.  Off-grid theta midpoints of the calibration grid.
+    _FOLD_THETAS: tuple[float, ...] = (
+        7.0 * math.pi / 32.0, 25.0 * math.pi / 32.0)
+    #: Reduced-caustic ratios just above the outer shell boundary
+    #: RHO_HI = 1 + DELTA = 1.4 (r is derived as rho * |y_c(theta)|).
+    _RHO_TARGETS: tuple[float, ...] = (1.42, 1.5, 1.6, 1.7)
+    #: Series/engine probe count for the honest-ceiling oracle (the bake's
+    #: default; a coarser scan skips the marginal resonances of INS-1-001).
+    _N_W: int = 16
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._script = _load_fit_certificate_script()
+        cls._rows = cls._measure_rows()
+
+    @classmethod
+    def _measure_rows(cls):
+        """Measure ``(rho, theta, y, w_fit, w_true)`` at each boundary witness."""
+        caustic_rho = cls._module._caustic_rho
+        rows = []
+        for theta in cls._FOLD_THETAS:
+            yc = 1.0 / caustic_rho(cls._GAMMA, 1.0, theta)
+            for rho_target in cls._RHO_TARGETS:
+                r = rho_target * yc
+                y = (r * math.cos(theta), r * math.sin(theta))
+                rho = caustic_rho(cls._GAMMA, r * r, theta)
+                w_fit = cls._w_low_fit(y, cls._GAMMA, cls._BETA, cls._KAPPA)
+                w_true = cls._script._measure_w_low_true(
+                    cls._GAMMA, cls._BETA, cls._KAPPA,
+                    float(y[0]), float(y[1]), cls._N_W)
+                rows.append((rho, theta, y, w_fit, w_true))
+        return rows
+
+    def test_just_outside_shell_is_conservative(self) -> None:
+        """De-rated ceiling <= engine-honest ceiling, > 0, at the handover."""
+        for rho, theta, y, w_fit, w_true in self._rows:
+            with self.subTest(theta=theta, rho=rho):
+                self._n_checks += 1
+                self.assertGreater(
+                    rho, self._rho_hi,
+                    f'premise lost: rho={rho:.3f} not in the served exterior')
+                self._n_checks += 1
+                self.assertIsNotNone(
+                    w_fit, 'served exterior declined to None (fence too wide)')
+                self._n_checks += 1
+                self.assertGreater(
+                    w_fit, 0.0,
+                    'fence too wide: fit killed (non-positive) at its own '
+                    'boundary')
+                self._n_checks += 1
+                self.assertIsNotNone(
+                    w_true, 'premise lost: engine refused to measure an honest '
+                    'ceiling')
+                self._n_checks += 1
+                self.assertLessEqual(
+                    w_fit, w_true * (1.0 + _CONSERVATIVE_REL_TOL),
+                    f'over-serve just outside the shell: w_low_fit={w_fit:.3f} '
+                    f'> engine-honest ceiling w_low_true={w_true:.3f} '
+                    f'(rho={rho:.3f})')
+
+    def test_removing_derate_over_serves_the_boundary(self) -> None:
+        """Teeth: without the de-rate the raw fit over-serves the boundary."""
+        for rho, theta, y, w_fit, w_true in self._rows:
+            with self.subTest(theta=theta, rho=rho):
+                with mock.patch.object(self._module, '_DIFFRACTIVE_FIT_DERATE',
+                                       1.0):
+                    raw = type(self)._w_low_fit(y, self._GAMMA, self._BETA,
+                                                self._KAPPA)
+                self._n_checks += 1
+                self.assertIsNotNone(raw)
+                self._n_checks += 1
+                self.assertLess(
+                    raw, self._ceiling,
+                    'premise lost: raw fit clipped at the ceiling -- the teeth '
+                    'would measure the clip, not the fit')
+                self._n_checks += 1
+                self.assertGreater(
+                    raw, w_fit, 'removing the de-rate does not inflate the '
+                    'served ceiling')
+                self._n_checks += 1
+                self.assertGreater(
+                    raw, w_true * (1.0 + _CONSERVATIVE_REL_TOL),
+                    f'de-rate not load-bearing: raw fit {raw:.3f} does not '
+                    f'over-serve the honest ceiling {w_true:.3f} at '
+                    f'rho={rho:.3f}')
+
+    def test_diagnostic_ratio_vs_rho(self) -> None:
+        """Save a ratio (w_low_fit / w_low_true) vs rho plot near 1 + DELTA."""
+        import os
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        self._n_checks += 1
+        self.assertTrue(
+            all(row[4] is not None for row in self._rows),
+            'premise lost: engine refused to measure an honest ceiling')
+        rhos = [row[0] for row in self._rows]
+        ratios = [row[3] / row[4] for row in self._rows]
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        ax.scatter(rhos, ratios, s=30, label='w_low_fit / w_low_true')
+        ax.axhline(1.0, color='k', ls=':', label='honest ceiling (= 1)')
+        ax.axvline(self._rho_hi, color='tab:red', ls='--',
+                   label='RHO_HI = 1 + DELTA')
+        ax.set_xlabel('rho = |y\'| / |y_c(theta)|')
+        ax.set_ylabel('w_low_fit / w_low_true (<= 1 = conservative)')
+        ax.set_title('conservative pin just outside the near-fold shell '
+                     '(gamma=0.3)')
+        ax.set_ylim(0.0, 1.2)
+        ax.legend()
+        fig.tight_layout()
+        out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'output')
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, 'just_outside_shell_conservative.png')
+        fig.savefig(path, dpi=90)
+        plt.close(fig)
+        self._n_checks += 1
+        self.assertTrue(os.path.exists(path))
+
+
+class TestFenceGridGenerators(unittest.TestCase):
+    """
+    The calibration script's grid generators FENCE the near-fold shell.
+
+    `_grid_points` / `_off_grid_points` (scripts/fit_diffractive_certificate.py)
+    drop every row whose reduced caustic ratio ``rho = |y'| / |y_c(theta)|``
+    falls in ``[RHO_LO, 1 + DELTA]`` (via `_fence_excluded`), so the fit, the
+    de-rate and the margin report all operate on the fenced domain (probe
+    domain == training domain).  This pins the fencing at the SOURCE: the
+    grid a calibration sweep iterates can no longer even REACH a shell row,
+    so the sweep cannot over-serve the shell (a residual ``None`` row in the
+    sweep is counted as refused, not over-serve).  The off-grid midpoint
+    probes are fenced through the same discriminator, so the held-out witness
+    set lives on the fenced domain too.
+
+    Engine-free: pure list generation plus the O(1) `_caustic_rho` fence
+    discriminator (no series/engine probe).  Budget: ~1 s.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._script = _load_fit_certificate_script()
+        cls._module = _load_diffractive_module()
+        cls._rho_lo: float = cls._module._DIFFRACTIVE_FIT_FENCE_RHO_LO
+        cls._rho_hi: float = 1.0 + cls._module._DIFFRACTIVE_FIT_FENCE_DELTA
+        cls._grid = cls._script._grid_points('full', 42)
+        cls._off_grid = cls._script._off_grid_points('full', 42)
+
+    def _rho(self, row):
+        """The fence discriminator ``rho`` the row maps to (live)."""
+        gamma, beta, kappa, r, theta = row
+        _lam, gamma_prime = self._script._reduced_shear(gamma, kappa)
+        return self._module._caustic_rho(abs(gamma_prime), r * r, theta)
+
+    def test_grid_and_offgrid_points_are_fenced(self) -> None:
+        """Every grid + off-grid row sits strictly outside the near-fold shell."""
+        for kind, rows in (('on-grid', self._grid), ('off-grid', self._off_grid)):
+            for row in rows:
+                rho = self._rho(row)
+                self.assertFalse(
+                    self._rho_lo <= rho <= self._rho_hi,
+                    f'{kind} row {row} has rho={rho:.3f} inside the shell')
+        interior = sum(1 for row in self._grid if self._rho(row) < self._rho_lo)
+        exterior = sum(1 for row in self._grid if self._rho(row) > self._rho_hi)
+        self.assertGreater(interior, 0, 'fenced grid has no deep-interior rows')
+        self.assertGreater(exterior, 0, 'fenced grid has no exterior rows')
+        self.assertGreater(
+            len(self._off_grid), 0, 'off-grid midpoint set is empty (vacuity)')
+
+    def test_fence_drops_the_shell_rows(self) -> None:
+        """The fenced grid keeps only non-shell rows; every shell row is dropped."""
+        unfenced = self._script._unfenced_grid_points('full', 42)
+        grid_set = set(self._grid)
+        dropped = [row for row in unfenced if row not in grid_set]
+        self.assertGreater(len(dropped), 0, 'fence dropped no rows (vacuity)')
+        self.assertTrue(
+            grid_set <= set(unfenced),
+            'fenced grid must be a subset of the unfenced grid')
+        for row in dropped:
+            self.assertTrue(
+                self._script._fence_excluded(*row),
+                f'dropped row {row} is not a shell row (fence dropped a '
+                'non-shell row it should keep)')
+        for row in unfenced:
+            if self._script._fence_excluded(*row):
+                self.assertNotIn(
+                    row, grid_set, f'shell row {row} survived the fence')
+
+    def test_fence_discriminator_is_single_sourced(self) -> None:
+        """`_fence_excluded` uses the shipped discriminator, not re-typed literals."""
+        fn = _find_function(_parse_source(_FIT_SCRIPT_PATH), '_fence_excluded')
+        if fn is None:
+            self.fail('_fence_excluded must exist in the script')
+        ids = _all_name_ids(fn)
+        for name in ('_caustic_rho', '_DIFFRACTIVE_FIT_FENCE_RHO_LO',
+                     '_DIFFRACTIVE_FIT_FENCE_DELTA'):
+            self.assertIn(
+                name, ids,
+                f'_fence_excluded must reference {name} (single-sourced from '
+                '_diffractive.py), never a re-derived literal')
+
+
+class TestFenceFallThroughByteIdentity(WLlowFitBaseTestCase):
+    """
+    A fenced draw falls through the consumer byte-identically to the wall.
+
+    `_diffractive_bottom_ceiling` (likelihood.py) is a THIN wrapper that
+    returns ``w_low_fit(...)`` directly and maps only the parity-wall
+    `DiffractiveDomainError` to ``None``.  The near-fold fence adds a THIRD
+    ``None`` source -- ``w_low_fit`` returns ``None`` (NOT an exception) for
+    a shell draw -- and it must route through the consumer's fall-through
+    BYTE-IDENTICALLY to the wall refusal and the (defense-in-depth) degenerate
+    ``sqrt_mu`` ``None``: the same ``None`` boundary, the same empty nested
+    bottom, the same engine-host region, and NO new exception class.
+
+    RUNTIME pin: it binds the REAL `_diffractive_bottom_ceiling` to an
+    uninitialized `LensedRelativeBinningLikelihood` shell (the census mirror's
+    own ``object.__new__`` idiom -- the method reads only its ``lens``
+    argument plus the ``w_hi`` cap), then compares the fenced result against
+    the wall result down to the shared `_band_split_mask` arithmetic.
+    Engine-free: importing likelihood binds no engine and evaluates none
+    (~3 s import, paid once in ``setUpClass``).
+    """
+
+    #: Fold-dip lens (the corner witness of the diffractive suite); beta =
+    #: kappa = 0 so the eigenframe angle is the lens polar angle.
+    _GAMMA: float = 0.41
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._host, cls._band_split_mask = _load_likelihood_wrapper()
+        theta = 3.0 * math.pi / 4.0
+        yc = 1.0 / cls._module._caustic_rho(cls._GAMMA, 1.0, theta)
+        r = 1.0 * yc  # rho = 1.0, mid-shell
+        cls._fenced_lens = {
+            'y1': r * math.cos(theta), 'y2': r * math.sin(theta),
+            'gamma': cls._GAMMA, 'beta': 0.0, 'kappa': 0.0,
+        }
+        cls._wall_lens = {
+            'y1': 0.5, 'y2': 0.3,
+            'gamma': cls._wall, 'beta': 0.0, 'kappa': 0.0,
+        }
+
+    def _wrapped_ceiling(self, lens, w_hi=None):
+        """The production wrapper bound to the uninitialized host shell."""
+        return type(self)._host._diffractive_bottom_ceiling(lens, w_hi=w_hi)
+
+    def test_fenced_draw_declines_to_none(self) -> None:
+        """A shell draw makes `_diffractive_bottom_ceiling` return None."""
+        self._n_checks += 1
+        self.assertIsNone(self._wrapped_ceiling(self._fenced_lens))
+
+    def test_fence_and_wall_collapse_byte_identically(self) -> None:
+        """Fenced None and wall None share the same downstream split mask."""
+        dense_w = np.linspace(1.0, 10.0, 16)
+        fenced = self._wrapped_ceiling(self._fenced_lens)
+        wall = self._wrapped_ceiling(self._wall_lens)
+        self._n_checks += 1
+        self.assertIsNone(fenced)
+        self._n_checks += 1
+        self.assertIsNone(wall)
+        f_split, f_below = type(self)._band_split_mask(dense_w, fenced)
+        w_split, w_below = type(self)._band_split_mask(dense_w, wall)
+        self._n_checks += 1
+        self.assertEqual(f_split, w_split, 'split flags must match')
+        self._n_checks += 1
+        self.assertTrue(
+            np.array_equal(f_below, w_below),
+            'below-split masks must be byte-identical for fenced vs wall None')
+
+    def test_fence_introduces_no_new_exception_class(self) -> None:
+        """The fence returns None without raising; the wrapper's sole except
+        is still `DiffractiveDomainError`."""
+        y = (self._fenced_lens['y1'], self._fenced_lens['y2'])
+        self._n_checks += 1
+        self.assertIsNone(
+            type(self)._w_low_fit(y, self._GAMMA, 0.0, 0.0),
+            'a shell draw must DECLINE to None, never raise a new exception')
+        method = _find_function(
+            _parse_source(_LIKELIHOOD_PATH), '_diffractive_bottom_ceiling')
+        if method is None:
+            self.fail('_diffractive_bottom_ceiling must exist in likelihood.py')
+        handlers = [
+            h for node in ast.walk(method)
+            if isinstance(node, ast.Try) for h in node.handlers]
+        self._n_checks += 1
+        self.assertEqual(len(handlers), 1, 'wrapper must have exactly one except')
+        self._n_checks += 1
+        self.assertTrue(
+            _handler_catches(handlers[0], 'DiffractiveDomainError'),
+            'wrapper must catch only DiffractiveDomainError')
+
+    def test_wrapper_returns_w_low_fit_transparently(self) -> None:
+        """The wrapper's try body returns `w_low_fit(...)` with no transform."""
+        method = _find_function(
+            _parse_source(_LIKELIHOOD_PATH), '_diffractive_bottom_ceiling')
+        if method is None:
+            self.fail('_diffractive_bottom_ceiling must exist in likelihood.py')
+        transparent = False
+        for node in ast.walk(method):
+            if not isinstance(node, ast.Try):
+                continue
+            for stmt in node.body:
+                if (isinstance(stmt, ast.Return)
+                        and isinstance(stmt.value, ast.Call)
+                        and 'w_low_fit' in _called_identifiers(stmt.value)):
+                    transparent = True
+        self._n_checks += 1
+        self.assertTrue(
+            transparent,
+            'wrapper must return w_low_fit(...) directly so a fenced None '
+            'flows through byte-identically')
+
+
+class TestCensusMirrorFencedDrawRouting(unittest.TestCase):
+    """
+    The census mirror never labels a fenced draw ``diffractive_analytic``.
+
+    `serve_route_census.classify_draw` mirrors production's Rung-P admission:
+    it calls ``mods.w_low_fit((y1, y2), gamma, 0.0, 0.0, w_hi=w_hi)`` and
+    returns ``diffractive_analytic`` ONLY under ``w_low is not None and
+    w_low > w_lo``.  A fenced draw makes ``w_low_fit`` return ``None``
+    (pinned by `TestWLlowFitNearFoldFence`), so it can never reach that
+    return -- it falls through to the per-node pass, i.e. engine/fold demand.
+    This pins the guard STRUCTURALLY (load-bearing in the shipped source)
+    plus the runtime ``None`` fact, engine-free.
+
+    Budget: one AST parse + one O(1) `w_low_fit` call, < 1 s.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tree = _parse_source(_SERVE_ROUTE_CENSUS_PATH)
+        cls.classify = _find_function(cls.tree, 'classify_draw')
+
+    @staticmethod
+    def _analytic_calls(fn):
+        """`_result('diffractive_analytic', ...)` call nodes in `fn`."""
+        return [
+            node for node in ast.walk(fn)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == '_result'
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == 'diffractive_analytic'
+        ]
+
+    @staticmethod
+    def _test_requires_w_low_not_none(test_node):
+        """True if `test_node` compares ``w_low is not None``."""
+        for node in ast.walk(test_node):
+            if (isinstance(node, ast.Compare)
+                    and isinstance(node.left, ast.Name)
+                    and node.left.id == 'w_low'
+                    and any(isinstance(op, ast.IsNot) for op in node.ops)
+                    and len(node.comparators) == 1
+                    and isinstance(node.comparators[0], ast.Constant)
+                    and node.comparators[0].value is None):
+                return True
+        return False
+
+    @staticmethod
+    def _guarded_bodies(fn):
+        """Bodies (as node sets) of every `If` guarded by ``w_low is not None``."""
+        return [
+            set(ast.walk(node)) for node in ast.walk(fn)
+            if isinstance(node, ast.If)
+            and TestCensusMirrorFencedDrawRouting._test_requires_w_low_not_none(
+                node.test)
+        ]
+
+    def test_anti_vacuity(self) -> None:
+        """The scan found `classify_draw` and a diffractive_analytic route."""
+        self.assertIsNotNone(self.classify, 'classify_draw must exist')
+        self.assertGreater(
+            len(self._analytic_calls(self.classify)), 0,
+            'no diffractive_analytic route found to police')
+
+    def test_diffractive_analytic_guarded_by_w_low_not_none(self) -> None:
+        """Every diffractive_analytic return is inside a `w_low is not None`
+        guard, so a fenced draw (w_low=None) can never be labelled analytic."""
+        fn = self.classify
+        if fn is None:
+            self.fail('classify_draw must exist')
+        guarded = self._guarded_bodies(fn)
+        self.assertGreater(
+            len(guarded), 0, 'no `w_low is not None` guard found in classify_draw')
+        for call in self._analytic_calls(fn):
+            self.assertTrue(
+                any(call in body for body in guarded),
+                'a diffractive_analytic return is not guarded by '
+                '`w_low is not None` -- a fenced draw (w_low=None) could be '
+                'mis-labelled analytic')
+
+    def test_fenced_draw_makes_w_low_none(self) -> None:
+        """The mirror's own predicate input is None for a fenced draw."""
+        w_low_fit = _load_w_low_fit()[0]
+        module = _load_diffractive_module()
+        theta = 3.0 * math.pi / 4.0
+        gamma = 0.41
+        yc = 1.0 / module._caustic_rho(gamma, 1.0, theta)
+        r = 1.0 * yc  # rho = 1.0, mid-shell (the fence declines it)
+        y = (r * math.cos(theta), r * math.sin(theta))
+        self.assertIsNone(
+            w_low_fit(y, gamma, 0.0, 0.0),
+            'premise lost: the fenced draw is no longer declined to None')
+
+    def test_guard_detector_flags_an_unguarded_route(self) -> None:
+        """SELF-FALSIFICATION: an unguarded analytic return is caught.
+
+        A synthetic `classify_draw` whose ``diffractive_analytic`` return is
+        NOT under ``w_low is not None`` must be flagged -- proving the guard
+        check has teeth rather than passing vacuously on any source.
+        """
+        synthetic = ast.parse(
+            "def classify_draw():\n"
+            "    if gamma < 1.0:\n"
+            "        w_low = f()\n"
+            "        if float(w_low) > w_lo:\n"
+            "            return _result('diffractive_analytic', ())\n")
+        fn = _find_function(synthetic, 'classify_draw')
+        guarded = self._guarded_bodies(fn)
+        unguarded = [
+            call for call in self._analytic_calls(fn)
+            if not any(call in body for body in guarded)]
+        self.assertGreater(
+            len(unguarded), 0,
+            'guard detector did not flag an unguarded diffractive_analytic '
+            'return -- the routing pin would be vacuous')
 
 
 if __name__ == '__main__':

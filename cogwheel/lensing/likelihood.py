@@ -1985,8 +1985,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             selection of the far-field exterior -- and it forwards ``lens``
             unmodified.  Admission onto the Rung-P analytic sub-band is
             therefore governed SOLELY by the truncation certificate
-            `w_low_fit` (which returns ``None`` on degenerate geometry and
-            raises at the reduced-shear wall), not by any ``kappa`` /
+            `w_low_fit` (which returns ``None`` on degenerate geometry, on
+            draws inside the near-fold shell (``rho`` in
+            ``[_DIFFRACTIVE_FIT_FENCE_RHO_LO, 1 +
+            _DIFFRACTIVE_FIT_FENCE_DELTA]``) -- falling through
+            byte-identically to the wall refusal -- and raises at the
+            reduced-shear wall), not by any ``kappa`` /
             ``beta`` precondition.
         dense_w : np.ndarray
             Full dimensionless-frequency grid, 1-D, strictly positive.
@@ -2741,7 +2745,11 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         S).  Also returns ``None`` for degenerate geometry (propagated from
         `w_low_fit`) and ``0.0`` when there is no shear (series exact);
         both collapse the nested bottom to empty via the whole-band /
-        empty-bottom branches at the call sites.
+        empty-bottom branches at the call sites.  The near-fold-shell
+        decline of `w_low_fit` (draws with ``rho`` in
+        ``[_DIFFRACTIVE_FIT_FENCE_RHO_LO, 1 +
+        _DIFFRACTIVE_FIT_FENCE_DELTA]``) likewise passes through as
+        ``None`` and falls through byte-identically to the wall refusal.
 
         Parameters
         ----------
@@ -2755,7 +2763,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         -------
         float or None
             ``w_low``; ``w_hi`` when the fitted ceiling reaches ``w_hi``;
-            ``None`` at the parity wall or on a degenerate solve.
+            ``None`` at the parity wall, on a degenerate solve, or inside
+            the near-fold shell (``rho`` in
+            ``[_DIFFRACTIVE_FIT_FENCE_RHO_LO, 1 +
+            _DIFFRACTIVE_FIT_FENCE_DELTA]``).
         """
         try:
             return w_low_fit(

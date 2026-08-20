@@ -40,6 +40,15 @@ surface is then DE-RATED by the reciprocal of the worst un-de-rated
 over-prediction (clamped to ~0.85) so the shipped `w_low_fit` never
 over-serves on the calibration grid.
 
+The calibration grid is FENCED: rows whose reduced caustic ratio
+``rho = |y'| / |y_c(theta)|`` (see `_diffractive._caustic_rho`) falls inside
+the near-fold shell ``[RHO_LO, 1 + DELTA]`` are dropped from both
+`_grid_points` and `_off_grid_points` (`_fence_excluded`), so the fit, the
+de-rate and the margin report all operate on the fenced domain (probe domain
+== training domain).  The deep interior (``rho < RHO_LO``) and the smooth
+exterior (``rho > 1 + DELTA``) remain; the near-fold shell is declined by
+`w_low_fit` (returns ``None`` -> the fold arm / exact engine).
+
 The feature basis MUST match `_diffractive._fit_features` / the enumeration in
 `_diffractive._fit_poly_exponents`; this script imports both from shipping code
 (single source of truth) rather than re-deriving them.
@@ -68,9 +77,10 @@ import time
 import numpy as np
 
 from cogwheel.lensing.chang_refsdal._diffractive import (
-    _DIFFRACTIVE_FIT_LIP, _DIFFRACTIVE_FIT_N_HARM, _fit_poly_exponents,
-    _fit_poly_features, _fit_features, _reduced_shear, diffractive_amplification,
-    w_low_fit)
+    _DIFFRACTIVE_FIT_FENCE_DELTA, _DIFFRACTIVE_FIT_FENCE_RHO_LO,
+    _DIFFRACTIVE_FIT_LIP, _DIFFRACTIVE_FIT_N_HARM, _caustic_rho,
+    _fit_poly_exponents, _fit_poly_features, _fit_features, _reduced_shear,
+    diffractive_amplification, w_low_fit)
 from cogwheel.lensing.chang_refsdal._schwinger import (
     W_CEILING_SCHWINGER, f_schwinger)
 from cogwheel.lensing.ppgo_map import CERTIFICATION_BAR
@@ -122,8 +132,25 @@ def _unreduced_source(r: float, theta: float, gamma: float, beta: float,
     return y1, y2
 
 
-def _grid_points(scale: str, seed: int) -> list[tuple[float, float, float, float, float]]:
-    """Calibration grid: ``(gamma, beta, kappa, r, theta)`` rows.
+def _fence_excluded(gamma: float, beta: float, kappa: float, r: float,
+                    theta: float) -> bool:
+    """True if the row's reduced caustic ratio ``rho`` is inside the near-fold shell.
+
+    The fence discriminator ``rho = |y'| / |y_c(theta)| = _caustic_rho(
+    abs(gamma'), r**2, theta)`` is 1.0 on the caustic, > 1 outside, < 1
+    inside.  Rows in ``[RHO_LO, 1 + DELTA]`` are fenced OUT of the
+    calibration grid (single-sourced from `_diffractive._caustic_rho` and the
+    `_DIFFRACTIVE_FIT_FENCE_*` constants, never re-derived).
+    """
+    _lam, gamma_prime = _reduced_shear(gamma, kappa)
+    rho = _caustic_rho(abs(gamma_prime), r * r, theta)
+    return (_DIFFRACTIVE_FIT_FENCE_RHO_LO <= rho
+            <= 1.0 + _DIFFRACTIVE_FIT_FENCE_DELTA)
+
+
+def _unfenced_grid_points(scale: str, seed: int
+                          ) -> list[tuple[float, float, float, float, float]]:
+    """Raw calibration grid (no fence): ``(gamma, beta, kappa, r, theta)`` rows.
 
     ``r = sqrt(s)`` is the reduced source magnitude and ``theta`` the
     eigenframe angle.  ``full`` spans hundreds of points and ``smoke`` a
@@ -137,22 +164,29 @@ def _grid_points(scale: str, seed: int) -> list[tuple[float, float, float, float
     `_DIFFRACTIVE_FIT_N_HARM`).  The earlier 8-theta grid ALIASED every
     harmonic beyond ``k = 1`` and produced a degenerate fit.
 
-    The ``smoke`` grid adds the high-gamma / small-r corner cells
-    (``gamma in {0.41, 0.5}`` x ``r = 0.55``) to the smooth-region anchor
-    cells, so the fit is constrained where the honest ceiling collapses
-    steeply toward the positive-parity wall -- the region the parametric
-    caustic feature is meant to capture.
+    The ``smoke`` grid spans the FENCED domain: smooth-region anchor cells
+    (``gamma in {0.1, 0.2, 0.3}`` x ``r in {0.5, 0.9}``), one deep-interior
+    cell (``gamma = 0.5`` x ``r = 0.3``, ``rho < RHO_LO`` throughout -- so
+    the fit is calibrated on the deep interior, whose engine-honest ceiling
+    is ~4-6, NOT the DD ceiling), and one near-exterior high-gamma cell
+    (``gamma = 0.5`` x ``r = 0.9``, ``rho > 1 + DELTA`` near the diagonal) --
+    the region the parametric caustic feature is meant to capture, now
+    sampled OUTSIDE the fence rather than at the (fenced-out) corner.
     """
     if scale == 'smoke':
         gammas = (0.1, 0.2, 0.3)
         radii = (0.5, 0.9)
-        corner_gammas = (0.41, 0.5)
-        corner_r = 0.55
+        interior_gamma = 0.5
+        interior_r = 0.3
+        near_exterior_gamma = 0.5
+        near_exterior_r = 0.9
         thetas = np.linspace(0.0, 2.0 * math.pi, _N_THETAS, endpoint=False)
         rows = [(g, 0.0, 0.0, r, float(t))
                 for g in gammas for r in radii for t in thetas]
-        rows += [(g, 0.0, 0.0, corner_r, float(t))
-                 for g in corner_gammas for t in thetas]
+        rows += [(interior_gamma, 0.0, 0.0, interior_r, float(t))
+                 for t in thetas]
+        rows += [(near_exterior_gamma, 0.0, 0.0, near_exterior_r, float(t))
+                 for t in thetas]
         rows += [(0.2, 0.7, 0.0, 0.9, 1.1),
                  (0.1, 0.0, 0.3, 0.5, 0.0),
                  (0.3, 0.7, 0.3, 0.9, 2.0)]
@@ -173,23 +207,38 @@ def _grid_points(scale: str, seed: int) -> list[tuple[float, float, float, float
     return rows
 
 
-def _off_grid_points(scale: str, seed: int) -> list[tuple[float, float, float, float, float]]:
-    """Theta-midpoint probes, derived as a theta-offset of `_grid_points`.
+def _grid_points(scale: str, seed: int
+                 ) -> list[tuple[float, float, float, float, float]]:
+    """Fenced calibration grid: `_unfenced_grid_points` minus the near-fold shell.
 
-    For each ``(gamma, r)`` cell of `_grid_points`, the grid samples
+    Rows whose reduced caustic ratio ``rho`` falls in
+    ``[RHO_LO, 1 + DELTA]`` are dropped (see `_fence_excluded`), so the fit,
+    the de-rate and the margin report all operate on the fenced domain
+    automatically (probe domain == training domain).
+    """
+    return [row for row in _unfenced_grid_points(scale, seed)
+            if not _fence_excluded(*row)]
+
+
+def _off_grid_points(scale: str, seed: int) -> list[tuple[float, float, float, float, float]]:
+    """Fenced theta-midpoint probes, a theta-offset of `_unfenced_grid_points`.
+
+    For each ``(gamma, r)`` cell of `_unfenced_grid_points`, the grid samples
     ``_N_THETAS`` thetas ``theta_j = 2 pi j / _N_THETAS``; these probes sit at
     the MIDPOINTS ``theta_j + pi / _N_THETAS`` between consecutive nodes --
     the points a harmonic fit is LEAST constrained at, so they are the honest
     out-of-sample witnesses.  A stride keeps the probe count at
-    `_OFF_GRID_PROBES_PER_CELL` per cell (~240 total at full scale).
+    `_OFF_GRID_PROBES_PER_CELL` per cell (~240 total at full scale).  The
+    probes are then FENCED (`_fence_excluded`), so the off-grid witness set
+    lives on the fenced domain too.
 
-    Derived as a theta-offset of `_grid_points` output (single source of
-    truth) rather than a hand-rolled second grid, so the two stay coupled.
+    Derived as a theta-offset of `_unfenced_grid_points` output (single source
+    of truth) rather than a hand-rolled second grid, so the two stay coupled.
     The off-grid rows are used for de-rating and the margin report ONLY,
     never the least-squares fit -- they remain a genuine held-out set.
     """
     cells: dict[tuple[float, float], list[float]] = {}
-    for gamma, beta, kappa, r, theta in _grid_points(scale, seed):
+    for gamma, beta, kappa, r, theta in _unfenced_grid_points(scale, seed):
         if beta == 0.0 and kappa == 0.0:
             cells.setdefault((gamma, r), []).append(theta)
     offset = math.pi / _N_THETAS
@@ -199,7 +248,7 @@ def _off_grid_points(scale: str, seed: int) -> list[tuple[float, float, float, f
         stride = max(1, len(thetas) // _OFF_GRID_PROBES_PER_CELL)
         for j in range(0, len(thetas), stride):
             probes.append((gamma, 0.0, 0.0, r, thetas[j] + offset))
-    return probes
+    return [p for p in probes if not _fence_excluded(*p)]
 
 
 def _engine_full(w: float, y_eig: np.ndarray, lam: float,
@@ -392,10 +441,15 @@ def main() -> None:
     args = parser.parse_args()
 
     t0 = time.time()
+    raw_rows = _unfenced_grid_points(args.scale, args.seed)
     rows = _grid_points(args.scale, args.seed)
     off_rows = _off_grid_points(args.scale, args.seed)
+    n_fenced = len(raw_rows) - len(rows)
+    frac = n_fenced / len(raw_rows) if raw_rows else 0.0
     print(f'# grid: {len(rows)} points ({args.scale}), off-grid: '
           f'{len(off_rows)} points, n_w={args.n_w}, degree={args.degree}')
+    print(f'# excluded-shell: {n_fenced}/{len(raw_rows)} grid rows fenced out '
+          f'({frac:.1%}) -- prior-mass proxy for the declined near-fold shell')
 
     measured_rows, w_low_true, n_skipped = _measure_rows(rows, args.n_w, 'grid')
     off_measured, off_w_low_true, off_skipped = _measure_rows(
@@ -433,22 +487,6 @@ def main() -> None:
           f'(grid {max(grid_overpreds):.4f}, off-grid '
           f'{max(off_overpreds) if off_overpreds else 0.0:.4f}) '
           f'-> de-rate = {derate:.4f}')
-
-    # Corner witness: the RAW (un-de-rated) over-prediction at the off-grid
-    # midpoint that motivated this representation change (the high-gamma /
-    # small-r cell where the ceiling collapses steeply toward the wall).
-    # The witness angle is the off-grid midpoint of the grid node
-    # theta_j = 3 pi / 4 (== 2.454369 + offset), the direction the previous
-    # 4-harmonic fit over-predicted by 2.06x.
-    witness_theta = 3.0 * math.pi / 4.0 + math.pi / _N_THETAS
-    for (gamma, beta, kappa, r, theta), w_true, overpred in zip(
-            off_measured, off_w_low_true, off_overpreds):
-        if (beta == 0.0 and kappa == 0.0
-                and abs(gamma - 0.41) < 1e-9 and abs(r - 0.55) < 1e-9
-                and abs(theta - witness_theta) < 1e-9):
-            print(f'# corner raw over-prediction gamma={gamma} r={r} '
-                  f'theta={theta:.6f}: {overpred:.4f}x '
-                  f'(fit {overpred * w_true:.4f} vs true {w_true:.4f})')
 
     # Margin report on the de-rated fit (conservative / tight distribution),
     # printed separately for the calibration grid and the held-out off-grid
