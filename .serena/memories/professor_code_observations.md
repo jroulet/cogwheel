@@ -777,3 +777,30 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   as designed on too few draws, not evidence of an actual imbalance; the
   real per-region distribution requires the full 10k-sample census (a
   >240s operator-deferred run), not a quick smoke sample.
+
+## 2026-08-19/20 (diffractive certificate-fit interior calibration, rulings + verdict)
+
+- CLIP IS A HARD ORACLE-DOMAIN CAP, NOT A MARGIN: min(w_fit,
+  _DIFFRACTIVE_FIT_CEILING=60) is load-bearing because f_schwinger refuses
+  w>60 (DD e^{pi w/4} cancellation ceiling) — literal removal would let a
+  regression return w_low>60 and crash the oracle. "Remove the clip-as-
+  conservativeness" is SEMANTIC: calibrate the interior + de-rate so the
+  clip is a no-op, pinned by a gated test (served<60 AND raw(de-rate=1)<60).
+- INTERIOR HONEST CEILING: smooth/monotone (6-34) on rho in [0.2,0.6] —
+  over-serve there is a calibration gap, not a representation wall. BUT the
+  degree-2 log(s) poly has NO correct s->0 asymptotics (log(s)^2 diverges
+  either sign): the "series exact as s->0" ceiling->60 limit lives at
+  rho<0.2 (<4% interior prior mass), guarded by clip + a gated test at
+  rho=0.2 (r≈0.06, below the r=0.1 grid floor). Prefer the conservative
+  (<=0 log(s)^2) outcome at bake.
+- DE-RATE min(0.85, 1/max_overpred) is the SOLE interior margin; no
+  interior-specific de-rate (breaks census mirror fidelity; redundant once
+  the grid samples the interior). 1e-5 one-sided (over-serve-trips)
+  tolerance = oracle bisection width ~3.4e-7 + de-rate 6-decimal rounding
+  ~6e-7 -> ~30x headroom — a round-off guard, not a physics margin.
+- VERDICT (INS-3-001, SHA 362c58e): with the 0.85-clamped provisional
+  de-rate, the cusp-direction deep interior OVER-SERVES (w_fit/w_true
+  1.1244 at gamma=0.5/rho=0.2/cusp, 1.0233 at rho=0.3; axis dirs
+  conservative 0.88x/0.69x) — the gated honest-serve skip reason is
+  accurate and the suite genuinely red. Corner re-pin CORNER_R=1.1 verified
+  (rho=2.188, raw/w_true 1.006, caustic coeff -0.824, drop-caustic 2.34).

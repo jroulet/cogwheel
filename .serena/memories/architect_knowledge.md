@@ -855,3 +855,59 @@
   as a drifted-core loud-failure trip-wire to preserve, not soften. The
   ~200s acceptance spot-check is a DRIVER post-build step, not a permanent
   test.
+
+## 2026-08-19/20 (diffractive_certificate_fit lineage, w_low_fit design)
+
+- HARMONIC-BASIS ALIASING ON A COARSE THETA GRID (aliasing build): a fit's
+  angular basis must be Nyquist-resolved by the calibration theta samples —
+  cos(4kθ), k=1..16 on 8 thetas aliases (even-k collapse to the all-+1
+  column, odd-k to the alternating column), so lstsq spreads the signal
+  into 2 effective patterns; Nyquist for cos(4kθ) is N>=8K=32 thetas.
+  Decouple the fit's harmonic count from the physics truncation order
+  (_DIFFRACTIVE_FIT_N_HARM = _DEFAULT_MAX_ORDER is a latent trap).
+- BASIS SYMMETRY MUST MATCH THE QUANTITY'S, NOT THE CAUSTIC'S (corner build):
+  the honest ceiling is D2 (period-pi + reflection), NOT pi/2 — the operator
+  term D_0=4(y_u^2-y_v^2)=4s·cos(2θ) flips sign under pi/2, so t_n ∝
+  cos^n(2θ) is pi-periodic; a cos(4kθ) k=1..4 basis silently drops cos(2θ),
+  cos(6θ),... Use cos(2kθ) k=1..7 (k=8 exact-Nyquist at 32 thetas, dropped).
+  Add a parametric-caustic feature log(|y'|/|y_c(θ_source)|) via the O(1)
+  `caustic_point` curve — NEVER a numerical brentq root-finder (violates
+  O(1)/engine-free value-path purity).
+- CAUSTIC-RELATIVE DISCRIMINATORS ARE MISCALIBRATED BY THE CRITICAL-CURVE
+  ANGLE (fenced build): caustic_point parametrizes by phi(θ)≠θ (median
+  |phi-θ|~1.36 rad), so rho=|y'|/|y_c(θ_source)| UNDER-estimates distance-
+  to-fold by up to 1.75x — monotone but direction-dependent; size the fence
+  delta honestly (0.35-0.5, not 0.1-0.3). Fence direction: the deep
+  interior (rho<<1) is where the operator series converges FASTEST — serve
+  it at the ceiling, never decline it; marginal resonances are near-fold-
+  only, so the fence is TWO-SIDED [RHO_LO~0.6, 1+DELTA~1.4] -> None. Apply
+  the fence INSIDE the grid/off-grid generators so probe-domain ==
+  training-domain; share one _caustic_rho discriminator.
+- A FIT'S CEILING CAP IS A HARD ORACLE-DOMAIN LIMIT, NOT A CONSERVATIVENESS
+  MECHANISM (interior_fix build): keep min(w_fit, CEILING) — the engine
+  refuses w>60, so removing the clip lets a regression return w_low>60 and
+  crash f_schwinger. "Remove the clip-as-conservativeness" is SEMANTIC:
+  calibrate the interior + de-rate so the clip is a no-op, pinned by a
+  gated clip-is-not-the-conservativeness test. Deep interior is smooth/
+  capturable on rho in [0.2,0.6] but NOT asymptotically representable as
+  r->0 (log(s)^2 diverges either sign) — rho<0.2 (<4% prior mass) stays
+  clip-bounded and leans on the rho=0.2 engine pin.
+- DE-RATE FLOOR IS A GRID-SPARSITY SAFETY MARGIN (INS-1-003): max_overpred
+  on a finite calibration grid is optimistically low, so keep the hard 0.85
+  floor (min(0.85, 1/max_overpred)) even when the raw ratio says otherwise;
+  remove the DEAD outer clamp (min(1.0, ...)) + its unreachable comment
+  (behavior-preserving). De-rate stays the SOLE margin; no region-specific
+  de-rate (breaks census mirror fidelity).
+- STALE-GREEN ACCEPTANCE ORACLE (INS-3-001/002): a fit's acceptance oracle
+  must sweep the FULL calibration grid — an oracle that sweeps only the
+  conservative region (CLEAN_GAMMAS at one Y_REF) ships a smoke bake GREEN
+  while out-of-sample regions over-serve. Baked coefficients ARE the
+  deliverable; when the full-scale bake fits the fast-tier budget, run it
+  in-build, not post-build.
+- RESONANCE-LIMITED DE-RATE (corner INS-1-001): narrow marginal resonances
+  in the order-16 series near the fold make the honest ceiling oscillate
+  (~0.1-wide w-windows), capping the achievable de-rate (~0.5); "de-rate
+  >= 0.70" is a MEASUREMENT not a claim. Re-point the acceptance bar to
+  the resonance-limited value and give the test its OWN skip reason — a
+  shared "flips green after bake" reason that contradicts the pin's own
+  docstring ("NOT expected to flip green") is a mislabelled gate.

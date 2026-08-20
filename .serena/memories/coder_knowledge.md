@@ -1024,3 +1024,36 @@
   loop-local variable BEFORE that closure is defined so the trim actually
   propagates — a trim computed after the closure captures the old value
   silently.
+
+## 2026-08-19/20 (diffractive_certificate_fit lineage, w_low_fit implementation)
+
+- PASTE-THEN-MEASURE CIRCULARITY: a calibration script's margin report must
+  use the SCRIPT's fresh fit (derate*_evaluate_fit), NEVER the production
+  module's already-baked w_low_fit — the latter re-validates the PREVIOUS
+  paste (placeholder coefficients) and reports a stale bake as green.
+- FENCE-BRANCH CATEGORICAL OVER-SERVE (fenced build): a fence branch that
+  returns the hard ceiling for the deep interior is catastrophically wrong —
+  the engine-honest ceiling inside the caustic is ~4-34, NOT the DD cap 60
+  (rel error ~1e7 at gamma=0.5); serve the interior with the SAME fit as the
+  exterior (it's calibrated on interior cells), decline only the shell
+  [RHO_LO, 1+DELTA]. Wall collapse is structural: a negative
+  log(1-gamma')^2 poly coeff forces P->-inf as gamma'->1.
+- EXPLICIT GROUP SLICING OF A GROWING FEATURE VECTOR (corner build): once a
+  fit gains a trailing feature group, slice each group by index
+  (poly[:n]/harm[n:n+m]/caustic[n+m:]) — a bare `features[n_poly:]` zip
+  silently DROPS trailing groups when the leading group size changes.
+- ON-GRID-GREEN ≠ OFF-GRID-GREEN (aliasing pass2): an aliased re-bake passes
+  on-grid yet under-serves ~1e4 off-grid (w_low_fit ~0.0014); verify a
+  re-baked coefficient block off-grid before pasting. But FIRST re-check the
+  calibration oracle's row coverage — pass3 proved the "degenerate fit" was
+  a symptom of a kappa-oracle bug (12 kappa rows skipped -> 8 aliased
+  thetas), not the representation itself.
+- SHA-SKEW (pass3): a provenance SHA stamped from committed HEAD does NOT
+  identify an UNTRACKED baking script's state — commit the script (with its
+  fixes) BEFORE the run so the stamp is meaningful.
+- CAUSTIC-POINT SIGN SENSITIVITY: geometry.caustic_point is
+  gamma-sign-sensitive (effective_u goes negative for -gamma); use
+  abs(gamma_prime) in any symmetric caustic-relative rho discriminator.
+- BETA-ROTATION IDENTITY: y_eig = [[cosB,sinB],[-sinB,cosB]] @ (y/sqrt(lam))
+  is exactly complex exp(-1j*beta) multiplication — verified equal; use
+  whichever form keeps the surrounding code real/complex-native.

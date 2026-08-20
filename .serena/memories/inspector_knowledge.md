@@ -594,3 +594,22 @@
   exercised end-to-end by a passing test and its logic is independently
   verified, carry the missing artifact forward as a DRIVER run-the-CLI
   step, not a code defect — don't block the build on an operator action.
+
+## 2026-08-20 (diffractive_certificate_fit_interior_fix, pass-3)
+
+- NUMERIC-CLAIM DOCSTRING SWEEP AFTER A COEFFICIENT RE-BAKE: when a re-bake
+  updates SOME docstring 'measured ~Nx' values, sweep EVERY docstring
+  carrying a measured-ratio claim for that surface — the caustic-feature
+  self-falsification docstring (~1.66x -> ~1.91x) is the laggard that
+  survives even a meticulous sibling pass (test still passes; docstring
+  only).
+- OVER-CLAIM IN A TEST NAME/DOCSTRING AFTER A FIXTURE REFACTOR: a method
+  named '..._at_calibrated_cell' whose fixture refactor widens coverage to
+  an EXTRAPOLATED cell re-introduces the exact over-claim the earlier
+  docstring lineage cleaned up — the assertion may be structurally correct
+  while the NAME over-claims; rename to keep wording == coverage.
+- FENCE-WITNESS MANAGEMENT PATTERN (reusable): when a new refusal band
+  lands, name the witnesses now inside it via a module constant (e.g.
+  NEAR_FOLD_DECLINED_WITNESSES) and skip them in the sweep, adding a
+  dedicated test that asserts the band IS declined — don't silently drop
+  witnesses or claim the sweep covers them.

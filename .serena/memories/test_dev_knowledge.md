@@ -831,3 +831,39 @@
   coarse grid — don't extend the tight-tolerance oracle check to the
   off-axis case; carry it via the closed form's own monotonicity instead
   and scope the independent-oracle assertion to the axis-aligned case only.
+
+## 2026-08-19/20 (diffractive certificate-fit, w_low_fit suite)
+
+- FIRST-BREACH CEILING IS SCAN-RESOLUTION-SENSITIVE (reusable, oracle
+  measurement): the honest ceiling can have a real non-monotone dip; a
+  coarse n_w bisection lands on the FIRST bar breach (correct,
+  prefix-closed semantics) while a denser scan skips to the LAST breach
+  (over-optimistic, over-certifies ~2x). Keep the coarse default n_w that
+  matches the prefix-closed semantics; document it in the pin's docstring.
+- CAUSTIC SET SYMMETRY ≠ CRITICAL-ANGLE PARAMETRISATION SYMMETRY
+  (empirical correction to a sibling run's claim): |y_c(θ)| is period-PI +
+  reflection (D2), NOT period-pi/2 — under θ->θ+pi/2 the gamma' cos(2θ)
+  term in effective_u flips sign. pi/2 non-invariance comes from BOTH odd
+  harmonics AND the caustic feature (zeroing odd harmonics still leaves a
+  pi/2 diff ~0.42-0.65).
+- ON-GRID-ONLY SWEEPS ARE BLIND TO SUB-GRID FEATURES: the on-grid-only
+  zero-over-serve sweep passed GREEN while the smoke surface over-served
+  at theta midpoints (sub-grid caustic dip); extend accuracy sweeps to
+  off-grid midpoints. When pinning an oracle against the calibration
+  script, import it via importlib.util.spec_from_file_location (single
+  source of truth — grid can't drift).
+- TEETH VIA A MODULE-GLOBAL: a module-global constant read at call time
+  (function.__globals__ IS the module dict) is mock.patchable
+  (mock.patch.object(module,'_CONST',...)) — the standard teeth lever. Use
+  UN-CLIPPED fixtures (assert served<ceiling as a premise) or the teeth
+  are masked. When the pin's expected value sits near the bar, use a
+  MONOTONE comparative form (raw_nocaustic > raw_with_caustic*1.05), not a
+  bare above-the-pin threshold — the bare form is satisfiable by a no-op
+  surface.
+- TESTCASE ATTR/METHOD NAME COLLISION: a base-class setUpClass CLASS
+  ATTRIBUTE (e.g. cls._ceiling) silently OVERWRITES a subclass METHOD of
+  the same name — rename the method. And a function stored as a class attr
+  still binds self via the descriptor protocol (call via type(self).name).
+- TOOLING: serena insert_at_line can land MID-BLOCK when the target index
+  is the last line of a preceding multi-line tuple — verify surrounding
+  structure after every insert.

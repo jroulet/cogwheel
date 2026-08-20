@@ -448,3 +448,18 @@
   read the FULL todo.d fragment before rewriting a "fragment open" SPEC
   sentence; it may already record that only part of the described work is
   still live, changing what the replacement text should say.
+
+## 2026-08-20 (diffractive certificate-fit SPEC sync, INS-3-001)
+
+- MECHANISM-SWAP STALENESS AT PARAGRAPH SCALE: a mechanism swap (formula
+  scan -> O(1) fitted surface) with zero SPEC.md edits across 5+ commits
+  leaves a SPEC paragraph describing the RETIRED admission gate — same
+  'SPEC cites a function by name' family, at paragraph scale; sync at the
+  lineage's completion, not per commit. Watch also for HISTORICAL
+  spec_changelog fragments describing the superseded scan — a future reader
+  may conflate them with the current fit (leave as-is per historical
+  convention, but flag the conflation risk).
+- FINDINGS F084 filed (certificate-fit lineage, first F-number for it):
+  the min(.,CEILING) clip-as-conservativeness trap — an uncalibrated fit
+  clipped to 60 silently re-serves the interior up to ~2.9x over the
+  engine-honest ~4-41 ceiling. Same family as F069/F073/F076.

@@ -159,3 +159,15 @@
   caustic boundary) for a different degeneracy -- audit every raise path in
   the wrapped helper, not just the one the original guard anticipated, and
   broaden the except clause (or add an explicit pre-check) to cover it.
+
+## 2026-08-20 (INS-4-001/002, coverage-claim qualifications)
+
+- COVERAGE-CLAIM × FENCE-INTERACTION AUDIT: a coverage claim ('throughout')
+  in a grid docstring must survive a fence audit — when rows of an interior
+  cell are FENCED OUT in some directions (cusp-direction thetas at r=0.2:
+  16/32 rows for (0.2,0.2), 8/32 for (0.3,0.2)), 'throughout' inverts into
+  exactly the coverage gap the tests name. Qualify by DIRECTION (smooth
+  off-cusp directions vs near-cusp thetas fenced out), never by averaging.
+  Same class: a de-rate docstring 'never over-serves' must be qualified to
+  the calibration grid + held-out probes ('extrapolated off-grid points
+  can over-serve').
