@@ -74,11 +74,12 @@ _DEFAULT_MAX_ORDER = 16
 #: `scripts/fit_diffractive_certificate.py` at SMOKE scale on the FENCED
 #: domain (the near-fold shell ``rho`` in ``[RHO_LO, 1 + DELTA]`` is
 #: excluded; see `_DIFFRACTIVE_FIT_FENCE_*`), and MUST be re-baked at FULL
-#: scale by the driver before release.  Smoke margins: de-rate 0.844967,
-#: grid 196/196 conservative / 196/196 tight, off-grid 48/48 conservative /
-#: 48/48 tight, excluded-shell 63/259 grid rows (24.3%).  Provenance SHA
-#: 9e09bdd (653.0 s).  Final bake: ``python scripts/fit_diffractive_certificate.py --scale
-#: full`` and paste the emission block verbatim.
+#: scale by the driver before release.  Smoke margins (interior-inclusive
+#: grid, radii down to r=0.1): de-rate 0.85, grid 178/178 conservative /
+#: 178/178 tight, off-grid 44/44 conservative / 44/44 tight, excluded-shell
+#: 49/227 grid rows (21.6%).  Provenance SHA 362c58e (526.9 s).  Final bake:
+#: ``python scripts/fit_diffractive_certificate.py --scale full`` and paste
+#: the emission block verbatim.
 #:
 #: NEAR-FOLD FENCE: the corner (high-gamma / small-r) region -- where the
 #: honest ceiling collapses steeply toward the positive-parity wall and
@@ -102,9 +103,9 @@ _DIFFRACTIVE_FIT_DEGREE = 2
 #: `_fit_poly_exponents`).  Baked by `scripts/fit_diffractive_certificate.py`.
 # PROVISIONAL -- driver re-bakes at --scale full
 _DIFFRACTIVE_FIT_POLY_COEFFS = (
-    -7.1584279141398355, -32.090195389523466, 0.18017435498735318, -10.554471704462383,
-    -23.858934833005495, 0.005697311313124095, 0.15169731420395685, -19.80581720444554,
-    -0.07178813488809696, -1.9699492914293213,
+    1.1486760545301573, 1.526949650602595, 0.8717651174724659, -2.074344678010659,
+    -2.755138697376363, 1.1575045245244224, -0.04816374031429832, 0.8122537203967878,
+    0.384579593915149, -0.23937381525663678,
 )
 
 #: Number of even harmonics in `w_low_fit` (``cos(2 k theta)`` for
@@ -125,8 +126,8 @@ _DIFFRACTIVE_FIT_N_HARM = 7
 #: `scripts/fit_diffractive_certificate.py`.
 # PROVISIONAL -- driver re-bakes at --scale full
 _DIFFRACTIVE_FIT_HARMONIC_COEFFS = (
-    0.03153210610150576, -0.37167067873450005, -0.013437051392246302, 0.07373345405204876,
-    0.005081354470044086, -0.02186959339488262, -0.006146390438591959,
+    0.08823929874286128, -0.34399871169454654, -0.021613817206027907, 0.07460091840159909,
+    7.481543489110371e-05, -0.012899568764444305, 0.0014882457009251198,
 )
 
 #: Coefficient of the parametric-caustic feature
@@ -135,14 +136,14 @@ _DIFFRACTIVE_FIT_HARMONIC_COEFFS = (
 #: honest ceiling dips as the source approaches / crosses the fold, so the
 #: caustic log-ratio is anti-correlated with ``log w_low``.
 # PROVISIONAL -- driver re-bakes at --scale full
-_DIFFRACTIVE_FIT_CAUSTIC_COEFF = -0.6870606032955108
+_DIFFRACTIVE_FIT_CAUSTIC_COEFF = -0.8236838383495544
 
 #: De-rating factor applied to the exponentiated fit so the fitted ceiling is
 #: CONSERVATIVE on the calibration grid (never above the engine-honest
 #: ceiling).  Baked by `scripts/fit_diffractive_certificate.py` as the
 #: reciprocal of the worst un-de-rated over-prediction (clamped to <= 0.85).
 # PROVISIONAL -- driver re-bakes at --scale full
-_DIFFRACTIVE_FIT_DERATE = 0.844967
+_DIFFRACTIVE_FIT_DERATE = 0.85
 
 #: Coefficient of the ``log(lam * sqrt_mu)`` feature, held at ``1 / (M + 1)``
 #: by construction (the amplitude-space normalisation the fitted surface
@@ -452,8 +453,13 @@ def w_low_fit(y, gamma: float, beta: float = 0.0, kappa: float = 0.0, *,
     1 - kappa``, ``sqrt_mu`` the macro amplitude, ``s = |y'|**2`` the reduced
     squared offset, ``theta`` the eigenframe angle, and ``|y_c(theta)|`` the
     reduced caustic radius in that direction (see `_fit_features`).  The
-    exponentiated surface is de-rated by `_DIFFRACTIVE_FIT_DERATE` and clipped to
-    `_DIFFRACTIVE_FIT_CEILING` so the result never over-serves.
+    exponentiated surface is de-rated by `_DIFFRACTIVE_FIT_DERATE` -- the SOLE
+    conservativeness margin (the de-rate alone guarantees the result never
+    over-serves on the calibration grid and its held-out off-grid midpoint
+    probes; extrapolated off-grid points can over-serve); the
+    ``min(., _DIFFRACTIVE_FIT_CEILING)`` clip is a hard
+    ORACLE-DOMAIN cap (``W_CEILING_SCHWINGER``, no oracle above 60) and is a
+    no-op wherever the fit is calibrated.
 
     The surface is FENCED around the directional caustic (see `_caustic_rho`
     and the `_DIFFRACTIVE_FIT_FENCE_*` constants): the near-fold shell
@@ -503,9 +509,9 @@ def w_low_fit(y, gamma: float, beta: float = 0.0, kappa: float = 0.0, *,
 
     The fence declines ONLY the near-fold shell: the deep interior
     (``rho < RHO_LO``) is served by the SAME fit as the smooth exterior (the
-    fit is calibrated on the interior cell, so it serves it conservatively --
+    fit is calibrated on the interior cells, so it serves them conservatively --
     NOT at the ceiling, whose engine-honest value deep inside the caustic is
-    ~4-34, not ``W_CEILING_SCHWINGER``).  The fence discriminator ``rho`` is
+    ~4-41, not ``W_CEILING_SCHWINGER``).  The fence discriminator ``rho`` is
     monotone but miscalibrated (it under-estimates the distance-to-fold by
     up to ~1.75x), so the boundaries are conservative guards tuned at the
     driver full bake.

@@ -27,10 +27,11 @@ The exact-heavy INS-3-002 deep-interior HONEST-VALUE pin (served ceiling
 <= engine-honest `_measure_w_low_true` ceiling over the gamma x rho x
 theta grid) and the clip-not-the-mechanism guard live in the
 ``COGWHEEL_BRUTE_ACCURACY``-gated `TestWLlowFitDeepInteriorHonestServe`:
-the provisional smoke fit still over-runs at the uncalibrated low-gamma
-interior and is clipped to the DD ceiling, so those pins are RED BY DESIGN
-until the feature-basis regularization + driver's full interior-inclusive
-re-bake land (see `_BRUTE_ACCURACY_REASON`).
+the in-build smoke bake is PROVISIONAL -- it calibrates the deep interior
+(served by the fit, below the ceiling) but its clamped de-rate still
+over-serves the cusp-direction interior, so those pins are RED BY DESIGN
+until the driver's full interior-inclusive re-bake lands (see
+`_BRUTE_ACCURACY_REASON`).
 """
 from __future__ import annotations
 
@@ -957,7 +958,7 @@ _MONOTONE_REL_TOL: float = 1e-9
 
 #: Upper end of the ``s = |y'|**2`` monotonicity sweep: the calibration grid's
 #: maximum reduced radius squared (`scripts/fit_diffractive_certificate.py`
-#: ``_grid_points`` trains on ``r = linspace(0.3, 1.3, 5)``, so
+#: ``_unfenced_grid_points`` trains on ``r = linspace(0.1, 1.3, 7)``, so
 #: ``s_max = 1.3**2 = 1.69``).  Sweeping past it would probe an uncalibrated
 #: extrapolation region; the engine-oracle full-grid suite in
 #: `test_lensing_diffractive.py` certifies the calibration domain directly.
@@ -973,9 +974,11 @@ _CALIBRATION_S_MAX: float = 1.3 ** 2
 
 #: Deep-interior witness grid (INS-3-002): reduced shears, eigenframe angles
 #: and reduced-caustic ratios (all strictly below ``RHO_LO = 0.6`` today).
-#: ``rho`` reaches deeper than the smoke grid's single interior cell, and
-#: ``theta = pi/4`` is the cusp direction (min ``|y_c(theta)|``) -- the worst
-#: over-serving direction of the provisional smoke bake (measured ~7x).
+#: ``rho`` reaches deeper than the smoke grid's interior anchors (the re-bake
+#: calibrates the interior), and ``theta = pi/4`` is the cusp direction (min
+#: ``|y_c(theta)|``) -- the worst over-serving direction of the provisional
+#: smoke bake (measured ~1.12x at gamma=0.5/rho=0.2, still RED until the
+#: driver's full re-bake).
 _DEEP_INTERIOR_GAMMAS: tuple[float, ...] = (0.2, 0.3, 0.5)
 _DEEP_INTERIOR_THETAS: tuple[float, ...] = (
     0.0, math.pi / 4.0, math.pi / 2.0)
@@ -994,22 +997,25 @@ _BRUTE_ACCURACY: bool = bool(os.environ.get('COGWHEEL_BRUTE_ACCURACY'))
 #: Skip reason for the exact-heavy deep-interior honest-serve suite
 #: (`TestWLlowFitDeepInteriorHonestServe`).  Its oracle is the calibration
 #: script's engine-honest `_measure_w_low_true`, and the pinned expectation
-#: (the interior is served by the regularized, de-rated FIT -- never by the
-#: ``min(w_fit, CEILING)`` DD-ceiling clip) is RED at the provisional smoke
-#: bake BY DESIGN.  INS-3-002: the smoke fit over-runs at the UNCALIBRATED
-#: low-gamma interior and clips to the ceiling, over-serving the
-#: engine-honest ceiling (~4-41 deep inside the caustic) by up to ~7x
-#: (measured at gamma=0.5/rho=0.2/cusp direction).  The suite flips green
-#: when the coder's feature-basis regularization lands and the DRIVER's full
-#: interior-inclusive bake (calibration grid reaching ``r ~ 0.1``) is pasted.
+#: (the interior is served by the de-rated FIT -- the de-rate is the SOLE
+#: conservativeness margin, the ``min(w_fit, CEILING)`` clip a hard
+#: oracle-domain cap) is RED at the provisional smoke bake BY DESIGN.  The
+#: smoke bake now calibrates the deep interior (served by the fit, below the
+#: ceiling) but its clamped de-rate (0.85) still over-serves the
+#: cusp-direction interior -- measured ~1.12x at gamma=0.5/rho=0.2/cusp,
+#: ~1.02x at gamma=0.5/rho=0.3/cusp -- over the engine-honest ceiling
+#: (~4-41 deep inside the caustic).  The suite flips green when the DRIVER's
+#: full interior-inclusive bake (the final de-rate, not the provisional 0.85
+#: clamp) is pasted.
 _BRUTE_ACCURACY_REASON = (
     'exact-heavy deep-interior honest-serve suite gated behind '
     'COGWHEEL_BRUTE_ACCURACY=1: its oracle is the engine-honest '
     '_measure_w_low_true and the pinned expectation is RED at the '
-    'provisional smoke bake BY DESIGN (INS-3-002: the deep interior is '
-    'still served at the DD-ceiling clip, over-serving the engine-honest '
-    'ceiling by up to ~7x). The driver re-runs it after the coder\'s '
-    'feature-basis regularization + full interior-inclusive re-bake land.')
+    'provisional smoke bake BY DESIGN (INS-3-002: the clamped de-rate '
+    'still over-serves the cusp-direction interior, up to ~1.12x -- the '
+    'de-rate is the sole margin, the DD-ceiling clip a hard oracle-domain '
+    'cap). The driver re-runs it after the full interior-inclusive re-bake '
+    'lands.')
 _brute_accuracy_tier = unittest.skipUnless(_BRUTE_ACCURACY,
                                            _BRUTE_ACCURACY_REASON)
 _CONSERVATIVE_REL_TOL: float = 1e-6
@@ -1401,7 +1407,7 @@ class TestWLlowFitCeilingCapAndWallCollapse(WLlowFitBaseTestCase):
     # to the CEILING), so the collapse was replaced by
     # `test_wall_serves_ceiling_or_declines`.  That ceiling branch is gone
     # (INS-2-001 -- the interior is served by the fit, whose engine-honest
-    # ceiling there is ~4-34, not 60), so the wall collapse is reachable
+    # ceiling there is ~4-41, not 60), so the wall collapse is reachable
     # again and is re-pinned by `test_wall_declines_or_collapses_finitely`.
 
     def test_wall_declines_or_collapses_finitely(self) -> None:
@@ -1486,7 +1492,9 @@ class TestWLlowFitDerateTeeth(WLlowFitBaseTestCase):
     ceiling and by itself over-predicts wherever the fit overshoots (the
     worst over-prediction is baked into ``1 / _DIFFRACTIVE_FIT_DERATE``).
     `w_low_fit` is conservative ONLY because the surface is de-rated by that
-    factor (then clipped to `_DIFFRACTIVE_FIT_CEILING`).
+    factor -- the de-rate is the sole margin; the
+    ``min(., _DIFFRACTIVE_FIT_CEILING)`` clip is the hard oracle-domain cap
+    (``W_CEILING_SCHWINGER``, a no-op wherever the fit is calibrated).
 
     These tests perturb the shipped constants and show the served ceiling
     strictly INFLATES -- the exact direction the conservative/tight oracle
@@ -1741,18 +1749,25 @@ class TestWLlowFitDeepInteriorServedByFit(WLlowFitBaseTestCase):
     declined region (that structural claim is also pinned by
     `TestWLlowFitNearFoldFence.test_shell_is_declined_and_bracketed`).
 
-    This fast-tier suite is ENGINE-FREE and pins only the structural
-    conservative claim: at the CALIBRATED ``gamma = 0.5`` interior cell
-    (the smoke grid's own interior cell) the served value sits STRICTLY
-    below the DD ceiling at every witness ``rho`` -- a reinstated
+    This fast-tier suite is ENGINE-FREE and pins the structural
+    conservative claim: at every deep-interior witness cell (gamma in
+    {0.2, 0.3, 0.5} x rho in {0.2, 0.3, 0.5} x the three witness angles)
+    the served value sits STRICTLY below the DD ceiling -- a reinstated
     ``rho < RHO_LO -> ceiling`` short-circuit would return the ceiling for
-    every fixture and trip the pin.  The HONEST-VALUE pin
-    (``w_low_fit <= w_low_true * (1 + 1e-5)`` over the full gamma x rho x
-    theta grid) and the clip-not-the-mechanism guard live in the exact-heavy
-    engine-oracle suite `TestWLlowFitDeepInteriorHonestServe`, gated under
-    ``COGWHEEL_BRUTE_ACCURACY`` -- the provisional smoke fit still over-runs
-    at the UNCALIBRATED low-gamma interior and is clipped to the ceiling
-    (INS-3-002), so those pins are red until the regularized re-bake lands.
+    every fixture and trip the pin.  Calibration is qualified by bake:
+    gamma in {0.2, 0.3} is calibrated by the current smoke re-bake (deep
+    interior at ``r`` in {0.1, 0.2}); the gamma = 0.5 deep interior
+    (``r ~ 0.11-0.28``) remains EXTRAPOLATION from the smoke anchors at
+    ``r`` = 0.3 and 0.9 and is calibrated only by the driver's full bake
+    (which adds gamma = 0.5 at ``r`` = 0.1) -- the cause of its residual
+    ~1.12x over-serve.  The HONEST-VALUE
+    pin (``w_low_fit <= w_low_true * (1 + 1e-5)`` over the full gamma x rho
+    x theta grid) and the clip-not-the-mechanism guard live in the
+    exact-heavy engine-oracle suite `TestWLlowFitDeepInteriorHonestServe`,
+    gated under ``COGWHEEL_BRUTE_ACCURACY`` -- the in-build smoke bake is
+    PROVISIONAL and still over-serves the cusp-direction interior (the
+    de-rate, not the clip, is the sole margin), so those pins are red until
+    the driver's full re-bake lands.
 
     Fixtures are DERIVED from the live directional caustic radius
     ``|y_c(theta)|``: each source sits at a FIXED deep-interior witness ratio
@@ -1761,15 +1776,10 @@ class TestWLlowFitDeepInteriorServedByFit(WLlowFitBaseTestCase):
     fence discriminator.  ``beta = kappa = 0``.  Engine-free, O(1) per probe.
     """
 
-    #: Calibrated interior cell (the smoke grid's own interior cell) whose
-    #: engine-honest ceiling is ~4.12 -- far below the DD ceiling, so the
-    #: fit there returns a value strictly under the ceiling.
-    _CALIBRATED_GAMMA: float = 0.5
-
-    def _fixtures(self, gammas=None):
+    def _fixtures(self):
         """Yield ``(gamma, theta, r, y, rho)`` for each deep-interior probe."""
         caustic_rho = self._module._caustic_rho
-        for gamma in (_DEEP_INTERIOR_GAMMAS if gammas is None else gammas):
+        for gamma in _DEEP_INTERIOR_GAMMAS:
             for theta in _DEEP_INTERIOR_THETAS:
                 yc = 1.0 / caustic_rho(gamma, 1.0, theta)
                 for rho in _DEEP_INTERIOR_RHOS:
@@ -1778,19 +1788,19 @@ class TestWLlowFitDeepInteriorServedByFit(WLlowFitBaseTestCase):
                     yield gamma, theta, r, y, rho
 
     def test_deep_interior_served_below_ceiling_at_calibrated_cell(self) -> None:
-        """The calibrated interior cell is served by the fit, below the ceiling.
+        """Every calibrated deep-interior cell is served by the fit, below the ceiling.
 
-        At ``gamma = 0.5`` the fit returns a value STRICTLY below
+        At gamma in {0.2, 0.3, 0.5} the fit returns a value STRICTLY below
         ``W_CEILING_SCHWINGER`` at every deep-interior witness ``rho``
-        (0.2/0.3/0.5).  A reinstated ``rho < RHO_LO -> ceiling``
+        (0.2/0.3/0.5) and angle.  A reinstated ``rho < RHO_LO -> ceiling``
         short-circuit would return the ceiling for every fixture and trip
-        this pin.  The honest-VALUE assertion at the uncalibrated low-gamma
-        cells is the gated engine-oracle suite's job (INS-3-002): the
-        provisional smoke fit over-runs there and is clipped, so no honest
-        value claim can hold in the fast tier until the re-bake.
+        this pin.  The honest-VALUE assertion (``w_low_fit <= w_low_true``)
+        over the same grid is the gated engine-oracle suite's job
+        (INS-3-002): the in-build smoke bake is PROVISIONAL and still
+        over-serves the cusp-direction interior, so no honest value claim can
+        hold in the fast tier until the driver's full re-bake lands.
         """
-        for gamma, theta, r, y, rho in self._fixtures(
-                gammas=(self._CALIBRATED_GAMMA,)):
+        for gamma, theta, r, y, rho in self._fixtures():
             with self.subTest(gamma=gamma, theta=theta, rho=rho):
                 self._n_checks += 1
                 self.assertLess(rho, self._rho_lo, 'premise lost')
@@ -1811,19 +1821,23 @@ class TestWLlowFitDeepInteriorHonestServe(WLlowFitBaseTestCase):
     """Deep interior is served at its HONEST value, never by the DD-ceiling clip.
 
     INS-3-002: `w_low_fit` serves the deep interior (``rho < RHO_LO``) via
-    ``min(w_fit, W_CEILING_SCHWINGER)``, and the provisional smoke fit
-    over-runs at the UNCALIBRATED low-gamma interior cells, so the served
-    value there IS the DD ceiling (60) -- over-serving the ENGINE-HONEST
-    ceiling (the largest ``w`` whose order-16 series stays within
-    `CERTIFICATION_BAR` of the exact engine; ~4-41 deep inside the caustic,
-    NOT 60) by up to ~7x.  This class pins the CORRECTED expectation: the
-    interior must be served by the regularized + de-rated FIT at its honest
-    value, with the ceiling clip acting only as an unreachable hard cap.
+    ``min(w_fit, W_CEILING_SCHWINGER)``, where the de-rate is the SOLE
+    conservativeness margin and the ``min(., CEILING)`` clip is a hard
+    oracle-domain cap (a no-op wherever the fit is calibrated).  The
+    in-build smoke bake is PROVISIONAL: it calibrates the deep interior
+    (served by the fit, below the ceiling) but its clamped de-rate (0.85)
+    still over-serves the ENGINE-HONEST ceiling (the largest ``w`` whose
+    order-16 series stays within `CERTIFICATION_BAR` of the exact engine;
+    ~4-41 deep inside the caustic, NOT 60) at the cusp direction -- up to
+    ~1.12x at gamma=0.5/rho=0.2/cusp.  This class pins the CORRECTED
+    expectation: the interior must be served by the de-rated FIT at its
+    honest value, with the ceiling clip acting only as an unreachable hard
+    cap.
 
     It is the REAL-VALUE replacement for the retired vacuous
     ``assertIsNotNone`` of `TestWLlowFitDeepInteriorServedByFit` (which
-    certified "served, not declined" at the clipped cells without any
-    conservativeness check).  The oracle is the calibration script's OWN
+    certified "served, not declined" without any conservativeness check).
+    The oracle is the calibration script's OWN
     ``_measure_w_low_true`` -- the exact ``f_schwinger`` engine under the
     ``CERTIFICATION_BAR`` sup-over-w semantics, ``n_w = 16`` (the bake's
     default; an ALWAYS-HONEST lower bound, bisection width ~3.4e-7) -- so
@@ -1832,13 +1846,11 @@ class TestWLlowFitDeepInteriorHonestServe(WLlowFitBaseTestCase):
     NOT a re-call of the production derivation.
 
     RED BY DESIGN at the provisional smoke bake (measured served/true up to
-    ~7x at gamma=0.5/rho=0.2/cusp direction, ~2.5x at gamma=0.5/rho=0.3/
-    cusp direction, ~1.8x at gamma=0.2 axis directions).  Flips green with
-    ZERO test edits when the coder's feature-basis regularization (the raw
-    pre-clip fit finite and monotone in the deep interior) and the DRIVER's
-    full interior-inclusive bake (calibration grid reaching ``r ~ 0.1``, so
-    the gamma <= 0.3 interior cells are actually sampled) land.  See
-    `_BRUTE_ACCURACY_REASON`.
+    ~1.12x at gamma=0.5/rho=0.2/cusp direction, ~1.02x at
+    gamma=0.5/rho=0.3/cusp direction -- the de-rate is clamped at 0.85 and
+    is insufficient there).  Flips green with ZERO test edits when the
+    DRIVER's full interior-inclusive bake (the final de-rate, not the
+    provisional 0.85 clamp) is pasted.  See `_BRUTE_ACCURACY_REASON`.
 
     Fixtures are DERIVED from the live directional caustic radius
     ``|y_c(theta)|`` (``r = rho * |y_c(theta)|`` with ``rho`` the live fence

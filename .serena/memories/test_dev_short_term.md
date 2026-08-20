@@ -1,5 +1,67 @@
 # Test Dev Short-Term Observations
 
+## 2026-08-20 (grid-change prose + deep-interior gamma extension — MY work, test_lensing_part0_mechanical.py)
+
+- WP-1 deep-interior re-bake landed: production `_diffractive.py` now has derate
+  0.85 (clamped), caustic coeff -0.82368, and `_unfenced_grid_points` full branch
+  radii `linspace(0.3,1.3,5)` -> `linspace(0.1,1.3,7)`.  MEASURED live: the deep
+  interior is now served by the FIT (values ~2-34, all < ceiling 60) -- NOT the
+  clip -- but the clamped 0.85 de-rate STILL over-serves the honest ceiling at
+  the cusp direction: w_fit/w_true = 1.1244 at (gamma=0.5, theta=pi/4, rho=0.2),
+  1.0233 at rho=0.3 (n_w=16 oracle).  So the zero-over-serve pin is RED BY DESIGN,
+  but the mechanism changed from "clip to 60 (7x)" to "de-rate clamp (1.12x)".
+- PROSE/SKIP-REASON correction (no assertion-value changes): rewrote the stale
+  "UNCALIBRATED low-gamma interior -> DD-ceiling clip, ~7x over-serve" story in
+  module docstring, `_DEEP_INTERIOR_GAMMAS` comment, `_BRUTE_ACCURACY_REASON`
+  (+its comment), `TestWLlowFitDerateTeeth` docstring ("then clipped to CEILING"
+  -> "the de-rate is the sole margin; the clip is the hard oracle-domain cap"),
+  `TestWLlowFitDeepInteriorServedByFit` + `TestWLlowFitDeepInteriorHonestServe`
+  docstrings.  New story: provisional bake calibrates the interior (served by the
+  fit) but the clamped de-rate over-serves the cusp direction ~1.12x; flips green
+  only after the DRIVER's full interior-inclusive bake.  `_CALIBRATION_S_MAX`
+  comment `linspace(0.3,1.3,5)` -> `linspace(0.1,1.3,7)` (value 1.3**2 unchanged).
+- EXTENDED fast-tier `test_deep_interior_served_below_ceiling_at_calibrated_cell`
+  from gamma={0.5} to {0.2,0.3,0.5} (all `_DEEP_INTERIOR_GAMMAS`); removed the
+  now-obsolete `_CALIBRATED_GAMMA` constant and the `_fixtures(gammas=...)`
+  parameter (dead code).  Green 60 passed / 3 skipped (~17s).
+- VERIFIED the gated `TestWLlowFitDeepInteriorHonestServe` is correct as written:
+  ran it with COGWHEEL_BRUTE_ACCURACY=1 -> 1 failed (value pin, exactly the
+  gamma=0.5/theta=0.785/rho=0.2 7.534 > 6.700 over-serve, matching my probe),
+  2 passed (clip-not-mechanism + diagnostic).  No assertion edits; only prose.
+- FLAGGED OUT-OF-SCOPE: the Architect's "zero-over-serve class docstring
+  '[0.3,1.3] ... 252 on-grid' row-count claim" lives in
+  `test_lensing_diffractive.py` (FullGridCertificateOracleTestCase docstring
+  ~line 751/778, still stale "252 on-grid + 240 off-grid") -- ANOTHER run's file,
+  NOT edited per scope discipline.
+
+## 2026-08-20 (corner re-pin r=1.05->1.1 after radii change — MY work, test_lensing_diffractive.py)
+
+- WP1 re-baked the smoke and pasted NEW provisional coefficients: derate=0.85,
+  caustic coeff=-0.8236838383495544 (was -0.72669/derate 0.503444).  The full-branch
+  radii changed linspace(0.3,1.3,5) -> linspace(0.1,1.3,7) = [0.1,0.3,0.5,0.7,0.9,
+  1.1,1.3], DROPPING r=1.05, so CornerRawOverPredictionTestCase's premise
+  (witness is an off-grid row) failed.
+- Re-pinned CORNER_R 1.05->1.1 (rho~2.19, nearest surviving radius to the original
+  rho~2.09; r=0.9 also survives at rho~1.79).  Both (0.5, 0.0, 0.0, r, theta=25pi/32)
+  rows CONFIRMED present in live _off_grid_points('full',42) (250 rows).  Kept
+  CORNER_THETA=3pi/4+pi/32; re-derived the premise from live off-grid output (added
+  the radii-change note to the CORNER_R comment, did NOT delete the membership check).
+- MEASURED at the new provisional coeffs: corner ratio raw_fit/w_low_true = 1.0062
+  (raw 1.2302 / w_low_true 1.2226) at r=1.1 (was ~1.19x at old smoke); self-fals
+  inflation (caustic coeff->0.0) = 1.9059x at r=1.1 vs 1.6155x at r=0.9 (r=1.1 gives
+  stronger teeth).  Docstring "measured ~1.19x" -> "~1.01x at the current provisional
+  re-baked smoke coefficients".
+- VERIFIED: gated corner test GREEN with COGWHEEL_DIFFRACTIVE_FULL_BAKE=1 (both tests
+  pass, ratio 1.0062 < 1.5); fast tier 34 passed / 3 skipped (~87s).
+- Cross-suite requirements (extend TestWLlowFitDeepInteriorServedByFit gamma set;
+  verify TestWLlowFitDeepInteriorHonestServe; clip-vs-derate prose in TestWLlowFit
+  DerateTeeth) ALL target test_lensing_part0_mechanical.py -- ANOTHER run's file; NOT
+  edited per scope discipline.  part0_mechanical green (60 passed, 3 skipped) as a
+  no-regression check.
+- Also fixed stale de-rate literal in test_removing_derate_trips_overserve docstring:
+  "the fenced smoke de-rate being 0.844967" -> "the shipped de-rate being 0.85"
+  (kept "~1.18x", internally consistent with 1/0.85).
+
 ## 2026-08-20 (fenced-domain grid oracle + consumer fall-through — MY work, test_lensing_part0_mechanical.py)
 
 - WP-1 fence (RHO_LO=0.6, DELTA=0.4, shell->None DECLINE) landed; this shard

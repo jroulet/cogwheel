@@ -164,29 +164,33 @@ def _unfenced_grid_points(scale: str, seed: int
     `_DIFFRACTIVE_FIT_N_HARM`).  The earlier 8-theta grid ALIASED every
     harmonic beyond ``k = 1`` and produced a degenerate fit.
 
-    The ``smoke`` grid spans the FENCED domain: smooth-region anchor cells
-    (``gamma in {0.1, 0.2, 0.3}`` x ``r in {0.5, 0.9}``), one deep-interior
-    cell (``gamma = 0.5`` x ``r = 0.3``, ``rho < RHO_LO`` throughout -- so
-    the fit is calibrated on the deep interior, whose engine-honest ceiling
-    is ~4-6, NOT the DD ceiling), and one near-exterior high-gamma cell
-    (``gamma = 0.5`` x ``r = 0.9``, ``rho > 1 + DELTA`` near the diagonal) --
-    the region the parametric caustic feature is meant to capture, now
-    sampled OUTSIDE the fence rather than at the (fenced-out) corner.
+    The ``full`` grid spans radii down to ``r = 0.1`` (deep interior) so the
+    fit is trained where ``gamma' * s * w / 2`` is genuinely small; the
+    interior is then served CONSERVATIVELY by the calibrated + de-rated fit,
+    not by the ``min(., CEILING)`` clip (which is a hard oracle-domain cap, a
+    no-op wherever the fit is calibrated).
+
+    The ``smoke`` grid is interior-inclusive: deep-interior cells
+    (``gamma in {0.2, 0.3}`` x ``r in {0.1, 0.2}``; ``rho < RHO_LO`` in
+    the smooth (off-cusp) directions, while the near-cusp thetas fall in
+    the near-fold shell and are fenced out -- so the fit is calibrated on
+    the deep interior, whose engine-honest ceiling is a smooth monotone
+    function of ``rho``), one
+    interior anchor (``gamma = 0.5`` x ``r = 0.3``), one near-exterior
+    caustic-feature anchor (``gamma = 0.5`` x ``r = 0.9``, ``rho > 1 + DELTA``
+    near the diagonal -- the region the parametric caustic feature is meant
+    to capture, sampled OUTSIDE the fence rather than at the (fenced-out)
+    corner), and ONE smooth-exterior anchor (``gamma = 0.2`` x ``r = 0.9``).
     """
     if scale == 'smoke':
-        gammas = (0.1, 0.2, 0.3)
-        radii = (0.5, 0.9)
-        interior_gamma = 0.5
-        interior_r = 0.3
-        near_exterior_gamma = 0.5
-        near_exterior_r = 0.9
+        interior_gammas = (0.2, 0.3)
+        interior_radii = (0.1, 0.2)
         thetas = np.linspace(0.0, 2.0 * math.pi, _N_THETAS, endpoint=False)
         rows = [(g, 0.0, 0.0, r, float(t))
-                for g in gammas for r in radii for t in thetas]
-        rows += [(interior_gamma, 0.0, 0.0, interior_r, float(t))
-                 for t in thetas]
-        rows += [(near_exterior_gamma, 0.0, 0.0, near_exterior_r, float(t))
-                 for t in thetas]
+                for g in interior_gammas for r in interior_radii for t in thetas]
+        rows += [(0.5, 0.0, 0.0, 0.3, float(t)) for t in thetas]
+        rows += [(0.5, 0.0, 0.0, 0.9, float(t)) for t in thetas]
+        rows += [(0.2, 0.0, 0.0, 0.9, float(t)) for t in thetas]
         rows += [(0.2, 0.7, 0.0, 0.9, 1.1),
                  (0.1, 0.0, 0.3, 0.5, 0.0),
                  (0.3, 0.7, 0.3, 0.9, 2.0)]
@@ -194,7 +198,7 @@ def _unfenced_grid_points(scale: str, seed: int
     rng = np.random.default_rng(seed)
     rows: list[tuple[float, float, float, float, float]] = []
     gammas = np.linspace(0.05, 0.5, 6)
-    radii = np.linspace(0.3, 1.3, 5)
+    radii = np.linspace(0.1, 1.3, 7)
     for gamma in gammas:
         for r in radii:
             for theta in np.linspace(0.0, 2.0 * math.pi, _N_THETAS,
@@ -202,7 +206,7 @@ def _unfenced_grid_points(scale: str, seed: int
                 rows.append((float(gamma), 0.0, 0.0, float(r), float(theta)))
     for _ in range(12):
         rows.append((float(rng.uniform(0.05, 0.4)), float(rng.uniform(-1.0, 1.0)),
-                     float(rng.uniform(0.0, 0.4)), float(rng.uniform(0.3, 1.3)),
+                     float(rng.uniform(0.0, 0.4)), float(rng.uniform(0.1, 1.3)),
                      float(rng.uniform(0.0, 2.0 * math.pi))))
     return rows
 

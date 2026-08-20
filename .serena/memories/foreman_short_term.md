@@ -1,26 +1,6 @@
-## 2026-08-20 (INS-2-002/003, fence-bake test fixes)
-- PROBE BEFORE TRUSTING A FINDING'S PROPOSED FIX, EVEN ON A TEST: INS-2-003's
-  literal prescription — "patch RHO_LO=0.0 AND DELTA to a large negative so
-  the interior is served by the fit, then assert the fit value != ceiling"
-  per-fixture — is RED by construction because `w_low_fit`'s fit path ends
-  with `w_fit = min(w_fit, _DIFFRACTIVE_FIT_CEILING)`: the UNCERTIFIED fit
-  extrapolates ABOVE the ceiling (w_fit 77–2479 unclipped) for 7 of the 12
-  deep-interior fixtures (gamma in {0.2,0.3} x theta {0,pi/4,pi/2} x rho
-  {0.3,0.5}), so those clip to exactly 60.0 == ceiling even with the fence
-  gone. The honest fix: collapse BOTH fence constants, assert per-fixture
-  `assertIsNotNone(raw)` (kills the original vacuity — the old shape
-  returned None for 12/12) and aggregate `differed |= raw != ceiling` +
-  final `assertTrue(differed)` (the fence is load-bearing at least
-  somewhere; measured differed=True). The per-fixture != form is genuinely
-  un-satisfiable and would be a flaky/false assertion, not a real test.
-- Related: the old test patched ONLY RHO_LO=0.0, which routes interior
-  fixtures into the SHELL branch (rho <= 1+DELTA -> None) — confirming the
-  vacuity mechanism: to collapse the shell for rho<1 fixtures, DELTA must
-  go below -1 (1+DELTA < 0), e.g. -10.0; DELTA=-0.4 leaves 1+DELTA=0.6 and
-  rho=0.3/0.5 still declined.
-- INS-2-002 was a pure docstring-number refresh in test_lensing_diffractive.py
-  (raw over-prediction ~2x -> ~1.18x, smoke de-rate 0.5034 -> 0.844967 for
-  the fenced bake). Verified with whitespace-flexible source-string asserts
-  (the hyphen "de-" word-split across the line wrap makes a naive literal
-  needle fail — normalize whitespace first). FullGridCertificateOracleTestCase
-  test still green (35.8 s).
+2026-08-20 (INS-4-001/INS-4-002, coverage-claim qualifications in smoke-grid + de-rate docstrings)
+
+- INS-4-001 (scripts/fit_diffractive_certificate.py, `_unfenced_grid_points` module/scale docstring): the parenthetical claiming deep-interior cells (gamma in {0.2,0.3} x r in {0.1,0.2}) have 'rho < RHO_LO throughout' was over-broad — the cusp-direction thetas (measured max rho 0.985, inside the near-fold shell) are FENCED OUT at r=0.2 (16/32 rows for (0.2,0.2), 8 for (0.3,0.2)), so the cusp direction is extrapolation, not calibrated. Rewrote to '``rho < RHO_LO`` in the smooth (off-cusp) directions, while the near-cusp thetas fall in the near-fold shell and are fenced out -- so the fit is calibrated on the deep interior...'. Kept the sentence structure (the '-- so...' justification intact).
+- INS-4-002 (cogwheel/lensing/chang_refsdal/_diffractive.py, `diffractive_w_low` surface docstring): '(the de-rate alone guarantees the result never over-serves)' qualified to '...never over-serves on the calibration grid and its held-out off-grid midpoint probes; extrapolated off-grid points can over-serve' — the served gamma=0.5/rho=0.2/cusp point over-serves 1.12x WITH the 0.85 de-rate because gamma=0.5 interior is off the smoke grid.
+- Verification: ast.parse both files OK; exact-string greps confirm both stale claims gone and both new qualifications present. Docstring-only — no test run beyond syntax/import checks, behavior untouched.
+- Lesson: a coverage claim ('throughout') in a grid docstring must survive a fence-interaction audit — when rows of an interior cell are fenced OUT in some directions, 'throughout' inverts into the exact coverage gap the tests name; qualify by direction, not by averaging.

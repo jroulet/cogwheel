@@ -1,53 +1,71 @@
-# Inspector Short-Term — 2026-08-20 diffractive_certificate_fit_fenced (pass 3, final)
+# Inspector Short-Term — 2026-08-20 diffractive_certificate_fit_interior_fix (pass 3, final)
 
-Scope: re-review after Coder resolved INS-2-001/002/003. Ran both changed fast-tier
-suites (test_lensing_part0_mechanical.py 61 pass; test_lensing_diffractive.py 34 pass /
-3 skip, all 3 skips COGWHEEL_DIFFRACTIVE_FULL_BAKE-gated). Verified fence math + the
-interior over-serve with engine-free and engine probes.
+Scope: re-review of the uncommitted deep-interior `w_low_fit` calibration build
+(INS-3-001). Pass-3 is the docstring-only fix of pass-2's F1/F2 (= INS-4-001/
+INS-4-002). Full diff: `_diffractive.py` provisional smoke coeffs + docstrings,
+`scripts/fit_diffractive_certificate.py` smoke grid interior-inclusive + full
+radii linspace(0.1,1.3,7), two test files (docstrings + CORNER_R 1.05->1.1 +
+`_fixtures()` refactor removing `_CALIBRATED_GAMMA`).
 
-## RESOLVED (confirmed)
-- INS-2-002: test_removing_derate_trips_overserve docstring now ~1.18x / 0.844967. FIXED.
-- INS-2-003: TestWLlowFitDeepInteriorCeiling deleted (branch removed => "delete the class"
-  path taken); replaced by TestWLlowFitDeepInteriorServedByFit. FIXED.
-- The hard-coded `if rho < RHO_LO: return CEILING` branch is GONE (w_low_fit ~line 532).
-  Consumer passthrough correct: _diffractive_bottom_ceiling returns w_low_fit transparently,
-  single except DiffractiveDomainError; census mirror guards `w_low is not None and
-  float(w_low) > w_lo`. Fence None falls through byte-identically. _caustic_rho DRY-single-
-  sourced (identical to old _fit_features caustic_feature arithmetic).
+## VERIFIED (fresh engine probes, re-measured this pass — nothing trusted)
+- Fast tier green: 94 passed / 6 skipped (test_lensing_part0_mechanical +
+  test_lensing_diffractive). `test_removing_derate_trips_overserve` RAN (38.87 s,
+  matches its "~39 s" docstring despite the larger full grid) and passed;
+  `test_dropping_caustic_feature_inflates_over_prediction` RAN and passed.
+- Live over/under-serve probes reproduce the shipped docstrings EXACTLY:
+  gamma=0.5/rho=0.2/cusp 1.1244x, gamma=0.5/rho=0.3/cusp 1.0233x (over-serve,
+  red-by-design), gamma=0.2/rho=0.2/cusp 0.6850x, gamma=0.3/rho=0.2/cusp
+  0.7719x (under-serve, conservative).
+- Honest ceiling range "~4-41" CONFIRMED correct (max = 40.976 at
+  gamma=0.2/rho=0.2/cusp; gamma=0.5/rho=0.3 = 4.121, gamma=0.3/rho=0.3 = 19.18).
+  The ~4-34 -> ~4-41 change is a real re-measurement reflecting the deeper grid.
+- CORNER witness rho = 2.188 (= "~2.19"), raw over-prediction 1.0062x (=
+  "~1.01x"), r=1.1 in linspace(0.1,1.3,7), gamma=0.5 in linspace(0.05,0.5,6),
+  theta is a fenced off-grid midpoint (1 match). All CornerRaw docstring claims
+  verified.
+- log(s)^2 coeff = -0.04816 (index 6 of 10-monomial degree-2 poly). derate 0.85
+  == _HARD_DERATE_CEILING clamp; interior served by the fit below the ceiling.
+- Grid arithmetic: smoke 227/178/49(21.6%)/44; full 1356/1014/342(25.2%)/250.
+  Fence exclusion: gamma=0.2/r=0.2 cell 16/32 fenced, gamma=0.3/r=0.2 8/32 —
+  confirms the INS-4-001 qualification is accurate.
+- No stale refs: 0.844967 / 196/196 / 48/48 / 63/259 / 9e09bdd / ~7x /
+  _CALIBRATED_GAMMA / singular "interior cell" all gone.
 
-## NOT RESOLVED — INS-2-001's over-serve persists via a NEW mechanism (INS-3-001, blocker)
-Removing the interior ceiling branch did NOT fix the interior over-serve — it moved it into
-the fit+clip. The provisional smoke fit is calibrated on ONE interior cell (gamma=0.5, r=0.3)
-and over-runs everywhere else in the deep interior, clipping to _DIFFRACTIVE_FIT_CEILING=60.
-Measured (w_low_fit vs _measure_w_low_true, n_w=16):
-  gamma=0.2 rho=0.3 (r~0.11): 60 vs 33.97 (1.77x)
-  gamma=0.3 rho=0.3 (r~0.09): 60 vs 20.50 (2.93x)
-  gamma=0.3 rho=0.5 (r~0.16): 60 vs 22.04 (2.72x)
-  gamma=0.5 rho=0.3 theta=pi/4 (r~0.17): 15.58 vs 6.14 (2.54x)
-STRUCTURAL: these cells live at r<0.3, below BOTH the smoke grid (radii 0.5/0.9 + r=0.3
-cell) and the full grid (_unfenced_grid_points radii linspace(0.3,1.3,5) + rand 0.3..1.3).
-The deep interior at low gamma (gamma<=0.3) needs r<0.22 but the grid r-floor is 0.3, so
-NO bake (smoke OR full) samples it. The docstring claim "the driver's full bake calibrates
-those cells" is FALSE. The gated FullGridCertificateOracleTestCase sweeps the same
-r in [0.3,1.3] grid, so it would ALSO miss this. w_low_fit's own docstring ("the fit is
-calibrated on the interior cell, so it serves it conservatively -- NOT at the ceiling") is
-contradicted: at gamma=0.2/0.3 the interior IS served at the ceiling (60).
+## RESOLVED
+- INS-4-001: smoke-grid docstring now qualified "rho < RHO_LO in the smooth
+  (off-cusp) directions, while the near-cusp thetas fall in the near-fold shell
+  and are fenced out". Accurate.
+- INS-4-002: `w_low_fit` docstring now "never over-serves on the calibration
+  grid and its held-out off-grid midpoint probes; extrapolated off-grid points
+  can over-serve". Accurate.
 
-## TRIVIAL/DESIGN
-- INS-3-002: TestWLlowFitDeepInteriorServedByFit.test_deep_interior_served_not_declined
-  asserts only `not None` for gamma=0.2/0.3 (value=60) — it certifies "served" but not
-  "served conservatively", and its docstring admits "the provisional fit over-runs and is
-  clipped to the ceiling". Green-test-advertises-overserve pattern (A GREEN test can be the
-  finding). Fix with INS-3-001: either decline the deep interior too, or extend the grid
-  below r=0.3 AND add an engine-backed conservative assertion.
+## FINDINGS (NEW, trivial — both docstring staleness from the coefficient re-bake)
+- F1: `TestWLlowFitDeepInteriorServedByFit.test_deep_interior_served_below_
+  ceiling_at_calibrated_cell` method NAME ("at_calibrated_cell") + docstring
+  "Every calibrated deep-interior cell" — gamma=0.5 deep interior is
+  EXTRAPOLATED (uncalibrated) per the class's own "Calibration is qualified by
+  bake" note. Suggest rename to test_deep_interior_served_below_ceiling and
+  drop "calibrated" from the docstring (the assertion is structural and
+  correct; only the wording over-claims).
+- F2: `test_dropping_caustic_feature_inflates_over_prediction` docstring
+  "measured ... ~1.66x" is STALE — with the re-baked coefficients dropping the
+  caustic feature raises the raw surface 1.9059x, not ~1.66x. The re-bake
+  updated the sibling corner claim (~1.19x -> ~1.01x) but missed this one.
+  Test still passes (asserts > 1.05x), so teeth unaffected; docstring only.
 
-## NEW BUG PATTERN
-- FENCE MOVES THE OVER-SERVE, DOESN'T KILL IT: removing a hard-coded "serve at ceiling"
-  branch and letting a fit serve a region only fixes the over-serve if the fit is actually
-  CALIBRATED+CONSERVATIVE across the whole served region. Here the fit over-runs and the
-  min(·, ceiling) clip re-serves 60. Rule: when a "serve-at-ceiling" branch is removed in
-  favour of "the fit serves it", verify the fit's raw value at the previously-flagged point
-  is BELOW the honest ceiling — not just that the branch is gone. Also: a "full bake will
-  fix it" mitigation is FALSE unless the full grid's coordinate range actually covers the
-  over-serve region — check the grid's r/gamma floors against the over-serve witness's
-  coordinates, don't trust the prose.
+## CARRIED FORWARD (unchanged, NOT code defects)
+- INS-1-003 (driver advisory): witness cells (gamma=0.2/0.3/rho=0.2/cusp,
+  r~0.04-0.06) stay below the full-grid floor r=0.1; conservativeness there
+  hinges on log(s)^2 = -0.048 (negative). Driver must verify after --scale full
+  (sign flip would over-serve). Docstrings now document this explicitly.
+- SPEC.md LOW-W DIFFRACTIVE RUNGS paragraph still describes only the ANALYTIC
+  `w_low = (gamma'/2)*[...]` certificate, never `w_low_fit` — Librarian sync.
+
+## PATTERN
+- When a coefficient re-bake updates SOME docstring "measured" values, sweep
+  EVERY docstring carrying a "measured ~Nx" claim for that surface — the
+  caustic-feature self-falsification docstring (~1.66x -> ~1.91x) is the
+  laggard that survives even a meticulous sibling pass.
+- A test-method name/docstring that says "calibrated cell" after a `_fixtures`
+  refactor widens coverage to an EXTRAPOLATED cell re-introduces the exact
+  over-claim the INS-4-001/002 lineage cleaned up.

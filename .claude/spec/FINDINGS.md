@@ -4532,3 +4532,33 @@ against the held-out bar with engine_budget raised), not a bare
 n_theta; the (f_max, f_floor) sweep re-runs only on theta-resolved
 charts; f_floor = 0.16 already measured unsupported (flat eps to 0.03,
 zero refusals). Blocks tube training; does not touch the demand census.
+
+## F084
+**The `min(., CEILING)` clip is NOT a conservativeness mechanism: an
+uncalibrated fitted surface clipped to a hard ceiling silently re-serves
+where the series is not honest (2026-08-20, INS-3-001, deep-interior
+calibration build).**
+
+The positive-parity low-w truncation-certificate fit (`w_low_fit`,
+`_diffractive.py`) initially "served" the deep interior (rho < RHO_LO)
+by `min(w_fit, _DIFFRACTIVE_FIT_CEILING = 60)` — but the calibration grid
+started at `r = 0.3`, so NO bake sampled gamma <= 0.3 cells (they need
+`r < 0.22`). The un-calibrated fit over-served the engine-honest ceiling
+(which is ~4-41 deep inside the caustic, a smooth monotone function of
+rho, NOT 60) by up to ~2.9x, and the clip quietly re-capped the result at
+60 — serving a value that is not the series' honest limit. Measured:
+gamma=0.2/rho=0.3 -> fit 60 vs true 34 (1.77x); gamma=0.3/rho=0.3 ->
+2.93x; gamma=0.3/rho=0.5 -> 2.72x; gamma=0.5/rho=0.3 @ cusp -> 2.54x.
+
+RULE: a ceiling cap is a hard ORACLE-DOMAIN bound (here
+`W_CEILING_SCHWINGER`, no oracle above 60), never a substitute for a
+conservative fit. A fitted serve must be conservative ON ITS OWN — the
+de-rate (`_DIFFRACTIVE_FIT_DERATE`) is the sole margin, and any
+`min(., cap)` in a served value is a red flag that a calibration gap is
+being papered over. Same family as F069/F073/F076 (a guard measuring the
+wrong thing), now corrected: the calibration grid reaches `r ~ 0.1` so
+the interior is genuinely sampled, and the docstring contract explicitly
+allows extrapolated off-grid points to over-serve (the de-rate alone
+guarantees on-grid + held-out-midpoint conservativeness). Residual
+gamma=0.5 deep interior (~1.12x cusp) stays RED BY DESIGN until the
+driver's full-scale re-bake — the smoke coefficients are PROVISIONAL.

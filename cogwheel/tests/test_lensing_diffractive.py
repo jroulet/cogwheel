@@ -868,8 +868,8 @@ class FullGridCertificateOracleTestCase(DiffractiveTestCase):
         """SELF-FALSIFICATION: derate=1.0 must over-serve somewhere on the grid.
 
         The de-rate is the load-bearing conservative margin (the raw least-
-        squares surface over-predicts by up to ~1.18x, the fenced smoke de-
-        rate being 0.844967), so with it set to 1.0 the served ceiling
+        squares surface over-predicts by up to ~1.18x, the shipped de-rate
+        being 0.85), so with it set to 1.0 the served ceiling
         inflates and the served series MUST exceed the bar at some grid row
         -- if none does, the zero-over-serve assertion has no teeth.
         Early-exits at the first over-serve row (measured ~39 s).  Runs on
@@ -937,12 +937,12 @@ class CornerRawOverPredictionTestCase(DiffractiveTestCase):
     (INS-1-001) is fenced out too.  The witness is re-derived to a SERVED
     near-exterior point at the SAME diagonal direction
     (``theta = 3pi/4 + pi/32``) but high-gamma / just-outside-the-caustic
-    (``gamma=0.5, r=1.05``, reduced caustic ratio ``rho ~ 2.09`` > ``1 +
+    (``gamma=0.5, r=1.1``, reduced caustic ratio ``rho ~ 2.19`` > ``1 +
     DELTA``): a fenced off-grid theta midpoint of the full calibration grid
     where the raw surface still over-claims the honest ceiling (measured
-    ~1.19x at the provisional smoke coefficients).  With the shell fenced,
-    the original < 1.5 bar (abandoned to < 2.0 only because of the
-    resonance) is restored.
+    ~1.01x at the current provisional re-baked smoke coefficients).  With
+    the shell fenced, the original < 1.5 bar (abandoned to < 2.0 only
+    because of the resonance) is restored.
 
     Cost: one `_measure_w_low_true` (n_w=16, ~36 series+engine probes, ~1.2 s
     measured) plus one `w_low_fit` (O(1)) -- well inside the fast-tier budget
@@ -952,8 +952,12 @@ class CornerRawOverPredictionTestCase(DiffractiveTestCase):
     #: The corner witness: a SERVED near-exterior point at the off-grid theta
     #: midpoint ``3pi/4 + pi/_N_THETAS`` -- the same diagonal direction the old
     #: 4-harmonic surface over-predicted by ~2.06x, moved OUT of the fenced
-    #: near-fold shell to ``gamma=0.5, r=1.05`` (reduced caustic ratio
-    #: ``rho ~ 2.09`` > ``1 + DELTA``).  ``_N_THETAS = 32`` is single-sourced
+    #: near-fold shell to ``gamma=0.5, r=1.1`` (reduced caustic ratio
+    #: ``rho ~ 2.19`` > ``1 + DELTA``).  ``r=1.1`` is re-derived from the LIVE
+    #: ``_off_grid_points('full', 42)`` output: the full-branch radii changed
+    #: ``linspace(0.3, 1.3, 5)`` -> ``linspace(0.1, 1.3, 7)`` (WP-1 deep-interior
+    #: calibration), dropping ``r=1.05``, so the witness moved to the nearest
+    #: surviving near-exterior radius.  ``_N_THETAS = 32`` is single-sourced
     #: from `scripts/fit_diffractive_certificate.py` via the premise assertion
     #: in `test_raw_fit_over_prediction_within_derate_target` (the witness
     #: must be an actual fenced off-grid midpoint of the grid, not a pinned
@@ -961,7 +965,7 @@ class CornerRawOverPredictionTestCase(DiffractiveTestCase):
     CORNER_GAMMA = 0.5
     CORNER_BETA = 0.0
     CORNER_KAPPA = 0.0
-    CORNER_R = 1.05
+    CORNER_R = 1.1
     CORNER_THETA = 3.0 * math.pi / 4.0 + math.pi / 32.0  # ~2.454 rad (midpoint)
 
     def _corner_source(self, script):

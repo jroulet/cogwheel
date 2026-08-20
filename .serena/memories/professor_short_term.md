@@ -1,13 +1,54 @@
-# Diffractive truncation-certificate fence ruling (d609fff)
+## diffractive_certificate_fit_interior_fix (INS-3-001) — Phase 1 rulings
 
-Measured at gamma'=0.41, kappa=0, beta=0 (corner direction theta_source=3pi/4+pi/32=2.454 rad):
+Consulted the Architect on the deep-interior calibration build. Key physics
+established by reading `_diffractive.py`, `_schwinger.py` (W_CEILING_SCHWINGER=60,
+the DD `e^{pi w/4}` cancellation hard ceiling; `f_schwinger` refuses >60),
+`_hyp1f1.point_mass_g_derivatives` (kernel cancellation law ~ eps·e^(w√s), but
+this is NOT the interior-ceiling driver), and the fit script + gated tests.
 
-1. **Caustic angle mismatch is order-1.** `caustic_point(gamma, theta)` takes the CRITICAL-CURVE polar angle theta; the returned caustic point's own polar angle phi(theta) differs from theta by median ~1.36 rad (78 deg), up to pi. At theta_source=2.454, y_c=(0.314,0.263) has phi=0.698 rad (40 deg) — a ~100 deg mismatch. So `|y_c(theta_source)|` is NOT the caustic radius along the source direction.
+Rulings given (design-authoritative):
+- Q1: KEEP the literal `min(w_fit, _DIFFRACTIVE_FIT_CEILING)` line — it is a hard
+  ORACLE-DOMAIN cap (w_low must never exceed 60 because f_schwinger does not exist
+  there), not the interior's margin. "Remove the clip-as-conservativeness" = make
+  the de-rated fit conservative on its own so the clip is a no-op; the committed
+  gated test `test_clip_is_not_the_conservativeness_mechanism` (served<60 AND
+  raw(de-rate=1)<60 in the interior) is the SPEC for this. Literal removal would
+  let a future regression return w_low>60 and crash the f_schwinger >60 refuse.
+- Q2: interior honest ceiling is smooth/monotone (engine-measured 6-34 at
+  rho 0.2-0.5), the over-serve is a calibration gap not a representation wall IN
+  rho∈[0.2,0.6]. BUT the degree-2 log(s) poly has NO correct s->0 asymptotics:
+  log(s)^2 must diverge, so below the sampled floor the raw fit either over-serves
+  (clipped to 60) or under-serves. The low interior (6-34) is at FINITE rho; the
+  "series exact as s->0" limit (ceiling->60) lives at rho<0.2 (<4% of interior
+  prior mass), exactly where the log(s)^2 representation limitation bites. Guarded
+  by clip + gated test at rho=0.2 (r≈0.06, below the r=0.1 grid floor) + low prior
+  mass. Prefer the conservative (≤0 log(s)^2) outcome if the bake produces it.
+- Q3: full grid linspace(0.1,1.3,7) = {0.1,0.3,0.5,0.7,0.9,1.1,1.3} (N=7);
+  6×7×32=1344 grid +336 off-grid ≈1692 measured ≈ ~56 min serial (driver step).
+  Smoke: interior gamma{0.2,0.3}×r{0.1,0.2} (4 cells=128 rows) + keep (0.5,0.3)
+  interior + (0.5,0.9) near-exterior anchors, TRIM the 6-cell smooth block
+  (192 rows) to 1-2 exterior anchors; target ~195-227 grid rows (~490-570 s),
+  under the 600 s budget. Interior cells must be PAID FOR by trimming smooth
+  cells, not added on top (current 259 rows = 653 s already at ceiling).
+- Q4: de-rate min(0.85, 1/max_overpred) is the sole interior margin; no
+  interior-specific de-rate (breaks mirror-fidelity + would be redundant once the
+  grid samples the interior, since the interior is in the FENCED de-rate domain).
+- Q5: 1e-5 one-sided (over-serve trips) tolerance is correct: oracle bisection
+  width ~3.4e-7 (2^24 log-w steps) + de-rate 6-decimal rounding ~6e-7 → ~30x
+  headroom; a round-off guard, not a physics margin.
 
-2. **rho discriminator is directionally miscalibrated.** ratio R_dir(phi)/|y_c(theta=phi)| (directional fold-crossing radius / code's reference radius) spans [0.573, 1.0] over 360 source directions. The code reference |y_c(theta_source)| is ALWAYS >= the true directional fold radius (1x..1.75x), so code rho = r/|y_c(theta_source)| systematically UNDER-estimates the true rho (source looks closer to the fold than it is) by up to 1.75x. The corner case (rho=1.34) is the ONE direction where ratio=1 (min-radius cusp region, |y_c|~0.41 = gamma'), so the brief's rho happens to be correctly calibrated only there.
-
-3. **|y_c| range** at gamma'=0.41: 0.41 (min, near diagonal cusp) to 1.067 (max, at theta=pi/2). min |y_c| = gamma' = 0.41.
-
-4. Operator-series small parameter = gamma' * s * w / 2 (code docstring; s=|y'|^2 reduced). Vanishes in deep interior (s->0), so the order-16 series is MOST valid there; marginal resonances (rel(w) barely > CERTIFICATION_BAR, ~1.1-1.2e-4 vs 1e-4 in ~0.1-wide w-windows) are a NEAR-FOLD phenomenon only (order-16 Taylor-in-shear can't track the coalescing-image Airy oscillation to 1e-4 relative).
-
-5. Fold wave-optics shell width ~ Airy xi=(3 w DT/4)^(2/3) ~ w^(2/3) * Delta, so Delta ~ w^(-2/3) ~ 0.08-0.2 reduced units at the resonance w~3.5-7. Maps to delta ~ Delta/R_dir ~ 0.25-0.5 in rho. Measured corner delta = 0.14/0.41 = 0.34.
+## INS-3-001 Professor inference-review verdict (2026-08-20, SHA 362c58e)
+Fast tier verified. (1) test_deep_interior_served_below_ceiling_at_calibrated_cell
+extended to gamma{0.2,0.3,0.5} x theta{0,pi/4,pi/2} x rho{0.2,0.3,0.5}: all 27
+engine-free probes served not-None and strictly < 60 (measured 1.9-34.4). (2)
+Corner re-pin CORNER_R=1.1 confirmed in _off_grid_points('full',42), rho=2.188
+> 1.4; raw_fit/w_low_true=1.006<1.5 (docstring says ~1.01x), raw=1.23 not
+clipped, caustic coeff -0.824 negative, drop-caustic inflates to 2.34. (3)
+Gated honest-serve skip reason ACCURATE and suite is genuinely red: measured
+w_fit/w_true=1.1244 (gamma .5 cusp rho .2) and 1.0233 (rho .3) -- the 0.85
+de-rate clamp is insufficient at the cusp-direction deep interior; axis dirs
+conservative (0.88x, 0.69x). GAP: FullGridCertificateOracleTestCase docstring
+still says "[0.3,1.3]" and "252 on-grid + 240 off-grid" (stale); actual new
+grid = 1014 on-grid + 250 off-grid = 1264 rows, and script docstring "~40 min
+serial" is stale (~56 min). _CALIBRATION_S_MAX comment WAS updated. Verdict
+CONCERN (docs only; no physics/test defect).
