@@ -2,21 +2,29 @@
 section: Backlog
 ---
 
-- **LOW-W NEAR-FOLD ANALYTIC SERVE — the fenced shell has no dedicated
-  serve (owner ruling 2026-08-20, DO NEXT after the fence build lands)**
+- **LOW-W NEAR-FOLD ANALYTIC SERVE — the near-fold shell has no dedicated
+  serve (owner ruling 2026-08-20, DO NEXT — the fence build has LANDED)**
   `[→ spec]` — the near-fold band of the diffractive rung has NO analytic
-  serve at low w. The fence build (diffractive_certificate_fit_fenced)
-  declines draws with `rho = |y'|/|y_c(theta)|` in `[RHO_LO ~ 0.6, 1+DELTA ~
-  1.4]` (returning None) so they fall through to the serving ladder. BUT the
-  uniform Airy fold arm (`_airy_fold.fold_amplification`) REFUSES at all w
-  in the diffractive band (measured at the fence corner gamma=0.41, r=0.55:
-  refuses at w=0.5..10): its control `xi = (3 w Delta_tau / 4)^(2/3)` is a
-  large-w asymptotic, and the arm is only OFFERED in the ladder for w > 60
-  (the DD band w <= 60 is unconditional exact-wave `f_schwinger`). So the
-  fenced near-fold shell routes to the EXACT ENGINE, not the fold arm.
-  Measured: the shell (rho 0.9-1.2) is 332/4462 = 7.4% of engine-residual
-  demand (demand_census_post_born_10k.json). This is correct-but-expensive
-  and leaves the low-w near-fold band without a dedicated analytic rung.
+  serve at low w. The fence build (diffractive_certificate_fit_fenced +
+  interior-fix + gamma-fence, SHIPPED: near-fold shell declines, deep
+  interior served by the calibrated fit, wall band gamma'>0.5 routes to
+  Schwinger) declines draws with `rho = |y'|/|y_c(theta)|` in `[RHO_LO ~
+  0.6, 1+DELTA ~ 1.4]` (returning None) so they fall through to the serving
+  ladder. BUT the uniform Airy fold arm (`_airy_fold.fold_amplification`)
+  REFUSES at all w in the diffractive band (measured at the fence corner
+  gamma=0.41, r=0.55: refuses at w=0.5..10): its control `xi = (3 w
+  Delta_tau / 4)^(2/3)` is a large-w asymptotic, and the arm is only OFFERED
+  in the ladder for w > 60 (the DD band w <= 60 is unconditional exact-wave
+  `f_schwinger`). So the fenced near-fold shell routes to the EXACT ENGINE,
+  not the fold arm. Measured: the shell (rho 0.9-1.2) is 332/4462 = 7.4% of
+  engine-residual demand (demand_census_post_born_10k.json). This is
+  correct-but-expensive and leaves the low-w near-fold band without a
+  dedicated analytic rung. The WALL band (gamma'>0.5) is SEPARATE and is
+  RESOLVED by routing to Schwinger (owner ruling: the order-16 series has a
+  convergence-radius collapse there — a square-root branch point not
+  representable at any practical order — so Schwinger is the correct serve,
+  and a fold-adapted serve is the right target for the NEAR-FOLD shell, not
+  the wall).
 
   ORDERING CONSTRAINT (owner): this MUST land before any demand-census-
   driven work (the tiling-plan refresh / campaign sizing), because the
