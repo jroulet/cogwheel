@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "99018963ca95156f6173fac5522324378da6f03f",
-  "timestamp": "2026-08-21T08:22:57Z",
+  "commit": "b1601043299da2a3e6e17fdc13d75287dadc8613",
+  "timestamp": "2026-08-21T23:05:22Z",
   "touched_files": [
     "cogwheel/lensing/chang_refsdal/_born.py",
     "cogwheel/lensing/chang_refsdal/_diffractive.py",
@@ -9,6 +9,7 @@
     "cogwheel/lensing/chang_refsdal/geometry.py",
     "cogwheel/lensing/likelihood.py",
     "cogwheel/lensing/low_w_diffractive_chart.py",
+    "cogwheel/lensing/low_w_shell_chart.py",
     "cogwheel/lensing/serve_route_census.py",
     "cogwheel/lensing/tiling_plan.py",
     "cogwheel/tests/test_lensing_born_analytic_reachability.py",
@@ -16,6 +17,7 @@
     "cogwheel/tests/test_lensing_diffractive.py",
     "cogwheel/tests/test_lensing_geometry.py",
     "cogwheel/tests/test_lensing_low_w_diffractive_chart.py",
+    "cogwheel/tests/test_lensing_low_w_shell_chart.py",
     "cogwheel/tests/test_lensing_marginalized_likelihood.py",
     "cogwheel/tests/test_lensing_part0_mechanical.py",
     "cogwheel/tests/test_lensing_ppgo_above_ceiling.py",
