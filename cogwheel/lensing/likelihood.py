@@ -108,7 +108,7 @@ from cogwheel.lensing.chang_refsdal._diffractive import (
     DiffractiveDomainError, diffractive_amplification, w_low_fit,
     _reduced_shear, _caustic_rho)
 from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
-from cogwheel.lensing.chang_refsdal._born import _born_factors
+from cogwheel.lensing.chang_refsdal._born import born_lead_carrier
 from cogwheel.lensing.chang_refsdal.operator import RHO_END
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
                                        dimensionless_frequency)
@@ -116,9 +116,9 @@ from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
                                        CERTIFICATION_BAR, caustic_rho,
                                        get_certified_ppgo_map)
 from cogwheel.lensing.born_residual_chart import BornResidualChart
-from cogwheel.lensing.low_w_diffractive_chart import (
-    LowWDiffractiveChart, reduced_source, partitioned_reference)
-
+from cogwheel.lensing.low_w_shell_chart import (
+    LowWShellChart, RHO_LO, RHO_HI, reduced_source,
+    _reduced_min_delay_separation)
 __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
 
 #: Sentinel for the ``born_residual_chart`` constructor argument: when the
@@ -129,12 +129,31 @@ __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
 #: ``None`` default cannot serve here.
 _AUTO_BORN_CHART = object()
 
-#: Sentinel for the ``low_w_diffractive_chart`` constructor argument,
-#: mirroring `_AUTO_BORN_CHART`: when the caller omits it, the shipped
-#: low-w diffractive residual chart is auto-loaded (refusing to ``None`` on
-#: any load anomaly).  An *explicit* ``None`` is the pure-engine opt-out;
-#: a caller-supplied in-memory instance is stored verbatim.
-_AUTO_LOW_W_CHART = object()
+#: Sentinel for the ``low_w_shell_chart`` constructor argument: mirrors the
+#: ``born_residual_chart`` sentinel exactly.  When omitted, the shipped chart
+#: artifact is auto-loaded (refusing to ``None`` on any load anomaly); an
+#: explicit ``None`` is the pure-engine opt-out (no chart attached).
+_AUTO_SHELL_CHART = object()
+
+#: Rho floor of the Born weak-deflection rung.  ``_born_residual_analytic``
+#: serves the far exterior (caustic-frame ``rho`` strictly above this floor)
+#: and falls through to the exact engine for the interior / near-caustic /
+#: tube (``rho <= _BORN_RHO_FLOOR``).  The floor is in ppgo_map's SCALAR-
+#: reach gauge ``caustic_rho(gamma, |y|, kappa) = |y| / caustic_reach``
+#: (``caustic_reach`` = the MAX caustic radius over angle), NOT the low-w
+#: shell chart's DIRECTIONAL gauge ``_caustic_rho(gamma', s, theta) =
+#: sqrt(s) / |y_c(theta)|`` (theta-dependent).  Because ``caustic_reach`` is
+#: the max over angle, ``scalar-rho <= directional-rho`` always: the Born
+#: floor (scalar 1.4) and the shell's outer boundary (directional 1.4) are
+#: therefore DIFFERENT physical surfaces, so the two covered sets are
+#: DISJOINT (no overlap) and the theta-dependent annulus between them falls
+#: through to the exact engine as the tie-breaker -- a conservative coverage
+#: GAP, never an over-serve.  The 1.4 floor is a node-budget boundary,
+#: lowered 2.0 -> 1.4 so the Born chart's re-trained ``rho_grid`` (down to
+#: ~1.4) is reachable; it is NOT a physics law -- Born is the weak-deflection
+#: expansion valid throughout ``rho > 1``, degrading gradually toward the
+#: caustic.  The census and any test read this same constant.
+_BORN_RHO_FLOOR: float = 1.4
 
 #: Highest frequency moment retained for the data term ``(d|h)``.  The
 #: candidate component ratio is expanded to first order across a bin and
@@ -1124,7 +1143,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                  kernel_subsamples=_DEFAULT_KERNEL_SUBSAMPLES,
                  amplification_surrogate=None,
                  born_residual_chart=_AUTO_BORN_CHART,
-                 low_w_diffractive_chart=_AUTO_LOW_W_CHART):
+                 low_w_shell_chart=_AUTO_SHELL_CHART):
         if isinstance(waveform_generator, LensedWaveformGenerator):
             base_generator = waveform_generator.waveform_generator
         else:
@@ -1173,28 +1192,25 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         else:
             self.born_residual_chart = born_residual_chart
 
-        # Optional trained low-w diffractive residual chart; same
-        # auto-load / refuse-to-None / round-trip pattern as
-        # `born_residual_chart` (see the comments and `get_init_dict`
-        # override there).  Default (`_AUTO_LOW_W_CHART` sentinel):
-        # auto-load the shipped artifact, refusing to `None` on any load
-        # anomaly so an absent / corrupt artifact degrades to the
-        # `_low_w_diffractive_serve` fall-through instead of raising.
-        self._low_w_diffractive_chart_is_default = (
-            low_w_diffractive_chart is _AUTO_LOW_W_CHART)
-        if low_w_diffractive_chart is _AUTO_LOW_W_CHART:
+        # Optional trained low-w shell chart; same serialization pattern as
+        # `born_residual_chart` (auto-load sentinel / explicit-None opt-out /
+        # explicit-instance, see `get_init_dict`).  Auto-load refuses to
+        # `None` on any load anomaly (RuntimeWarning) so a corrupt / absent
+        # artifact degrades to the pure-engine path.
+        self._low_w_shell_chart_is_default = (
+            low_w_shell_chart is _AUTO_SHELL_CHART)
+        if low_w_shell_chart is _AUTO_SHELL_CHART:
             try:
-                self.low_w_diffractive_chart = LowWDiffractiveChart.load()
+                self.low_w_shell_chart = LowWShellChart.load()
             except (OSError, ValueError, KeyError) as error:
                 warnings.warn(
-                    f'Low-w diffractive chart unavailable ({error}); the '
-                    f'near-fold-shell and wall-band draws will fall through '
-                    f'to the exact engine. Regenerate with '
-                    f'scripts/train_low_w_diffractive_chart.py.',
-                    RuntimeWarning)
-                self.low_w_diffractive_chart = None
+                    f'Low-w shell chart unavailable ({error}); the low-w '
+                    f'near-fold-shell rung will fall through to the exact '
+                    f'engine. Regenerate with '
+                    f'scripts/train_low_w_shell_chart.py.', RuntimeWarning)
+                self.low_w_shell_chart = None
         else:
-            self.low_w_diffractive_chart = low_w_diffractive_chart
+            self.low_w_shell_chart = low_w_shell_chart
 
         # Populated by ``_set_summary`` (triggered by the ``fbin`` setter
         # inside ``super().__init__``).
@@ -1276,6 +1292,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
           no source path to reference and its interpolation tables are not
           embedded in the init dict (pickle preserves it for sampler
           workers).
+
+        ``low_w_shell_chart`` round-trips by the identical three-way keying
+        on `_low_w_shell_chart_is_default`.
         """
         init_dict = super().get_init_dict(**kwargs)
         if init_dict.get('amplification_surrogate') is None:
@@ -1299,20 +1318,20 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
                 'auto-loaded default by omitting `born_residual_chart`, or '
                 'opt out of the Born rung with `born_residual_chart=None`.  '
                 'Pickle preserves an in-memory chart for sampler workers.')
-        if self._low_w_diffractive_chart_is_default:
-            init_dict.pop('low_w_diffractive_chart', None)
-        elif self.low_w_diffractive_chart is None:
-            init_dict['low_w_diffractive_chart'] = None
+        if self._low_w_shell_chart_is_default:
+            init_dict.pop('low_w_shell_chart', None)
+        elif self.low_w_shell_chart is None:
+            init_dict['low_w_shell_chart'] = None
         else:
             raise NotImplementedError(
                 'JSON serialization of a caller-supplied in-memory '
-                '`low_w_diffractive_chart` is unsupported: the chart carries '
-                'no source path to reference and its interpolation tables '
-                'are not embedded in the init dict.  Reconstruct with the '
-                'shipped auto-loaded default by omitting '
-                '`low_w_diffractive_chart`, or opt out of the low-w '
-                'diffractive rung with `low_w_diffractive_chart=None`.  '
-                'Pickle preserves an in-memory chart for sampler workers.')
+                '`low_w_shell_chart` is unsupported: the chart carries no '
+                'source path to reference and its interpolation tables are '
+                'not embedded in the init dict.  Reconstruct with the shipped '
+                'auto-loaded default by omitting `low_w_shell_chart`, or '
+                'opt out of the low-w shell rung with `low_w_shell_chart='
+                'None`.  Pickle preserves an in-memory chart for sampler '
+                'workers.')
         return init_dict
 
     # -- Parameters ------------------------------------------------------
@@ -1968,50 +1987,38 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
             return None
         return exact
 
-    def _low_w_diffractive_chart_serve(self, lens, dense_w, geom):
-        """Serve the low-w band from the trained diffractive residual chart.
+    def _low_w_shell_chart_serve(self, lens, dense_w, geom):
+        """Serve the low-w near-fold shell from the macro-lead shell chart.
 
-        Charts the low-w diffractive residual for the positive-parity
-        far-field exterior directly, bypassing the `w_low_fit` band split
-        and the exact engine entirely for the band the chart owns: the
-        near-fold shell (`w_low_fit` declines there -> ``None``) and the
-        wall band (`w_low_fit` would split into a tiny analytic sub-band
-        plus an engine host).  Mirrors `_low_w_diffractive_serve`'s
-        re-modulation and reconstruction tail exactly -- the same
-        ``FARFIELD_DIFFRACTIVE`` gauge, ``t_min`` demod/re-mod pair, and
-        ``(delays, k0, k1, geom)`` result -- so a chart serve is a drop-in
-        replacement for the two-rung serve over the band it covers.
+        The chart-first consult of Rung P.  Serves the near-fold shell
+        (``RHO_LO <= rho <= RHO_HI``) at low ``w`` from the trained
+        ``low_w_shell_chart`` using the macro-lead demodulated-DIFFERENCE
+        representation -- never a quotient.  The chart interpolates the
+        residual ``R = f_pure - carrier`` in the REDUCED eigenframe (``f_pure
+        = f_schwinger(w, y_eig, gamma')``, ``carrier = born_lead_carrier``,
+        a difference with no poles); the serve re-adds the reduced-frame
+        macro lead and re-modulates with the mass-sheet phase into the
+        absolute ``FARFIELD_DIFFRACTIVE`` gauge:
 
-        The residual ``r_pure`` interpolated by the chart is the reduced
-        point-mass kernel in units of the rho-partitioned uniform reference
-        ``F_ref`` (`partitioned_reference`, rebuilt at serve time from the
-        merging fold pair, the Pearcey cusp form, the macro lead, or the
-        geometric-optics sum -- the carrier chosen by ``rho`` -- in the
-        reduced eigenframe): the full
-        amplitude
-        reconstructs as
-        ``F = mass_sheet_phase * F_ref(w) * sqrt_mu_full * r_pure``,
-        with ``mass_sheet_phase = exp(0.5j*w*(log(lam) - kappa*s))`` and
-        ``sqrt_mu_full`` from `_born_factors` -- the SAME mass-sheet
-        decomposition as the test oracle ``_engine_reference_kappa``
-        (``mass_sheet_phase * f_pure / lam``) with ``1/lam`` folded into
-        ``sqrt_mu_full``.  ``F_ref`` replaces `prefactor_c` ONLY: the macro
-        normalization (``sqrt(1 - gamma'^2)`` in the residual,
-        ``sqrt_mu_full`` here) is preserved, so ``F_serve =
-        mass_sheet_phase * f_pure / lam``.  ``F_ref`` is already
-        band-split for off-caustic cells (``rho < RHO_LO`` or
-        ``rho > RHO_HI``): `partitioned_reference` anchors the residual on
-        the macro lead below the resolution boundary ``w * delta_tau =
-        RHO_END`` and on the two-image geometric-optics sum above it (the
-        ``w -> inf`` asymptote, not exact at finite ``w`` -- the residual
-        against it is the smooth O(1) diffractive correction), so a single
-        ``farfield = mass_sheet_phase * F_ref * sqrt_mu_full * r_pure``
-        re-modulation serves every cell with the SAME carrier the trainer
-        baked.  `_schwinger.f_schwinger` is
-        NEVER called on this path: the chart is the sole serve-time source
-        for the band it owns, and ``F_ref`` is built engine-free once per
-        draw from the reduced-frame geometry re-solve (quartic
-        ``find_images`` + ``nearest_caustic_point`` + ``soft_axis_cubic``).
+            F_abs(w) = mass_sheet_phase(w) * (carrier(w) + R(w)) / lam,
+
+        ``mass_sheet_phase = exp(0.5j w (log(lam) - kappa s))``, ``lam =
+        1 - kappa``.  The band is split at ``w_shell = 1 / delta_min`` (the
+        reduced-frame minimum pairwise real-image delay separation): the
+        chart serves the smooth sub-band below ``w_shell`` (``w * delta_min
+        < 1``, where the fold/cusp structure has not developed) and the
+        exact engine hosts the resolved sub-band above it, both composed in
+        the same ``FARFIELD_DIFFRACTIVE`` gauge.  On any refusal this returns
+        ``None`` and the caller falls through byte-identically (to the
+        ``w_low_fit`` split / exact engine).
+
+        The reduced-shear map (``_reduced_shear``) handles general ``kappa``
+        / ``beta``: the source is rescaled by ``sqrt(lam)`` and rotated by
+        ``beta`` into the eigenframe, ``theta`` is the eigenframe angle,
+        ``s = |y|**2 / lam`` the reduced offset squared, and ``rho`` the
+        caustic-relative distance via `_caustic_rho` (``abs(gamma_prime)``
+        per the caustic-point sign-sensitivity finding).  ``gamma_prime == 0``
+        has no caustic (reach 0) and declines.
 
         Parameters
         ----------
@@ -2020,74 +2027,105 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         dense_w : np.ndarray
             Full dimensionless-frequency grid, 1-D, strictly positive.
         geom : ChangRefsdalGeometryPartition
-            Geometry-only partition over ``dense_w`` (delays, saddle
-            kernels, real mask, ``t_min``) already in hand.
+            Geometry-only partition over ``dense_w`` (``t_min``, delays,
+            saddle kernels, real mask) for the reconstruction tail.
 
         Returns
         -------
         tuple or None
-            ``(delays, k0, k1, geom)`` on a full-band chart serve, or
-            ``None`` to fall through (chart absent, out of coverage, a
-            reduced-shear domain refusal, an unbuildable ``F_ref``, or a
-            draw in a per-cell declined cell the training oracle flagged as
-            unable to meet the certification bar).
+            ``(delays, k0, k1, geom)`` on a full-band serve, or ``None`` to
+            decline (fall through to the caller's ``w_low_fit`` / engine
+            path).
         """
-        chart = self.low_w_diffractive_chart
+        chart = self.low_w_shell_chart
         if chart is None:
             return None
 
         gamma = float(lens['gamma'])
-        beta = float(lens['beta'])
         kappa = float(lens['kappa'])
+        beta = float(lens['beta'])
         try:
             lam, gamma_prime = _reduced_shear(gamma, kappa)
         except DiffractiveDomainError:
             return None
         if gamma_prime == 0.0:
-            # No shear -> no caustic frame; `_caustic_rho` would divide by
-            # a degenerate zero-radius caustic.  Fall through to the
-            # `w_low_fit` path, which returns 0.0 (series exact) here.
             return None
 
+        # Reduced frame: source rescaled by sqrt(lam) and rotated by beta
+        # into the eigenframe (the beta-rotation identity: the complex
+        # multiplication z_eig = exp(-1j beta) * yp equals the matrix
+        # [[cosB, sinB], [-sinB, cosB]] @ yp).  ``s = |yp|**2`` and ``theta``
+        # is the eigenframe angle; ``rho`` is the caustic-relative distance.
         root = math.sqrt(lam)
-        y1 = float(lens['y1'])
-        y2 = float(lens['y2'])
-        yp0, yp1 = y1 / root, y2 / root
+        yp0 = float(lens['y1']) / root
+        yp1 = float(lens['y2']) / root
         s = yp0 * yp0 + yp1 * yp1
-        if not s > 0.0:
-            return None
         z_eig = cmath.exp(-1j * beta) * complex(yp0, yp1)
         theta = math.atan2(z_eig.imag, z_eig.real)
-
         rho = _caustic_rho(abs(gamma_prime), s, theta)
 
-        # Rebuild the reduced eigenframe source and its rho-partitioned
-        # uniform reference ``F_ref`` engine-free at serve time.  A draw
-        # whose ``F_ref`` is unbuildable (``None``) falls through to the
-        # exact engine, mirroring `_tube_f_ref`'s ``None`` handling.
+        # Rho gate: the chart owns only the near-fold shell.  Born owns
+        # rho >= RHO_HI; the deep interior (rho < RHO_LO) is out of scope.
+        if not (RHO_LO <= rho <= RHO_HI):
+            return None
+
+        # Gamma-prime box gate: the chart is trained only on its reduced-
+        # shear grid; a draw outside it (weak lens gamma' below the grid
+        # floor, or wall-adjacent gamma' near 1) would be cubic-
+        # EXTRAPOLATED (``evaluate`` is built with ``bounds_error=False``,
+        # ``fill_value=None``), silently serving a residual the chart never
+        # represented.  theta is safe (``evaluate`` folds it into the full
+        # [0, pi/2] theta_grid span), but gamma_prime is not -- decline to
+        # the caller's ``w_low_fit`` / exact-engine path.
+        if not (chart.gamma_prime_grid[0] <= gamma_prime
+                <= chart.gamma_prime_grid[-1]):
+            return None
+
         source = reduced_source(gamma_prime, rho, theta)
-        fref, _kind = partitioned_reference(dense_w, gamma_prime, rho, source)
-        if fref is None:
+        delta_min = _reduced_min_delay_separation(gamma_prime, source)
+        w_shell = 1.0 / delta_min if delta_min > 0.0 else math.inf
+
+        w_lo = float(dense_w.min())
+        if w_shell <= w_lo:
+            # Fully-resolved band: no smooth-shell nodes below w_shell, so
+            # the chart has no job.  (The shared band-split helper's
+            # null-split fallback is all-True, which is correct only for
+            # the below-trusted polarity when the split sits ABOVE the band.)
+            return None
+        _band_split, below_split = _band_split_mask(dense_w, w_shell)
+        in_log_w = ((np.log(dense_w) >= chart.log_w_grid[0])
+                    & (np.log(dense_w) <= chart.log_w_grid[-1]))
+        below = below_split & in_log_w
+        if not below.any():
             return None
 
-        if not chart.covers(gamma_prime, rho, dense_w):
-            return None
+        farfield = np.zeros(dense_w.shape, dtype=complex)
 
-        if chart.declined(gamma_prime, rho, theta):
-            # A measured per-cell decline: the served two-sided error cannot
-            # meet the certification bar in this cell (near-fold resonance),
-            # so fall through to the exact engine -- never an amplitude scale.
-            return None
-
-        r_fit = chart.evaluate(dense_w, gamma_prime, rho, theta) * chart.derate
-        sqrt_mu_full = _born_factors(y1, y2, gamma, beta, kappa)[0]
-
+        # Below w_shell: reduced-frame macro lead + interpolated residual,
+        # re-modulated with the mass-sheet phase and the 1/lam prefactor.
+        carrier_below = np.array([
+            born_lead_carrier(float(w_i), source[0], source[1], gamma_prime)
+            for w_i in dense_w[below]], dtype=complex)
+        residual = chart.evaluate(dense_w[below], gamma_prime, rho, theta)
+        f_serve = carrier_below + residual
         mass_sheet_phase = np.exp(
-            0.5j * dense_w * (math.log(lam) - kappa * s))
-        farfield = mass_sheet_phase * fref * sqrt_mu_full * r_fit
+            0.5j * dense_w[below] * (math.log(lam) - kappa * s))
+        farfield[below] = mass_sheet_phase * f_serve / lam
 
-        # Demodulate F by t_min into the far-field envelope and reconstruct
-        # via the SAME tail as `_low_w_diffractive_serve` (FARFIELD_DIFFRACTIVE).
+        # Above w_shell: the exact engine hosts the resolved sub-band, in
+        # the same FARFIELD_DIFFRACTIVE gauge (the envelope IS F there).
+        above = ~below
+        if above.any():
+            host = self._engine_farfield_total(lens, dense_w[above])
+            if host is None:
+                return None
+            farfield[above] = host
+
+        # Diffractive reconstruction tail (identical to
+        # `_low_w_diffractive_serve`): demodulate by geom.t_min into the
+        # frame-invariant far-field envelope, then reconstruct in the
+        # FARFIELD_DIFFRACTIVE gauge.  `_frame_phase` (mod 2pi) is the same
+        # authoritative phase `reconstruct_farfield` re-modulates with.
         envelope = farfield * np.exp(1j * _frame_phase(dense_w, geom.t_min))
         kernels, _total = reconstruct_farfield(
             dense_w, envelope, geom.delays, geom.saddle_kernels,
@@ -2111,7 +2149,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         returns ``None`` -- a byte-identical fall-through to the prior F070
         refusal path.
 
-        Rung P (positive parity, ``det A > 0`` i.e. ``gamma < 1``): the
+        Rung P (positive parity, ``det A > 0`` i.e. ``gamma < 1``): a
+        chart-first consult hands the near-fold shell
+        (``RHO_LO <= rho <= RHO_HI``) to `_low_w_shell_chart_serve` (the
+        macro-lead demodulated-difference chart); on its decline, the
         low-``w`` truncation certificate `w_low_fit` admits the analytic
         series ``F_P`` (`diffractive_amplification`) on ``w < w_low``; the
         exact engine hosts ``[w_low, w_hi]``.  A single `_band_split_mask`
@@ -2188,16 +2229,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         farfield = np.zeros(dense_w.shape, dtype=complex)
 
         if gamma < 1.0:
-            # Rung P: consult the trained low-w diffractive residual chart
-            # FIRST.  The chart owns the near-fold shell (where `w_low_fit`
-            # declines -> None) and the wall band (which `w_low_fit` would
-            # split into a tiny analytic sub-band plus an engine host), so
-            # a full-band chart serve short-circuits the split below.  On
-            # any miss (chart absent or out of coverage) it returns None
-            # and the `w_low_fit` split runs unchanged.
-            served = self._low_w_diffractive_chart_serve(lens, dense_w, geom)
-            if served is not None:
-                return served
+            # Chart-first consult: the low-w shell chart serves the
+            # near-fold shell (RHO_LO <= rho <= RHO_HI) at low w; if it
+            # declines, fall through to the w_low_fit split below.
+            shell_served = self._low_w_shell_chart_serve(lens, dense_w, geom)
+            if shell_served is not None:
+                return shell_served
 
             # Rung P: analytic F_P below the truncation certificate w_low,
             # exact engine host above it.
@@ -3120,10 +3157,11 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         path.
 
         GATE.  Serves ONLY when a chart is attached AND ``kappa == 0`` AND
-        ``beta == 0`` AND the caustic-frame ``rho = caustic_rho(...) > 2.0``
-        (far exterior, two real images).  Interior / near-caustic / tube
-        (``rho <= 2``) always falls through to the exact engine -- the
-        carrier-only lift below never captures it.
+        ``beta == 0`` AND the caustic-frame ``rho = caustic_rho(...)`` is
+        strictly above `_BORN_RHO_FLOOR` (far exterior, two real images).
+        Interior / near-caustic / tube (``rho <= _BORN_RHO_FLOOR``) always
+        falls through to the exact engine -- the carrier-only lift below
+        never captures it.
 
         TRAINED-FLOOR BAND SPLIT.  When the far-exterior query IS box-covered
         but the served host sub-band drops BELOW the chart's trained
@@ -3230,12 +3268,13 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         except (ValueError, LensDomainError):
             return None
 
-        # Interior / near-caustic / tube (rho <= 2): no Born far exterior.
-        # Fall through to the exact engine BEFORE the geometry solve,
-        # byte-identical to HEAD.  The carrier-only lift below NEVER captures
-        # this branch -- the tube case (covered but rho <= 2) keeps its
-        # engine fallthrough (pinned invariant).
-        if rho <= 2.0:
+        # Interior / near-caustic / tube (rho <= _BORN_RHO_FLOOR): no Born
+        # far exterior.  Fall through to the exact engine BEFORE the geometry
+        # solve, byte-identical to HEAD.  The carrier-only lift below NEVER
+        # captures this branch -- the tube case (covered but
+        # rho <= _BORN_RHO_FLOOR) keeps its engine fallthrough (pinned
+        # invariant).
+        if rho <= _BORN_RHO_FLOOR:
             return None
 
         # Cheap geometry-only partition (same construction the sibling
@@ -3616,8 +3655,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         # First-class Born weak-deflection analytic intercept (WP-B).  When
         # a `born_residual_chart` is attached and the candidate sits in the
-        # Born exterior (kappa == 0, beta == 0, caustic-frame rho > 2,
-        # covered by the chart box), serve the analytic carrier + trained
+        # Born exterior (kappa == 0, beta == 0, caustic-frame rho above
+        # `_BORN_RHO_FLOOR`, covered by the chart box), serve the analytic
+        # carrier + trained
         # residual directly -- no surrogate, no per-candidate engine cost --
         # consulting the certified ppGO map to band-split the upper band to
         # bare ppGO where certified.  Positioned LAST among the analytic

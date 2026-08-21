@@ -1,5 +1,67 @@
 # Test Dev Short-Term Observations
 
+## 2026-08-21 (INS-2-001 port: end-to-end serve + load contract, low_w_shell_chart)
+- INS-2-001 PORT COMPLETED (test_lensing_low_w_shell_chart.py, 22 tests green
+  in 20.6s): added ShellServeNodeExactTestCase (production
+  `_low_w_shell_chart_serve` driven end-to-end via a SimpleNamespace binder +
+  `reconstruct_farfield` interception, kappa in {0.0, 0.2}, beta in {0.0,0.3};
+  `_engine_farfield_total` stubbed to the `_engine_reference_kappa` oracle for
+  above-split nodes; split wiring pinned by asserting the host received exactly
+  dense_w[~below] recomputed from `_reduced_min_delay_separation` +
+  `_band_split_mask`; below-split chart composition node-exact ~1e-16 for BOTH
+  kappa cases) and ShellLoadContractTestCase (bit-identical round-trip, missing/
+  foreign schema + missing content_hash refusals, one flipped real_coeff under a
+  stale hash refuses, rehashed tamper loads cleanly = saver<->loader hash-field
+  agreement, tampered provenance still loads).  `_round_trip_chart` uses seeded
+  RNG coeffs (engine-free) -- no need to reuse the heavy `_exact_residual_chart`.
+- FIXTURE MEASUREMENT (witness gp=0.8, rho=1.2, theta=pi/5 node): serve rho and
+  theta round-trip EXACTLY from `_make_lens` (rel err ~1e-16), delta_min=4.474,
+  w_shell=0.2235 splits the chart's log-w window [0.05..0.3] as below=[0.05,0.1,
+  0.15,0.2] above=[0.3] -- a straddling fixture, no stubbing ambiguity.  rho=0.5
+  and rho=1.5 both DECLINE (inline rho gate fires before any grid check).
+- The `_make_lens` fixture inversion is the SAME one the deleted diffractive
+  suite used (`y = sqrt(lam)*R(beta) y_eig`; serve inverts with exp(-1j*beta));
+  the beta-rotation + atan2 round-trip is bit-exact for interior grid nodes.
+- The port reuses the existing `_exact_residual_chart()` (lru_cached, 480 nodes)
+  for the serve class -- shared with the pre-existing accuracy/boundary classes,
+  so the ~14-20s build is paid ONCE.
+
+## 2026-08-21 (low_w_shell_chart test suite, test_lensing_low_w_shell_chart.py)
+
+- OFF-GRID 1e-4 IS NOT ACHIEVABLE AT SYNTHETIC SCALE for the shell residual
+  chart: R = f_pure - born_lead_carrier has genuine theta structure near the
+  caustic, so a 480-node (4x4x6x5) fixture measures ~2e-2 off-grid (theta/
+  log-w midpoints), and 8-12 theta nodes only reach ~9e-3..3e-3 (plateaus).
+  Substituted a MEASURED 0.1 off-grid bar; node-exact 1e-10 round-trip is the
+  robust pin (bit-exact ~1e-16).  Same family as the "4-node w charts cannot
+  hit off-grid 1e-4" memory.  f_schwinger at low w (w<=1) is ~15-25ms/call,
+  so the 480-node build is ~14-20s (lru_cache-shared across classes).
+- MACRO-LEAD CARRIER HAS CONSTANT MAGNITUDE: born_lead_carrier =
+  sqrt_mu * exp(1j w phi_geo), |carrier| = sqrt_mu w-INDEPENDENT (no beating
+  zero).  So a quotient residual f_pure/carrier does NOT trip the literal
+  "max|R|/max|F| <= 10" no-poles cap at low w (|f_pure/carrier| ~ 1) -- the
+  quotient's 5800x poles must come from a DIFFERENT (beating) carrier, not
+  the macro lead.  The no-poles invariant's real teeth are the node-exact
+  round-trip + falsification controls, not the ratio cap.  Measured
+  max|R|/max|F| <= 0.9 over witness cells (gp/rho/theta in {0.8/1.1/0.2,
+  0.5/1.2/0.5, 0.3/0.9/1.0} x w in [0.02,1.0]).
+- RHO=1.4 HANDOFF (shell vs Born) IS ENGINE-SIDED, NOT CARRIER-SIDED:
+  RHO_HI == _likelihood._BORN_RHO_FLOOR == 1.4 (bit-equal, no gap/overlap).
+  At rho=1.4 the Born carrier-only certificate REFUSES (born_carrier_omitted_term
+  ~0.056-0.13 -> safety*est ~1.1-2.5 >> _SADDLE_FARFIELD_CERT_BAR 0.001), so
+  the Born side falls to the exact engine.  The honest "no step" pin =
+  shell chart accurate at its rho=1.4 boundary node (node-exact) + Born
+  carrier-only refusal (engine) -- NOT "both arms carrier-served at 1e-4"
+  (the residual is ~1.5% at rho=1.4, non-negligible).  Professor Q3b-consistent.
+- FALSIFICATION VIA CHEAP VECTOR ARITHMETIC (no 2nd engine bake): derive
+  wrong-residual charts from the exact chart's coeffs by adding the carrier
+  correction -- doubled carrier: R_wrong = R_exact - carrier (= f - 2 carrier);
+  unit sqrt_mu: R_wrong = R_exact + carrier*(1 - 1/sqrt_mu); zero residual.
+  Each breaks node-exactness to ~0.4-1.0 rel err.  No extra f_schwinger calls.
+- reduced_source(gp,rho,theta) + f_schwinger(w,src,gp) works at theta=0 and
+  pi/2 endpoints and across gp in [0.3,0.9], rho in [0.6,1.4] (no domain
+  errors at low w).
+
 ## 2026-08-21 (low_w_chart_rho_partitioned test port + per-carrier pins)
 - CUSP-TRANSITION DETECTION BUG (production, needs coder fix):
   `low_w_diffractive_chart._airy_fold_form` keys `cusp_transition` on

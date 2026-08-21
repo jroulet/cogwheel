@@ -1558,7 +1558,7 @@ class BornTrainedFloorCensusRevivalTestCase(_BornCertTestCase):
         # requires (rho > the live _BORN_RHO_FLOOR) -- else the whole Born
         # rung is skipped and the route says nothing about Route 2.
         self.rho = _route_rho(FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2)
-        self.assertGreater(self.rho, serve_route_census._BORN_RHO_FLOOR,
+        self.assertGreater(self.rho, likelihood._BORN_RHO_FLOOR,
                            'fixture is not far-exterior; Born rung skipped')
         self.low_edge = _WBandChart(FLOOR_TRAINED, FLOOR_CEIL, FLOOR_SENTINEL)
         # Premise: a genuine STRICT sub-band -- trained floor read from the
@@ -2061,9 +2061,10 @@ class BornCensusMirrorFaithfulnessTestCase(_BornCertTestCase):
         self.rho = _route_rho(FLOOR_GAMMA, FLOOR_Y1, FLOOR_Y2)
         # Premise: far-exterior Born box (rho > the live floor), else the
         # whole rung is skipped and no route claim is meaningful.
-        self.assertGreater(self.rho, serve_route_census._BORN_RHO_FLOOR,
+        self.assertGreater(self.rho, likelihood._BORN_RHO_FLOOR,
                            'fixture is not far-exterior; Born rung skipped')
-        self.assertGreater(self.rho, 2.0, 'fixture below the production rho>2')
+        self.assertGreater(self.rho, 2.0,
+                           'fixture not deep far-exterior (rho <= 2.0)')
         self.low_edge = _WBandChart(FLOOR_TRAINED, FLOOR_CEIL, FLOOR_SENTINEL)
         # The host sub-band and its trained-floor split (shipped arithmetic).
         _bottom, self.engine_mask, self.chart_mask, _above = _floor_tier_masks(

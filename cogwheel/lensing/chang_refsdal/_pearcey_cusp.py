@@ -732,7 +732,7 @@ class _CuspUniformGeometry:
     and the F074 control projections do not depend on w.  `_cusp_uniform_geometry`
     computes them once per cell and the per-w core reuses them across w
     nodes, so the bake-time cusp reference solves the geometry once per cell
-    and loops only over w, mirroring `_airy_fold_form`.
+    and loops only over w.
     """
     matrix: np.ndarray
     images: list[np.ndarray]
@@ -921,7 +921,6 @@ def _cusp_uniform_at_w(geometry_bundle: _CuspUniformGeometry, source,
 
     return _CuspUniformForm(uniform, far_sum, stationary_values,
                             matched_delays)
-
 
 
 def cusp_amplification(w: float, source, gamma: float, *,

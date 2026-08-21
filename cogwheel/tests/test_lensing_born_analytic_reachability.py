@@ -29,7 +29,7 @@ What is pinned
    ``0.0``.
 4. BYTE-IDENTITY BATTERY OFF THE SERVED PATH.  A battery of draws that
    MUST NOT reach the Born intercept -- (a) interior ``rho < 1``, (b)
-   exterior ``1 < rho < 2`` (below the ``rho > 2`` gate), (c) a
+   exterior ``1 < rho < _BORN_RHO_FLOOR`` (below the Born floor), (c) a
    ``covers() == False`` draw outside the chart grid, (d) a ``gamma > 1``
    saddle draw the saddle far-field rung claims first, and (e) a
    ``kappa != 0`` / ``beta != 0`` off-reference draw -- each declines the
@@ -109,6 +109,7 @@ from cogwheel.lensing.born_residual_chart import (
 from cogwheel.lensing.likelihood import (
     LensedRelativeBinningLikelihood,
     _AUTO_BORN_CHART,
+    _BORN_RHO_FLOOR,
 )
 from cogwheel.lensing.marginalized_likelihood import (
     LensedMarginalizedExtrinsicLikelihood,
@@ -149,9 +150,15 @@ _GAMMA: float = 0.5
 _KAPPA: float = 0.0
 _BETA: float = 0.0
 
-#: Exterior caustic-frame coordinate (rho > 2 so covers() / the rho gate is
-#: the binding admission and the config is a clean 2-image exterior).
+#: Exterior caustic-frame coordinate (rho = 3 > _BORN_RHO_FLOOR so covers()
+#: / the rho gate is the binding admission and the config is a clean 2-image
+#: exterior).
 _TARGET_RHO: float = 3.0
+
+#: Below-floor exterior witness: strictly in (1.0, _BORN_RHO_FLOOR) so it
+#: stays BELOW the Born rho gate (midpoint of the (1, floor] interval,
+#: derived from the live floor -- never a literal matching the old 2.0).
+_BELOW_FLOOR_RHO: float = 0.5 * (1.0 + _BORN_RHO_FLOOR)
 
 #: Off-axis source direction (radians) -- keeps the image config generic,
 #: away from the on-axis astroid cusp symmetry line.
@@ -543,8 +550,9 @@ class BornServePathTraceTestCase(_BornReachTestCase):
         self._count()
 
     def test_gate_misses_return_none(self):
-        # Each Born gate (kappa==0, beta==0, rho>2) refuses its violation
-        # and falls through -- never serves a config it cannot represent.
+        # Each Born gate (kappa==0, beta==0, rho > _BORN_RHO_FLOOR) refuses
+        # its violation and falls through -- never serves a config it cannot
+        # represent.
         chart = _build_chart(_RESIDUAL_SCALE_A)
         probe = _BornAnalyticProbe(born_residual_chart=chart)
 
@@ -558,12 +566,13 @@ class BornServePathTraceTestCase(_BornReachTestCase):
             # decline BEFORE any caustic-frame computation.
             'gamma==0': {**base, 'gamma': 0.0},
         }
-        # rho <= 2 (interior/near-caustic): shrink |y| to rho ~ 1.5.
+        # rho < _BORN_RHO_FLOOR (below-floor exterior): shrink |y| to
+        # _BELOW_FLOOR_RHO.
         near = _par_dic()
-        abs_y = _abs_y_for_rho(1.5)
+        abs_y = _abs_y_for_rho(_BELOW_FLOOR_RHO)
         near['y1'] = abs_y * math.cos(_SOURCE_ANGLE)
         near['y2'] = abs_y * math.sin(_SOURCE_ANGLE)
-        cases['rho<=2'] = near
+        cases['rho<floor'] = near
 
         for label, par_dic in cases.items():
             with self.subTest(gate=label):
@@ -728,7 +737,7 @@ class NullSplitIdentityTestCase(_BornReachTestCase):
 #: so the fixtures follow the gate boundaries if the geometry moves.
 _OFF_PATH_BATTERY = (
     ('interior_rho<1', _GAMMA, 0.5, _KAPPA, _BETA),
-    ('exterior_1<rho<2', _GAMMA, 1.5, _KAPPA, _BETA),
+    ('exterior_1<rho<floor', _GAMMA, _BELOW_FLOOR_RHO, _KAPPA, _BETA),
     ('covers_false_rho>grid', _GAMMA, 6.0, _KAPPA, _BETA),
     ('saddle_gamma>1', 1.3, _TARGET_RHO, _KAPPA, _BETA),
     ('kappa!=0_beta!=0', _GAMMA, _TARGET_RHO, 0.1, 0.1),
@@ -795,8 +804,9 @@ class ByteIdentityBatteryTestCase(_BornReachTestCase):
 
     def test_kappa_beta_row_declines_even_when_rho_and_covers_pass(self):
         # Isolate the silent-accuracy guard: hold gamma/rho on the SERVED
-        # cell (rho = 3 > 2, covers True) and flip ONLY kappa/beta.  The
-        # rho + covers gates would admit; the kappa/beta gate must veto.
+        # cell (rho = 3 > _BORN_RHO_FLOOR, covers True) and flip ONLY
+        # kappa/beta.  The rho + covers gates would admit; the kappa/beta
+        # gate must veto.
         chart = _build_chart(_RESIDUAL_SCALE_A)
 
         # Same cell served with kappa = beta = 0 (the reference config) DOES

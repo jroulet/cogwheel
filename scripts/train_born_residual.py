@@ -12,8 +12,10 @@ min-relative-delay frame), and the carrier from born_lead_carrier
 
 Grid:
     gamma : 7 values log-spaced in (0.05, 0.9), positive parity
-    rho   : 5 values in (2.0, 4.0), far exterior
-    w     : 10 values log-spaced in (5, 60)
+    rho   : 8 values [1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0] (inner
+            far-exterior down to the ~1.4 shell handoff)
+    w     : 13 values log-spaced in (0.4, 60) (extends down to the low-w
+            band; the shell chart owns the deep low-w band at rho <= 1.4)
     theta : pi/4 fixed (source-plane polar angle)
 """
 from __future__ import annotations
@@ -47,8 +49,14 @@ def main() -> None:
     """
     # --- Grid definition ---
     gamma_grid = np.geomspace(0.05, 0.9, 7)
-    rho_grid = np.linspace(2.0, 4.0, 5)
-    w_grid = np.geomspace(5.0, 60.0, 10)
+    # rho_grid extends down to ~1.4 (the shell/outer-far-exterior handoff):
+    # the low-w shell chart owns rho in [RHO_LO, RHO_HI] = [0.6, 1.4]; this
+    # chart owns rho >= RHO_HI.  Three extra nodes in [1.4, 2.0] (1.4, 1.6,
+    # 1.8) bridge the handoff into the previously-shipped far-exterior band.
+    rho_grid = np.array([1.4, 1.6, 1.8, 2.0, 2.5, 3.0, 3.5, 4.0])
+    # w_grid extends DOWN to ~0.4 (three extra low-w nodes), NOT to 0.02:
+    # the shell chart owns the deep low-w band at rho <= 1.4 (Professor Q4).
+    w_grid = np.geomspace(0.4, 60.0, 13)
     log_w_grid = np.log(w_grid)
 
     theta = np.pi / 4.0  # fixed source-plane polar angle
@@ -115,6 +123,16 @@ def main() -> None:
         'grid_shape': [n_gamma, n_rho, n_w],
         'max_abs_residual': float(np.max(np.abs(
             real_coeffs + 1j * imag_coeffs))),
+        # DRIVER PREREQUISITE (not enforced in code): an azimuthal sweep at
+        # rho = 1.4 (the F025-style check that the lead-only residual needs
+        # N(theta) <= 8 nodes) must PRECEDE the full re-bake.  If N(theta)
+        # > 8, do NOT re-bake this theta-fixed Born chart below ~1.6 --
+        # extend the shell chart's rho coverage upward instead.
+        'driver_prerequisite': (
+            'azimuthal sweep at rho=1.4 must confirm N(theta) <= 8 for the '
+            'lead-only residual before re-baking; if N(theta) > 8, do not '
+            're-bake this theta-fixed chart below ~1.6 (extend the shell '
+            'chart rho coverage upward instead)'),
     }
 
     chart = BornResidualChart(
