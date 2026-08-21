@@ -650,3 +650,19 @@
 - RE-VERIFY RESOLVED FINDINGS IN CODE + GREP, not from memory: on a re-review pass, re-check each previously-open finding against the live code (INS-2-001 dead fields gone — only the 9 live fields remain; INS-2-002 scalar accessor dropped — only `cusp_uniform_reference_grid` remains, consumed by `_pearcey_cusp_reference` -> `fold_cusp_reference`), re-run the full changed-file suites, and re-derive the key identity by hand.
 - GRID-DEPENDENT GUARD RATIO NOTE (non-finding): the non-vanishing guard min|F_ref|/max|F_ref| is computed over the bake w_grid at train time and over the likelihood dense_w at serve — so a serve/bake decline ASYMMETRY is possible, but the failure mode is a SAFE decline (-> exact engine); per-node F_ref values are grid-independent. If a future census shows unexpected Pearcey-cell declines at serve, this asymmetry is the first explanation to check.
 - `cusp_uniform_reference_grid` solves geometry ONCE per cell, loops only w, calls `_cusp_uniform_at_w` per node WITHOUT the ppGO rung / F074 gate / calibration certificate; `_consult_pearcey(x,y,None)` -> live quadrature. The non-vanishing guard catches cluster_sum->0 collapses; max==0 -> nan -> the isfinite guard declines.
+
+
+## 2026-08-21 (low_w_shell_born_extension, pass 5 FINAL)
+
+- CROSS-GAUGE SINGLE-SOURCING (INS-3-001 -> INS-4-001 lineage): a "same
+  constant (no gap/overlap)" claim spanning two rungs is FALSE whenever the
+  two boundaries live in DIFFERENT rho gauges (scalar reach vs directional)
+  — identical float values (both 1.4) do NOT make two physical surfaces
+  equal. Verify the GAUGE of each "rho" before accepting "no gap/no
+  overlap" prose in ANY surface; value-equality pins (assertEqual) are
+  correct but do not license surface-equality prose.
+- PLAN-LISTED-SPEC-EDIT MISS: when the plan lists SPEC.md +
+  DATA_CONTRACTS.yaml as expected-to-change but the build edits neither, a
+  green code diff does NOT certify the doc surfaces — sweep them explicitly
+  whenever a build renames a data-product tag/route AND changes a gate
+  constant (recurring INS-1-xxx lineage, now INS-5-xxx).

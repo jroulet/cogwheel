@@ -1107,3 +1107,39 @@
 - F_ref SINGLE-SOURCE AT SERVE: `_low_w_diffractive_chart_serve` rebuilds F_ref at serve via `reduced_source(gamma_prime,rho,theta)` + fold_cusp_reference(dense_w, ...), placed AFTER the rho computation but BEFORE chart.covers; None falls through to w_low_fit/engine. reduced_source needs no try/except when its caustic_point call is byte-identical to one already evaluated just above for the same args.
 - covers() returns np.bool_ (not Python bool) in the w-given branch (grid elements are np.float64) — tests must not use `is False`.
 - Trainer mechanics: `_fill_coefficients` returns (real, imag, n_refused, unbuildable_mask); off_served filled by BOOLEAN-INDEX assignment (off_served[~off_unbuildable] = served_errs[grid_n:]), never reshape; `_w_grid` uniform in w**(2/3): linspace(W_LO**(2/3), W_CEILING_SCHWINGER**(2/3), n)**(3/2); _SMOKE_N_W 5->8, _FULL_N_W 14->16.
+
+
+## 2026-08-21 (low_w_shell_born_extension build — shell serve + gauge decouple)
+
+- SILENT CUBIC EXTRAPOLATION BEYOND A GRID BOX (INS-1-002): chart.evaluate
+  with bounds_error=False/fill_value=None will cubic-EXTRAPOLATE out-of-
+  grid parameter axes (e.g. gamma_prime) silently — add an explicit grid
+  box gate (`chart.gamma_prime_grid[0] <= gp <= chart.gamma_prime_grid[-1]`
+  -> None) BEFORE evaluate whenever the serve keys on a parameter axis.
+- CROSS-GAUGE SINGLE-SOURCE CATEGORY ERROR (INS-3-001): `_BORN_RHO_FLOOR =
+  RHO_HI` looked like DRY but the two constants live in DIFFERENT rho
+  gauges (Born: scalar-reach ppgo_map.caustic_rho; shell: directional
+  _caustic_rho) — identical numeric value != identical physical surface.
+  Decouple to an independent constant + honest comment, pin value equality
+  only in a test.
+- FULLY-RESOLVED BAND-SPLIT NULL FALLBACK (INS-1-002/005): the shared
+  `_band_split_mask` all-True null fallback is WRONG when the whole band is
+  resolved-below-trusted — add an explicit `w_shell <= w_lo -> None` guard
+  so a fully-resolved below-trusted polarity declines rather than serving
+  the whole band via the wrong side.
+- SERVING CONVENTION: a propagating LensDomainError (e.g. from
+  geometric_amplification inside a band-split branch) is outcome-preserving
+  when the exact seed-engine path below raises the identical error for the
+  same geometry — no try/except needed (per the _amplification_coefficients
+  docstring convention).
+- Shell trainer (scripts/train_low_w_shell_chart.py): grid gamma_prime in
+  [GAMMA_LO, 1-DELTA_GAMMA_P], rho linspace(RHO_LO,RHO_HI), theta D2
+  [0,pi/2], log_w geomspace(0.02,1.0); reduced_source single-sourced from
+  low_w_shell_chart; NO derate/declined_mask (measured |r|~0.61-1.6);
+  f_schwinger refusal -> SystemExit naming the node (fail-fast, never NaN);
+  content-hash field order (gamma_prime_grid,rho_grid,theta_grid,log_w_grid,
+  real,imag) IDENTICAL to load; Born trainer rho explicit [1.4..4.0] +
+  w geomspace(0.4,60,13) (shell owns deep low-w at rho<=1.4), provenance
+  driver_prerequisite = azimuthal sweep at rho=1.4 (N(theta)<=8 gate before
+  re-bake). RHO_LO=_DIFFRACTIVE_FIT_FENCE_RHO_LO, RHO_HI=1.0+
+  _DIFFRACTIVE_FIT_FENCE_DELTA imported from _diffractive (never re-typed).

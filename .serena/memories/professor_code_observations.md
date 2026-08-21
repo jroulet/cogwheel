@@ -864,3 +864,27 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
 - Non-vanishing cusp witness (gamma'=0.8, rho=1.2, theta=0.2), b3=1.42e-15; Pearcey |F_ref| min/max ~0.25 (band ~3.9x << 1e3); Airy form correctly None there. Fold/cusp |F_ref| continuity ~3.12x across the theta 0.2(cusp)->0.3(fold) handoff (tol 5.0), both forms genuinely visited. Node-exact cusp re-modulation consistent between train (fold_cusp_reference) and serve (likelihood.py rebuilds the same F_ref) to NODE_EXACT_TOL=1e-10.
 - cusp_amplification refactor (geometry -> _cusp_uniform_geometry, controls -> _cusp_controls) is DRY behavior-preserving.
 - BRIEF-DRIFT LESSON: brief specs written on pre-measurement expectation (spec 1's non-vanishing witness rho=2.0 is actually DECLINED; spec 4's "interior decline cell" does not exist) — the implementation is the measured-corrected version; write such fixture specs only after the measurement, not before.
+
+
+## 2026-08-21 (low_w_shell_chart serve build, verdict PASS)
+
+- DIFFERENCE FORM IS FINITE EVERYWHERE: R = f_schwinger - born_lead_carrier
+  (reduced frame, macro-lead demodulated-difference) has NO quotient pole
+  at carrier-beating zeros — max|R|/max|F| measured O(1) (0.216-0.884) far
+  under the 10 cap; |F_serve| stays in [0.5,5]*sqrt(mu_macro).
+- SHELL/BORN BOUNDARY IS ENGINE-SIDED, NOT CARRIER-SIDED (CORRECTS the
+  'no gap/overlap' phrasing — value equality only): RHO_HI ==
+  _BORN_RHO_FLOOR == 1.4 as FLOAT VALUES, but the surfaces are
+  gauge-DISJOINT (Born scalar-reach gate vs shell directional rho); the
+  honest 'no step' form = shell serve node-exact at its rho=1.4 boundary
+  node + Born carrier-only certificate REFUSES at rho=1.4 (safety*est
+  ~1.1-2.5 >> 1e-3 bar) -> falls through to the exact engine, so no
+  finite-but-wrong serve ever happens at the handoff.
+- Node-exact serve vs f_schwinger oracle: bit-exact (0.0 rel err) at
+  interior grid nodes; off-grid worst ~0.019 < 0.1 measured bar.
+  Null-residual R=0 round-trips to bare born_carrier_from_partition to
+  1e-13.
+- Concerns (driver, non-blocking): the 1e-4 off-grid acceptance is the
+  TRAINED chart's bar (operator full-bake); shipped low_w_shell_chart.npz +
+  born_residual_chart.npz absent -> auto-attach None + RuntimeWarning,
+  shell rung falls through to exact engine.

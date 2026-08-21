@@ -940,3 +940,41 @@
 - FULL-W-GRID SWEEP BEFORE CHOOSING A CONTINUITY BAR: the fold/cusp handoff |F_ref| ratio peaks 3.12x (w~0.65), NOT the naive ~2.3x from a few sampled w — sweep the ENTIRE w-grid before setting the bar (set 5.0).
 - PRODUCTION FLAG (open, -> next code-touching build): `fold_cusp_reference` emits RuntimeWarning "invalid value encountered in scalar divide" when the Pearcey reference is ALL-ZEROS (cusp cluster fully resolves -> uniform==0 for every node) because ratio = magnitude.min()/magnitude.max() is 0/0 before the isfinite guard catches it — guard magnitude.max()==0 first (the guard still declines correctly, just noisy).
 - TOOLING (same family as the insert_at_line gotcha): serena insert_before_symbol on a module constant can land MID-BLOCK — it split the `_CENSUS_W_GRID` `#:` doc-comment from its variable when the target constant's own comment block preceded it; verify surrounding structure after every such insert.
+
+
+## 2026-08-21 (low_w_shell_chart suite, test_lensing_low_w_shell_chart.py)
+
+- OFF-GRID 1e-4 NOT ACHIEVABLE AT SYNTHETIC SCALE for a residual with
+  genuine theta structure near the caustic: R = f_pure - born_lead_carrier
+  on a 480-node (4x4x6x5) fixture measures ~2e-2 off-grid; 8-12 theta nodes
+  plateau at ~9e-3..3e-3. Use a MEASURED 0.1 off-grid bar; node-exact
+  1e-10 round-trip (bit-exact ~1e-16) is the robust pin. (Same family as
+  '4-node w charts cannot hit off-grid 1e-4'.)
+- MACRO-LEAD CARRIER HAS CONSTANT MAGNITUDE: born_lead_carrier =
+  sqrt_mu*exp(1j w phi_geo) has |carrier|=sqrt_mu w-INDEPENDENT (no beating
+  zero), so a quotient residual f_pure/carrier does NOT trip the literal
+  'max|R|/max|F|<=10' no-poles cap at low w (~1) — the quotient's 5800x
+  poles must come from a DIFFERENT beating carrier. The no-poles
+  invariant's real teeth are the node-exact round-trip + falsification
+  controls, not the ratio cap.
+- RHO=1.4 HANDOFF IS ENGINE-SIDED, NOT CARRIER-SIDED: the honest 'no step'
+  pin = shell chart node-exact at its boundary node + Born carrier-only
+  certificate REFUSES at rho=1.4 (engine fallback) — NOT 'both arms
+  carrier-served at 1e-4' (the residual is ~1.5% at rho=1.4).
+- FALSIFICATION VIA CHEAP VECTOR ARITHMETIC (no 2nd engine bake): derive
+  wrong-residual charts from the exact chart's coeffs by adding the carrier
+  correction — doubled carrier: R_wrong = R_exact - carrier; unit sqrt_mu:
+  R_wrong = R_exact + carrier*(1 - 1/sqrt_mu); zero residual. Each breaks
+  node-exactness ~0.4-1.0.
+- TRAINER SCRIPT importlib GOTCHA: a scripts/ trainer imported via
+  spec_from_file_location MUST register in sys.modules BEFORE exec_module —
+  its `@dataclass` (e.g. _FillResult) does sys.modules.get(cls.__module__)
+  and raises AttributeError on an unregistered module.
+- End-to-end serve port: bind the UNBOUND _low_w_shell_chart_serve to a
+  SimpleNamespace (chart + lambdas) + reconstruct_farfield capture, stub
+  _engine_farfield_total to the _engine_reference_kappa oracle for
+  above-split nodes, kappa in {0,0.2} / beta in {0,0.3}; split wiring
+  pinned by asserting the host received dense_w[~below]; a straddling
+  fixture (w_shell inside the chart's log-w window) removes stubbing
+  ambiguity; interior grid nodes round-trip bit-exact (serve reconstructs
+  gamma'/rho/theta with ~1e-16 roundoff — edge nodes trip inclusive covers).

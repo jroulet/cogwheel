@@ -968,3 +968,57 @@
 - Non-vanishing guard: min|F_ref|/max|F_ref| < 1e-3 -> decline (the guard also catches the far-exterior cluster_sum->0 collapse; see professor_code_observations for the mechanism).
 - Low-w scaling: F_cusp ~ A w^{1/2} P -> 0 at w->0 so residual r ~ w^{-1/2} (bounded, ~55x dynamic range), unlike the Airy Wronskian (r -> w^{1/6} -> 0).
 - Serve re-modulates via the SAME fold_cusp_reference (single-source) — serve needs NO logic change, only the rename; census mirror unchanged.
+
+
+## 2026-08-21 (low_w_shell_born_extension build — plan + INS triage)
+
+- SHELL CHART REPLACES THE QUOTIENT CHART (kills partitioned_reference /
+  4-carrier F_ref / LowWDiffractiveChart / derate / declined_mask — 5800x
+  poles). NEW low_w_shell_chart: rho in [RHO_LO=0.6, RHO_HI=1.4], band
+  w*delta_min<1, MACRO-LEAD demodulated-DIFFERENCE residual R =
+  f_pure - born_lead_carrier (reduced frame, NO t_min demod — t_min demod
+  is a far-exterior/phi_geo≈t_min thing); serve F = mass_sheet_phase*
+  (carrier+R)/lam then _frame_phase into FARFIELD_DIFFRACTIVE; kappa!=0/
+  beta!=0 via reduced_shear (shell is a reduced-frame object). Gate:
+  delta_min = _reduced_min_delay_separation (min pairwise real-image gap,
+  reduced); BAND-SPLIT at w_shell = 1/delta_min (chart below, fold/tube/
+  engine above) — not whole-band decline. w-continuity at w*delta_min=1
+  needs NO new gate; the "no step" acceptance is at rho=1.4 (shell vs
+  Born, both 1e-4). Born theta=pi/4 fixed adequacy at rho=1.4 is
+  UNMEASURED — driver must azimuthal-sweep at rho=1.4 BEFORE re-train; if
+  N(theta)>8 extend shell upward instead of bolting theta onto Born. Node
+  budget 2-3 rho nodes [1.4,2.0], log_w down to ~0.3-0.5.
+  Simplifier: NEW FILE (delete old; 3 test files ref old name, 2 mock the
+  surviving _low_w_diffractive_serve, 1 is the dead quotient suite); DROP
+  derate+declined_mask (pole-free needs neither); KEEP route label
+  'low_w_diffractive_chart'; 4 WPs (shell class -> serve+Born gate ->
+  census -> trainers).
+- RHO-GAUGE SINGLE-SOURCE IS A CATEGORY ERROR ACROSS GAUGES (INS-3-001
+  SUPERSEDES INS-1-004): Born gate rho = ppgo_map.caustic_rho SCALAR-reach
+  gauge (|y|/caustic_reach, reach=max over angle); shell serve rho =
+  _diffractive._caustic_rho DIRECTIONAL gauge (sqrt(s)/|y_c(theta)|);
+  scalar<=directional always (reach/r_caustic in [1.45,6.2]) so the two
+  covered sets are DISJOINT with a theta-dependent gap served by the exact
+  engine. `_BORN_RHO_FLOOR = RHO_HI` therefore CROSSES GAUGES — decouple
+  to an independent `_BORN_RHO_FLOOR: float = 1.4` with an honest comment
+  (node-budget boundary lowered 2.0->1.4, NOT a physics law; no 'can never
+  drift apart' claim); pin value equality ONLY via test assertEqual(RHO_HI,
+  _BORN_RHO_FLOOR). Census mirror reads float(_BORN_RHO_FLOOR) so it
+  auto-follows.
+- CENSUS MIRROR MUST REPLICATE THE BAND SPLIT (INS-1-005): a whole-band
+  chart-consult admits only when the WHOLE band is smooth; production
+  band-splits at w_shell=1/delta_min — mirror via a w_split detail +
+  band_split_mask + covers on the below-split sub-band (below.any()
+  anti-vacuity).
+- INS-2-001 DESIGN triage (execute via TEST DEVELOPER, named explicitly in
+  coder_instructions — Coders never author tests): port ONLY the
+  serve-node-exact harness (stub _engine_farfield_total, the above-split
+  host) + load contract (6 physics arrays hashed, provenance EXCLUDED with
+  a negative tamper pin); ONE tamper mutation family; keep the ONE positive
+  control (rehashed tamper loads cleanly); straddle premise needs a
+  MEASURED delta_min + anti-vacuity below.any()/above.any(); t_min=0
+  intercept only (real-tail 1e-10 NOT guaranteed — catastrophic-
+  cancellation floor ~1.7e-11); folded theta must be a grid node; serve
+  never calls chart.covers (inline gates) so covers() tests don't pin
+  serve gating; scope the 'no f_schwinger' claim to the below-split band
+  only. ~+200 lines max.

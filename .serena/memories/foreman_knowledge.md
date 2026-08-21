@@ -195,3 +195,18 @@
 - When removing a dataclass STORAGE field, keep the LOCALLY-COMPUTED values that feed derived fields (branch/vertex/phi_ssr feed vertex/curvature/c4) — only the storage is dead; removing the local computations breaks the derived fields.
 - Mid-file function deletion via regex `\ndef NAME\(.*?<last-body-line>\n` with an EMPTY repl leaves the correct two-blank-line spacing; a single-newline repl leaves THREE blank lines (needs a cleanup pass).
 - SPEC-staleness scan after dropping a symbol: grep the SYMBOL name — SPEC goes stale only if the QUANTITY itself disappears; a quantity still computed locally (phi_ssr in the F074 serving-ladder formula) leaves no staleness.
+
+
+## 2026-08-21 (INS-3-002, dead-import removal)
+
+- DEAD-IMPORT REMOVAL RECIPE (single-line): `search_for_pattern` the
+  symbol across the WHOLE file to confirm the import line is the ONLY
+  occurrence (sibling files importing the symbol via their OWN imports are
+  untouched); one replace_content; verify via ast.parse + live import +
+  hasattr absent/present asserts; no pytest for an import-only zero-behavior
+  change. SPEC-staleness: grep the symbol name — stale only if the
+  QUANTITY disappears, not if a dead import is dropped.
+- TOOLING GOTCHA: a redundant second replace_content with the SAME needle
+  raises ValueError (no matches) after the first already applied — don't
+  read that as an edit failure; re-read the file to confirm the first edit
+  landed.

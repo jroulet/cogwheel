@@ -495,3 +495,43 @@
 - BUILD-PIPELINE sync_issues.json: a BUILD-pipeline librarian (no commit) must NOT delete `.claude/sync_issues.json` (the post-commit hook owns it) — absorb its deferred doc findings into the in-DAG run and let the next post-commit run find them resolved.
 - NEW FRAGILE CROSS-REF CLUSTER: SPEC.md + DATA_CONTRACTS.yaml now cite `fold_cusp_reference` + its `_NON_VANISHING_MIN_RATIO` guard — if the Airy-primary/Pearcey-fallback pairing or the guard is ever dropped, BOTH surfaces go stale together (same family as `_PPGO_BAR_DIVISOR`). `cusp_uniform_reference_grid` (the Pearcey leg's engine: cluster-only uniform, live quadrature, no serving gates) is not named in SPEC — add only if the cusp paragraph is next touched.
 - CODE-DOCSTRING FINDINGS ARE NOT LIBRARIAN-FIXABLE: a code docstring finding (fold_cusp_reference's guard rationale naming only the P~0 mechanism, missing the far-exterior cluster_sum->0 decline) is read-only for the librarian — flag it for the next code-touching build rather than editing code.
+
+
+## 2026-08-21 (low-w shell chart doc sync, INS-1-007 / INS-2-003)
+
+- KILLED-MODULE STALENESS AT WHOLE-ARTIFACT SCALE: a build that DELETES a
+  chart module + trainer + test file (LowWDiffractiveChart) and replaces
+  the artifact leaves SPEC.md's rung paragraph AND DATA_CONTRACTS.yaml's
+  artifact entry stale on EVERY clause — representation (quotient vs
+  macro-lead demodulated-difference), axis (w**(2/3) vs log w), margins
+  (derate/declined_mask vs none), coverage (union shell-OR-wall vs shell
+  box), schema, producer/consumer module names, and the census SERVE_ROUTES
+  label. Same family as 'SPEC cites a function by name', at whole-artifact
+  scale.
+- GATE-LITERAL STALENESS MUST SWEEP EVERY OCCURRENCE: a floor change to
+  `_BORN_RHO_FLOOR = 1.4` means sweeping ALL `rho > 2` texts (3 SPEC rows
+  + DATA_CONTRACTS `> 2.0`/`rho <= 2`/grid-node clauses) + any stale
+  "(classmethod not yet implemented)" parenthetical (the classmethod long
+  shipped).
+- THE GAUGE-DISJOINTNESS FACT IS THE DURABLE SPEC SENTENCE: Born floor 1.4
+  (scalar-reach ppgo_map.caustic_rho) and shell RHO_HI 1.4 (directional
+  _caustic_rho) are DIFFERENT physical surfaces — scalar<=directional
+  always, so a theta-dependent coverage GAP exists between shell and Born
+  at rho~1.4; record the disjointness fact, don't claim 'no gap no step'.
+- NEW FRAGILE CROSS-REF CLUSTER: LowWShellChart/low_w_shell_chart +
+  _SCHEMA='low_w_shell_v1' + RHO_LO=_DIFFRACTIVE_FIT_FENCE_RHO_LO /
+  RHO_HI=1.0+_DIFFRACTIVE_FIT_FENCE_DELTA + the w_shell=1/delta_min
+  band-split — if the shell rho band or fence pairing ever moves, BOTH
+  surfaces go stale together.
+- CENSUS-ROUTE-LIST ENUMERATION (rename variant, recurring): sweep on ANY
+  add/remove/RENAME of a route — this build renamed low_w_diffractive_chart
+  -> low_w_shell_chart with count unchanged at 12, still requiring the
+  tuple list + the parity-split waterfall sentence + the "exactly one of
+  TWELVE MECE routes" count check.
+- SPEC.md table-pipe escape: `|` must be escaped `\|` INSIDE a table row
+  (unescaped `measured |r| ~0.61-1.6` broke the column count 9->11);
+  verify column integrity by comparing unescaped-pipe counts (git show
+  HEAD vs worktree).
+- TRAINER RUNTIME CLAIM: don't invent a number for a re-trained grid's
+  runtime — drop the runtime sentence and keep "trained offline by
+  <script> (<grid>)".
