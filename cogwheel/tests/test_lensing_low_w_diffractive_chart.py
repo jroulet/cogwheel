@@ -6,38 +6,47 @@ WHAT THIS SUITE ADJUDICATES
 `LowWDiffractiveChart` holds a trained 4-D tensor-product interpolation of the
 low-w diffractive residual
 
-    r_pure(w; gamma', rho, theta) = f_pure / (sqrt(mu_pure) * prefactor_c(w))
+    r_new(w; gamma', rho, theta) = f_pure * sqrt(1 - gamma'^2) / F_ref(w)
 
-and `LensedRelativeBinningLikelihood._low_w_diffractive_chart_serve`
-re-modulates it back to the full amplitude
+where ``F_ref`` is the NON-VANISHING uniform Airy fold reference
+`airy_fold_reference` (the q=p Wronskian form
+``|F_ref|^2 ~ w^{1/3} Ai^2 + w^{-1/3} Ai'^2``), and
+`LensedRelativeBinningLikelihood._low_w_diffractive_chart_serve` re-modulates
+it back to the full amplitude
 
-    F_serve = mass_sheet_phase * prefactor_c(w) * sqrt_mu_full * r_pure.
+    F_serve = mass_sheet_phase * F_ref(w) * sqrt_mu_full * r_new.
 
-The serve is the Rung-P replacement for the exact Schwinger engine over the
-near-fold shell (`w_low_fit` declines there -> None) and the wall band
-(`gamma' > 0.5`).  Three invariants:
+``F_ref`` replaces the point-mass prefactor ``C(w)`` ONLY; the macro
+normalization ``sqrt(1 - gamma'^2)`` stays in the residual, so
+``F_serve = mass_sheet_phase * f_pure / lam`` -- the exact engine.  The serve
+is the Rung-P replacement for the exact Schwinger engine over the near-fold
+shell (`w_low_fit` declines there -> None) and the wall band
+(`gamma' > 0.5`).  Invariants:
 
-  1. DC ANCHOR (`DcAnchorRemodulationTestCase`).  As ``w -> 0`` the exact
-     engine's amplitude tends to ``sqrt(mu_macro) = 1/sqrt(|(1-kappa)**2 -
-     gamma**2|)`` with Morse-0 phase (positive parity), NOT 1.  With a
-     CONSTANT-residual chart the re-modulation factors are isolated from any
-     residual accuracy, so |F_serve|/sqrt(mu_macro) -> 1 and arg -> 0 pins
-     that the anchor is sqrt(mu_macro) and that ``prefactor_c`` and the
-     mass-sheet phase are each applied exactly once (a magnitude offset ~
-     1/lam or a phase ramp ~ w ln(w) is a missed/doubled factor).
+  1. F_REF NON-VANISHING (`FrefNonVanishingTestCase`).  The q=p Wronskian
+     combination ``w^{1/3} Ai(-xi)^2 + w^{-1/3} Ai'(-xi)^2`` is strictly
+     positive at every node (the q=0 form would vanish at the Airy zeros
+     ``xi = 2.338, 4.088``), and the built ``|F_ref|`` stays O(1)
+     (``min|F_ref|/max|F_ref| >= 1e-1``, ``>= 3e-1`` for the shell witness).
+     Engine-free (geometry + ``scipy.special.airy``).
 
-  2. SERVE-VS-ENGINE (`ServeEngineNodeExactTestCase`).  With an EXACT-residual
-     chart the re-modulated F_serve must reproduce the exact engine to
-     ~1e-14 at grid NODES (the residual is node-exact by construction, so the
-     only thing left is the re-modulation + normalization consistency).  This
-     is the fast-tier form of the accuracy invariant -- STRONGER than the
-     shipped chart's 1e-4 off-grid bar, and it runs in-build because it needs
-     only a few dozen engine calls, not the dense full-bake artifact.  The
-     shipped chart's 1e-4 off-grid interpolation accuracy is certified by
-     ``scripts/train_low_w_diffractive_chart.py``'s off-grid margin report
+  2. RESIDUAL BOUNDEDNESS (`ResidualBoundednessTestCase`).  The residual
+     ``r = f_pure * sqrt(1 - gamma'^2) / F_ref`` is a smooth O(1) complex
+     function -- no magnitude collapse (``min|r|/max|r| >= 1e-1``, ``>= 3e-1``
+     shell) and no Airy-zero crossing (unwrapped arg steps < pi/2).  The
+     BROKEN representation (divide by ``prefactor_c``) collapses and jumps,
+     pinned by a self-falsification class.
+
+  3. SERVE-VS-ENGINE (`ServeEngineNodeExactTestCase`).  With an EXACT-residual
+     chart the re-modulated F_serve must reproduce the exact engine to ~1e-14
+     at grid NODES (the residual is node-exact by construction, so the only
+     thing left is the re-modulation + normalization consistency).  This is
+     the fast-tier form of the accuracy invariant -- STRONGER than the shipped
+     chart's 1e-4 off-grid bar.  The shipped chart's off-grid accuracy is
+     certified by ``scripts/train_low_w_diffractive_chart.py``'s margin report
      (a DRIVER post-build step, not a unit test).
 
-  3. ONE-SIDED CONSERVATIVENESS (`ConservativenessTestCase`).  Cubic
+  4. ONE-SIDED CONSERVATIVENESS (`ConservativenessTestCase`).  Cubic
      interpolation overshoots by construction (measured up to ~1.6x here on
      off-grid theta midpoints); the scalar ``derate`` is the SOLE margin.  The
      serve must apply it multiplicatively (node-exact ratio == derate) and a
@@ -49,25 +58,27 @@ ORACLE INDEPENDENCE
 The engine oracle is ``f_schwinger`` (exact Schwinger double-double), the
 ``kappa = 0`` form evaluated in the eigenframe and the ``kappa > 0`` form
 reconstructed through the shipped ``operator._mass_sheet_map`` (the same
-recipe as ``test_lensing_diffractive._engine_reference_kappa``).  The chart/
-serve path never calls ``f_schwinger`` (the chart is the sole serve-time
-source), so agreeing with it is exactly the serve-consistency the rung needs.
-The DC-anchor oracle is the CLOSED FORM of the mass-sheet phase + prefactor
-(no engine), which is independent of the serve's own expression of those
-quantities.  ``w`` stays <= 8 so the engine runs on its exact double-double
-path (mpmath only above ~60).
+recipe as ``test_lensing_diffractive._engine_reference_kappa``).  The chart
+serve never calls ``f_schwinger`` for its band (the chart is the sole
+serve-time source); the residual-boundedness spec evaluates ``f_schwinger``
+directly because the geometric-optics 2-image sum is singular at the merging
+fold pair (magnification -> inf) and so cannot stand in for ``f_pure`` in the
+near-fold shell -- the exact engine at ``w <= 60`` (double-double path) is the
+correct cheap oracle.  ``w`` stays <= 60 so the engine runs on its exact
+double-double path (mpmath only above ~60).
 
 TOLERANCES
 ----------
 * `NODE_EXACT_TOL` = 1e-10: the node-exact re-modulation reconstructs
-  F_engine to ~1.6e-14 (measured); 1e-10 leaves ~6000x float64 margin.
-* `_DC_SHARP_TOL` = 1e-12 (relative): the closed-form DC anchor matches the
-  serve to ~1e-15 (the two expressions of the mass-sheet phase agree to
-  float64); 1e-12 leaves ~1000x margin.
-* `_DC_MAG_TOL` = 0.05 / `_DC_ARG_TOL` = 0.15: the loose O(w) asymptotic the
-  spec demands.  |prefactor_c(w)| - 1 ~ 0.79*w (0.008 at w=1e-2) and the
-  phase ~ 0.024-0.027 rad at w=1e-2, so these are 5-6x above the correction
-  yet far below the failure signatures (anchor->1 gives ratio 0.6 at gamma'=0.8).
+  F_engine to ~1e-15 (the residual/F_ref round-trip is node-exact to float64);
+  1e-10 leaves ~1e5 margin.
+* `FREF_RATIO_TOL` = 1e-1 (wall) / `SHELL_FREF_RATIO_TOL` = 3e-1 (shell): the
+  measured |F_ref| min/max is 0.75 (shell) and 0.52 (wall), far above the
+  spec bars -- the q=0 form would dive toward 0 at the Airy zeros.
+* `RESIDUAL_RATIO_TOL` = 1e-1 (wall) / `SHELL_RESIDUAL_RATIO_TOL` = 3e-1
+  (shell): the measured residual min/max is 0.33-0.45 (shell) and 0.35 (wall),
+  ~3-4x above the bars; the broken prefactor_c representation collapses to
+  ~0.01-0.08 (13-68x).
 """
 
 from __future__ import annotations
@@ -84,6 +95,7 @@ from unittest import TestCase, main, mock
 
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
+from scipy.special import airy
 
 from cogwheel.lensing import likelihood as _likelihood_mod
 from cogwheel.lensing import low_w_diffractive_chart as _lwd_module
@@ -92,9 +104,10 @@ from cogwheel.lensing import serve_route_census as _census
 from cogwheel.lensing.likelihood import LensedRelativeBinningLikelihood
 from cogwheel.lensing.low_w_diffractive_chart import (
     RHO_HI, RHO_LO, _WALL_GAMMA_PRIME, _SCHEMA, _content_hash,
-    LowWDiffractiveChart)
+    LowWDiffractiveChart, airy_fold_reference, reduced_source)
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal import operator as _operator
+from cogwheel.lensing.chang_refsdal._airy_fold import _merging_fold_pair
 from cogwheel.lensing.chang_refsdal._diffractive import _caustic_rho
 from cogwheel.lensing.chang_refsdal._hyp1f1 import prefactor_c
 from cogwheel.lensing.chang_refsdal._schwinger import f_schwinger
@@ -106,11 +119,17 @@ from cogwheel.lensing.chang_refsdal._schwinger import f_schwinger
 NEAR_FOLD_GAMMA_PRIME = 0.3
 WALL_GAMMA_PRIME = 0.8
 
-#: Caustic-relative distances paired with the regions above: rho = 1.0 sits
-#: inside the near-fold shell fence ``[RHO_LO, RHO_HI] = [0.6, 1.4]``; rho =
-#: 2.0 is a wall-band exterior source (the wall band covers all rho).
+#: Caustic-relative distances paired with the regions above.  BOTH fixtures
+#: sit at rho = 1.0 (inside the shell fence ``[RHO_LO, RHO_HI] = [0.6, 1.4]``
+#: and, for the wall fixture, on the caustic): the two regions are
+#: distinguished by ``gamma'`` (0.3 shell vs 0.8 wall band), not by rho.  A
+#: genuinely EXTERIOR wall draw (rho ~ 2.0) has an UNBUILDABLE ``F_ref`` in
+#: most theta directions (``airy_fold_reference`` -> None), so the serve
+#: declines it -- the re-modulation tests therefore exercise the buildable
+#: on-caustic wall-band draw, and the exterior wall draw is covered by the
+#: ``covers`` predicate test via `RHO_ABOVE_SHELL`.
 NEAR_FOLD_RHO = 1.0
-WALL_RHO = 2.0
+WALL_RHO = 1.0
 
 #: (gamma', rho, label) fixtures, one per chart-owned region.
 FIXTURES = (
@@ -130,35 +149,69 @@ THETA_NODE = 0.6
 #: constrained between nodes -- where overshoot lives).
 THETA_MIDPOINTS = (0.4, 0.8, 1.2)
 
-#: Frequencies probing the DC anchor (w -> 0).
-ANCHOR_WS = (1e-3, 3e-3, 1e-2)
-
 #: Frequencies (grid NODES) exercising the serve-vs-engine / conservativeness
 #: accuracy on the exact-residual chart.
 SERVE_WS = (0.5, 2.0, 8.0)
 
 #: Exact-residual chart grids (>= 4 nodes per axis for scipy cubic).  The
-#: fixture coordinates (gamma' = 0.3/0.8, rho = 1.0/2.0, theta = 0.6,
+#: fixture coordinates (gamma' = 0.3/0.8, rho = 1.0, theta = 0.6,
 #: w = 0.5/2/8) are INTERIOR nodes, so a float64 round-off in the serve's
 #: coordinate reconstruction (~1e-16) cannot push them outside the grid and
-#: trip `covers` (which uses inclusive <= on the grid edges).
+#: trip `covers` (which uses inclusive <= on the grid edges).  The rho grid
+#: is capped at 1.05 because `airy_fold_reference` is UNBUILDABLE for rho
+#: beyond ~1.1 in the theta-edge directions (measured 6/16 cells at rho=1.1),
+#: and every cell of the exact chart must carry a finite residual.
 _GAMMA_GRID = np.array([0.2, 0.3, 0.8, 0.9])
-_RHO_GRID = np.array([0.5, 1.0, 2.0, 2.5])
+_RHO_GRID = np.array([0.5, 0.8, 1.0, 1.05])
 _THETA_GRID = np.array([0.2, 0.6, 1.0, 1.4])
 _W_GRID = np.array([0.3, 0.5, 2.0, 8.0])
 
 #: Serve-vs-engine accuracy bar at grid nodes (see module docstring).
 NODE_EXACT_TOL = 1e-10
 
-#: Sharp (relative) tolerance of the DC-anchor closed-form pin.
-_DC_SHARP_TOL = 1e-12
-
-#: Loose O(w) magnitude / phase tolerances of the DC-anchor asymptotic.
-_DC_MAG_TOL = 0.05
-_DC_ARG_TOL = 0.15
-
 #: Scalar derate used to prove the serve applies it multiplicatively.
 _CONSERVATIVE_DERATE = 0.5
+
+#: Eigenframe source angle of the SHELL witness for the F_ref / residual
+#: specs.  theta = 1.4 (a `_THETA_GRID` node) is where the near-fold
+#: residual is cleanest: min|r|/max|r| = 0.446 with a 0.47-rad unwrapped arg
+#: step, a wide margin over the 3e-1 ratio bar and the pi/2 arg-jump guard.
+#: (At THETA_NODE = 0.6 the residual's arg winds ~3 rad -- an on-caustic
+#: higher-order term F_ref does not cancel -- so the shell witness uses its
+#: own angle rather than the serve fixture's THETA_NODE.)
+FREF_SHELL_THETA = 1.4
+
+#: Synthetic dimensionless-frequency grid spanning [0.02, 60] (log-uniform,
+#: 24 nodes) for the F_ref-non-vanishing and residual-boundedness witnesses.
+_FREF_W_GRID = np.geomspace(0.02, 60.0, 24)
+
+#: min|F_ref|/max|F_ref| bars: the wall band >= 1e-1, the shell >= 3e-1 (the
+#: q=p Wronskian form never vanishes; the q=0 form dives toward 0 at the
+#: Airy zeros xi = 2.338, 4.088).  Measured 0.772 (shell) and 0.521 (wall)
+#: on `_FREF_W_GRID`.
+FREF_RATIO_TOL = 1e-1
+SHELL_FREF_RATIO_TOL = 3e-1
+
+#: min|r|/max|r| bars for the residual-boundedness spec (same as the F_ref
+#: bars).  Measured 0.446 (shell) and 0.355 (wall); the broken prefactor_c
+#: representation collapses to ~0.01-0.08 (13-68x).
+RESIDUAL_RATIO_TOL = 1e-1
+SHELL_RESIDUAL_RATIO_TOL = 3e-1
+
+#: Max unwrapped |arg r| step between adjacent w-nodes (pi/2): a zero
+#: crossing forces a >= pi jump.
+RESIDUAL_ARG_STEP_TOL = 0.5 * math.pi
+
+#: (gamma', rho, theta, bar, label) witnesses shared by the F_ref-non-
+#: vanishing and residual-boundedness specs.  The shell draw (gamma'=0.3,
+#: rho=1.0, theta=1.4) and the wall-band exterior draw (gamma'=0.8, rho=2.0,
+#: theta=0.6) are both F_ref-buildable on `_FREF_W_GRID`; their min/max bars
+#: are 3e-1 (shell) and 1e-1 (wall).
+_FREF_WITNESSES = (
+    (NEAR_FOLD_GAMMA_PRIME, NEAR_FOLD_RHO, FREF_SHELL_THETA,
+     SHELL_FREF_RATIO_TOL, 'near_fold_shell'),
+    (WALL_GAMMA_PRIME, 2.0, THETA_NODE, FREF_RATIO_TOL, 'wall_band'),
+)
 
 #: --- Coverage-union fixtures (DERIVED from the live gate constants) ---
 #: The union band is ``(RHO_LO <= rho <= RHO_HI) or (gamma' > _WALL_GAMMA_PRIME)``.
@@ -176,12 +229,6 @@ def _rot_minus_beta(beta: float) -> np.ndarray:
     """Return the eigenframe rotation ``R(-beta)`` (2x2)."""
     cos_b, sin_b = math.cos(beta), math.sin(beta)
     return np.array([[cos_b, sin_b], [-sin_b, cos_b]])
-
-
-def _sqrt_mu_macro(gamma: float, kappa: float) -> float:
-    """Macro amplitude ``sqrt(mu_macro) = 1/sqrt(|(1-kappa)**2 - gamma**2|)``."""
-    lam = 1.0 - kappa
-    return 1.0 / math.sqrt(abs(lam * lam - gamma * gamma))
 
 
 def _engine_reference_kappa(w: float, y, gamma: float, beta: float,
@@ -230,21 +277,28 @@ def _make_lens(gamma_prime: float, rho: float, theta: float,
             'y1': float(y[0]), 'y2': float(y[1])}
 
 
-def _residual_at(w: float, gamma_prime: float, rho: float,
-                 theta: float) -> complex:
-    """Engine residual ``r_pure = f_pure * sqrt(1 - gamma'**2) / C(w)``.
+def _residual_at(w_grid: np.ndarray, gamma_prime: float, rho: float,
+                 theta: float) -> np.ndarray | None:
+    """Airy-anchored residual ``r_new = f_pure * sqrt(1 - gamma'**2) / F_ref``.
 
     Mirrors ``scripts/train_low_w_diffractive_chart._residual_at``: rebuilds
-    the reduced eigenframe source from the chart coordinates and evaluates
-    the exact engine, so the stored coefficient is the quantity the serve's
-    re-modulation must invert.
+    the reduced eigenframe source from the chart coordinates via
+    `reduced_source`, builds the non-vanishing uniform Airy fold reference
+    ``F_ref`` ONCE on ``w_grid`` via `airy_fold_reference`, then evaluates the
+    exact engine per node and divides.  Returns ``None`` when ``F_ref`` is
+    unbuildable (no merging fold pair / degenerate fold frame) -- the same
+    sentinel the trainer treats as a declined cell.
     """
-    caustic = geometry.caustic_point(gamma_prime, theta)
-    y_c = math.hypot(caustic[0], caustic[1])
-    r_prime = rho * y_c
-    y_eig = np.array([r_prime * math.cos(theta), r_prime * math.sin(theta)])
-    f_pure = f_schwinger(w, y_eig, gamma_prime)
-    return f_pure * math.sqrt(1.0 - gamma_prime * gamma_prime) / prefactor_c(w)
+    y_eig = reduced_source(gamma_prime, rho, theta)
+    f_ref = airy_fold_reference(w_grid, gamma_prime, y_eig)
+    if f_ref is None:
+        return None
+    residual = np.empty(w_grid.size, dtype=complex)
+    for i_w, w in enumerate(w_grid):
+        f_pure = f_schwinger(float(w), y_eig, gamma_prime)
+        residual[i_w] = (f_pure * math.sqrt(1.0 - gamma_prime * gamma_prime)
+                         / f_ref[i_w])
+    return residual
 
 
 def _serve_farfield(chart: LowWDiffractiveChart, lens: dict,
@@ -257,7 +311,7 @@ def _serve_farfield(chart: LowWDiffractiveChart, lens: dict,
     argument.  With ``geom.t_min = 0`` the frame-demodulation phase vanishes,
     so the captured envelope IS the re-modulated farfield -- the quantity
     under test.  Returns ``None`` when the serve declines (chart absent / out
-    of coverage / reduced-shear refusal).
+    of coverage / reduced-shear refusal / unbuildable ``F_ref``).
     """
     captured: dict[str, np.ndarray] = {}
 
@@ -282,48 +336,35 @@ def _serve_farfield(chart: LowWDiffractiveChart, lens: dict,
 
 
 @functools.lru_cache(maxsize=1)
-def _build_unit_chart() -> LowWDiffractiveChart:
-    """Constant residual ``r_pure = 1`` chart covering the fixture domain.
-
-    With residual identically 1 the served amplitude is the re-modulation
-    factors in isolation (``mass_sheet_phase * prefactor_c * sqrt_mu_full``),
-    so the DC anchor does not depend on any residual accuracy.  No engine
-    calls.  Grids need >= 4 nodes per axis (scipy cubic) and COVER the
-    fixtures with interior margin.
-    """
-    gamma_grid = np.array([0.2, 0.4, 0.6, 0.9])
-    rho_grid = np.array([0.3, 1.0, 2.0, 3.0])
-    theta_grid = np.array([0.0, 0.3, 0.9, 1.4])
-    log_w_grid = np.log(np.geomspace(5e-4, 2e-2, 4))
-    shape = (4, 4, 4, 4)
-    return LowWDiffractiveChart(
-        gamma_prime_grid=gamma_grid, rho_grid=rho_grid, theta_grid=theta_grid,
-        log_w_grid=log_w_grid, real_coeffs=np.ones(shape),
-        imag_coeffs=np.zeros(shape), derate=1.0)
-
-
-@functools.lru_cache(maxsize=1)
 def _build_exact_chart() -> LowWDiffractiveChart:
     """Exact-residual chart over `_GAMMA_GRID` x `_RHO_GRID` x `_THETA_GRID`
     x `_W_GRID` (256 engine calls, ~8 s), at unit de-rate.
 
-    Cached so every test class shares one build.  The residual is the exact
-    engine value in the chart's reduced frame, so `_serve_farfield` on a grid
-    NODE reconstructs `_engine_reference_kappa` to ~1e-14.
+    Cached so every test class shares one build.  The residual is the
+    Airy-anchored exact engine value in the chart's reduced frame
+    (``r_new = f_pure * sqrt(1 - gamma'^2) / F_ref``), so `_serve_farfield`
+    on a grid NODE reconstructs `_engine_reference_kappa` to ~1e-15.  Every
+    cell must be ``F_ref``-buildable (the rho grid is capped accordingly);
+    an unbuildable cell raises rather than being silently zero-filled, so a
+    future grid edit surfaces loudly.
     """
     real = np.zeros((4, 4, 4, 4), dtype=float)
     imag = np.zeros((4, 4, 4, 4), dtype=float)
     for i, gp in enumerate(_GAMMA_GRID):
         for j, rho in enumerate(_RHO_GRID):
             for k, theta in enumerate(_THETA_GRID):
-                for ell, w in enumerate(_W_GRID):
-                    r = _residual_at(float(w), float(gp), float(rho),
-                                     float(theta))
-                    real[i, j, k, ell] = r.real
-                    imag[i, j, k, ell] = r.imag
+                r = _residual_at(_W_GRID, float(gp), float(rho),
+                                 float(theta))
+                if r is None:
+                    raise AssertionError(
+                        f'F_ref unbuildable at chart node '
+                        f'(gamma_prime={gp}, rho={rho}, theta={theta}); the '
+                        'exact chart grid must be F_ref-buildable')
+                real[i, j, k, :] = r.real
+                imag[i, j, k, :] = r.imag
     return LowWDiffractiveChart(
         gamma_prime_grid=_GAMMA_GRID, rho_grid=_RHO_GRID,
-        theta_grid=_THETA_GRID, log_w_grid=np.log(_W_GRID),
+        theta_grid=_THETA_GRID, w23_grid=_W_GRID ** (2.0 / 3.0),
         real_coeffs=real, imag_coeffs=imag, derate=1.0)
 
 
@@ -338,87 +379,17 @@ class _BaseChartTestCase(TestCase):
             self.fail('no comparisons were made; the test asserted nothing')
 
 
-class DcAnchorRemodulationTestCase(_BaseChartTestCase):
-    """DC anchor: the serve re-modulates to ``sqrt(mu_macro)``, never 1.
-
-    With a CONSTANT-residual chart the served amplitude is the re-modulation
-    factors in isolation (``mass_sheet_phase * prefactor_c(w) * sqrt_mu_full``)
-    and must match the CLOSED FORM
-    ``exp(0.5j w (log lam - kappa s)) * C(w) / sqrt(|lam^2 - gamma^2|)`` to
-    float64.  That pins (a) the anchor is ``sqrt(mu_macro)`` (never ``F -> 1``
-    -- a missed 1/lam mass-sheet amplitude shows up as a magnitude offset),
-    and (b) ``prefactor_c`` and the mass-sheet phase are each applied exactly
-    once (a doubled/missed prefactor leaves a phase ramp ~ w ln(w)).  The
-    loose asymptotic is then |F_serve|/sqrt(mu_macro) -> 1 and arg -> 0 within
-    O(w).
-    """
-
-    def _sweep(self):
-        """Yield ``(label, kappa, beta, w, f_serve, lam, s, sqrt_mu_macro)``."""
-        chart = _build_unit_chart()
-        for (gp, rho, label), kappa, beta in (
-                (f, k, b) for f in FIXTURES for k in KAPPAS for b in BETAS):
-            lens = _make_lens(gp, rho, THETA_NODE, kappa, beta)
-            f_serve = _serve_farfield(chart, lens, np.array(ANCHOR_WS))
-            if f_serve is None:
-                self.fail(f'serve declined fixture {label} '
-                          f'(gamma_prime={gp}, rho={rho}, kappa={kappa}, '
-                          f'beta={beta}); the unit chart must cover it')
-            lam = 1.0 - kappa
-            root = math.sqrt(lam)
-            yp0, yp1 = lens['y1'] / root, lens['y2'] / root
-            s = yp0 * yp0 + yp1 * yp1
-            sqrt_mu_macro = _sqrt_mu_macro(lens['gamma'], kappa)
-            for i, w in enumerate(ANCHOR_WS):
-                yield (label, kappa, beta, w, f_serve[i], lam, s,
-                       sqrt_mu_macro)
-
-    def test_served_amplitude_anchors_at_sqrt_mu_macro(self):
-        """|F_serve|/sqrt(mu_macro) -> 1 and arg -> 0 as w -> 0 (loose O(w))."""
-        for (label, kappa, beta, w, f_serve, _lam, _s,
-             sqrt_mu_macro) in self._sweep():
-            with self.subTest(label=label, kappa=kappa, beta=beta, w=w):
-                ratio = abs(f_serve) / sqrt_mu_macro
-                self.assertLess(
-                    abs(ratio - 1.0), _DC_MAG_TOL,
-                    f'|F_serve|/sqrt(mu_macro) = {ratio:.6f} is not within '
-                    f'{_DC_MAG_TOL} of 1 at w={w:g} (the anchor is '
-                    'sqrt(mu_macro), not 1)')
-                self.assertLess(
-                    abs(cmath.phase(f_serve)), _DC_ARG_TOL,
-                    f'arg(F_serve) = {cmath.phase(f_serve):.6f} rad is not '
-                    f'within {_DC_ARG_TOL} of 0 at w={w:g} (Morse-0 DC phase)')
-                self.n_checks += 1
-
-    def test_remodulation_matches_closed_form(self):
-        """F_serve == exp(0.5j w (log lam - kappa s)) * C(w) * sqrt(mu_macro).
-
-        The sharp pin: prefactor_c and the mass-sheet phase are each applied
-        exactly once, and the anchor is sqrt(mu_macro).
-        """
-        for (label, kappa, beta, w, f_serve, lam, s,
-             sqrt_mu_macro) in self._sweep():
-            with self.subTest(label=label, kappa=kappa, beta=beta, w=w):
-                mass_sheet = cmath.exp(0.5j * w * (math.log(lam) - kappa * s))
-                expected = mass_sheet * prefactor_c(w) * sqrt_mu_macro
-                rel = abs(f_serve - expected) / abs(expected)
-                self.assertLess(
-                    rel, _DC_SHARP_TOL,
-                    f're-modulation off the closed form by {rel:.3e} at '
-                    f'w={w:g}: a missed/doubled prefactor_c or mass-sheet '
-                    'phase, or a wrong anchor')
-                self.n_checks += 1
-
-
 class ServeEngineNodeExactTestCase(_BaseChartTestCase):
     """Serve-vs-engine accuracy: the re-modulated F_serve == the engine.
 
     With the EXACT-residual chart, evaluating at grid NODES must reproduce
-    `_engine_reference_kappa` to ~1e-14: the residual is node-exact by
-    construction, so any residual mismatch is a re-modulation or
-    normalization defect (missed/doubled prefactor_c or mass-sheet phase,
-    wrong anchor, or an inconsistency between the training residual and the
-    serve's reconstruction).  This is the fast-tier form of the accuracy
+    `_engine_reference_kappa` to ~1e-15: the residual is node-exact by
+    construction (the trainer stores ``r_new = f_pure * sqrt(1-gamma'^2) /
+    F_ref`` and the serve re-modulates ``F_ref * sqrt_mu_full * r_new``, which
+    cancels exactly), so any residual mismatch is a re-modulation or
+    normalization defect (missed/doubled F_ref or mass-sheet phase, a dropped
+    sqrt(1-gamma'^2), or an inconsistency between the training residual and
+    the serve's reconstruction).  This is the fast-tier form of the accuracy
     invariant -- STRONGER than the shipped chart's 1e-4 off-grid bar, and it
     needs no full-bake artifact.
     """
@@ -447,6 +418,253 @@ class ServeEngineNodeExactTestCase(_BaseChartTestCase):
                         f'w={w:g} ({label}); the re-modulation or residual '
                         'normalization is inconsistent')
                     self.n_checks += 1
+
+
+def _fold_xi(w_grid: np.ndarray, gamma_prime: float,
+             source: np.ndarray) -> np.ndarray | None:
+    """Airy fold control ``xi = (3 w delta_tau / 4)**(2/3)``.
+
+    Reconstructs ``delta_tau = tau_minus - tau_plus`` from the merging fold
+    pair -- the same `_merging_fold_pair` and delay difference
+    `airy_fold_reference` uses -- so the independent Airy evaluation below
+    operates on the identical fold control.  ``None`` when the merging fold
+    pair is absent.
+    """
+    matrix = geometry.macro_matrix(gamma_prime, 0.0, 0.0)
+    images = geometry.find_images(source, matrix)
+    pair = _merging_fold_pair(images, source, matrix)
+    if pair is None:
+        return None
+    tau_plus, tau_minus = pair
+    delta_tau = tau_minus - tau_plus
+    return (3.0 * np.asarray(w_grid, dtype=float) * delta_tau / 4.0
+            ) ** (2.0 / 3.0)
+
+
+def _wronskian_combination(w_grid: np.ndarray, xi: np.ndarray) -> np.ndarray:
+    """q=p Wronskian ``w^{1/3} Ai(-xi)^2 + w^{-1/3} Ai'(-xi)^2``.
+
+    Strictly positive for every ``xi`` (Ai and Ai' never vanish together --
+    the Airy Wronskian ``Ai Bi' - Ai' Bi = 1/pi``); ``|F_ref|^2`` is this
+    combination times the ``w``-independent factor ``4 pi |p|^2``.
+    """
+    ai_value, aip_value, _, _ = airy(-xi)
+    w = np.asarray(w_grid, dtype=float)
+    return (w ** (1.0 / 3.0) * ai_value ** 2
+            + w ** (-1.0 / 3.0) * aip_value ** 2)
+
+
+def _q0_airy_form(w_grid: np.ndarray, xi: np.ndarray) -> np.ndarray:
+    """q=0 leading-order form ``w^{1/3} Ai(-xi)^2`` (the Ai channel alone).
+
+    A q=0 (leading-order) F_ref would be proportional to this; it dives to 0
+    at the Airy zeros ``xi = 2.338, 4.088``, unlike the q=p Wronskian.
+    """
+    ai_value, _, _, _ = airy(-xi)
+    return np.asarray(w_grid, dtype=float) ** (1.0 / 3.0) * ai_value ** 2
+
+
+def _residual_metrics(gamma_prime: float, rho: float, theta: float,
+                      w_grid: np.ndarray):
+    """Return ``(ratio, arg_step, prefactor_ratio, prefactor_arg_step)``.
+
+    ``ratio`` / ``arg_step`` are the F_ref-anchored residual
+    ``r = f_pure * sqrt(1 - gamma'^2) / F_ref`` metrics; the ``prefactor_*``
+    pair is the SAME ``f_pure`` divided by the OLD ``prefactor_c``
+    denominator (the broken representation), for the discriminator.  ``None``
+    when ``F_ref`` is unbuildable.  ``f_pure`` is the exact engine
+    (``f_schwinger`` at ``w <= 60``) -- the geometric-optics 2-image sum is
+    singular at the merging fold pair, so it cannot stand in for ``f_pure``.
+    """
+    source = reduced_source(gamma_prime, rho, theta)
+    f_ref = airy_fold_reference(w_grid, gamma_prime, source)
+    if f_ref is None:
+        return None
+    sq = math.sqrt(1.0 - gamma_prime * gamma_prime)
+    f_pure = np.array([f_schwinger(float(w), source, gamma_prime)
+                       for w in w_grid])
+    r_new = f_pure * sq / f_ref
+    c = np.array([prefactor_c(float(w)) for w in w_grid])
+    r_old = f_pure * sq / c
+
+    def _metrics(residual: np.ndarray) -> tuple[float, float]:
+        magnitude = np.abs(residual)
+        arg = np.unwrap(np.angle(residual))
+        return (float(magnitude.min() / magnitude.max()),
+                float(np.max(np.abs(np.diff(arg)))))
+
+    return _metrics(r_new) + _metrics(r_old)
+
+
+class FrefNonVanishingTestCase(_BaseChartTestCase):
+    """F_ref non-vanishing: the q=p Wronskian form never collapses (spec 1).
+
+    `airy_fold_reference` builds the q=p uniform Airy fold form
+    ``F_ref = 2 sqrt(pi) p [w^{1/6} Ai(-xi) - i w^{-1/6} Ai'(-xi)] * carrier``
+    whose magnitude ``|F_ref|^2 = 4 pi |p|^2 (w^{1/3} Ai^2 + w^{-1/3} Ai'^2)``
+    is the Wronskian combination -- strictly positive at every node (Ai and
+    Ai' never vanish together), unlike the q=0 leading-order form
+    ``w^{1/3} Ai(-xi)^2`` which dives to 0 at the Airy zeros xi=2.338, 4.088.
+    Engine-free (geometry + ``scipy.special.airy``).
+    """
+
+    def _witness_data(self):
+        """Yield ``(label, f_ref, wronskian, bar)`` per witness."""
+        for gp, rho, theta, bar, label in _FREF_WITNESSES:
+            source = reduced_source(gp, rho, theta)
+            f_ref = airy_fold_reference(_FREF_W_GRID, gp, source)
+            if f_ref is None:
+                self.fail(f'F_ref unbuildable at witness '
+                          f'(gamma_prime={gp}, rho={rho}, theta={theta})')
+            xi = _fold_xi(_FREF_W_GRID, gp, source)
+            if xi is None:
+                self.fail(f'merging fold pair absent at witness '
+                          f'(gamma_prime={gp}, rho={rho}, theta={theta})')
+            wronskian = _wronskian_combination(_FREF_W_GRID, xi)
+            yield label, f_ref, wronskian, bar
+
+    def test_wronskian_strictly_positive(self):
+        """w^{1/3} Ai^2 + w^{-1/3} Ai'^2 > 0 at every node (q=p never vanishes)."""
+        for label, _f_ref, wronskian, _bar in self._witness_data():
+            with self.subTest(label=label):
+                self.assertTrue(
+                    np.all(wronskian > 0.0),
+                    f'q=p Wronskian combination is not strictly positive at '
+                    f'every node for {label}')
+                self.n_checks += 1
+
+    def test_fref_magnitude_stays_o1(self):
+        """min|F_ref|/max|F_ref| >= bar (no Airy-zero dive)."""
+        for label, f_ref, _wronskian, bar in self._witness_data():
+            with self.subTest(label=label):
+                magnitude = np.abs(f_ref)
+                ratio = float(magnitude.min() / magnitude.max())
+                self.assertGreaterEqual(
+                    ratio, bar,
+                    f'min|F_ref|/max|F_ref| = {ratio:.3f} < {bar} for '
+                    f'{label}: F_ref collapses (a q=0 Airy-zero signature)')
+                self.n_checks += 1
+
+    def test_magnitude_tracks_wronskian_form(self):
+        """|F_ref|^2 / (w^{1/3} Ai^2 + w^{-1/3} Ai'^2) is w-independent.
+
+        The structural pin that F_ref IS the q=p Wronskian form (both the Ai
+        and Ai' channels, equal amplitudes p): the ratio equals
+        ``4 pi |p|^2``, constant in w.  A q=0 regression (dropping the Ai'
+        channel) would make the ratio strongly w-dependent.
+        """
+        for label, f_ref, wronskian, _bar in self._witness_data():
+            with self.subTest(label=label):
+                ratio = np.abs(f_ref) ** 2 / wronskian
+                spread = float(ratio.max() / ratio.min())
+                self.assertLess(
+                    spread - 1.0, 1e-6,
+                    f'|F_ref|^2 / Wronskian varies by {spread - 1.0:.2e} in '
+                    f'w for {label}: F_ref is not the pure q=p Wronskian form')
+                self.n_checks += 1
+
+
+class FrefNonVanishingSelfFalsificationTestCase(_BaseChartTestCase):
+    """Prove the non-vanishing pin is the q=p Wronskian's doing.
+
+    The q=0 leading-order form ``w^{1/3} Ai(-xi)^2`` (the Ai channel alone)
+    MUST dive toward 0 at the Airy zeros -- its min/max over `_FREF_W_GRID`
+    is far below the q=p bar.  If the q=0 form also stayed O(1), the
+    non-vanishing pin would be vacuous.
+    """
+
+    def test_q0_form_collapses(self):
+        """The q=0 leading-order form collapses (min/max << the q=p bar)."""
+        for gp, rho, theta, bar, label in _FREF_WITNESSES:
+            source = reduced_source(gp, rho, theta)
+            xi = _fold_xi(_FREF_W_GRID, gp, source)
+            if xi is None:
+                self.fail(f'merging fold pair absent at witness '
+                          f'(gamma_prime={gp}, rho={rho}, theta={theta})')
+            q0 = _q0_airy_form(_FREF_W_GRID, xi)
+            ratio = float(q0.min() / q0.max())
+            with self.subTest(label=label):
+                self.assertLess(
+                    ratio, bar,
+                    f'q=0 form min/max = {ratio:.3f} is NOT below the bar '
+                    f'{bar} for {label}; the q=p non-vanishing pin would be '
+                    'vacuous')
+                self.n_checks += 1
+
+
+class ResidualBoundednessTestCase(_BaseChartTestCase):
+    """Residual boundedness / no Airy-zero crossing (spec 2).
+
+    The residual ``r = f_pure * sqrt(1 - gamma'^2) / F_ref`` is a smooth O(1)
+    complex function: no magnitude collapse (min|r|/max|r| >= bar) and no
+    Airy-zero crossing (unwrapped arg steps < pi/2).  ``f_pure`` is the EXACT
+    engine -- the geometric-optics 2-image sum is singular at the merging
+    fold pair (magnification -> inf), so it cannot stand in for ``f_pure`` in
+    the near-fold shell; the double-double engine at ``w <= 60`` is the
+    correct cheap oracle (the same oracle spec 3 admits).
+    """
+
+    def test_residual_has_no_magnitude_collapse(self):
+        """min|r|/max|r| >= bar over the w^(2/3) grid."""
+        for gp, rho, theta, bar, label in _FREF_WITNESSES:
+            metrics = _residual_metrics(gp, rho, theta, _FREF_W_GRID)
+            if metrics is None:
+                self.fail(f'F_ref unbuildable at witness '
+                          f'(gamma_prime={gp}, rho={rho}, theta={theta})')
+            ratio, _arg_step, _pr, _pa = metrics
+            with self.subTest(label=label):
+                self.assertGreaterEqual(
+                    ratio, bar,
+                    f'min|r|/max|r| = {ratio:.3f} < {bar} for {label}: the '
+                    'residual collapses (a zero/denominator mismatch)')
+                self.n_checks += 1
+
+    def test_residual_has_no_zero_crossing(self):
+        """max unwrapped |arg r| step < pi/2 between adjacent w-nodes."""
+        for gp, rho, theta, _bar, label in _FREF_WITNESSES:
+            metrics = _residual_metrics(gp, rho, theta, _FREF_W_GRID)
+            if metrics is None:
+                self.fail(f'F_ref unbuildable at witness '
+                          f'(gamma_prime={gp}, rho={rho}, theta={theta})')
+            _ratio, arg_step, _pr, _pa = metrics
+            with self.subTest(label=label):
+                self.assertLess(
+                    arg_step, RESIDUAL_ARG_STEP_TOL,
+                    f'max unwrapped |arg r| step = {arg_step:.3f} rad >= '
+                    f'{RESIDUAL_ARG_STEP_TOL:.3f} for {label}: an Airy-zero '
+                    'crossing (>= pi jump)')
+                self.n_checks += 1
+
+
+class ResidualBoundednessSelfFalsificationTestCase(_BaseChartTestCase):
+    """Prove the residual-boundedness pin is the F_ref denominator's doing.
+
+    Dividing the SAME ``f_pure`` by the OLD ``prefactor_c`` denominator (the
+    point-mass C(w), no Airy structure) leaves the full Airy fold structure
+    in the residual -- it collapses ~13-68x and its arg jumps >= pi/2, the
+    exact failure signature the F_ref division avoids.
+    """
+
+    def test_prefactor_denominator_collapses_and_jumps(self):
+        """r_old = f_pure * sqrt(1 - gamma'^2) / C(w) collapses and jumps."""
+        for gp, rho, theta, bar, label in _FREF_WITNESSES:
+            metrics = _residual_metrics(gp, rho, theta, _FREF_W_GRID)
+            if metrics is None:
+                self.fail(f'F_ref unbuildable at witness '
+                          f'(gamma_prime={gp}, rho={rho}, theta={theta})')
+            _ratio, _arg_step, pr, pa = metrics
+            with self.subTest(label=label):
+                self.assertLess(
+                    pr, bar,
+                    f'prefactor_c residual min/max = {pr:.3f} is NOT below '
+                    f'bar {bar} for {label}: the F_ref discriminator would be '
+                    'vacuous')
+                self.assertGreaterEqual(
+                    pa, RESIDUAL_ARG_STEP_TOL,
+                    f'prefactor_c residual arg step = {pa:.3f} < '
+                    f'{RESIDUAL_ARG_STEP_TOL} for {label}: no zero-crossing '
+                    'jump in the broken representation')
+                self.n_checks += 1
 
 
 class ConservativenessTestCase(_BaseChartTestCase):
@@ -637,19 +855,21 @@ class RemodulationSelfFalsificationTestCase(_BaseChartTestCase):
                 worst = max(worst, abs(f_serve[i] - f_engine) / abs(f_engine))
         return worst
 
-    def test_doubled_prefactor_breaks_node_exactness(self):
-        """Applying prefactor_c twice blows the node-exact agreement."""
-        real_prefactor = _likelihood_mod.prefactor_c
+    def test_doubled_fref_breaks_node_exactness(self):
+        """Applying F_ref twice blows the node-exact agreement."""
+        real_fref = _likelihood_mod.airy_fold_reference
         rel = self._node_rel_error_under(
-            'prefactor_c', lambda w: real_prefactor(w) ** 2)
+            'airy_fold_reference',
+            lambda w, gp, src: real_fref(w, gp, src) ** 2)
         self.assertGreater(
             rel, NODE_EXACT_TOL,
-            f'doubled prefactor left rel err {rel:.3e} <= {NODE_EXACT_TOL}; '
-            'the re-modulation suite would not catch a doubled prefactor')
+            f'doubled F_ref left rel err {rel:.3e} <= {NODE_EXACT_TOL}; '
+            'the re-modulation suite would not catch a doubled F_ref')
         self.n_checks += 1
 
-    def test_unit_anchor_breaks_node_exactness(self):
-        """Replacing sqrt_mu_full with 1 (anchor -> 1) breaks exactness."""
+    def test_unit_sqrt_mu_full_breaks_node_exactness(self):
+        """Replacing sqrt_mu_full with 1 (dropped macro normalization) breaks
+        exactness."""
         real_born = _likelihood_mod._born_factors
 
         def _unit_sqrt_mu(y1, y2, gamma, beta, kappa):
@@ -659,8 +879,9 @@ class RemodulationSelfFalsificationTestCase(_BaseChartTestCase):
         rel = self._node_rel_error_under('_born_factors', _unit_sqrt_mu)
         self.assertGreater(
             rel, NODE_EXACT_TOL,
-            f'unit anchor left rel err {rel:.3e} <= {NODE_EXACT_TOL}; the '
-            're-modulation suite would not catch an anchor=1 regression')
+            f'unit sqrt_mu_full left rel err {rel:.3e} <= {NODE_EXACT_TOL}; '
+            'the re-modulation suite would not catch a dropped '
+            'sqrt(1-gamma\'^2) / 1-lam normalization')
         self.n_checks += 1
 
 def _save_chart_artifact(path: Path, chart: LowWDiffractiveChart,
@@ -679,7 +900,7 @@ def _save_chart_artifact(path: Path, chart: LowWDiffractiveChart,
         'gamma_prime_grid': chart.gamma_prime_grid,
         'rho_grid': chart.rho_grid,
         'theta_grid': chart.theta_grid,
-        'log_w_grid': chart.log_w_grid,
+        'w23_grid': chart.w23_grid,
         'real_coeffs': chart.real_coeffs,
         'imag_coeffs': chart.imag_coeffs,
         'derate': np.array(chart.derate),
@@ -690,7 +911,7 @@ def _save_chart_artifact(path: Path, chart: LowWDiffractiveChart,
     if content_hash is None:
         content_hash = _content_hash(
             chart.gamma_prime_grid, chart.rho_grid, chart.theta_grid,
-            chart.log_w_grid, chart.real_coeffs, chart.imag_coeffs,
+            chart.w23_grid, chart.real_coeffs, chart.imag_coeffs,
             chart.derate, chart.declined_mask)
     arrays['content_hash'] = np.array(content_hash)
     for key in drop_keys:
@@ -716,7 +937,7 @@ def _round_trip_chart() -> LowWDiffractiveChart:
     gamma_prime_grid = np.array([0.2, 0.3, 0.8, 0.9])
     rho_grid = np.array([0.5, 1.0, 2.0, 2.5])
     theta_grid = np.array([0.2, 0.6, 1.0, 1.4])
-    log_w_grid = np.log(np.array([0.3, 0.5, 2.0, 8.0]))
+    w23_grid = np.array([0.3, 0.5, 2.0, 8.0]) ** (2.0 / 3.0)
     shape = (4, 4, 4, 4)
     rng = np.random.default_rng(0)
     # Non-trivial mask: the middle two rho columns are declined (near-fold
@@ -726,7 +947,7 @@ def _round_trip_chart() -> LowWDiffractiveChart:
     declined_mask[:, 1:3, :] = True
     return LowWDiffractiveChart(
         gamma_prime_grid=gamma_prime_grid, rho_grid=rho_grid,
-        theta_grid=theta_grid, log_w_grid=log_w_grid,
+        theta_grid=theta_grid, w23_grid=w23_grid,
         real_coeffs=rng.standard_normal(shape),
         imag_coeffs=rng.standard_normal(shape), derate=0.85,
         declined_mask=declined_mask,
@@ -744,11 +965,11 @@ def _build_coverage_chart() -> LowWDiffractiveChart:
     gamma_prime_grid = np.array([0.1, 0.2, 0.6, 0.95])
     rho_grid = np.array([0.2, 0.3, 2.0, 3.0])
     theta_grid = np.linspace(0.0, math.pi / 2.0, 4)
-    log_w_grid = np.log(np.array([0.02, 0.1, 1.0, 8.0]))
+    w23_grid = np.array([0.02, 0.1, 1.0, 8.0]) ** (2.0 / 3.0)
     shape = (4, 4, 4, 4)
     return LowWDiffractiveChart(
         gamma_prime_grid=gamma_prime_grid, rho_grid=rho_grid,
-        theta_grid=theta_grid, log_w_grid=log_w_grid,
+        theta_grid=theta_grid, w23_grid=w23_grid,
         real_coeffs=np.zeros(shape), imag_coeffs=np.zeros(shape), derate=1.0)
 
 
@@ -766,14 +987,14 @@ def _build_fold_chart() -> LowWDiffractiveChart:
     theta_grid = np.linspace(0.0, math.pi / 2.0, 8)
     gamma_prime_grid = np.linspace(0.2, 0.9, n_gp)
     rho_grid = np.linspace(0.5, 2.5, n_rho)
-    log_w_grid = np.log(np.geomspace(0.05, 8.0, n_w))
+    w23_grid = np.geomspace(0.05, 8.0, n_w) ** (2.0 / 3.0)
     theta_2d = theta_grid.reshape(1, 1, -1, 1)
     real = np.broadcast_to(np.cos(2.0 * theta_2d),
                            (n_gp, n_rho, 8, n_w)).astype(float).copy()
     imag = np.zeros((n_gp, n_rho, 8, n_w), dtype=float)
     return LowWDiffractiveChart(
         gamma_prime_grid=gamma_prime_grid, rho_grid=rho_grid,
-        theta_grid=theta_grid, log_w_grid=log_w_grid,
+        theta_grid=theta_grid, w23_grid=w23_grid,
         real_coeffs=real, imag_coeffs=imag, derate=1.0)
 
 
@@ -796,7 +1017,7 @@ class LoadContractTestCase(_BaseChartTestCase):
             _save_chart_artifact(path, chart)
             loaded = LowWDiffractiveChart.load(path)
         for field in ('gamma_prime_grid', 'rho_grid', 'theta_grid',
-                      'log_w_grid', 'real_coeffs', 'imag_coeffs',
+                      'w23_grid', 'real_coeffs', 'imag_coeffs',
                       'declined_mask'):
             np.testing.assert_array_equal(
                 getattr(loaded, field), getattr(chart, field),
@@ -975,9 +1196,15 @@ class CoverageUnionPredicateTestCase(_BaseChartTestCase):
         self.n_checks += 1
 
     def test_wall_band_exterior_covers(self):
-        """A wall-band exterior draw (rho above the shell) is covered."""
+        """A wall-band exterior draw (rho above the shell) is covered.
+
+        Uses `RHO_ABOVE_SHELL` (a genuinely exterior rho) rather than
+        `WALL_RHO` because the serve's re-modulation fixtures now sit
+        on-caustic (rho = 1.0) where ``F_ref`` is buildable; the coverage
+        predicate must still admit the exterior wall draw.
+        """
         chart = _build_coverage_chart()
-        self.assertTrue(chart.covers(WALL_GAMMA_PRIME, WALL_RHO))
+        self.assertTrue(chart.covers(WALL_GAMMA_PRIME, RHO_ABOVE_SHELL))
         self.n_checks += 1
 
     def test_wall_band_interior_covers(self):
@@ -1006,18 +1233,18 @@ class CoverageUnionPredicateTestCase(_BaseChartTestCase):
                 self.assertTrue(chart.covers(NEAR_FOLD_GAMMA_PRIME, rho))
                 self.n_checks += 1
 
-    def test_w_beyond_log_w_ceiling_declines(self):
-        """A band whose w extends beyond the trained log-w ceiling is declined."""
+    def test_w_beyond_w23_ceiling_declines(self):
+        """A band whose w extends beyond the trained w**(2/3) ceiling is declined."""
         chart = _build_coverage_chart()
-        w_hi = float(np.exp(chart.log_w_grid[-1] + 0.1))
+        w_hi = float((chart.w23_grid[-1] + 0.1) ** 1.5)
         self.assertFalse(chart.covers(NEAR_FOLD_GAMMA_PRIME, NEAR_FOLD_RHO,
                                       np.array([w_hi])))
         self.n_checks += 1
 
-    def test_w_within_log_w_range_covers(self):
-        """A band at the trained log-w ceiling (inclusive) is covered."""
+    def test_w_within_w23_range_covers(self):
+        """A band at the trained w**(2/3) ceiling (inclusive) is covered."""
         chart = _build_coverage_chart()
-        w_hi = float(np.exp(chart.log_w_grid[-1]))
+        w_hi = float(chart.w23_grid[-1] ** 1.5)
         self.assertTrue(chart.covers(NEAR_FOLD_GAMMA_PRIME, NEAR_FOLD_RHO,
                                      np.array([w_hi])))
         self.n_checks += 1
@@ -1127,10 +1354,10 @@ class ThetaD2FoldSelfFalsificationTestCase(_BaseChartTestCase):
         folded = chart.evaluate(np.array([w]), gp, rho, math.pi - theta)
         real_interp = RegularGridInterpolator(
             (chart.gamma_prime_grid, chart.rho_grid, chart.theta_grid,
-             chart.log_w_grid),
+             chart.w23_grid),
             chart.real_coeffs, method='cubic', bounds_error=False,
             fill_value=None)
-        points = np.array([[gp, rho, math.pi - theta, math.log(w)]])
+        points = np.array([[gp, rho, math.pi - theta, w ** (2.0 / 3.0)]])
         no_fold = float(real_interp(points)[0])
         self.assertGreater(
             abs(no_fold - folded[0].real), 1e-2,

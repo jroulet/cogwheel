@@ -1,3 +1,3 @@
 # Architect Short-Term Observations
 
-(empty — last consolidated by Dreamer on 2026-08-20)
+- low_w_chart_airy_representation (2026-08-20): residual keeps sqrt(1-γ′²) — F_ref (q=p, ABSOLUTE frame, airy_fold_value) replaces prefactor_c ONLY; serve F = mass_sheet_phase·F_ref·sqrt_mu_full·(derate·r) = mass_sheet_phase·f_pure/lam. Global w^{2/3} axis (smoke 8 / full 16 over [0.0737,15.33]); delta_tau only inside F_ref. Per-cell F_ref-unbuildable decline folded into declined_mask (census mirrors covers()+declined() -> auto-correct). Schema bump v1->v2; rename log_w_grid->w23_grid. Builder lives in low_w_diffractive_chart.py (consumer placement), imports geometry, never calls fold_amplification. F075 does NOT apply (F_ref is a demod carrier, not a serve value). Tolerances: node-exact 1e-10 (pre-derate), residual min/max >=1e-1 (shell >=3e-1), F_ref min/max >=1e-1, w->0 anchor ±1e-2. Brief's literal "r=f_pure/F_ref" is WRONG (drops sqrt(1-γ′²)).

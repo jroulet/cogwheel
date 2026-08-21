@@ -6,30 +6,33 @@ WHAT
 ``LowWDiffractiveChart`` is the frozen dataclass holding a trained 4-D
 tensor-product interpolation of the low-w diffractive residual
 
-    r_pure(w; gamma', rho, theta) = f_pure / (sqrt(mu_pure) * prefactor_c(w))
+    r_new(w; gamma', rho, theta) = f_pure * sqrt(1 - gamma'^2) / F_ref(w)
 
-over the reduced-coordinate grid ``(gamma', rho, theta, log w)``.  It is the
+over the reduced-coordinate grid ``(gamma', rho, theta, w^{2/3})``.  It is the
 loader + serve-side interpolation object ONLY (no engine, no training); it is
 produced by ``scripts/train_low_w_diffractive_chart.py`` and consumed by the
 diffractive low-w serve in the likelihood (Rung P).
 
-Representation: the stored residual strips BOTH known analytic factors from
-the exact pure-shear engine value ``f_pure = f_schwinger(w, y_eig, gamma')``:
-the macro amplitude ``sqrt(mu_pure) = 1 / sqrt(1 - gamma'^2)`` that diverges
-at the parity wall, and ``prefactor_c(w) = C(w)``, the exact point-mass
-``w*ln(w)`` diffraction phase.  Stripping both leaves a smooth, bounded
-residual (measured ``|r_pure| ~ 0.6-1.0`` across the band), NOT the raw
-amplification.  The served value is reconstructed by re-modulation
-``F_serve = mass_sheet_phase * prefactor_c(w) * sqrt_mu_full * r_pure``
-(``mass_sheet_phase`` and ``sqrt_mu_full`` as defined in the likelihood
-serve), which lives in the likelihood serve -- this class returns the
-REDUCED-frame residual ``r_pure`` only.
+Representation: the stored residual is the exact pure-shear engine value
+``f_pure = f_schwinger(w, y_eig, gamma')`` stripped of the NON-VANISHING
+uniform Airy fold reference ``F_ref = airy_fold_reference(w_grid, gamma',
+source)`` -- the q=p Wronskian form ``|F_ref|^2 ~ w^{1/3} Ai^2 +
+w^{-1/3} Ai'^2`` never vanishes -- and scaled by ``sqrt(1 - gamma'^2)``::
+
+    r_new = f_pure * sqrt(1 - gamma'^2) / F_ref .
+
+``F_ref`` replaces the exact point-mass prefactor ``C(w)`` ONLY; the
+``sqrt(1 - gamma'^2)`` factor (the macro amplitude ``1 / sqrt(mu_pure)`` that
+diverges at the parity wall) STAYS in the residual.  Stripping ``F_ref``
+leaves a smooth, bounded residual, NOT the raw amplification.  The served
+value is reconstructed by re-modulation in the likelihood serve, which returns
+the REDUCED-frame residual ``r_new`` only.
 
 Coordinates are REDUCED / caustic-relative, never raw lens-plane: ``rho =
 |y'| / |y_c(theta)|`` (``geometry.caustic_point`` -- the same discriminator as
 the fit fence), ``gamma'`` the reduced shear, ``theta`` the eigenframe angle
-(folded to ``[0, pi/2]`` by D2 symmetry), and ``log w`` the natural logarithm
-of the dimensionless frequency.
+(folded to ``[0, pi/2]`` by D2 symmetry), and ``w^{2/3}`` the two-thirds
+power of the dimensionless frequency.
 
 WHY
 ---
@@ -45,6 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from importlib.resources import files
 from pathlib import Path
@@ -52,6 +56,13 @@ from pathlib import Path
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 
+from cogwheel.lensing.chang_refsdal import geometry
+from cogwheel.lensing.chang_refsdal._airy_fold import (
+    _fold_amplitudes,
+    _merging_fold_pair,
+    _soft_axis_cubic,
+    airy_fold_value,
+)
 from cogwheel.lensing.chang_refsdal._diffractive import (
     _DIFFRACTIVE_FIT_FENCE_DELTA,
     _DIFFRACTIVE_FIT_FENCE_RHO_LO,
@@ -63,7 +74,7 @@ _DEFAULT_CHART_NAME = 'low_w_diffractive_chart.npz'
 #: Artifact schema tag.  The loader hard-refuses (``ValueError``) an
 #: artifact whose ``schema`` key is absent or does not match this value,
 #: so a stale/foreign npz can never be silently deserialized.
-_SCHEMA = 'low_w_diffractive_v1'
+_SCHEMA = 'low_w_diffractive_v2'
 
 #: Inner shell boundary ``RHO_LO`` -- single-sourced from the diffractive-fit
 #: fence (the same discriminator ``w_low_fit`` uses to decline the near-fold
@@ -101,6 +112,108 @@ def _content_hash(*arrays: np.ndarray) -> str:
     return hasher.hexdigest()
 
 
+def reduced_source(gamma_prime: float, rho: float,
+                   theta: float) -> np.ndarray:
+    """Reconstruct the reduced eigenframe source ``y_eig`` from chart coords.
+
+    Inverts the fence discriminator the trainer and serve both use:
+    ``|y'| = rho * |caustic_point(gamma', theta)|`` (``geometry.caustic_point``,
+    the ``hypot`` of the returned 2-vector), then
+    ``y_eig = |y'| (cos theta, sin theta)`` -- never a numerical root-find.
+    Single-sources the trainer's inline inversion so trainer and serve cannot
+    drift.
+
+    Parameters
+    ----------
+    gamma_prime : float
+        Reduced shear.
+    rho : float
+        Caustic-relative distance ``|y'| / |y_c(theta)|``.
+    theta : float
+        Eigenframe angle (radians).
+
+    Returns
+    -------
+    ndarray
+        Shape ``(2,)`` reduced eigenframe source ``y_eig``.
+    """
+    caustic = geometry.caustic_point(gamma_prime, theta)
+    y_c = math.hypot(caustic[0], caustic[1])
+    r_prime = rho * y_c
+    return np.array([r_prime * math.cos(theta),
+                     r_prime * math.sin(theta)], dtype=float)
+
+
+def airy_fold_reference(w_grid: np.ndarray, gamma_prime: float,
+                        source: np.ndarray) -> np.ndarray | None:
+    """Non-vanishing uniform Airy fold reference ``F_ref`` on ``w_grid``.
+
+    Builds the q=p uniform Airy fold form (the Wronskian
+    ``|F_ref|^2 ~ w^{1/3} Ai^2 + w^{-1/3} Ai'^2`` never vanishes, unlike the
+    leading-order q=0 form) from the merging fold pair and the nearest-caustic
+    fold frame, in the ABSOLUTE frame -- no ``t_min`` subtraction and no
+    ``exp(-1j w * critical_delay)`` re-referencing, since ``f_pure`` is raw and
+    the mean carrier cancels exactly.  The residual this anchors is
+    ``r = f_pure * sqrt(1 - gamma'^2) / F_ref``: ``F_ref`` replaces
+    ``prefactor_c`` ONLY, the ``sqrt(1 - gamma'^2)`` stays in the residual.
+
+    Deliberately does NOT call `fold_amplification`, whose q=0 +
+    ``_ETA_MAX_FOLD`` certificate would wrongly refuse wall-band nodes.
+
+    Parameters
+    ----------
+    w_grid : ndarray
+        1-D array of dimensionless frequencies (positive).
+    gamma_prime : float
+        Reduced shear.
+    source : ndarray
+        Shape ``(2,)`` reduced eigenframe source position.
+
+    Returns
+    -------
+    ndarray or None
+        Complex ``F_ref`` sampled on ``w_grid``, or ``None`` on any refusal
+        (a geometry ``LensDomainError`` from the solve, no merging fold pair,
+        a degenerate soft-axis cubic or fold amplitude, or a non-finite
+        value).
+    """
+    w_grid = np.asarray(w_grid, dtype=float)
+    try:
+        matrix = geometry.macro_matrix(gamma_prime, 0.0, 0.0)
+        images = geometry.find_images(source, matrix)
+        nearest = geometry.nearest_caustic_point(gamma_prime, 0.0, source,
+                                                 kappa=0.0)
+    except geometry.LensDomainError:
+        return None
+
+    pair = _merging_fold_pair(images, source, matrix)
+    if pair is None:
+        return None
+    tau_plus, tau_minus = pair
+
+    b3 = _soft_axis_cubic(nearest.image, nearest.soft_axis)
+    if b3 is None:
+        return None
+
+    amplitudes = _fold_amplitudes(nearest.hard_eigenvalue, b3)
+    if amplitudes is None:
+        return None
+    p_amplitude, _, sigma = amplitudes
+
+    tau_bar = 0.5 * (tau_plus + tau_minus)
+    delta_tau = tau_minus - tau_plus
+    xi = (3.0 * w_grid * delta_tau / 4.0) ** (2.0 / 3.0)
+
+    f_ref = np.empty(w_grid.size, dtype=complex)
+    for index, w_value in enumerate(w_grid):
+        f_ref[index] = airy_fold_value(float(w_value), tau_bar,
+                                       float(xi[index]), p_amplitude,
+                                       p_amplitude, sigma)
+    if not np.all(np.isfinite(f_ref)):
+        return None
+    return f_ref
+
+
 @dataclass(frozen=True)
 class LowWDiffractiveChart:
     """Frozen 4-D interpolation chart for the low-w diffractive residual.
@@ -114,9 +227,9 @@ class LowWDiffractiveChart:
     theta_grid : ndarray
         1-D ascending grid of eigenframe angle ``theta`` values (radians,
         covering the folded ``[0, pi/2]`` domain).
-    log_w_grid : ndarray
-        1-D ascending grid of ``log(w)`` values (natural logarithm of the
-        dimensionless frequency).
+    w23_grid : ndarray
+        1-D ascending grid of ``w**(2/3)`` values (the two-thirds power of
+        the dimensionless frequency).
     real_coeffs : ndarray
         4-D array shape ``(n_gp, n_rho, n_theta, n_w)`` holding the real
         part of the residual at the grid nodes.
@@ -143,7 +256,7 @@ class LowWDiffractiveChart:
     gamma_prime_grid: np.ndarray
     rho_grid: np.ndarray
     theta_grid: np.ndarray
-    log_w_grid: np.ndarray
+    w23_grid: np.ndarray
     real_coeffs: np.ndarray
     imag_coeffs: np.ndarray
     derate: float = 1.0
@@ -164,7 +277,7 @@ class LowWDiffractiveChart:
         w : ndarray, optional
             Served dimensionless-frequency band.  When provided (and
             non-empty), containment additionally requires the whole band to
-            lie within the trained ``log_w_grid`` range, so that
+            lie within the trained ``w23_grid`` range, so that
             :meth:`evaluate` never cubic-extrapolates off the frequency
             axis.
 
@@ -175,7 +288,7 @@ class LowWDiffractiveChart:
             (inclusive on both ends) AND inside the union band
             ``(RHO_LO <= rho <= RHO_HI) or (gamma_prime > _WALL_GAMMA_PRIME)``
             and, when ``w`` is given, the served band lies within the trained
-            log-w range.
+            ``w**(2/3)`` range.
         """
         in_box = (self.gamma_prime_grid[0] <= gamma_prime
                   <= self.gamma_prime_grid[-1]
@@ -191,9 +304,9 @@ class LowWDiffractiveChart:
         w = np.asarray(w, dtype=float)
         if w.size == 0:
             return True
-        log_w = np.log(w)
-        return (float(log_w.min()) >= self.log_w_grid[0]
-                and float(log_w.max()) <= self.log_w_grid[-1])
+        w23 = w ** (2.0 / 3.0)
+        return (float(w23.min()) >= self.w23_grid[0]
+                and float(w23.max()) <= self.w23_grid[-1])
 
     def declined(self, gamma_prime: float, rho: float,
                  theta: float) -> bool:
@@ -235,7 +348,7 @@ class LowWDiffractiveChart:
         Folds ``theta`` to ``[0, pi/2]`` via the D2 symmetry
         ``theta -> |theta| mod pi -> pi - theta if > pi/2``, then uses 4-D
         tensor-product cubic interpolation over
-        (gamma_prime, rho, theta, log w).  The interpolator is lazily
+        (gamma_prime, rho, theta, w**(2/3)).  The interpolator is lazily
         constructed and cached on first call (stored via
         ``object.__setattr__`` on the frozen dataclass).
 
@@ -255,12 +368,12 @@ class LowWDiffractiveChart:
         -------
         ndarray
             Complex residual array, shape matching ``w``.  These are the
-            REDUCED-frame values ``r_pure``; the re-modulation
-            (``F_serve = mass_sheet_phase * prefactor_c(w) * sqrt_mu_full *
-            r_pure``) is applied by the likelihood serve, NOT here.
+            REDUCED-frame values ``r_new = f_pure * sqrt(1 - gamma'^2) /
+            F_ref``; the re-modulation (multiply by ``F_ref`` and the
+            mass-sheet phase) is applied by the likelihood serve, NOT here.
         """
         w = np.asarray(w, dtype=float)
-        log_w = np.log(w)
+        w23 = w ** (2.0 / 3.0)
 
         theta_folded = abs(theta) % np.pi
         if theta_folded > np.pi / 2:
@@ -271,24 +384,24 @@ class LowWDiffractiveChart:
         if not hasattr(self, '_real_interp'):
             real_interp = RegularGridInterpolator(
                 (self.gamma_prime_grid, self.rho_grid, self.theta_grid,
-                 self.log_w_grid),
+                 self.w23_grid),
                 self.real_coeffs, method='cubic',
                 bounds_error=False, fill_value=None)
             imag_interp = RegularGridInterpolator(
                 (self.gamma_prime_grid, self.rho_grid, self.theta_grid,
-                 self.log_w_grid),
+                 self.w23_grid),
                 self.imag_coeffs, method='cubic',
                 bounds_error=False, fill_value=None)
             object.__setattr__(self, '_real_interp', real_interp)
             object.__setattr__(self, '_imag_interp', imag_interp)
 
         # Build the query points: shape (n_w, 4) with columns
-        # (gamma_prime, rho, theta, log_w).
-        points = np.empty((log_w.size, 4), dtype=float)
+        # (gamma_prime, rho, theta, w**(2/3)).
+        points = np.empty((w23.size, 4), dtype=float)
         points[:, 0] = gamma_prime
         points[:, 1] = rho
         points[:, 2] = theta_folded
-        points[:, 3] = log_w
+        points[:, 3] = w23
 
         real_part = self._real_interp(points)
         imag_part = self._imag_interp(points)
@@ -313,7 +426,7 @@ class LowWDiffractiveChart:
         ------
         ValueError
             If the ``schema`` key is absent or does not match
-            ``low_w_diffractive_v1``, or if the recomputed content hash does
+            ``low_w_diffractive_v2``, or if the recomputed content hash does
             not match the stored one (corrupt / stale artifact).  The
             message names ``scripts/train_low_w_diffractive_chart.py`` as
             the regeneration script.
@@ -344,7 +457,7 @@ class LowWDiffractiveChart:
                                           dtype=np.float64)
             rho_grid = np.asarray(data['rho_grid'], dtype=np.float64)
             theta_grid = np.asarray(data['theta_grid'], dtype=np.float64)
-            log_w_grid = np.asarray(data['log_w_grid'], dtype=np.float64)
+            w23_grid = np.asarray(data['w23_grid'], dtype=np.float64)
             real_coeffs = np.asarray(data['real_coeffs'], dtype=np.float64)
             imag_coeffs = np.asarray(data['imag_coeffs'], dtype=np.float64)
             derate = (float(data['derate'])
@@ -358,7 +471,7 @@ class LowWDiffractiveChart:
             provenance = json.loads(str(data['provenance']))
 
         actual = _content_hash(gamma_prime_grid, rho_grid, theta_grid,
-                               log_w_grid, real_coeffs, imag_coeffs, derate,
+                               w23_grid, real_coeffs, imag_coeffs, derate,
                                declined_mask)
         if expected != actual:
             raise ValueError(
@@ -367,7 +480,7 @@ class LowWDiffractiveChart:
                 f'corrupt or stale; regenerate with '
                 f'scripts/train_low_w_diffractive_chart.py.')
         return cls(gamma_prime_grid=gamma_prime_grid, rho_grid=rho_grid,
-                   theta_grid=theta_grid, log_w_grid=log_w_grid,
+                   theta_grid=theta_grid, w23_grid=w23_grid,
                    real_coeffs=real_coeffs, imag_coeffs=imag_coeffs,
                    derate=derate, declined_mask=declined_mask,
                    provenance=provenance)

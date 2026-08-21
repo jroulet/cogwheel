@@ -107,8 +107,7 @@ from cogwheel.lensing.chang_refsdal._schwinger import (
 from cogwheel.lensing.chang_refsdal._diffractive import (
     DiffractiveDomainError, diffractive_amplification, w_low_fit,
     _reduced_shear, _caustic_rho)
-from cogwheel.lensing.chang_refsdal._hyp1f1 import (
-    HypergeometricDomainError, prefactor_c)
+from cogwheel.lensing.chang_refsdal._hyp1f1 import HypergeometricDomainError
 from cogwheel.lensing.chang_refsdal._born import _born_factors
 from cogwheel.lensing.chang_refsdal.operator import RHO_END
 from cogwheel.lensing.waveform import (LensedWaveformGenerator,
@@ -117,7 +116,8 @@ from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
                                        CERTIFICATION_BAR, caustic_rho,
                                        get_certified_ppgo_map)
 from cogwheel.lensing.born_residual_chart import BornResidualChart
-from cogwheel.lensing.low_w_diffractive_chart import LowWDiffractiveChart
+from cogwheel.lensing.low_w_diffractive_chart import (
+    LowWDiffractiveChart, reduced_source, airy_fold_reference)
 
 __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
 
@@ -1983,15 +1983,23 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         replacement for the two-rung serve over the band it covers.
 
         The residual ``r_pure`` interpolated by the chart is the reduced
-        point-mass kernel in units of the macro amplitude times the exact
-        point-mass prefactor ``C(w)``: the full amplitude reconstructs as
-        ``F = mass_sheet_phase * prefactor_c(w) * sqrt_mu_full * r_pure``,
+        point-mass kernel in units of the uniform Airy fold reference
+        ``F_ref`` (the WP1 `airy_fold_reference`, rebuilt at serve time from
+        the merging fold pair in the reduced eigenframe): the full amplitude
+        reconstructs as
+        ``F = mass_sheet_phase * F_ref(w) * sqrt_mu_full * r_pure``,
         with ``mass_sheet_phase = exp(0.5j*w*(log(lam) - kappa*s))`` and
         ``sqrt_mu_full`` from `_born_factors` -- the SAME mass-sheet
         decomposition as the test oracle ``_engine_reference_kappa``
         (``mass_sheet_phase * f_pure / lam``) with ``1/lam`` folded into
-        ``sqrt_mu_full``.  `_schwinger.f_schwinger` is NEVER called on this
-        path: the chart is the sole serve-time source for the band it owns.
+        ``sqrt_mu_full``.  ``F_ref`` replaces `prefactor_c` ONLY: the macro
+        normalization (``sqrt(1 - gamma'^2)`` in the residual,
+        ``sqrt_mu_full`` here) is preserved, so ``F_serve =
+        mass_sheet_phase * f_pure / lam``.  `_schwinger.f_schwinger` is
+        NEVER called on this path: the chart is the sole serve-time source
+        for the band it owns, and ``F_ref`` is built engine-free once per
+        draw from the reduced-frame geometry re-solve (quartic
+        ``find_images`` + ``nearest_caustic_point`` + ``soft_axis_cubic``).
 
         Parameters
         ----------
@@ -2008,9 +2016,9 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         tuple or None
             ``(delays, k0, k1, geom)`` on a full-band chart serve, or
             ``None`` to fall through (chart absent, out of coverage, a
-            reduced-shear domain refusal, or a draw in a per-cell declined
-            cell the training oracle flagged as unable to meet the
-            certification bar).
+            reduced-shear domain refusal, an unbuildable ``F_ref``, or a
+            draw in a per-cell declined cell the training oracle flagged as
+            unable to meet the certification bar).
         """
         chart = self.low_w_diffractive_chart
         if chart is None:
@@ -2041,6 +2049,15 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         rho = _caustic_rho(abs(gamma_prime), s, theta)
 
+        # Rebuild the reduced eigenframe source and its non-vanishing
+        # uniform Airy fold reference ``F_ref`` engine-free at serve time.
+        # A draw whose ``F_ref`` is unbuildable (``None``) falls through to
+        # the exact engine, mirroring `_tube_f_ref`'s ``None`` handling.
+        source = reduced_source(gamma_prime, rho, theta)
+        fref = airy_fold_reference(dense_w, gamma_prime, source)
+        if fref is None:
+            return None
+
         if not chart.covers(gamma_prime, rho, dense_w):
             return None
 
@@ -2055,9 +2072,7 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         mass_sheet_phase = np.exp(
             0.5j * dense_w * (math.log(lam) - kappa * s))
-        prefactor = np.array(
-            [prefactor_c(float(w)) for w in dense_w], dtype=complex)
-        farfield = mass_sheet_phase * prefactor * sqrt_mu_full * r_fit
+        farfield = mass_sheet_phase * fref * sqrt_mu_full * r_fit
 
         # Demodulate F by t_min into the far-field envelope and reconstruct
         # via the SAME tail as `_low_w_diffractive_serve` (FARFIELD_DIFFRACTIVE).

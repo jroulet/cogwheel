@@ -12,15 +12,17 @@ wall-approach band.
 
 The stored object is the SMOOTH residual, never the raw amplification::
 
-    r_pure(w; gamma', rho, theta) = f_pure / (sqrt(mu_pure) * prefactor_c(w))
+    r_new(w; gamma', rho, theta) = f_pure * sqrt(1 - gamma'**2) / F_ref(w)
 
 with ``f_pure = f_schwinger(w, y_eig, gamma')`` the exact pure-shear engine
-value, ``sqrt(mu_pure) = 1 / sqrt(1 - gamma'**2)`` the macro amplitude that
-diverges at the parity wall, and ``prefactor_c(w) = C(w)`` the exact
-point-mass ``w*ln(w)`` diffraction phase.  Stripping both factors leaves a
-bounded, low-dimensional residual (measured ``|r_pure| ~ 0.6-1.0`` across the
-band); the serve re-modulates ``F = mass_sheet_phase * prefactor_c(w) *
-sqrt_mu_full * r_pure``, which reproduces ``f_pure`` at ``kappa = 0`` exactly.
+value and ``F_ref(w) = airy_fold_reference(w_grid, gamma', y_eig)`` the
+non-vanishing uniform Airy fold reference (the q=p Wronskian form
+``|F_ref|^2 ~ w**(1/3) Ai^2 + w**(-1/3) Ai'^2`` never vanishes).  ``F_ref``
+replaces the exact point-mass prefactor ``C(w)`` ONLY; the
+``sqrt(1 - gamma'**2)`` factor (the macro amplitude ``1 / sqrt(mu_pure)``
+that diverges at the parity wall) STAYS in the residual.  Stripping ``F_ref``
+leaves a smooth, bounded residual; the serve re-modulates it by ``F_ref`` and
+the mass-sheet phase, which reproduces ``f_pure`` at ``kappa = 0`` exactly.
 
 ORACLE
 ------
@@ -39,10 +41,13 @@ chart stores:
 * ``theta``   -- eigenframe source angle, folded to the D2 fundamental domain
   ``[0, pi/2]`` (the point-mass + shear potential is even in each source
   component, so the residual is D2-symmetric).
-* ``log w``   -- natural log of the dimensionless frequency, in
-  ``[log(W_LO), log(W_CEILING_SCHWINGER)]``.
+* ``w**(2/3)`` -- the two-thirds power of the dimensionless frequency, in
+  ``[W_LO**(2/3), W_CEILING_SCHWINGER**(2/3)]``.  The ``w**(2/3)`` map
+  densifies ``w`` at the low end, where the residual ``r ~ w**(1/6)`` varies
+  fastest, so the frequency axis is UNIFORM in ``w**(2/3)``, never log-spaced.
 
-The node source is reconstructed by inverting the fence discriminator:
+The node source is reconstructed by inverting the fence discriminator via the
+single-sourced `reduced_source(gamma', rho, theta)`:
 ``|y'| = rho * |caustic_point(gamma', theta)|`` and
 ``y_eig = |y'| (cos theta, sin theta)`` -- the same `geometry.caustic_point`
 the serve uses, never a numerical root-find.
@@ -60,8 +65,12 @@ equals the raw interpolation error.  Cells whose SERVED two-sided error
 ``|derate * r_interp - r_engine| / |r_engine|`` still exceeds
 ``CERTIFICATION_BAR`` (the near-fold resonance-limited cells) are baked as a
 per-cell ``declined_mask`` on the chart; the serve falls through to the exact
-engine for a covered draw in a declined cell -- NEVER an amplitude scale.  The
-1e-4 bar is the real acceptance gate, enforced on the de-rated served value.
+engine for a covered draw in a declined cell -- NEVER an amplitude scale.
+Cells whose ``F_ref`` is UNBUILDABLE (no merging fold pair / a degenerate
+soft-axis cubic / fold amplitude -- expected across the exterior wall band)
+are ALSO baked as declined, distinct from engine refusals (which still
+raise); see `_fill_coefficients`.  The 1e-4 bar is the real acceptance gate,
+enforced on the de-rated served value.
 
 Usage::
 
@@ -72,9 +81,12 @@ The SMOKE scale is a small non-collinear subset (a few minutes) covering both
 the near-fold shell at low ``gamma'`` (the ``gamma' = 0.3`` shell witness) and
 the wall band (``gamma' = 0.8-0.9``); it proves the pipeline end-to-end and
 emits a smoke artifact under the system temp dir (never the shipped path).
-Its ``w`` axis is deliberately coarse, so its de-rate / margin reflect the
-under-resolved frequency interpolation -- NOT a shipped value; the FULL bake's
-dense grid is what drives the de-rate toward ``1.0``.
+Its ``w`` axis is deliberately coarse (8 uniform-``w**(2/3)`` nodes), so its
+de-rate / margin reflect the under-resolved frequency interpolation -- NOT a
+shipped value.  With the ``w**(2/3)`` axis densifying the low-``w`` Airy-fold
+variation, the smoke de-rate is expected far above the old log-spaced ``0.055``
+(and its served error within ``1e-4``); the FULL bake's dense grid is what
+drives the de-rate toward ``1.0``.
 The FULL scale bakes the shipped ``cogwheel/data/low_w_diffractive_chart.npz``
 -- a DRIVER post-build step (its grid is dense enough that the calibration is
 a tens-of-minutes Schwinger sweep).
@@ -99,12 +111,11 @@ sys.path.insert(0, str(_project_root))
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal._born import DELTA_GAMMA_P
 from cogwheel.lensing.chang_refsdal._diffractive import _caustic_rho
-from cogwheel.lensing.chang_refsdal._hyp1f1 import prefactor_c
 from cogwheel.lensing.chang_refsdal._schwinger import (
     W_CEILING_SCHWINGER, SchwingerCertificationError, f_schwinger)
 from cogwheel.lensing.low_w_diffractive_chart import (
     _SCHEMA, LowWDiffractiveChart, RHO_HI, RHO_LO, _WALL_GAMMA_PRIME,
-    _content_hash)
+    _content_hash, airy_fold_reference, reduced_source)
 from cogwheel.lensing.ppgo_map import CERTIFICATION_BAR
 
 #: Lower bound of the reduced-shear ``gamma'`` grid.  Mirrors the lower gamma
@@ -144,11 +155,13 @@ _RHO_HI_MARGIN = 1.1
 _FULL_N_GAMMA = 14
 _FULL_N_RHO = 10
 _FULL_N_THETA = 16
-_FULL_N_W = 14
+#: ``16`` w-nodes resolve the low-``w`` Airy-fold variation ``r ~ w**(1/6)``
+#: on the uniform-``w**(2/3)`` axis (the map densifies ``w`` at the low end).
+_FULL_N_W = 16
 
 #: Smoke-scale dimensionless-frequency node count (spatial grids are the
 #: hand-picked `_SMOKE_GAMMA_PRIMES` / `_SMOKE_RHOS` / `_SMOKE_THETAS`).
-_SMOKE_N_W = 5
+_SMOKE_N_W = 8
 
 #: Smoke-scale reduced-shear nodes: the near-fold shell witness at
 #: ``gamma' = 0.3`` (cf. ``NEAR_FOLD_DECLINED_WITNESSES``) plus the wall band
@@ -241,11 +254,22 @@ def _theta_grid(scale: str) -> np.ndarray:
     return np.linspace(0.0, math.pi / 2.0, n)
 
 
-def _w_grid(scale: str, n_w: int) -> np.ndarray:
-    """Dimensionless-frequency grid, log-spaced in ``[W_LO, W_CEILING_SCHWINGER]``."""
+def _w_grid(scale: str, n_w: int | None) -> np.ndarray:
+    """Dimensionless-frequency grid, uniform in ``w**(2/3)``.
+
+    ``w = linspace(W_LO**(2/3), W_CEILING_SCHWINGER**(2/3), n)**(3/2)``.
+    The ``w**(2/3)`` map densifies ``w`` at the low end, where the residual
+    ``r ~ w**(1/6)`` varies fastest (the Airy fold
+    ``|F_ref|^2 ~ w**(1/3) Ai^2 + w**(-1/3) Ai'^2``), so a uniform-``w**(2/3)``
+    axis resolves that variation far better than a log-spaced one.  The axis
+    is stored on the chart as ``w23_grid = w**(2/3)`` and ``evaluate`` maps a
+    query ``w`` to ``w**(2/3)`` before interpolating.
+    """
     if n_w is None:
         n_w = _SMOKE_N_W if scale == 'smoke' else _FULL_N_W
-    return np.geomspace(W_LO, W_CEILING_SCHWINGER, n_w)
+    w23_lo = W_LO ** (2.0 / 3.0)
+    w23_hi = W_CEILING_SCHWINGER ** (2.0 / 3.0)
+    return np.linspace(w23_lo, w23_hi, n_w) ** (3.0 / 2.0)
 
 
 def _rho_grid(scale: str, rho_lo_meas: float, rho_hi_meas: float) -> np.ndarray:
@@ -262,89 +286,127 @@ def _rho_grid(scale: str, rho_lo_meas: float, rho_hi_meas: float) -> np.ndarray:
     return np.linspace(rho_lo, rho_hi, _FULL_N_RHO)
 
 
-def _residual_at(w: float, gamma_prime: float, rho: float,
-                 theta: float) -> complex:
-    """Engine residual ``r_pure = f_pure * sqrt(1 - gamma'**2) / C(w)``.
+def _residual_at(w_grid: np.ndarray, gamma_prime: float, rho: float,
+                 theta: float) -> np.ndarray | None:
+    """Airy-anchored residual ``r = f_pure * sqrt(1 - gamma'^2) / F_ref``.
 
-    Reconstructs the reduced eigenframe source ``y_eig`` from the chart
-    coordinates by INVERTING the fence discriminator
-    (``|y'| = rho * |caustic_point(gamma', theta)|``) -- the same
-    `geometry.caustic_point` the serve uses, never a root-find.
+    Reconstructs the reduced eigenframe source ``y_eig`` via
+    `reduced_source` (the single-sourced fence inversion, never re-inlined)
+    and builds the non-vanishing uniform Airy fold reference ``F_ref`` via
+    `airy_fold_reference` -- ``F_ref`` replaces ``prefactor_c`` ONLY, the
+    ``sqrt(1 - gamma'^2)`` factor stays in the residual.  ``F_ref`` is sampled
+    on the FULL ``w_grid``: its buildability (geometry / merging-fold-pair /
+    soft-axis-cubic / fold-amplitude refusal) is ``w``-INDEPENDENT, its VALUE
+    is ``w``-dependent.
+
+    Returns the complex residual sampled on ``w_grid``, or ``None`` when
+    ``F_ref`` is unbuildable (a sentinel the caller treats as a DECLINED cell,
+    never an engine refusal).  An engine refusal (`SchwingerCertificationError`
+    / ``ValueError`` from `f_schwinger`) is NOT caught here -- it propagates so
+    the caller can count it toward ``n_refused`` (a grid-design bug) rather
+    than a declined cell.
     """
-    caustic = geometry.caustic_point(gamma_prime, theta)
-    y_c = math.hypot(caustic[0], caustic[1])
-    r_prime = rho * y_c
-    y_eig = np.array([r_prime * math.cos(theta),
-                      r_prime * math.sin(theta)], dtype=float)
-    f_pure = f_schwinger(w, y_eig, gamma_prime)
-    return f_pure * math.sqrt(1.0 - gamma_prime * gamma_prime) / prefactor_c(w)
+    try:
+        y_eig = reduced_source(gamma_prime, rho, theta)
+        f_ref = airy_fold_reference(w_grid, gamma_prime, y_eig)
+    except ValueError:
+        # A geometry / source-reconstruction refusal (``LensDomainError`` or a
+        # domain error in the caustic solve): F_ref is UNBUILDABLE at this
+        # source -- a declined cell, NOT an engine refusal.
+        return None
+    if f_ref is None:
+        return None
+    residual = np.empty(w_grid.size, dtype=complex)
+    for i_w, w in enumerate(w_grid):
+        f_pure = f_schwinger(float(w), y_eig, gamma_prime)
+        residual[i_w] = (f_pure * math.sqrt(1.0 - gamma_prime * gamma_prime)
+                         / f_ref[i_w])
+    return residual
 
 
 def _fill_coefficients(gamma_prime_grid: np.ndarray, rho_grid: np.ndarray,
                        theta_grid: np.ndarray, w_grid: np.ndarray
-                       ) -> tuple[np.ndarray, np.ndarray, int]:
+                       ) -> tuple[np.ndarray, np.ndarray, int, np.ndarray]:
     """Evaluate the engine residual at every grid node.
 
-    Returns ``(real_coeffs, imag_coeffs, n_refused)``; a refusing node (the
-    Schwinger engine declining to certify there, or a point-mass kernel domain
-    refusal) is recorded and counted -- a nonzero ``n_refused`` is a grid
-    design problem the caller raises on.
+    Returns ``(real_coeffs, imag_coeffs, n_refused, unbuildable_mask)``.
+    ``F_ref`` is built ONCE per ``(gamma', rho, theta)`` cell (its buildability
+    is ``w``-independent); a cell whose ``F_ref`` is UNBUILDABLE is recorded in
+    ``unbuildable_mask`` and skipped (no ``f_schwinger`` call, NOT counted in
+    ``n_refused``) -- the exterior wall band is expected to be unbuildable.  A
+    cell whose ``F_ref`` IS buildable but whose ``f_schwinger`` engine refuses
+    (a ``SchwingerCertificationError`` / ``ValueError``) increments
+    ``n_refused`` -- a nonzero ``n_refused`` is a grid design problem the
+    caller raises on.
     """
     n_gp, n_rho, n_theta, n_w = (len(gamma_prime_grid), len(rho_grid),
                                  len(theta_grid), len(w_grid))
     real = np.empty((n_gp, n_rho, n_theta, n_w), dtype=float)
     imag = np.empty((n_gp, n_rho, n_theta, n_w), dtype=float)
+    unbuildable = np.zeros((n_gp, n_rho, n_theta), dtype=bool)
     n_refused = 0
     t0 = time.time()
     n_nodes = n_gp * n_rho * n_theta * n_w
     for i_gp, gp in enumerate(gamma_prime_grid):
         for i_rho, rho in enumerate(rho_grid):
             for i_theta, theta in enumerate(theta_grid):
-                for i_w, w in enumerate(w_grid):
-                    try:
-                        r_pure = _residual_at(float(w), float(gp), float(rho),
-                                              float(theta))
-                    except (SchwingerCertificationError, ValueError):
-                        n_refused += 1
-                        real[i_gp, i_rho, i_theta, i_w] = np.nan
-                        imag[i_gp, i_rho, i_theta, i_w] = np.nan
-                        continue
-                    real[i_gp, i_rho, i_theta, i_w] = r_pure.real
-                    imag[i_gp, i_rho, i_theta, i_w] = r_pure.imag
+                try:
+                    residual = _residual_at(w_grid, float(gp), float(rho),
+                                            float(theta))
+                except (SchwingerCertificationError, ValueError):
+                    n_refused += 1
+                    real[i_gp, i_rho, i_theta] = np.nan
+                    imag[i_gp, i_rho, i_theta] = np.nan
+                    continue
+                if residual is None:
+                    unbuildable[i_gp, i_rho, i_theta] = True
+                    real[i_gp, i_rho, i_theta] = np.nan
+                    imag[i_gp, i_rho, i_theta] = np.nan
+                    continue
+                real[i_gp, i_rho, i_theta] = residual.real
+                imag[i_gp, i_rho, i_theta] = residual.imag
         print(f'  gamma_prime={float(gp):.5f} done '
-              f'({(i_gp + 1)}/{n_gp}, {time.time() - t0:.1f} s)')
-    print(f'# evaluated {n_nodes - n_refused}/{n_nodes} nodes, '
-          f'{n_refused} refused, {time.time() - t0:.1f} s')
-    return real, imag, n_refused
+              f'({i_gp + 1}/{n_gp}, {time.time() - t0:.1f} s)')
+    n_unbuildable = int(np.sum(unbuildable))
+    print(f'# {n_nodes - n_refused - n_unbuildable * n_w}/{n_nodes} nodes '
+          f'evaluated, {n_refused} engine-refused, {n_unbuildable} F_ref-'
+          f'unbuildable cells, {time.time() - t0:.1f} s')
+    return real, imag, n_refused, unbuildable
 
 
 def _off_grid_engine(gamma_prime_grid: np.ndarray, rho_grid: np.ndarray,
                      theta_grid: np.ndarray, w_grid: np.ndarray
                      ) -> tuple[list[tuple[float, float, float]],
-                                list[np.ndarray]]:
+                                list[np.ndarray], np.ndarray]:
     """Engine residuals at the off-grid theta MIDPOINTS (held-out witnesses).
 
     For each ``(gamma', rho)`` cell, probes the midpoint of every consecutive
     theta-node pair -- the angles cubic interpolation is least constrained at.
-    Computed ONCE here so the de-rate and the margin report share the same
-    engine values (no redundant ``f_schwinger`` sweep).
+    An ``F_ref``-unbuildable midpoint is SKIPPED (recorded in the returned
+    ``off_unbuildable`` mask, no ``f_schwinger`` call): it has no valid
+    residual and cannot be served, so it contributes no interpolation-error
+    witness.  Computed ONCE here so the de-rate and the margin report share
+    the same engine values (no redundant ``f_schwinger`` sweep).
     """
     midpoints = 0.5 * (theta_grid[:-1] + theta_grid[1:])
     points: list[tuple[float, float, float]] = []
     values: list[np.ndarray] = []
+    off_unbuildable = np.zeros((len(gamma_prime_grid), len(rho_grid),
+                                len(midpoints)), dtype=bool)
     t0 = time.time()
-    for gp in gamma_prime_grid:
-        for rho in rho_grid:
-            for theta_mid in midpoints:
-                r_engine = np.array(
-                    [_residual_at(float(w), float(gp), float(rho),
-                                  float(theta_mid))
-                     for w in w_grid], dtype=complex)
+    for i_gp, gp in enumerate(gamma_prime_grid):
+        for i_rho, rho in enumerate(rho_grid):
+            for i_mid, theta_mid in enumerate(midpoints):
+                r_engine = _residual_at(w_grid, float(gp), float(rho),
+                                        float(theta_mid))
+                if r_engine is None:
+                    off_unbuildable[i_gp, i_rho, i_mid] = True
+                    continue
                 points.append((float(gp), float(rho), float(theta_mid)))
                 values.append(r_engine)
-    print(f'# off-grid theta midpoints: {len(points)} points, '
-          f'{time.time() - t0:.1f} s')
-    return points, values
+    print(f'# off-grid theta midpoints: {len(points)} buildable / '
+          f'{off_unbuildable.size} total, {time.time() - t0:.1f} s')
+    return points, values, off_unbuildable
 
 
 def _iter_points(chart: LowWDiffractiveChart, gamma_prime_grid: np.ndarray,
@@ -356,15 +418,21 @@ def _iter_points(chart: LowWDiffractiveChart, gamma_prime_grid: np.ndarray,
 
     On-grid points (the stored coefficients) first, then the off-grid
     theta-midpoint held-out witnesses, in the SAME order as
-    `_off_grid_engine` so callers can reshape the off-grid tail by grid
-    shape.  ``chart.evaluate`` is cubic interpolation only -- never an engine
-    call.
+    `_off_grid_engine` so callers can map the off-grid tail back onto the
+    midpoint grid via `_off_grid_engine`'s ``off_unbuildable`` mask.  On-grid
+    cells whose coefficients are non-finite (an ``F_ref``-unbuildable cell,
+    whose residual is undefined) are SKIPPED -- they contribute no
+    interpolation-error witness and are declined via the unbuildable mask
+    instead.  ``chart.evaluate`` is cubic interpolation only -- never an
+    engine call.
     """
     for i_gp, gp in enumerate(gamma_prime_grid):
         for i_rho, rho in enumerate(rho_grid):
             for i_theta, theta in enumerate(theta_grid):
                 r_engine = (real[i_gp, i_rho, i_theta]
                             + 1j * imag[i_gp, i_rho, i_theta])
+                if not np.all(np.isfinite(r_engine)):
+                    continue
                 r_interp = chart.evaluate(w_grid, float(gp), float(rho),
                                           float(theta))
                 yield r_interp, r_engine
@@ -490,16 +558,17 @@ def main() -> None:
     rho_grid = _rho_grid(args.scale, rho_lo_meas, rho_hi_meas)
     theta_grid = _theta_grid(args.scale)
     w_grid = _w_grid(args.scale, args.n_w)
-    log_w_grid = np.log(w_grid)
+    w23_grid = w_grid ** (2.0 / 3.0)
     print(f'# grid ({args.scale}): {len(gamma_prime_grid)} gamma_prime x '
           f'{len(rho_grid)} rho x {len(theta_grid)} theta x {len(w_grid)} w '
           f'= {len(gamma_prime_grid) * len(rho_grid) * len(theta_grid) * len(w_grid)} nodes')
     print(f'#   gamma_prime in [{gamma_prime_grid[0]:.4f}, '
           f'{gamma_prime_grid[-1]:.4f}]')
     print(f'#   rho         in [{rho_grid[0]:.4f}, {rho_grid[-1]:.4f}]')
-    print(f'#   w           in [{w_grid[0]:.4f}, {w_grid[-1]:.1f}]')
+    print(f'#   w           in [{w_grid[0]:.4f}, {w_grid[-1]:.1f}] '
+          f'(w^(2/3) in [{w23_grid[0]:.4f}, {w23_grid[-1]:.4f}])')
 
-    real, imag, n_refused = _fill_coefficients(
+    real, imag, n_refused, unbuildable_mask = _fill_coefficients(
         gamma_prime_grid, rho_grid, theta_grid, w_grid)
     if n_refused:
         raise SystemExit(
@@ -511,10 +580,10 @@ def main() -> None:
     # accuracy (``evaluate`` is de-rate-independent).
     probe = LowWDiffractiveChart(
         gamma_prime_grid=gamma_prime_grid, rho_grid=rho_grid,
-        theta_grid=theta_grid, log_w_grid=log_w_grid,
+        theta_grid=theta_grid, w23_grid=w23_grid,
         real_coeffs=real, imag_coeffs=imag, derate=1.0)
 
-    off_points, off_values = _off_grid_engine(
+    off_points, off_values, off_unbuildable = _off_grid_engine(
         gamma_prime_grid, rho_grid, theta_grid, w_grid)
     overshoots, rel_errs = _node_metrics(
         probe, gamma_prime_grid, rho_grid, theta_grid, w_grid, real, imag,
@@ -536,7 +605,7 @@ def main() -> None:
     served_errs = _served_errors(
         probe, gamma_prime_grid, rho_grid, theta_grid, w_grid, real, imag,
         off_points, off_values, derate)
-    grid_n = len(gamma_prime_grid) * len(rho_grid) * len(theta_grid)
+    grid_n = int(np.sum(~unbuildable_mask))
     full_stats = _margin_report('full-grid', ratios, rel_errs, served_errs)
     grid_stats = _margin_report('grid', ratios[:grid_n], rel_errs[:grid_n],
                                 served_errs[:grid_n])
@@ -552,9 +621,14 @@ def main() -> None:
     # never a hardcoded band.
     n_gp, n_rho, n_theta = (len(gamma_prime_grid), len(rho_grid),
                             len(theta_grid))
-    off_served = served_errs[grid_n:].reshape(n_gp, n_rho, n_theta - 1)
+    # Map the buildable off-grid served errors back onto the full
+    # (n_gp, n_rho, n_theta - 1) midpoint grid; an F_ref-unbuildable midpoint
+    # stays 0.0 (no error contribution -- its adjacent cells are declined via
+    # the F_ref-unbuildable grid-node mask instead).
+    off_served = np.zeros((n_gp, n_rho, n_theta - 1), dtype=float)
+    off_served[~off_unbuildable] = served_errs[grid_n:]
     uniform_bias = 1.0 - derate
-    declined_mask = np.zeros((n_gp, n_rho, n_theta), dtype=bool)
+    declined_by_error = np.zeros((n_gp, n_rho, n_theta), dtype=bool)
     for i_theta in range(n_theta):
         if i_theta == 0:
             cell_err = off_served[:, :, 0]
@@ -563,11 +637,15 @@ def main() -> None:
         else:
             cell_err = np.maximum(off_served[:, :, i_theta - 1],
                                   off_served[:, :, i_theta])
-        declined_mask[:, :, i_theta] = (
+        declined_by_error[:, :, i_theta] = (
             np.maximum(cell_err, uniform_bias) > CERTIFICATION_BAR)
+    declined_mask = unbuildable_mask | declined_by_error
+    n_unbuildable_cells = int(np.sum(unbuildable_mask))
+    n_declined_by_error = int(np.sum(declined_by_error))
     n_declined = int(np.sum(declined_mask))
     print(f'# decline mask: {n_declined}/{n_gp * n_rho * n_theta} spatial '
-          f'cells declined (served error > {CERTIFICATION_BAR:.0e})')
+          f'cells declined ({n_unbuildable_cells} F_ref-unbuildable, '
+          f'{n_declined_by_error} by served error > {CERTIFICATION_BAR:.0e})')
 
     provenance = {
         'driver': 'scripts/train_low_w_diffractive_chart.py',
@@ -589,26 +667,28 @@ def main() -> None:
         'grid_margin': grid_stats,
         'off_grid_margin': off_stats,
         'n_declined_cells': n_declined,
+        'n_unbuildable_cells': n_unbuildable_cells,
+        'n_declined_by_error': n_declined_by_error,
         'declined_mask_shape': [n_gp, n_rho, n_theta],
     }
 
     chart = LowWDiffractiveChart(
         gamma_prime_grid=gamma_prime_grid, rho_grid=rho_grid,
-        theta_grid=theta_grid, log_w_grid=log_w_grid,
+        theta_grid=theta_grid, w23_grid=w23_grid,
         real_coeffs=real, imag_coeffs=imag, derate=derate,
         declined_mask=declined_mask, provenance=provenance)
 
     out_path = _output_path(args.scale, args.output)
     content_hash = _content_hash(
         chart.gamma_prime_grid, chart.rho_grid, chart.theta_grid,
-        chart.log_w_grid, chart.real_coeffs, chart.imag_coeffs, chart.derate,
+        chart.w23_grid, chart.real_coeffs, chart.imag_coeffs, chart.derate,
         chart.declined_mask)
     np.savez(
         out_path,
         gamma_prime_grid=chart.gamma_prime_grid,
         rho_grid=chart.rho_grid,
         theta_grid=chart.theta_grid,
-        log_w_grid=chart.log_w_grid,
+        w23_grid=chart.w23_grid,
         real_coeffs=chart.real_coeffs,
         imag_coeffs=chart.imag_coeffs,
         derate=np.array(chart.derate),
@@ -625,6 +705,7 @@ def main() -> None:
     loaded = LowWDiffractiveChart.load(out_path)
     assert loaded.derate == derate
     assert np.array_equal(loaded.gamma_prime_grid, gamma_prime_grid)
+    assert np.array_equal(loaded.w23_grid, w23_grid)
     assert np.array_equal(loaded.real_coeffs, real)
     assert np.array_equal(loaded.declined_mask, declined_mask)
     print(f'  Round-trip: LowWDiffractiveChart.load() verified '
