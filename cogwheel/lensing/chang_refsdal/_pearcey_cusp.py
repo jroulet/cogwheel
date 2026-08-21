@@ -693,7 +693,11 @@ def _leading_geometric(w: float, image: np.ndarray, source: np.ndarray,
     try:
         mu = geometry.magnification(image, matrix)
         n_morse = geometry.morse_index(image, matrix)
-    except geometry.LensDomainError:
+    except (geometry.LensDomainError, ZeroDivisionError):
+        # ZeroDivisionError: the Hessian determinant vanishes at an image on
+        # the critical curve (magnification divergent) -- the same refusal
+        # as `mu == 0.0` below, but `geometry.magnification` can raise it
+        # rather than return 0.0 depending on the exact degeneracy.
         return None
     if mu == 0.0 or not math.isfinite(mu):
         return None
