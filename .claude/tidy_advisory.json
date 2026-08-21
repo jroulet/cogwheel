@@ -1,10 +1,11 @@
 {
   "trigger": "post-commit",
-  "commit": "4a77c3fff4c0ba9a09b07fa3ddd999ada0de3926",
-  "timestamp": "2026-08-20T21:41:11Z",
+  "commit": "99018963ca95156f6173fac5522324378da6f03f",
+  "timestamp": "2026-08-21T08:22:57Z",
   "touched_files": [
     "cogwheel/lensing/chang_refsdal/_born.py",
     "cogwheel/lensing/chang_refsdal/_diffractive.py",
+    "cogwheel/lensing/chang_refsdal/_pearcey_cusp.py",
     "cogwheel/lensing/chang_refsdal/geometry.py",
     "cogwheel/lensing/likelihood.py",
     "cogwheel/lensing/low_w_diffractive_chart.py",
