@@ -15,9 +15,10 @@ The stored object is the SMOOTH residual, never the raw amplification::
     r_new(w; gamma', rho, theta) = f_pure * sqrt(1 - gamma'**2) / F_ref(w)
 
 with ``f_pure = f_schwinger(w, y_eig, gamma')`` the exact pure-shear engine
-value and ``F_ref(w) = airy_fold_reference(w_grid, gamma', y_eig)`` the
-non-vanishing uniform Airy fold reference (the q=p Wronskian form
-``|F_ref|^2 ~ w**(1/3) Ai^2 + w**(-1/3) Ai'^2`` never vanishes).  ``F_ref``
+value and ``F_ref(w) = fold_cusp_reference(w_grid, gamma', y_eig)`` the
+non-vanishing uniform fold/cusp reference: the Airy fold q=p Wronskian form
+``|F_ref|^2 ~ w**(1/3) Ai^2 + w**(-1/3) Ai'^2`` (never vanishes) or, where
+the fold degenerates (``b3 -> 0``), the uniform Pearcey cusp form.  ``F_ref``
 replaces the exact point-mass prefactor ``C(w)`` ONLY; the
 ``sqrt(1 - gamma'**2)`` factor (the macro amplitude ``1 / sqrt(mu_pure)``
 that diverges at the parity wall) STAYS in the residual.  Stripping ``F_ref``
@@ -115,7 +116,7 @@ from cogwheel.lensing.chang_refsdal._schwinger import (
     W_CEILING_SCHWINGER, SchwingerCertificationError, f_schwinger)
 from cogwheel.lensing.low_w_diffractive_chart import (
     _SCHEMA, LowWDiffractiveChart, RHO_HI, RHO_LO, _WALL_GAMMA_PRIME,
-    _content_hash, airy_fold_reference, reduced_source)
+    _content_hash, fold_cusp_reference, reduced_source)
 from cogwheel.lensing.ppgo_map import CERTIFICATION_BAR
 
 #: Lower bound of the reduced-shear ``gamma'`` grid.  Mirrors the lower gamma
@@ -288,27 +289,33 @@ def _rho_grid(scale: str, rho_lo_meas: float, rho_hi_meas: float) -> np.ndarray:
 
 def _residual_at(w_grid: np.ndarray, gamma_prime: float, rho: float,
                  theta: float) -> np.ndarray | None:
-    """Airy-anchored residual ``r = f_pure * sqrt(1 - gamma'^2) / F_ref``.
+    """Fold/cusp-anchored residual ``r = f_pure * sqrt(1 - gamma'^2) / F_ref``.
 
     Reconstructs the reduced eigenframe source ``y_eig`` via
     `reduced_source` (the single-sourced fence inversion, never re-inlined)
-    and builds the non-vanishing uniform Airy fold reference ``F_ref`` via
-    `airy_fold_reference` -- ``F_ref`` replaces ``prefactor_c`` ONLY, the
-    ``sqrt(1 - gamma'^2)`` factor stays in the residual.  ``F_ref`` is sampled
-    on the FULL ``w_grid``: its buildability (geometry / merging-fold-pair /
-    soft-axis-cubic / fold-amplitude refusal) is ``w``-INDEPENDENT, its VALUE
-    is ``w``-dependent.
+    and builds the non-vanishing uniform fold/cusp reference ``F_ref`` via
+    `fold_cusp_reference` -- the Airy fold form or, where the fold degenerates
+    (``b3 -> 0``), the Pearcey cusp form.  ``F_ref`` replaces ``prefactor_c``
+    ONLY, the ``sqrt(1 - gamma'^2)`` factor stays in the residual.  ``F_ref``
+    is sampled on the FULL ``w_grid``.  Buildability is ``w``-independent
+    ONLY for the Airy fold form, which builds its geometry once and samples
+    every node the same way; the Pearcey cusp form's buildability is
+    ``w``-dependent -- each node can refuse independently (live certified
+    quadrature), and the non-vanishing guard ``min|F_ref| / max|F_ref| >=
+    _NON_VANISHING_MIN_RATIO`` is a ratio over the whole ``w_grid``.  For
+    both forms the VALUE is ``w``-dependent.
 
     Returns the complex residual sampled on ``w_grid``, or ``None`` when
-    ``F_ref`` is unbuildable (a sentinel the caller treats as a DECLINED cell,
-    never an engine refusal).  An engine refusal (`SchwingerCertificationError`
-    / ``ValueError`` from `f_schwinger`) is NOT caught here -- it propagates so
-    the caller can count it toward ``n_refused`` (a grid-design bug) rather
-    than a declined cell.
+    ``F_ref`` is unbuildable -- both the Airy fold AND the Pearcey cusp form
+    refused, or the non-vanishing guard failed -- (a sentinel the caller
+    treats as a DECLINED cell, never an engine refusal).  An engine refusal
+    (`SchwingerCertificationError` / ``ValueError`` from `f_schwinger`) is NOT
+    caught here -- it propagates so the caller can count it toward
+    ``n_refused`` (a grid-design bug) rather than a declined cell.
     """
     try:
         y_eig = reduced_source(gamma_prime, rho, theta)
-        f_ref = airy_fold_reference(w_grid, gamma_prime, y_eig)
+        f_ref = fold_cusp_reference(w_grid, gamma_prime, y_eig)
     except ValueError:
         # A geometry / source-reconstruction refusal (``LensDomainError`` or a
         # domain error in the caustic solve): F_ref is UNBUILDABLE at this
@@ -330,14 +337,18 @@ def _fill_coefficients(gamma_prime_grid: np.ndarray, rho_grid: np.ndarray,
     """Evaluate the engine residual at every grid node.
 
     Returns ``(real_coeffs, imag_coeffs, n_refused, unbuildable_mask)``.
-    ``F_ref`` is built ONCE per ``(gamma', rho, theta)`` cell (its buildability
-    is ``w``-independent); a cell whose ``F_ref`` is UNBUILDABLE is recorded in
-    ``unbuildable_mask`` and skipped (no ``f_schwinger`` call, NOT counted in
-    ``n_refused``) -- the exterior wall band is expected to be unbuildable.  A
-    cell whose ``F_ref`` IS buildable but whose ``f_schwinger`` engine refuses
-    (a ``SchwingerCertificationError`` / ``ValueError``) increments
-    ``n_refused`` -- a nonzero ``n_refused`` is a grid design problem the
-    caller raises on.
+    ``F_ref`` is built ONCE per ``(gamma', rho, theta)`` cell; its buildability
+    is ``w``-independent for the Airy fold form but ``w``-dependent for the
+    Pearcey cusp form (per-node refusal + the non-vanishing guard over the
+    full ``w_grid``).  A cell whose ``F_ref`` is UNBUILDABLE -- both the
+    Airy fold AND the Pearcey cusp form refused, or the non-vanishing guard
+    failed -- is recorded in ``unbuildable_mask`` and skipped (no
+    ``f_schwinger`` call, NOT counted in ``n_refused``).  With the Pearcey
+    fallback, cusp cells are now BUILDABLE, so ``n_unbuildable_cells`` is
+    expected ~0 (a genuinely-degenerate remnant only).  A cell whose ``F_ref``
+    IS buildable but whose ``f_schwinger`` engine refuses (a
+    ``SchwingerCertificationError`` / ``ValueError``) increments ``n_refused``
+    -- a nonzero ``n_refused`` is a grid design problem the caller raises on.
     """
     n_gp, n_rho, n_theta, n_w = (len(gamma_prime_grid), len(rho_grid),
                                  len(theta_grid), len(w_grid))

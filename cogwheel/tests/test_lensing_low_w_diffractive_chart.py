@@ -9,7 +9,7 @@ low-w diffractive residual
     r_new(w; gamma', rho, theta) = f_pure * sqrt(1 - gamma'^2) / F_ref(w)
 
 where ``F_ref`` is the NON-VANISHING uniform Airy fold reference
-`airy_fold_reference` (the q=p Wronskian form
+`fold_cusp_reference` (the q=p Wronskian form
 ``|F_ref|^2 ~ w^{1/3} Ai^2 + w^{-1/3} Ai'^2``), and
 `LensedRelativeBinningLikelihood._low_w_diffractive_chart_serve` re-modulates
 it back to the full amplitude
@@ -104,10 +104,12 @@ from cogwheel.lensing import serve_route_census as _census
 from cogwheel.lensing.likelihood import LensedRelativeBinningLikelihood
 from cogwheel.lensing.low_w_diffractive_chart import (
     RHO_HI, RHO_LO, _WALL_GAMMA_PRIME, _SCHEMA, _content_hash,
-    LowWDiffractiveChart, airy_fold_reference, reduced_source)
+    LowWDiffractiveChart, fold_cusp_reference, reduced_source,
+    _airy_fold_form, _pearcey_cusp_reference, _NON_VANISHING_MIN_RATIO)
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal import operator as _operator
-from cogwheel.lensing.chang_refsdal._airy_fold import _merging_fold_pair
+from cogwheel.lensing.chang_refsdal._airy_fold import (
+    _merging_fold_pair, _soft_axis_cubic)
 from cogwheel.lensing.chang_refsdal._diffractive import _caustic_rho
 from cogwheel.lensing.chang_refsdal._hyp1f1 import prefactor_c
 from cogwheel.lensing.chang_refsdal._schwinger import f_schwinger
@@ -122,11 +124,15 @@ WALL_GAMMA_PRIME = 0.8
 #: Caustic-relative distances paired with the regions above.  BOTH fixtures
 #: sit at rho = 1.0 (inside the shell fence ``[RHO_LO, RHO_HI] = [0.6, 1.4]``
 #: and, for the wall fixture, on the caustic): the two regions are
-#: distinguished by ``gamma'`` (0.3 shell vs 0.8 wall band), not by rho.  A
-#: genuinely EXTERIOR wall draw (rho ~ 2.0) has an UNBUILDABLE ``F_ref`` in
-#: most theta directions (``airy_fold_reference`` -> None), so the serve
-#: declines it -- the re-modulation tests therefore exercise the buildable
-#: on-caustic wall-band draw, and the exterior wall draw is covered by the
+#: distinguished by ``gamma'`` (0.3 shell vs 0.8 wall band), not by rho.
+#: The fixtures sit ON the caustic (rho = 1.0) because there ``F_ref`` is
+#: buildable in EVERY theta direction (measured 16/16).  A genuinely
+#: EXTERIOR wall draw (rho ~ 2.0) is buildable in only ~42% of theta
+#: directions -- the fold band plus a Pearcey-fallback cusp band -- with the
+#: cusp-RESOLVED directions (theta ~ 0 and theta >~ 1.0) declined by the
+#: non-vanishing guard (``P -> 0``), not by an absent form.  The re-
+#: modulation tests therefore exercise the universally-buildable on-caustic
+#: wall-band draw, and the exterior wall draw's coverage is pinned by the
 #: ``covers`` predicate test via `RHO_ABOVE_SHELL`.
 NEAR_FOLD_RHO = 1.0
 WALL_RHO = 1.0
@@ -158,9 +164,11 @@ SERVE_WS = (0.5, 2.0, 8.0)
 #: w = 0.5/2/8) are INTERIOR nodes, so a float64 round-off in the serve's
 #: coordinate reconstruction (~1e-16) cannot push them outside the grid and
 #: trip `covers` (which uses inclusive <= on the grid edges).  The rho grid
-#: is capped at 1.05 because `airy_fold_reference` is UNBUILDABLE for rho
-#: beyond ~1.1 in the theta-edge directions (measured 6/16 cells at rho=1.1),
-#: and every cell of the exact chart must carry a finite residual.
+#: is capped at 1.05 because beyond ~1.1 the theta-edge direction theta = 1.4
+#: resolves to a cusp (b3 -> 0) whose Pearcey fallback reference hits P = 0
+#: and is declined by the non-vanishing guard (measured 2/16 cells at
+#: rho = 1.1, gamma' = 0.8/0.9 at theta = 1.4), and every cell of the exact
+#: chart must carry a finite residual.
 _GAMMA_GRID = np.array([0.2, 0.3, 0.8, 0.9])
 _RHO_GRID = np.array([0.5, 0.8, 1.0, 1.05])
 _THETA_GRID = np.array([0.2, 0.6, 1.0, 1.4])
@@ -284,13 +292,13 @@ def _residual_at(w_grid: np.ndarray, gamma_prime: float, rho: float,
     Mirrors ``scripts/train_low_w_diffractive_chart._residual_at``: rebuilds
     the reduced eigenframe source from the chart coordinates via
     `reduced_source`, builds the non-vanishing uniform Airy fold reference
-    ``F_ref`` ONCE on ``w_grid`` via `airy_fold_reference`, then evaluates the
+    ``F_ref`` ONCE on ``w_grid`` via `fold_cusp_reference`, then evaluates the
     exact engine per node and divides.  Returns ``None`` when ``F_ref`` is
     unbuildable (no merging fold pair / degenerate fold frame) -- the same
     sentinel the trainer treats as a declined cell.
     """
     y_eig = reduced_source(gamma_prime, rho, theta)
-    f_ref = airy_fold_reference(w_grid, gamma_prime, y_eig)
+    f_ref = fold_cusp_reference(w_grid, gamma_prime, y_eig)
     if f_ref is None:
         return None
     residual = np.empty(w_grid.size, dtype=complex)
@@ -426,7 +434,7 @@ def _fold_xi(w_grid: np.ndarray, gamma_prime: float,
 
     Reconstructs ``delta_tau = tau_minus - tau_plus`` from the merging fold
     pair -- the same `_merging_fold_pair` and delay difference
-    `airy_fold_reference` uses -- so the independent Airy evaluation below
+    `fold_cusp_reference` uses -- so the independent Airy evaluation below
     operates on the identical fold control.  ``None`` when the merging fold
     pair is absent.
     """
@@ -477,7 +485,7 @@ def _residual_metrics(gamma_prime: float, rho: float, theta: float,
     singular at the merging fold pair, so it cannot stand in for ``f_pure``.
     """
     source = reduced_source(gamma_prime, rho, theta)
-    f_ref = airy_fold_reference(w_grid, gamma_prime, source)
+    f_ref = fold_cusp_reference(w_grid, gamma_prime, source)
     if f_ref is None:
         return None
     sq = math.sqrt(1.0 - gamma_prime * gamma_prime)
@@ -499,7 +507,7 @@ def _residual_metrics(gamma_prime: float, rho: float, theta: float,
 class FrefNonVanishingTestCase(_BaseChartTestCase):
     """F_ref non-vanishing: the q=p Wronskian form never collapses (spec 1).
 
-    `airy_fold_reference` builds the q=p uniform Airy fold form
+    `fold_cusp_reference` builds the q=p uniform Airy fold form
     ``F_ref = 2 sqrt(pi) p [w^{1/6} Ai(-xi) - i w^{-1/6} Ai'(-xi)] * carrier``
     whose magnitude ``|F_ref|^2 = 4 pi |p|^2 (w^{1/3} Ai^2 + w^{-1/3} Ai'^2)``
     is the Wronskian combination -- strictly positive at every node (Ai and
@@ -512,7 +520,7 @@ class FrefNonVanishingTestCase(_BaseChartTestCase):
         """Yield ``(label, f_ref, wronskian, bar)`` per witness."""
         for gp, rho, theta, bar, label in _FREF_WITNESSES:
             source = reduced_source(gp, rho, theta)
-            f_ref = airy_fold_reference(_FREF_W_GRID, gp, source)
+            f_ref = fold_cusp_reference(_FREF_W_GRID, gp, source)
             if f_ref is None:
                 self.fail(f'F_ref unbuildable at witness '
                           f'(gamma_prime={gp}, rho={rho}, theta={theta})')
@@ -857,9 +865,9 @@ class RemodulationSelfFalsificationTestCase(_BaseChartTestCase):
 
     def test_doubled_fref_breaks_node_exactness(self):
         """Applying F_ref twice blows the node-exact agreement."""
-        real_fref = _likelihood_mod.airy_fold_reference
+        real_fref = _likelihood_mod.fold_cusp_reference
         rel = self._node_rel_error_under(
-            'airy_fold_reference',
+            'fold_cusp_reference',
             lambda w, gp, src: real_fref(w, gp, src) ** 2)
         self.assertGreater(
             rel, NODE_EXACT_TOL,
@@ -1364,6 +1372,293 @@ class ThetaD2FoldSelfFalsificationTestCase(_BaseChartTestCase):
             f'no-fold interpolation ({no_fold:.4f}) matched the folded value '
             f'({folded[0].real:.4f}); the fold is not doing anything')
         self.n_checks += 1
+
+
+# ---------------------------------------------------------------------------
+# Cusp-cell (Pearcey reference) fixtures -- the b3 -> 0 fold->cusp transition.
+# ---------------------------------------------------------------------------
+
+#: Reduced shear of the cusp-cell fixtures (wall band, gamma' > 0.5).
+CUSP_GAMMA_PRIME = 0.8
+
+#: Near-caustic rho (just outside the caustic) -- the cusp cell where the
+#: uniform Pearcey reference is genuinely NON-VANISHING over the full chart
+#: band.  At rho = 1.2, theta = 0.2 the soft-axis cubic coefficient is
+#: b3 ~ 1.4e-15 (the fold degenerates), the Airy fold reference refuses, and
+#: the Pearcey fallback builds a finite ``F_ref`` (measured
+#: min|F_ref|/max|F_ref| ~ 0.25, ~4x spread).  Premise-asserted in the test
+#: (b3 <= 1e-6, Airy form None), so a gate move fails loudly.
+CUSP_RHO = 1.2
+
+#: Eigenframe angle of the near-caustic cusp witness (inside the b3 -> 0
+#: window theta in [0, 0.5]).
+CUSP_THETA = 0.2
+
+#: Far-exterior rho -- the SAME b3 -> 0 window (theta in [0, 0.5]) gives a
+#: Pearcey uniform form that COLLAPSES (the cusp cluster fully resolves
+#: above w ~ 7, so ``cluster_sum -> 0`` and min|F_ref| == 0), and the
+#: non-vanishing guard declines the cell.  Witness for the guard's teeth.
+FAR_CUSP_RHO = 2.0
+FAR_CUSP_THETA = 0.3
+
+#: Exact-residual CUSP chart grids (>= 4 nodes per axis for scipy cubic;
+#: the cusp cell (0.8, 1.2, 0.2) is an INTERIOR node).  The theta grid
+#: avoids the declined band (theta ~ 0.25 at rho = 1.2) and the
+#: far-exterior unbuildable corners, so every cell is F_ref-buildable
+#: (fold OR Pearcey).
+_CUSP_GP_GRID = np.array([0.6, 0.7, 0.8, 0.9])
+_CUSP_RHO_GRID = np.array([0.8, 1.0, 1.2, 1.4])
+_CUSP_THETA_GRID = np.array([0.15, 0.2, 0.3, 0.4])
+
+#: theta sweep across the b3 -> 0 threshold at (gamma'=0.8, rho=1.2): the
+#: cusp side (<= 0.2, Pearcey F_ref) through the fold side (>= 0.3, Airy
+#: F_ref).  theta ~ 0.25 is the declined band (neither form serves) and is
+#: skipped by the sweep.
+_CUSP_THETA_SWEEP = (0.15, 0.2, 0.3, 0.35, 0.4, 0.5)
+
+#: Max |F_ref| ratio between adjacent servable thetas across the handoff
+#: (spec 3's "~3x" bar).  Measured 3.12x (at w ~ 0.65, where the cusp and
+#: fold forms oscillate out of phase); 5.0 leaves headroom while still
+#: catching an order-of-magnitude discontinuity (a q=0 collapse or a wrong
+#: normalization would give >> 10x).
+CONTINUITY_FREF_RATIO_TOL = 5.0
+
+#: Non-vanishing upper bound on the Pearcey reference spread
+#: (spec 2's ``max|F_ref|/min|F_ref| < 1e3`` sanity ceiling).  The measured
+#: spread is ~4x, so 1e3 leaves ~250x headroom -- the load-bearing claim is
+#: really ``min|F_ref| > 0`` (pinned separately), this ceiling only catches
+#: a diverging reference.
+CUSP_FREF_RATIO_TOL = 1e3
+
+
+@functools.lru_cache(maxsize=1)
+def _build_exact_cusp_chart() -> LowWDiffractiveChart:
+    """Exact-residual chart whose cusp cell is an interior node (spec 1).
+
+    Same construction as `_build_exact_chart` but on the CUSP grids, so the
+    b3 -> 0 cusp cell (gamma'=0.8, rho=1.2, theta=0.2) is an interior grid
+    node whose residual is Pearcey-anchored (``r = f_pure * sqrt(1-gp^2) /
+    F_ref`` with the Pearcey ``F_ref``).  Every cell must be F_ref-buildable
+    (fold OR Pearcey); an unbuildable cell raises rather than being silently
+    zero-filled, so a future grid edit surfaces loudly.  Cached so the cusp
+    tests share one build.
+    """
+    real = np.zeros((4, 4, 4, 4), dtype=float)
+    imag = np.zeros((4, 4, 4, 4), dtype=float)
+    for i, gp in enumerate(_CUSP_GP_GRID):
+        for j, rho in enumerate(_CUSP_RHO_GRID):
+            for k, theta in enumerate(_CUSP_THETA_GRID):
+                r = _residual_at(_W_GRID, float(gp), float(rho),
+                                 float(theta))
+                if r is None:
+                    raise AssertionError(
+                        f'F_ref unbuildable at cusp-chart node '
+                        f'(gamma_prime={gp}, rho={rho}, theta={theta}); the '
+                        'cusp chart grid must be F_ref-buildable')
+                real[i, j, k, :] = r.real
+                imag[i, j, k, :] = r.imag
+    return LowWDiffractiveChart(
+        gamma_prime_grid=_CUSP_GP_GRID, rho_grid=_CUSP_RHO_GRID,
+        theta_grid=_CUSP_THETA_GRID, w23_grid=_W_GRID ** (2.0 / 3.0),
+        real_coeffs=real, imag_coeffs=imag, derate=1.0)
+
+
+class CuspServeEngineNodeExactTestCase(_BaseChartTestCase):
+    """Node-exact re-modulation for the Pearcey-anchored cusp cell (spec 1).
+
+    The cusp-cell analogue of `ServeEngineNodeExactTestCase`: with an
+    EXACT-residual chart whose b3 -> 0 cusp cell is an interior node (the
+    trainer stores ``r = f_pure * sqrt(1-gp^2) / F_ref`` with the Pearcey
+    ``F_ref``), the serve re-modulates ``F_ref * sqrt_mu_full * r`` back to
+    the exact engine to ~1e-14 -- proving the Pearcey reference convention
+    is consistent between train and serve (a missed/doubled F_ref, a dropped
+    sqrt(1-gp^2), or a frame mismatch would break the cancellation).
+    """
+
+    def test_cusp_cell_serve_matches_engine_at_node(self):
+        """|F_serve - F_engine| / |F_engine| <= NODE_EXACT_TOL at the cusp node."""
+        chart = _build_exact_cusp_chart()
+        for kappa, beta in ((k, b) for k in KAPPAS for b in BETAS):
+            lens = _make_lens(CUSP_GAMMA_PRIME, CUSP_RHO, CUSP_THETA,
+                              kappa, beta)
+            dense_w = np.array(SERVE_WS)
+            f_serve = _serve_farfield(chart, lens, dense_w)
+            if f_serve is None:
+                self.fail(f'serve declined the cusp-cell fixture '
+                          f'(kappa={kappa}, beta={beta}); the exact cusp '
+                          'chart must cover it')
+            y = (lens['y1'], lens['y2'])
+            for i, w in enumerate(SERVE_WS):
+                with self.subTest(kappa=kappa, beta=beta, w=w):
+                    f_engine = _engine_reference_kappa(
+                        w, y, lens['gamma'], beta, kappa)
+                    rel = abs(f_serve[i] - f_engine) / abs(f_engine)
+                    self.assertLess(
+                        rel, NODE_EXACT_TOL,
+                        f'F_serve disagrees with the engine by {rel:.3e} at '
+                        f'w={w:g}; the Pearcey re-modulation or residual '
+                        'normalization is inconsistent')
+                    self.n_checks += 1
+
+
+class CuspFrefNonVanishingTestCase(_BaseChartTestCase):
+    """Pearcey reference contract: finite, non-vanishing at a cusp cell.
+
+    At a genuine b3 -> 0 cusp cell the fallback Pearcey reference is finite
+    and non-vanishing over the full chart band (spec 2): the witness
+    (gamma'=0.8, rho=1.2, theta=0.2) has b3 ~ 1.4e-15, the Airy fold form
+    refuses, and the Pearcey fallback builds ``F_ref`` with ``min|F_ref| >
+    0``.  Engine-free (geometry + the Pearcey form, no Schwinger call).
+    """
+
+    def _witness(self):
+        """Return ``(source, f_ref)`` with the cusp-cell premise asserted."""
+        source = reduced_source(CUSP_GAMMA_PRIME, CUSP_RHO, CUSP_THETA)
+        nearest = geometry.nearest_caustic_point(
+            CUSP_GAMMA_PRIME, 0.0, source, kappa=0.0)
+        b3 = _soft_axis_cubic(nearest.image, nearest.soft_axis)
+        if b3 is None:
+            self.fail('premise lost: soft-axis cubic is degenerate at the '
+                      'cusp witness')
+        self.assertLessEqual(
+            abs(b3), 1e-6,
+            'premise lost: the witness is no longer a b3 -> 0 cusp cell '
+            f'(b3 = {b3:.2e})')
+        self.n_checks += 1
+        airy = _airy_fold_form(_FREF_W_GRID, CUSP_GAMMA_PRIME, source)
+        self.assertIsNone(
+            airy, 'premise lost: the Airy fold form no longer refuses at '
+            'the cusp witness (b3 not ~ 0)')
+        self.n_checks += 1
+        pearcey = _pearcey_cusp_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME,
+                                          source)
+        self.assertIsNotNone(
+            pearcey, 'premise lost: the Pearcey fallback no longer builds '
+            'the cusp reference')
+        self.n_checks += 1
+        f_ref = fold_cusp_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME, source)
+        return source, f_ref
+
+    def test_cusp_fref_is_finite_nonvanishing(self):
+        """``fold_cusp_reference`` is non-None, finite, min > 0, ratio < 1e3."""
+        _source, f_ref = self._witness()
+        self.assertIsNotNone(
+            f_ref, 'fold_cusp_reference declined a non-vanishing cusp cell')
+        self.n_checks += 1
+        self.assertTrue(
+            np.all(np.isfinite(f_ref)),
+            'F_ref is not finite at the cusp witness')
+        self.n_checks += 1
+        magnitude = np.abs(f_ref)
+        self.assertGreater(
+            float(magnitude.min()), 0.0,
+            'min|F_ref| == 0 at the cusp witness: a residual pole')
+        self.n_checks += 1
+        ratio = float(magnitude.max() / magnitude.min())
+        self.assertLess(
+            ratio, CUSP_FREF_RATIO_TOL,
+            f'max|F_ref|/min|F_ref| = {ratio:.2e} >= {CUSP_FREF_RATIO_TOL}: '
+            'the Pearcey reference diverges over the band')
+        self.n_checks += 1
+
+
+class CuspFrefNonVanishingSelfFalsificationTestCase(_BaseChartTestCase):
+    """Prove the non-vanishing guard is load-bearing (spec 2 teeth).
+
+    `CuspFrefNonVanishingTestCase` is green at rho=1.2 where the Pearcey
+    form is non-vanishing.  At the FAR-exterior cusp cell (rho=2.0, the SAME
+    b3 -> 0 window) the Pearcey uniform form COLLAPSES -- its cusp cluster
+    fully resolves above w ~ 7 (``matched -> 0``, so ``cluster_sum -> 0``)
+    and ``min|F_ref| == 0`` -- and ``fold_cusp_reference`` must DECLINE
+    (return None) rather than emit a residual pole.  This is what gives the
+    non-vanishing pin its teeth: the guard discriminates, it is not a no-op.
+    """
+
+    def test_far_exterior_cusp_cell_is_declined(self):
+        """The guard declines the rho=2.0 cusp cell whose Pearcey form hits 0."""
+        source = reduced_source(CUSP_GAMMA_PRIME, FAR_CUSP_RHO,
+                                FAR_CUSP_THETA)
+        pearcey = _pearcey_cusp_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME,
+                                          source)
+        self.assertIsNotNone(
+            pearcey, 'premise lost: the far-exterior Pearcey form should '
+            'build (and then be declined by the guard)')
+        pearcey_ratio = float(np.abs(pearcey).min() / np.abs(pearcey).max())
+        self.assertLess(
+            pearcey_ratio, _NON_VANISHING_MIN_RATIO,
+            'premise lost: the far-exterior Pearcey form no longer falls '
+            'below the non-vanishing guard floor (its cusp cluster must '
+            'resolve to a hard 0)')
+        self.n_checks += 1
+        f_ref = fold_cusp_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME, source)
+        self.assertIsNone(
+            f_ref, 'the non-vanishing guard failed to decline a cusp cell '
+            'whose Pearcey reference hits 0 (a residual pole)')
+        self.n_checks += 1
+
+
+class FoldCuspContinuityTestCase(_BaseChartTestCase):
+    """Fold/cusp continuity across the b3 -> 0 threshold (spec 3).
+
+    At fixed (gamma'=0.8, rho=1.2), theta sweeps from the cusp side
+    (theta <= 0.2, Pearcey F_ref) to the fold side (theta >= 0.3, Airy
+    F_ref).  ``|F_ref|`` at a shared w stays within ~3x across the handoff
+    (the two normal forms are comparable in magnitude, not numerically
+    equal), and the residual ``r = f_pure * sqrt(1-gp^2) / F_ref`` stays
+    finite at every servable theta (no jump to a pole).
+    """
+
+    def _servable_frefs(self):
+        """Yield ``(theta, form, f_ref)`` for the servable sweep points."""
+        for theta in _CUSP_THETA_SWEEP:
+            source = reduced_source(CUSP_GAMMA_PRIME, CUSP_RHO, theta)
+            airy = _airy_fold_form(_FREF_W_GRID, CUSP_GAMMA_PRIME, source)
+            f_ref = fold_cusp_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME,
+                                        source)
+            if f_ref is None:
+                continue  # declined band (theta ~ 0.25): neither form serves
+            yield theta, ('cusp' if airy is None else 'fold'), f_ref
+
+    def test_handoff_visits_both_forms(self):
+        """The sweep visits both the cusp and the fold form (premise)."""
+        forms = {form for _t, form, _f in self._servable_frefs()}
+        self.assertEqual(
+            forms, {'cusp', 'fold'},
+            f'handoff sweep saw forms {forms}, expected both cusp and fold; '
+            'the b3 -> 0 threshold is not being crossed')
+        self.n_checks += 1
+
+    def test_fref_continuous_across_handoff(self):
+        """max |F_ref| ratio between adjacent servable thetas < tol."""
+        points = list(self._servable_frefs())
+        for (t_lo, _f_lo, ref_lo), (t_hi, _f_hi, ref_hi) in zip(
+                points[:-1], points[1:]):
+            ratio = np.maximum(
+                np.abs(ref_lo) / np.abs(ref_hi),
+                np.abs(ref_hi) / np.abs(ref_lo))
+            with self.subTest(theta_lo=t_lo, theta_hi=t_hi):
+                self.assertLess(
+                    float(ratio.max()), CONTINUITY_FREF_RATIO_TOL,
+                    f'|F_ref| jumps {ratio.max():.2f}x between theta={t_lo} '
+                    f'and theta={t_hi}: the fold/cusp handoff is not '
+                    'continuous')
+                self.n_checks += 1
+
+    def test_residual_finite_across_handoff(self):
+        """The residual r is finite (no pole) at every servable theta."""
+        sq = math.sqrt(1.0 - CUSP_GAMMA_PRIME * CUSP_GAMMA_PRIME)
+        for theta, form, f_ref in self._servable_frefs():
+            source = reduced_source(CUSP_GAMMA_PRIME, CUSP_RHO, theta)
+            f_pure = np.array([f_schwinger(float(w), source,
+                                           CUSP_GAMMA_PRIME)
+                               for w in _FREF_W_GRID])
+            r = f_pure * sq / f_ref
+            with self.subTest(theta=theta, form=form):
+                self.assertTrue(
+                    np.all(np.isfinite(r)),
+                    f'residual not finite at theta={theta} ({form} form): '
+                    'a jump to a pole at the handoff')
+                self.n_checks += 1
 
 
 # ---------------------------------------------------------------------------

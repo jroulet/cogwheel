@@ -15,9 +15,10 @@ diffractive low-w serve in the likelihood (Rung P).
 
 Representation: the stored residual is the exact pure-shear engine value
 ``f_pure = f_schwinger(w, y_eig, gamma')`` stripped of the NON-VANISHING
-uniform Airy fold reference ``F_ref = airy_fold_reference(w_grid, gamma',
-source)`` -- the q=p Wronskian form ``|F_ref|^2 ~ w^{1/3} Ai^2 +
-w^{-1/3} Ai'^2`` never vanishes -- and scaled by ``sqrt(1 - gamma'^2)``::
+uniform fold/cusp reference ``F_ref = fold_cusp_reference(w_grid, gamma',
+source)`` -- the Airy fold q=p Wronskian form ``|F_ref|^2 ~ w^{1/3} Ai^2 +
+w^{-1/3} Ai'^2`` (never vanishes) or, where the fold degenerates (``b3 -> 0``),
+the uniform Pearcey cusp form -- and scaled by ``sqrt(1 - gamma'^2)``::
 
     r_new = f_pure * sqrt(1 - gamma'^2) / F_ref .
 
@@ -67,6 +68,9 @@ from cogwheel.lensing.chang_refsdal._diffractive import (
     _DIFFRACTIVE_FIT_FENCE_DELTA,
     _DIFFRACTIVE_FIT_FENCE_RHO_LO,
 )
+from cogwheel.lensing.chang_refsdal._pearcey_cusp import (
+    cusp_uniform_reference_grid,
+)
 
 #: Shipped package-data artifact name (under ``cogwheel/data/``).
 _DEFAULT_CHART_NAME = 'low_w_diffractive_chart.npz'
@@ -91,6 +95,13 @@ RHO_HI = 1.0 + _DIFFRACTIVE_FIT_FENCE_DELTA
 #: (``gamma' > _WALL_GAMMA_PRIME``) is served by the chart, so a
 #: re-calibration that moves that ceiling must move this constant too.
 _WALL_GAMMA_PRIME = 0.5
+
+#: Non-vanishing guard floor on the built reference: the reference is
+#: declined (``None``) when ``min|F_ref| / max|F_ref|`` falls below this.
+#: Load-bearing only for the Pearcey cusp form (the Airy q=p Wronskian never
+#: vanishes); interior cusp cells can hit ``P ~ 0`` and would otherwise emit
+#: a residual pole.
+_NON_VANISHING_MIN_RATIO = 1e-3
 
 
 def _content_hash(*arrays: np.ndarray) -> str:
@@ -144,40 +155,25 @@ def reduced_source(gamma_prime: float, rho: float,
                      r_prime * math.sin(theta)], dtype=float)
 
 
-def airy_fold_reference(w_grid: np.ndarray, gamma_prime: float,
-                        source: np.ndarray) -> np.ndarray | None:
-    """Non-vanishing uniform Airy fold reference ``F_ref`` on ``w_grid``.
+def _airy_fold_form(w_grid: np.ndarray, gamma_prime: float,
+                    source: np.ndarray) -> np.ndarray | None:
+    """Uniform Airy fold reference ``F_ref`` (q=p Wronskian form).
 
     Builds the q=p uniform Airy fold form (the Wronskian
     ``|F_ref|^2 ~ w^{1/3} Ai^2 + w^{-1/3} Ai'^2`` never vanishes, unlike the
     leading-order q=0 form) from the merging fold pair and the nearest-caustic
     fold frame, in the ABSOLUTE frame -- no ``t_min`` subtraction and no
     ``exp(-1j w * critical_delay)`` re-referencing, since ``f_pure`` is raw and
-    the mean carrier cancels exactly.  The residual this anchors is
-    ``r = f_pure * sqrt(1 - gamma'^2) / F_ref``: ``F_ref`` replaces
-    ``prefactor_c`` ONLY, the ``sqrt(1 - gamma'^2)`` stays in the residual.
+    the mean carrier cancels exactly.
 
     Deliberately does NOT call `fold_amplification`, whose q=0 +
     ``_ETA_MAX_FOLD`` certificate would wrongly refuse wall-band nodes.
 
-    Parameters
-    ----------
-    w_grid : ndarray
-        1-D array of dimensionless frequencies (positive).
-    gamma_prime : float
-        Reduced shear.
-    source : ndarray
-        Shape ``(2,)`` reduced eigenframe source position.
-
-    Returns
-    -------
-    ndarray or None
-        Complex ``F_ref`` sampled on ``w_grid``, or ``None`` on any refusal
-        (a geometry ``LensDomainError`` from the solve, no merging fold pair,
-        a degenerate soft-axis cubic or fold amplitude, or a non-finite
-        value).
+    Returns ``None`` on any refusal: a geometry ``LensDomainError`` from the
+    solve, no merging fold pair, a degenerate soft-axis cubic (``b3 -> 0``,
+    the fold->cusp transition), a degenerate fold amplitude, or a non-finite
+    value.
     """
-    w_grid = np.asarray(w_grid, dtype=float)
     try:
         matrix = geometry.macro_matrix(gamma_prime, 0.0, 0.0)
         images = geometry.find_images(source, matrix)
@@ -210,6 +206,76 @@ def airy_fold_reference(w_grid: np.ndarray, gamma_prime: float,
                                        float(xi[index]), p_amplitude,
                                        p_amplitude, sigma)
     if not np.all(np.isfinite(f_ref)):
+        return None
+    return f_ref
+
+
+def _pearcey_cusp_reference(w_grid: np.ndarray, gamma_prime: float,
+                            source: np.ndarray) -> np.ndarray | None:
+    """Uniform Pearcey cusp reference ``F_ref``, geometry shared across w.
+
+    Fallback form for `fold_cusp_reference` when the Airy fold reference is
+    unbuildable (``b3 -> 0``, the fold->cusp transition).  Builds the
+    cluster-only uniform Pearcey form (live certified quadrature, no Pearcey
+    table) via `cusp_uniform_reference_grid` with ``beta = 0.0`` and
+    ``kappa = 0.0`` -- the same reduced-eigenframe ``kappa = 0`` convention
+    the Airy path uses via ``macro_matrix(gamma_prime, 0, 0)`` -- in the
+    ABSOLUTE frame.  The w-independent geometry/controls are solved once per
+    cell and reused across w nodes, mirroring `_airy_fold_form`.
+
+    Returns ``None`` if ANY w-node is refused (``cusp_uniform_reference_grid``
+    returns ``None``) or if the sampled array is non-finite.
+    """
+    return cusp_uniform_reference_grid(
+        np.asarray(w_grid, dtype=float), np.asarray(source, dtype=float),
+        gamma_prime)
+
+
+def fold_cusp_reference(w_grid: np.ndarray, gamma_prime: float,
+                        source: np.ndarray) -> np.ndarray | None:
+    """Non-vanishing uniform fold/cusp reference ``F_ref`` on ``w_grid``.
+
+    ``F_ref`` is the uniform Airy fold q=p Wronskian form OR the uniform
+    Pearcey cusp form per cell -- the Airy fold path is primary, and when it
+    is unbuildable for ANY reason (notably ``b3 -> 0``, the fold->cusp
+    transition) the Pearcey cusp reference is built instead, mirroring the
+    serving ladder.  Both forms are in the ABSOLUTE frame -- no ``t_min``
+    subtraction and no ``exp(-1j w * critical_delay)`` re-referencing, since
+    ``f_pure`` is raw and the mean carrier cancels exactly.  The residual this
+    anchors is ``r = f_pure * sqrt(1 - gamma'^2) / F_ref``: ``F_ref`` replaces
+    ``prefactor_c`` ONLY, the ``sqrt(1 - gamma'^2)`` stays in the residual.
+
+    Declines (``None``) only when BOTH forms fail, or when the returned
+    reference is non-finite or fails the non-vanishing magnitude guard
+    ``min|F_ref| / max|F_ref| >= _NON_VANISHING_MIN_RATIO``.  The guard is
+    load-bearing only for the Pearcey form: exterior cusp cells have
+    ``P != 0`` (Pearcey zeros live on interior fold lines), but interior cusp
+    cells can hit ``P ~ 0``, and the guard declines those instead of emitting
+    a residual pole; the Airy Wronskian trivially satisfies it.
+
+    Parameters
+    ----------
+    w_grid : ndarray
+        1-D array of dimensionless frequencies (positive).
+    gamma_prime : float
+        Reduced shear.
+    source : ndarray
+        Shape ``(2,)`` reduced eigenframe source position.
+
+    Returns
+    -------
+    ndarray or None
+        Complex ``F_ref`` sampled on ``w_grid``, or ``None`` to decline.
+    """
+    w_grid = np.asarray(w_grid, dtype=float)
+    f_ref = _airy_fold_form(w_grid, gamma_prime, source)
+    if f_ref is None:
+        f_ref = _pearcey_cusp_reference(w_grid, gamma_prime, source)
+    if f_ref is None:
+        return None
+    magnitude = np.abs(f_ref)
+    ratio = magnitude.min() / magnitude.max()
+    if not np.isfinite(ratio) or ratio < _NON_VANISHING_MIN_RATIO:
         return None
     return f_ref
 

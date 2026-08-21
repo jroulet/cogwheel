@@ -117,7 +117,7 @@ from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
                                        get_certified_ppgo_map)
 from cogwheel.lensing.born_residual_chart import BornResidualChart
 from cogwheel.lensing.low_w_diffractive_chart import (
-    LowWDiffractiveChart, reduced_source, airy_fold_reference)
+    LowWDiffractiveChart, reduced_source, fold_cusp_reference)
 
 __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
 
@@ -1983,9 +1983,10 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         replacement for the two-rung serve over the band it covers.
 
         The residual ``r_pure`` interpolated by the chart is the reduced
-        point-mass kernel in units of the uniform Airy fold reference
-        ``F_ref`` (the WP1 `airy_fold_reference`, rebuilt at serve time from
-        the merging fold pair in the reduced eigenframe): the full amplitude
+        point-mass kernel in units of the uniform fold/cusp reference
+        ``F_ref`` (the WP1 `fold_cusp_reference`, rebuilt at serve time from
+        the merging fold pair -- or the Pearcey cusp form -- in the reduced
+        eigenframe): the full amplitude
         reconstructs as
         ``F = mass_sheet_phase * F_ref(w) * sqrt_mu_full * r_pure``,
         with ``mass_sheet_phase = exp(0.5j*w*(log(lam) - kappa*s))`` and
@@ -2050,11 +2051,11 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         rho = _caustic_rho(abs(gamma_prime), s, theta)
 
         # Rebuild the reduced eigenframe source and its non-vanishing
-        # uniform Airy fold reference ``F_ref`` engine-free at serve time.
+        # uniform fold/cusp reference ``F_ref`` engine-free at serve time.
         # A draw whose ``F_ref`` is unbuildable (``None``) falls through to
         # the exact engine, mirroring `_tube_f_ref`'s ``None`` handling.
         source = reduced_source(gamma_prime, rho, theta)
-        fref = airy_fold_reference(dense_w, gamma_prime, source)
+        fref = fold_cusp_reference(dense_w, gamma_prime, source)
         if fref is None:
             return None
 

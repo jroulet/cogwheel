@@ -6,6 +6,33 @@ Add a new entry by creating a fragment in `spec_changelog.d/`.
 
 ---
 
+- `0.49.4` (2026-08-21):
+
+SPEC.md's BEAT-FREE TUBE RESIDUAL paragraph gained the ASTROID TUBE ARC-TRIM
+sentence: `surrogate_training._trim_tube_arc` (promoted from F083) derives the
+robust servable astroid sub-arc from the binding corner's live merging-pair
+`Delta_tau` profile instead of charting the full cusp-to-cusp arc (whose
+non-monotone `Delta_tau` makes `_merging_fold_pair` refuse near the cusps) —
+low knee at `_TUBE_TRIM_DTAU_FRAC = 0.6` of the peak, both bounds stood inward
+by `_TUBE_TRIM_LO_STANDOFF = 0.20` / `_TUBE_TRIM_HI_STANDOFF = 0.05` at
+`_TUBE_TRIM_SCAN_POINTS = 80` resolution, parity-gated to the astroid (+1)
+with saddle bands byte-identical. Closes the deferred post-commit finding
+INS-1-001.
+
+- `0.49.3` (2026-08-21):
+
+SPEC.md's LOW-W DIFFRACTIVE RUNGS paragraph (Rung P) corrected from the stale
+point-mass anchor to the code's actual residual representation: the chart
+stores `r_new = f_pure * sqrt(1 - gamma'^2) / F_ref(w)` with `F_ref =
+fold_cusp_reference` — the non-vanishing uniform Airy fold q=p Wronskian form,
+or the uniform Pearcey cusp form where the fold degenerates (`b3 -> 0`, the
+fold->cusp transition) — declined (exact-engine fall-through) when both forms
+fail or the non-vanishing guard `min|F_ref| / max|F_ref| >=
+_NON_VANISHING_MIN_RATIO` trips; the serve re-modulation is `F =
+mass_sheet_phase * F_ref(w) * sqrt_mu_full * r_pure` and the interpolation
+axis is `w**(2/3)` (not `log w`). The stale `prefactor_c(w) = C(w)` description
+removed (deferred findings INS-1-004 / INS-2-003 / INS-3-001).
+
 - `0.49.2` (2026-08-20):
 
 SPEC.md's LOW-W DIFFRACTIVE RUNGS paragraph (Rung P) updated for the low-w

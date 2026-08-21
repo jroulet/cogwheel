@@ -92,6 +92,7 @@ fall-through.  Engine internals are untouched.
 from __future__ import annotations
 
 import cmath
+import dataclasses
 import functools
 import math
 import warnings
@@ -104,6 +105,7 @@ from cogwheel.lensing.chang_refsdal import _airy_fold
 from cogwheel.lensing.chang_refsdal._pearcey_table import PearceyTable
 
 __all__ = ['pearcey', 'pearcey_asymptotic', 'cusp_amplification',
+           'cusp_uniform_reference_grid',
            'PearceyTable', 'set_pearcey_table', 'get_pearcey_table',
            'use_pearcey_table']
 
@@ -700,6 +702,224 @@ def _leading_geometric(w: float, image: np.ndarray, source: np.ndarray,
     return kernel * cmath.exp(1j * w * tau), tau
 
 
+@dataclasses.dataclass(frozen=True)
+class _CuspUniformForm:
+    """Cluster-uniform result bundle returned by `_cusp_uniform_at_w`.
+
+    Carries the cluster-uniform form (`uniform`), the resolved far-image sum
+    (`far_sum`), and the reduced stationary phases + matched scaled delays
+    the calibration certificate needs.  The certified Pearcey primitive and
+    the cluster/far split that produce them are deferred to
+    `_cusp_uniform_at_w`, which `cusp_amplification` calls only AFTER the
+    ppGO fast rung and the F074 error gate have not fired.
+    """
+    uniform: complex
+    far_sum: complex
+    stationary_values: list[float]
+    matched_delays: list[float]
+
+
+@dataclasses.dataclass(frozen=True)
+class _CuspUniformGeometry:
+    """w-independent geometry/controls shared by all w at a cusp cell.
+
+    The cluster-uniform Pearcey form evaluates `_leading_geometric` and the
+    reduced stationary phases per w, but the lens geometry, the cusp vertex
+    and the F074 control projections do not depend on w.  `_cusp_uniform_geometry`
+    computes them once per cell and the per-w core reuses them across w
+    nodes, so the bake-time cusp reference solves the geometry once per cell
+    and loops only over w, mirroring `_airy_fold_form`.
+    """
+    matrix: np.ndarray
+    images: list[np.ndarray]
+    nearest: geometry.NearestCausticPoint
+    c4: float
+    tau_c: float
+    delta_parallel: float
+    delta_perp: float
+    abs_c4: float
+    curvature: float
+
+
+def _cusp_uniform_geometry(source, gamma: float, *,
+                           beta: float = 0.0, kappa: float = 0.0
+                           ) -> _CuspUniformGeometry | None:
+    """Resolve the w-independent part of the cluster-uniform form.
+
+    Solves the lens geometry (``macro_matrix`` / ``nearest_caustic_point`` /
+    ``find_images``), the cusp vertex, the soft-axis normal form, the cusp
+    delay and the F074 control projections -- every quantity
+    `_cusp_uniform_at_w` needs that does not depend on ``w``.  Refused
+    (``None``) on the same structural failures `_cusp_uniform_at_w` reports:
+    a geometry ``LensDomainError``, no cusp vertex, or a degenerate normal
+    form.
+    """
+    source = np.asarray(source, dtype=float)
+    if not (source.shape == (2,) and np.all(np.isfinite(source))):
+        return None
+
+    try:
+        matrix = geometry.macro_matrix(gamma, beta, kappa)
+        nearest = geometry.nearest_caustic_point(gamma, beta, source,
+                                                 kappa=kappa)
+        images = geometry.find_images(source, matrix)
+    except geometry.LensDomainError:
+        return None
+
+    lam = 1.0 - float(kappa)
+    branch = 1 if abs(gamma) < lam else _saddle_branch(gamma, beta, kappa,
+                                                       nearest.theta)
+    vertex = _cusp_vertex(gamma, beta, kappa, source, nearest.theta, branch)
+    if vertex is None:
+        return None
+
+    normal_form = _soft_normal_form(vertex.image, matrix, vertex.soft_axis,
+                                    vertex.hard_axis, vertex.hard_eigenvalue)
+    if normal_form is None:
+        return None
+    c4, phi_ssr = normal_form
+
+    tau_c = geometry.delay(vertex.image, source, matrix)
+
+    # Source offset from the cusp caustic point, resolved on the caustic
+    # tangent (soft / cusp axis) and normal (hard axis).  The caustic
+    # frame is the image-plane eigenframe carried to the source plane;
+    # for the leading uniform form the eigenframe directions are used.
+    offset = source - vertex.source
+    delta_parallel = float(offset @ vertex.soft_axis)
+    delta_perp = float(offset @ vertex.hard_axis)
+
+    abs_c4 = abs(c4)
+    curvature = phi_ssr / (2.0 * vertex.hard_eigenvalue)
+
+    return _CuspUniformGeometry(matrix, images, nearest, c4, tau_c,
+                                delta_parallel, delta_perp, abs_c4, curvature)
+
+
+@dataclasses.dataclass(frozen=True)
+class _CuspControls:
+    """Per-w F074 controls and fold-ppGO handoff radius (no quadrature).
+
+    Derived from the w-independent `_CuspUniformGeometry` by scalar
+    arithmetic only.  Together with the geometry bundle it supplies
+    everything the ppGO fast rung and the F074 error gate read, so
+    `cusp_amplification` can run both gates BEFORE the certified Pearcey
+    primitive is ever consulted.
+    """
+    x: float
+    y: float
+    handoff_radius: float
+    reflected: bool
+    phase_sign: float
+
+
+def _cusp_controls(geometry_bundle: _CuspUniformGeometry, w: float
+                   ) -> _CuspControls:
+    """Per-w F074 controls and fold-ppGO handoff radius.
+
+    F074: delta_phi = -delta_y . x(s) along the reduced manifold
+    x(s) = x_c + s e_s - (phi_ssr / (2 lambda_h)) s^2 e_h, so the ODD
+    control a1 (coeff of s) = -delta_parallel (the SOFT projection,
+    linear because e_s multiplies s) and the EVEN control a2 (coeff of
+    s^2) = +delta_perp * phi_ssr / (2 lambda_h) (the HARD projection
+    times the manifold's curvature, entering through the bend h*(s)).
+    The pre-F074 map had the two transposed and dropped the curvature
+    factor; measured consequence, sign convention, and the 54/54
+    stationary-cluster match are in FINDINGS F074.  Rescaling
+    s -> (w |C4|)^{-1/4} t: x = a2 w^{1/2} / sqrt(|C4|),
+    y = a1 w^{3/4} / |C4|^{1/4}; the |C4|^{-1/4} prefactor is common to
+    P and P_asymp, so it cancels in the uniform ratio.
+
+    The fold-ppGO handoff radius is kept in the PRE-F074 control gauge
+    (the ROUTING radius the handoff was calibrated against), so re-gauging
+    the controls does not silently re-tune a different gate.
+
+    A negative reduced quartic (C4 < 0 -- the standard minimum-image cusp
+    orientation) is the *dual* cusp: the exact substitution
+    s = |C4|^{-1/4} t turns its generating integral into
+    |C4|^{-1/4} conj(P(-x, -y)) (a closed-form identity, not a fit), so the
+    primitive is evaluated in the reflected (-x, -y) frame and conjugated;
+    the reduced phase carries a compensating sign flip (`phase_sign`).
+    """
+    w = float(w)
+    abs_c4 = geometry_bundle.abs_c4
+
+    x = (geometry_bundle.delta_perp * geometry_bundle.curvature
+         * math.sqrt(w) / math.sqrt(abs_c4))
+    y = -geometry_bundle.delta_parallel * w ** 0.75 / abs_c4 ** 0.25
+
+    handoff_radius = math.hypot(
+        geometry_bundle.delta_parallel * math.sqrt(w) / math.sqrt(abs_c4),
+        geometry_bundle.delta_perp * w ** 0.75 / abs_c4 ** 0.25)
+
+    reflected = geometry_bundle.c4 < 0.0
+    phase_sign = -1.0 if reflected else 1.0
+
+    return _CuspControls(x, y, handoff_radius, reflected, phase_sign)
+
+
+def _cusp_uniform_at_w(geometry_bundle: _CuspUniformGeometry, source,
+                       w: float, *,
+                       pearcey_table: PearceyTable | None = None
+                       ) -> _CuspUniformForm | None:
+    """Per-w core of the cluster-uniform form for a fixed geometry bundle.
+
+    Builds the certified primitive/asymptotic ratio and the cusp-cluster /
+    far-image split for ONE ``w`` from the shared w-independent geometry of
+    `_cusp_uniform_geometry`.  Refused (``None``) on per-w structural
+    failures: primitive certification failure, vanishing asymptotic,
+    non-finite primitive, or a divergent leading geometric image.
+    """
+    w = float(w)
+    if not w > 0.0:
+        return None
+    matrix = geometry_bundle.matrix
+    images = geometry_bundle.images
+
+    controls = _cusp_controls(geometry_bundle, w)
+    x, y = controls.x, controls.y
+    reflected = controls.reflected
+    phase_sign = controls.phase_sign
+
+    x_eval, y_eval = (-x, -y) if reflected else (x, y)
+
+    primitive = _consult_pearcey(x_eval, y_eval, pearcey_table)
+    if primitive is None:
+        return None
+    asymptotic = pearcey_asymptotic(x_eval, y_eval)
+    if abs(asymptotic) == 0.0 or not np.isfinite(abs(primitive)):
+        return None
+    if reflected:
+        primitive = primitive.conjugate()
+        asymptotic = asymptotic.conjugate()
+
+    # Split images into the cusp cluster (scaled delays matching the
+    # reduced stationary phases) and the resolved far images (added
+    # as-is), and certify the calibration by that match.
+    stationary_values = [phase_sign * (t ** 4 + x_eval * t ** 2 + y_eval * t)
+                         for t in _real_stationary_points(x_eval, y_eval)]
+    cluster_sum = 0.0j
+    far_sum = 0.0j
+    matched_delays: list[float] = []
+    for image in images:
+        contribution = _leading_geometric(w, image, source, matrix)
+        if contribution is None:
+            return None
+        kernel_carrier, tau = contribution
+        scaled_delay = w * (tau - geometry_bundle.tau_c)
+        if _matches_stationary(scaled_delay, stationary_values):
+            cluster_sum += kernel_carrier
+            matched_delays.append(scaled_delay)
+        else:
+            far_sum += kernel_carrier
+
+    uniform = cluster_sum * (primitive / asymptotic)
+
+    return _CuspUniformForm(uniform, far_sum, stationary_values,
+                            matched_delays)
+
+
+
 def cusp_amplification(w: float, source, gamma: float, *,
                        beta: float = 0.0, kappa: float = 0.0,
                        envelope_bar: float = _DEFAULT_ENVELOPE_BAR,
@@ -772,67 +992,21 @@ def cusp_amplification(w: float, source, gamma: float, *,
     if not (envelope_bar > 0.0):
         return None
 
-    try:
-        matrix = geometry.macro_matrix(gamma, beta, kappa)
-        nearest = geometry.nearest_caustic_point(gamma, beta, source,
-                                                 kappa=kappa)
-        images = geometry.find_images(source, matrix)
-    except geometry.LensDomainError:
+    geometry_bundle = _cusp_uniform_geometry(source, gamma, beta=beta,
+                                             kappa=kappa)
+    if geometry_bundle is None:
         return None
-
-    lam = 1.0 - float(kappa)
-    branch = 1 if abs(gamma) < lam else _saddle_branch(gamma, beta, kappa,
-                                                       nearest.theta)
-    vertex = _cusp_vertex(gamma, beta, kappa, source, nearest.theta, branch)
-    if vertex is None:
-        return None
-
-    normal_form = _soft_normal_form(vertex.image, matrix, vertex.soft_axis,
-                                    vertex.hard_axis, vertex.hard_eigenvalue)
-    if normal_form is None:
-        return None
-    c4, phi_ssr = normal_form
-
-    tau_c = geometry.delay(vertex.image, source, matrix)
-
-    # Source offset from the cusp caustic point, resolved on the caustic
-    # tangent (soft / cusp axis) and normal (hard axis).  The caustic
-    # frame is the image-plane eigenframe carried to the source plane;
-    # for the leading uniform form the eigenframe directions are used.
-    offset = source - vertex.source
-    delta_parallel = float(offset @ vertex.soft_axis)
-    delta_perp = float(offset @ vertex.hard_axis)
-
-    # F074: delta_phi = -delta_y . x(s) along the reduced manifold
-    # x(s) = x_c + s e_s - (phi_ssr / (2 lambda_h)) s^2 e_h, so the ODD
-    # control a1 (coeff of s) = -delta_parallel (the SOFT projection,
-    # linear because e_s multiplies s) and the EVEN control a2 (coeff of
-    # s^2) = +delta_perp * phi_ssr / (2 lambda_h) (the HARD projection
-    # times the manifold's curvature, entering through the bend h*(s)).
-    # The pre-F074 map had the two transposed and dropped the curvature
-    # factor; measured consequence, sign convention, and the 54/54
-    # stationary-cluster match are in FINDINGS F074.  Rescaling
-    # s -> (w |C4|)^{-1/4} t: x = a2 w^{1/2} / sqrt(|C4|),
-    # y = a1 w^{3/4} / |C4|^{1/4}; the |C4|^{-1/4} prefactor is common to
-    # P and P_asymp, so it cancels in the uniform ratio below.
-    abs_c4 = abs(c4)
-    curvature = phi_ssr / (2.0 * vertex.hard_eigenvalue)
-    x = delta_perp * curvature * math.sqrt(w) / math.sqrt(abs_c4)
-    y = -delta_parallel * w ** 0.75 / abs_c4 ** 0.25
-
-    # The fold-ppGO handoff below was calibrated against the pre-F074
-    # control gauge; keep its ROUTING radius in that gauge so this fix
-    # does not silently re-tune a different gate (re-gauging the handoff
-    # is separate work with its own measurement).
-    handoff_radius = math.hypot(
-        delta_parallel * math.sqrt(w) / math.sqrt(abs_c4),
-        delta_perp * w ** 0.75 / abs_c4 ** 0.25)
+    controls = _cusp_controls(geometry_bundle, w)
 
     # The ppGO fast rung serves the fold-region fold_ppgo_correction,
     # which is only valid OUTSIDE the fold arm's serving band.  Inside
     # the band (nearest.distance < _ETA_MAX_FOLD) the fold arm is the
     # designated rung; serving there with the cusp arm would double-serve
-    # the corner with a different answer (measured 44% disagreement).
+    # the corner with a different answer (measured 44% disagreement).  It
+    # runs BEFORE the certified Pearcey primitive and the cluster/far
+    # image split (`_cusp_uniform_at_w` below) are consulted, so a
+    # ppGO-served node pays no Pearcey quadrature -- SPEC.md: the fast
+    # rung 'returns before any table or quadrature lookup'.
     r_ppgo_min = (_R_PPGO_ERROR_CONST * _UNIFORM_ERROR_CONST
                   / (envelope_bar / _PPGO_BAR_DIVISOR)) ** (2.0 / 3.0)
     # ``len(images) < 4`` is the EXTERIOR discriminator, and it is
@@ -852,15 +1026,17 @@ def cusp_amplification(w: float, source, gamma: float, *,
     # ON-AXIS, where `_merging_fold_pair` is None and the resolution gate
     # holds by accident -- so the contract was real and merely unenforced
     # off-axis.
-    if (len(images) < 4 and handoff_radius >= r_ppgo_min
+    if (len(geometry_bundle.images) < 4
+            and controls.handoff_radius >= r_ppgo_min
             and w >= _W_PPGO_FLOOR
-            and nearest.distance >= _airy_fold._ETA_MAX_FOLD):
-        delays = sorted(geometry.delay(image, source, matrix)
-                        for image in images)
+            and geometry_bundle.nearest.distance >= _airy_fold._ETA_MAX_FOLD):
+        delays = sorted(geometry.delay(image, source, geometry_bundle.matrix)
+                        for image in geometry_bundle.images)
         delta_min = min(b - a for a, b in zip(delays[:-1], delays[1:])) \
             if len(delays) >= 2 else 0.0
         try:
-            if (_airy_fold._merging_fold_pair(images, source, matrix)
+            if (_airy_fold._merging_fold_pair(geometry_bundle.images, source,
+                                              geometry_bundle.matrix)
                     is not None
                     or w * delta_min >= _PPGO_RESOLUTION_GATE):
                 # fold_ppgo_correction is scalar-w-safe (returns 0-d array)
@@ -884,7 +1060,7 @@ def cusp_amplification(w: float, source, gamma: float, *,
     # envelope_bar = 0.05, interior coverage 12/18 (was 0).
     error_estimate = _K_UNIFORM / math.sqrt(w)
     try:
-        ghost = geometry.ghost_kernel([w], source, matrix)
+        ghost = geometry.ghost_kernel([w], source, geometry_bundle.matrix)
         error_estimate += (
             abs(complex(np.atleast_1d(ghost.kernel)[0]))
             * math.exp(-w * float(ghost.delay.imag)))
@@ -895,47 +1071,16 @@ def cusp_amplification(w: float, source, gamma: float, *,
     if error_estimate > envelope_bar:
         return None
 
-    # A negative reduced quartic (C4 < 0 -- the standard minimum-image
-    # cusp orientation) is the *dual* cusp: the exact substitution
-    # s = |C4|^{-1/4} t turns its generating integral into
-    # |C4|^{-1/4} conj(P(-x, -y)) (a closed-form identity, not a fit).  So
-    # the primitive, its asymptotic and the reduced stationary phase are
-    # evaluated in the reflected (-x, -y) frame and conjugated; the
-    # reduced phase carries a compensating sign flip (phase_sign).
-    reflected = c4 < 0.0
-    x_eval, y_eval = (-x, -y) if reflected else (x, y)
-    phase_sign = -1.0 if reflected else 1.0
-
-    table = pearcey_table if pearcey_table is not None else _PEARCEY_TABLE
-    primitive = _consult_pearcey(x_eval, y_eval, table)
-    if primitive is None:
+    # The certified Pearcey primitive and the cluster/far image split are
+    # deferred to HERE, after the fast rung and the error gate have not
+    # fired -- fusing them into a single bundle and calling it up
+    # front made the fast rung pay the quadrature it is designed to skip.
+    resolved_table = (pearcey_table if pearcey_table is not None
+                      else _PEARCEY_TABLE)
+    bundle = _cusp_uniform_at_w(geometry_bundle, source, w,
+                                pearcey_table=resolved_table)
+    if bundle is None:
         return None
-    asymptotic = pearcey_asymptotic(x_eval, y_eval)
-    if abs(asymptotic) == 0.0 or not np.isfinite(abs(primitive)):
-        return None
-    if reflected:
-        primitive = primitive.conjugate()
-        asymptotic = asymptotic.conjugate()
-
-    # Split images into the cusp cluster (scaled delays matching the
-    # reduced stationary phases) and the resolved far images (added
-    # as-is), and certify the calibration by that match.
-    stationary_values = [phase_sign * (t ** 4 + x_eval * t ** 2 + y_eval * t)
-                         for t in _real_stationary_points(x_eval, y_eval)]
-    cluster_sum = 0.0j
-    far_sum = 0.0j
-    matched_delays: list[float] = []
-    for image in images:
-        contribution = _leading_geometric(w, image, source, matrix)
-        if contribution is None:
-            return None
-        kernel_carrier, tau = contribution
-        scaled_delay = w * (tau - tau_c)
-        if _matches_stationary(scaled_delay, stationary_values):
-            cluster_sum += kernel_carrier
-            matched_delays.append(scaled_delay)
-        else:
-            far_sum += kernel_carrier
 
     # F074: with the corrected controls the reduced stationary phases
     # reproduce the geometric cluster (54/54 measured: 3 on-axis
@@ -946,14 +1091,53 @@ def cusp_amplification(w: float, source, gamma: float, *,
     # "interior degenerate cluster" special case, which was not a
     # physical degeneracy but the transposition collapsing three
     # stationary points into one.
-    if not _calibration_certified(stationary_values, matched_delays):
+    if not _calibration_certified(bundle.stationary_values,
+                                  bundle.matched_delays):
         return None
 
-    uniform = cluster_sum * (primitive / asymptotic)
-    total = uniform + far_sum
+    total = bundle.uniform + bundle.far_sum
     if not np.isfinite(abs(total)):
         return None
     return complex(total)
+
+
+def cusp_uniform_reference_grid(w_grid: np.ndarray, source, gamma: float, *,
+                                beta: float = 0.0, kappa: float = 0.0
+                                ) -> np.ndarray | None:
+    """Cluster-only uniform Pearcey reference on a ``w`` grid, geometry shared.
+
+    Grid form of the cluster-only uniform reference: solves the
+    w-independent geometry/controls ONCE per cell via `_cusp_uniform_geometry`
+    and loops only over ``w`` (calling the per-w core per node would re-run
+    the whole geometry/controls pipeline once per node -- ~24x redundant
+    solves on the bake grid).  Each node returns ``cluster_sum * (P / P_asymp)`` (the
+    `_CuspUniformForm` bundle's ``uniform``) from live certified quadrature
+    -- no Pearcey table, and without `cusp_amplification`'s ppGO fast rung,
+    F074 error gate, or calibration certificate.
+
+    Returns ``None`` if ANY w-node is refused or the sampled array is
+    non-finite (all-or-nothing).
+    """
+    w_grid = np.asarray(w_grid, dtype=float)
+    source = np.asarray(source, dtype=float)
+    if not (np.all(w_grid > 0.0) and source.shape == (2,)
+            and np.all(np.isfinite(source))):
+        return None
+
+    geometry_bundle = _cusp_uniform_geometry(source, gamma, beta=beta,
+                                             kappa=kappa)
+    if geometry_bundle is None:
+        return None
+
+    f_ref = np.empty(w_grid.size, dtype=complex)
+    for index, w_value in enumerate(w_grid):
+        bundle = _cusp_uniform_at_w(geometry_bundle, source, float(w_value))
+        if bundle is None:
+            return None
+        f_ref[index] = bundle.uniform
+    if not np.all(np.isfinite(f_ref)):
+        return None
+    return f_ref
 
 
 def _saddle_branch(gamma: float, beta: float, kappa: float,
