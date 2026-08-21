@@ -15,11 +15,17 @@ The stored object is the SMOOTH residual, never the raw amplification::
     r_new(w; gamma', rho, theta) = f_pure * sqrt(1 - gamma'**2) / F_ref(w)
 
 with ``f_pure = f_schwinger(w, y_eig, gamma')`` the exact pure-shear engine
-value and ``F_ref(w) = fold_cusp_reference(w_grid, gamma', y_eig)`` the
-non-vanishing uniform fold/cusp reference: the Airy fold q=p Wronskian form
-``|F_ref|^2 ~ w**(1/3) Ai^2 + w**(-1/3) Ai'^2`` (never vanishes) or, where
-the fold degenerates (``b3 -> 0``), the uniform Pearcey cusp form.  ``F_ref``
-replaces the exact point-mass prefactor ``C(w)`` ONLY; the
+value and ``F_ref(w) = partitioned_reference(w_grid, gamma', rho, y_eig)``
+the rho-partitioned uniform reference: the Airy fold q=p Wronskian form
+``|F_ref|^2 ~ w**(1/3) Ai^2 + w**(-1/3) Ai'^2`` (never vanishes,
+magnitude-renormalized to the macro lead at low ``w``), the uniform Pearcey
+cusp form (only where the fold degenerates, ``b3 -> 0``), or -- off-caustic
+-- the macro lead carrier ``sqrt(mu_macro) exp(1j w phi_geo)``
+(`born_lead_carrier`) on the unresolved nodes and the two-image
+geometric-optics sum (the ``w -> inf`` asymptote) on the resolved nodes,
+split at ``w_split = RHO_END / delta_tau`` -- the carrier chosen by ``rho``.
+``F_ref`` replaces the exact
+point-mass prefactor ``C(w)`` ONLY; the
 ``sqrt(1 - gamma'**2)`` factor (the macro amplitude ``1 / sqrt(mu_pure)``
 that diverges at the parity wall) STAYS in the residual.  Stripping ``F_ref``
 leaves a smooth, bounded residual; the serve re-modulates it by ``F_ref`` and
@@ -70,8 +76,16 @@ engine for a covered draw in a declined cell -- NEVER an amplitude scale.
 Cells whose ``F_ref`` is UNBUILDABLE (no merging fold pair / a degenerate
 soft-axis cubic / fold amplitude -- expected across the exterior wall band)
 are ALSO baked as declined, distinct from engine refusals (which still
-raise); see `_fill_coefficients`.  The 1e-4 bar is the real acceptance gate,
-enforced on the de-rated served value.
+raise); see `_fill_coefficients`.  A cell whose residual fails the ABSOLUTE
+carrier-adequacy guard -- ``sup |r| > 1e3`` or ``inf |r| < 1e-3`` over the
+carrier-specific served domain (the fold/cusp and geometric carriers guarded
+over the FULL band, the pure-macro carrier over its unresolved domain
+``w < w_split = RHO_END / delta_tau``) -- is ALSO baked as declined (a
+residual pole or collapse, 3-4 orders off normalization), NEVER de-rated.
+The 1e-4 bar is the real acceptance gate, enforced on the de-rated served
+value, and the margin report breaks the served error out per carrier (see
+`carrier_populations` / the ``per_carrier_margin`` provenance block) so the
+geometric (resolved) band is never invisible to a decline statistic.
 
 Usage::
 
@@ -95,6 +109,7 @@ a tens-of-minutes Schwinger sweep).
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 import math
 import subprocess
@@ -114,9 +129,11 @@ from cogwheel.lensing.chang_refsdal._born import DELTA_GAMMA_P
 from cogwheel.lensing.chang_refsdal._diffractive import _caustic_rho
 from cogwheel.lensing.chang_refsdal._schwinger import (
     W_CEILING_SCHWINGER, SchwingerCertificationError, f_schwinger)
+from cogwheel.lensing.chang_refsdal.operator import RHO_END
 from cogwheel.lensing.low_w_diffractive_chart import (
     _SCHEMA, LowWDiffractiveChart, RHO_HI, RHO_LO, _WALL_GAMMA_PRIME,
-    _content_hash, fold_cusp_reference, reduced_source)
+    _content_hash, _reduced_min_delay_separation, partitioned_reference,
+    reduced_source)
 from cogwheel.lensing.ppgo_map import CERTIFICATION_BAR
 
 #: Lower bound of the reduced-shear ``gamma'`` grid.  Mirrors the lower gamma
@@ -179,6 +196,13 @@ _SMOKE_RHOS = (RHO_LO, 1.0, RHO_HI, 2.0)
 #: 8 ALIASES the harmonics (the ``_N_THETAS = 32`` lesson from
 #: ``scripts/fit_diffractive_certificate.py``).
 _SMOKE_N_THETA = 8
+
+#: Absolute carrier-adequacy guard on the residual magnitude ``|r|``: a
+#: served cell whose residual is 3-4 orders off normalization (a pole above
+#: the ceiling, or a collapse below the floor) is DECLINED -- folded into
+#: ``declined_mask`` -- NEVER de-rated.
+_ABS_GUARD_CEILING = 1e3
+_ABS_GUARD_FLOOR = 1e-3
 
 
 def _provenance_sha() -> str:
@@ -287,74 +311,154 @@ def _rho_grid(scale: str, rho_lo_meas: float, rho_hi_meas: float) -> np.ndarray:
     return np.linspace(rho_lo, rho_hi, _FULL_N_RHO)
 
 
+def _carrier_adequate(residual: np.ndarray, kind: str, w_grid: np.ndarray,
+                      w_split: float) -> bool:
+    """Whether the residual magnitude is carrier-adequately bounded.
+
+    The absolute carrier-adequacy guard: ``sup |r| <= _ABS_GUARD_CEILING``
+    AND ``inf |r| >= _ABS_GUARD_FLOOR``, evaluated over the carrier-specific
+    served domain.  The caustic-neighborhood carriers (``'airy_fold'`` /
+    ``'pearcey_cusp'``) and the ``'geometric'`` carrier are guarded over the
+    FULL ``w_grid`` (the geometric-optics sum anchors the resolved band, so
+    the residual is adequate throughout); the ``'macro'`` carrier (no
+    resolved node) is guarded only over the unresolved nodes
+    ``w < w_split``, which is the full band for a pure-macro cell.  Returns
+    False when the residual is 3-4 orders off normalization (a pole above
+    the ceiling or a collapse below the floor) -- such a cell is DECLINED,
+    never de-rated.
+    """
+    if kind == 'macro':
+        domain = w_grid < w_split
+        if not np.any(domain):
+            return True
+        mag = np.abs(residual[domain])
+    else:
+        mag = np.abs(residual)
+    return bool(np.max(mag) <= _ABS_GUARD_CEILING
+                and np.min(mag) >= _ABS_GUARD_FLOOR)
+
+
+def _cell_w_split(gamma_prime: float, source: np.ndarray,
+                  w_grid: np.ndarray) -> float:
+    """Macro-carrier resolved/unresolved split frequency.
+
+    ``w_split = RHO_END / delta_tau`` with ``delta_tau`` the smallest
+    pairwise real-image delay separation (`_reduced_min_delay_separation`).
+    ``delta_tau == 0.0`` (fewer than two real images -- nothing resolved)
+    returns ``math.inf``.  A fully-resolved band (``w_split <= w_grid[0]``)
+    returns the TRUE sub-``w_grid[0]`` split, so `_carrier_adequate`'s
+    empty-domain admit path (``w_grid < w_split`` is empty -> admit) fires
+    and the cell is not spurious-declined.  The ``w_grid`` argument is kept
+    for signature stability with `_residual_at`; the split is grid-
+    independent.
+    """
+    delta_tau = _reduced_min_delay_separation(gamma_prime, source)
+    if delta_tau > 0.0:
+        return RHO_END / delta_tau
+    return math.inf
+
+
 def _residual_at(w_grid: np.ndarray, gamma_prime: float, rho: float,
-                 theta: float) -> np.ndarray | None:
-    """Fold/cusp-anchored residual ``r = f_pure * sqrt(1 - gamma'^2) / F_ref``.
+                 theta: float) -> tuple[np.ndarray | None, str | None]:
+    """Partitioned-reference residual ``r = f_pure * sqrt(1 - gamma'^2) / F_ref``.
 
     Reconstructs the reduced eigenframe source ``y_eig`` via
     `reduced_source` (the single-sourced fence inversion, never re-inlined)
-    and builds the non-vanishing uniform fold/cusp reference ``F_ref`` via
-    `fold_cusp_reference` -- the Airy fold form or, where the fold degenerates
-    (``b3 -> 0``), the Pearcey cusp form.  ``F_ref`` replaces ``prefactor_c``
-    ONLY, the ``sqrt(1 - gamma'^2)`` factor stays in the residual.  ``F_ref``
-    is sampled on the FULL ``w_grid``.  Buildability is ``w``-independent
-    ONLY for the Airy fold form, which builds its geometry once and samples
-    every node the same way; the Pearcey cusp form's buildability is
-    ``w``-dependent -- each node can refuse independently (live certified
-    quadrature), and the non-vanishing guard ``min|F_ref| / max|F_ref| >=
-    _NON_VANISHING_MIN_RATIO`` is a ratio over the whole ``w_grid``.  For
-    both forms the VALUE is ``w``-dependent.
+    and builds the rho-partitioned uniform reference ``F_ref`` via
+    `partitioned_reference(w_grid, gamma_prime, rho, y_eig)` -- the carrier
+    chosen by ``rho``: the Airy fold form (magnitude-renormalized to the
+    macro lead at low ``w``), the Pearcey cusp form (only on the fold->cusp
+    ``b3 -> 0`` transition), or the macro lead `born_lead_carrier` /
+    two-image geometric-optics sum (off-caustic, split at
+    ``w_split = RHO_END / delta_tau``).  ``F_ref`` replaces ``prefactor_c``
+    ONLY, the ``sqrt(1 - gamma'^2)`` factor stays in the residual.
+    ``F_ref`` is sampled on the FULL ``w_grid``.
 
-    Returns the complex residual sampled on ``w_grid``, or ``None`` when
-    ``F_ref`` is unbuildable -- both the Airy fold AND the Pearcey cusp form
-    refused, or the non-vanishing guard failed -- (a sentinel the caller
-    treats as a DECLINED cell, never an engine refusal).  An engine refusal
-    (`SchwingerCertificationError` / ``ValueError`` from `f_schwinger`) is NOT
-    caught here -- it propagates so the caller can count it toward
-    ``n_refused`` (a grid-design bug) rather than a declined cell.
+    Returns ``(residual, kind)`` with ``kind`` the carrier that built
+    ``F_ref`` (``'airy_fold'`` / ``'pearcey_cusp'`` / ``'macro'`` /
+    ``'geometric'``), or ``(None, None)`` when ``F_ref`` is unbuildable (a
+    DECLINED cell), or ``(None, kind)`` when the residual FAILS the absolute
+    carrier-adequacy guard `_carrier_adequate` (also a DECLINED cell --
+    never a de-rate and never an engine refusal).  Only the
+    caustic-neighborhood Airy fold (and a geometric-census failure) can be
+    unbuildable; the off-caustic macro lead never refuses.  An engine
+    refusal (`SchwingerCertificationError` /
+    ``ValueError`` from `f_schwinger`) is NOT caught here -- it propagates
+    so the caller can count it toward ``n_refused`` (a grid-design bug)
+    rather than a declined cell.
     """
     try:
         y_eig = reduced_source(gamma_prime, rho, theta)
-        f_ref = fold_cusp_reference(w_grid, gamma_prime, y_eig)
+        f_ref, kind = partitioned_reference(w_grid, gamma_prime, rho, y_eig)
     except ValueError:
         # A geometry / source-reconstruction refusal (``LensDomainError`` or a
         # domain error in the caustic solve): F_ref is UNBUILDABLE at this
         # source -- a declined cell, NOT an engine refusal.
-        return None
+        return None, None
     if f_ref is None:
-        return None
+        return None, None
     residual = np.empty(w_grid.size, dtype=complex)
     for i_w, w in enumerate(w_grid):
         f_pure = f_schwinger(float(w), y_eig, gamma_prime)
         residual[i_w] = (f_pure * math.sqrt(1.0 - gamma_prime * gamma_prime)
                          / f_ref[i_w])
-    return residual
+    if kind == 'macro':
+        w_split = _cell_w_split(gamma_prime, y_eig, w_grid)
+    else:
+        w_split = math.inf
+    if not _carrier_adequate(residual, kind, w_grid, w_split):
+        return None, kind
+    return residual, kind
+
+
+@dataclass
+class _FillResult:
+    """Per-cell engine sweep: coefficients, masks, and carrier census."""
+    real: np.ndarray
+    imag: np.ndarray
+    n_refused: int
+    unbuildable_mask: np.ndarray
+    guard_declined_mask: np.ndarray
+    carrier_populations: dict[str, int]
+    n_resolved_served_cells: int
+    cell_kinds: np.ndarray
 
 
 def _fill_coefficients(gamma_prime_grid: np.ndarray, rho_grid: np.ndarray,
                        theta_grid: np.ndarray, w_grid: np.ndarray
-                       ) -> tuple[np.ndarray, np.ndarray, int, np.ndarray]:
+                       ) -> _FillResult:
     """Evaluate the engine residual at every grid node.
 
-    Returns ``(real_coeffs, imag_coeffs, n_refused, unbuildable_mask)``.
-    ``F_ref`` is built ONCE per ``(gamma', rho, theta)`` cell; its buildability
-    is ``w``-independent for the Airy fold form but ``w``-dependent for the
-    Pearcey cusp form (per-node refusal + the non-vanishing guard over the
-    full ``w_grid``).  A cell whose ``F_ref`` is UNBUILDABLE -- both the
-    Airy fold AND the Pearcey cusp form refused, or the non-vanishing guard
-    failed -- is recorded in ``unbuildable_mask`` and skipped (no
-    ``f_schwinger`` call, NOT counted in ``n_refused``).  With the Pearcey
-    fallback, cusp cells are now BUILDABLE, so ``n_unbuildable_cells`` is
-    expected ~0 (a genuinely-degenerate remnant only).  A cell whose ``F_ref``
-    IS buildable but whose ``f_schwinger`` engine refuses (a
-    ``SchwingerCertificationError`` / ``ValueError``) increments ``n_refused``
-    -- a nonzero ``n_refused`` is a grid design problem the caller raises on.
+    Returns `_FillResult` with the coefficient arrays, the engine-refusal
+    count, the two DECLINED-cell masks (``unbuildable_mask``: ``F_ref``
+    unbuildable; ``guard_declined_mask``: residual failed
+    `_carrier_adequate`), the per-carrier population census
+    (`carrier_populations`), the resolved-served-cell count
+    (`n_resolved_served_cells` -- the ``'geometric'``-kind cells, whose band
+    contains a resolved node), and the per-cell carrier label array
+    (`cell_kinds`, used for the per-carrier margin breakdown).  Both declined
+    masks fold into
+    ``declined_mask`` downstream; a declined cell is NEVER de-rated.
+    ``F_ref`` is built ONCE per ``(gamma', rho, theta)`` cell; a cell whose
+    ``F_ref`` is UNBUILDABLE is recorded in ``unbuildable_mask`` and skipped
+    (no ``f_schwinger`` call, NOT counted in ``n_refused``).  A buildable
+    cell whose residual fails the absolute carrier-adequacy guard is
+    recorded in ``guard_declined_mask`` (also no serve, NOT counted in
+    ``n_refused``).  A cell whose ``f_schwinger`` engine refuses (a
+    ``SchwingerCertificationError`` / ``ValueError``) increments
+    ``n_refused`` -- a nonzero ``n_refused`` is a grid design problem the
+    caller raises on.
     """
     n_gp, n_rho, n_theta, n_w = (len(gamma_prime_grid), len(rho_grid),
                                  len(theta_grid), len(w_grid))
     real = np.empty((n_gp, n_rho, n_theta, n_w), dtype=float)
     imag = np.empty((n_gp, n_rho, n_theta, n_w), dtype=float)
     unbuildable = np.zeros((n_gp, n_rho, n_theta), dtype=bool)
+    guard_declined = np.zeros((n_gp, n_rho, n_theta), dtype=bool)
+    cell_kinds = np.empty((n_gp, n_rho, n_theta), dtype=object)
+    carrier_populations = {'airy_fold': 0, 'pearcey_cusp': 0, 'macro': 0,
+                           'geometric': 0}
+    n_resolved_served_cells = 0
     n_refused = 0
     t0 = time.time()
     n_nodes = n_gp * n_rho * n_theta * n_w
@@ -362,8 +466,8 @@ def _fill_coefficients(gamma_prime_grid: np.ndarray, rho_grid: np.ndarray,
         for i_rho, rho in enumerate(rho_grid):
             for i_theta, theta in enumerate(theta_grid):
                 try:
-                    residual = _residual_at(w_grid, float(gp), float(rho),
-                                            float(theta))
+                    residual, kind = _residual_at(w_grid, float(gp),
+                                                  float(rho), float(theta))
                 except (SchwingerCertificationError, ValueError):
                     n_refused += 1
                     # Finite sentinel, NOT NaN: the cubic spline must stay
@@ -373,23 +477,40 @@ def _fill_coefficients(gamma_prime_grid: np.ndarray, rho_grid: np.ndarray,
                     # a neighbor.
                     real[i_gp, i_rho, i_theta] = 1.0
                     imag[i_gp, i_rho, i_theta] = 0.0
+                    cell_kinds[i_gp, i_rho, i_theta] = 'refused'
                     continue
                 if residual is None:
-                    unbuildable[i_gp, i_rho, i_theta] = True
                     # Finite sentinel (see above): the cell is declined, the
                     # fill never served, but the spline must be finite.
+                    if kind is None:
+                        unbuildable[i_gp, i_rho, i_theta] = True
+                        cell_kinds[i_gp, i_rho, i_theta] = 'unbuildable'
+                    else:
+                        guard_declined[i_gp, i_rho, i_theta] = True
+                        cell_kinds[i_gp, i_rho, i_theta] = 'guard_declined'
                     real[i_gp, i_rho, i_theta] = 1.0
                     imag[i_gp, i_rho, i_theta] = 0.0
                     continue
                 real[i_gp, i_rho, i_theta] = residual.real
                 imag[i_gp, i_rho, i_theta] = residual.imag
+                cell_kinds[i_gp, i_rho, i_theta] = kind
+                carrier_populations[kind] += 1
+                if kind == 'geometric':
+                    n_resolved_served_cells += 1
         print(f'  gamma_prime={float(gp):.5f} done '
               f'({i_gp + 1}/{n_gp}, {time.time() - t0:.1f} s)')
     n_unbuildable = int(np.sum(unbuildable))
-    print(f'# {n_nodes - n_refused - n_unbuildable * n_w}/{n_nodes} nodes '
-          f'evaluated, {n_refused} engine-refused, {n_unbuildable} F_ref-'
-          f'unbuildable cells, {time.time() - t0:.1f} s')
-    return real, imag, n_refused, unbuildable
+    n_guard_declined = int(np.sum(guard_declined))
+    print(f'# {n_nodes - n_refused - (n_unbuildable + n_guard_declined) * n_w}'
+          f'/{n_nodes} nodes evaluated, {n_refused} engine-refused, '
+          f'{n_unbuildable} F_ref-unbuildable, {n_guard_declined} '
+          f'guard-declined cells, {time.time() - t0:.1f} s')
+    return _FillResult(
+        real=real, imag=imag, n_refused=n_refused,
+        unbuildable_mask=unbuildable, guard_declined_mask=guard_declined,
+        carrier_populations=carrier_populations,
+        n_resolved_served_cells=n_resolved_served_cells,
+        cell_kinds=cell_kinds)
 
 
 def _off_grid_engine(gamma_prime_grid: np.ndarray, rho_grid: np.ndarray,
@@ -400,8 +521,9 @@ def _off_grid_engine(gamma_prime_grid: np.ndarray, rho_grid: np.ndarray,
 
     For each ``(gamma', rho)`` cell, probes the midpoint of every consecutive
     theta-node pair -- the angles cubic interpolation is least constrained at.
-    An ``F_ref``-unbuildable midpoint is SKIPPED (recorded in the returned
-    ``off_unbuildable`` mask, no ``f_schwinger`` call): it has no valid
+    A DECLINED midpoint -- ``F_ref`` unbuildable OR the residual failing the
+    `_carrier_adequate` guard -- is SKIPPED (recorded in the returned
+    ``off_declined`` mask, no ``f_schwinger`` call): it has no valid
     residual and cannot be served, so it contributes no interpolation-error
     witness.  Computed ONCE here so the de-rate and the margin report share
     the same engine values (no redundant ``f_schwinger`` sweep).
@@ -409,22 +531,22 @@ def _off_grid_engine(gamma_prime_grid: np.ndarray, rho_grid: np.ndarray,
     midpoints = 0.5 * (theta_grid[:-1] + theta_grid[1:])
     points: list[tuple[float, float, float]] = []
     values: list[np.ndarray] = []
-    off_unbuildable = np.zeros((len(gamma_prime_grid), len(rho_grid),
-                                len(midpoints)), dtype=bool)
+    off_declined = np.zeros((len(gamma_prime_grid), len(rho_grid),
+                             len(midpoints)), dtype=bool)
     t0 = time.time()
     for i_gp, gp in enumerate(gamma_prime_grid):
         for i_rho, rho in enumerate(rho_grid):
             for i_mid, theta_mid in enumerate(midpoints):
-                r_engine = _residual_at(w_grid, float(gp), float(rho),
-                                        float(theta_mid))
+                r_engine, _kind = _residual_at(w_grid, float(gp), float(rho),
+                                               float(theta_mid))
                 if r_engine is None:
-                    off_unbuildable[i_gp, i_rho, i_mid] = True
+                    off_declined[i_gp, i_rho, i_mid] = True
                     continue
                 points.append((float(gp), float(rho), float(theta_mid)))
                 values.append(r_engine)
     print(f'# off-grid theta midpoints: {len(points)} buildable / '
-          f'{off_unbuildable.size} total, {time.time() - t0:.1f} s')
-    return points, values, off_unbuildable
+          f'{off_declined.size} total, {time.time() - t0:.1f} s')
+    return points, values, off_declined
 
 
 def _iter_points(chart: LowWDiffractiveChart, gamma_prime_grid: np.ndarray,
@@ -435,10 +557,10 @@ def _iter_points(chart: LowWDiffractiveChart, gamma_prime_grid: np.ndarray,
     """Yield ``(r_interp, r_engine)`` complex arrays per calibration point.
 
     Only non-declined points are yielded: on-grid cells whose coefficients
-    are the finite sentinel (an ``F_ref``-unbuildable or engine-refused cell)
-    and off-grid midpoints in a declined neighborhood are SKIPPED -- they
-    contribute no interpolation-error witness.  ``chart.evaluate`` is cubic
-    interpolation only -- never an engine call.
+    are the finite sentinel (an ``F_ref``-unbuildable, guard-declined, or
+    engine-refused cell) and off-grid midpoints in a declined neighborhood
+    are SKIPPED -- they contribute no interpolation-error witness.
+    ``chart.evaluate`` is cubic interpolation only -- never an engine call.
     """
     unbuildable = ~np.all(np.isfinite(real), axis=-1)
     # A cell whose coefficients are the 1.0+0j sentinel is declined; the
@@ -464,9 +586,10 @@ def _iter_points(chart: LowWDiffractiveChart, gamma_prime_grid: np.ndarray,
     # Off-grid midpoints: evaluate ALL buildable ones.  The finite sentinel
     # for declined cells keeps the cubic spline finite everywhere, so an
     # off-grid midpoint's spline support never NaNs; a midpoint that is
-    # itself unbuildable never appears in `off_points`/`off_values` (the
-    # engine probe skips it).  The caller maps one served error per yielded
-    # point onto the midpoint grid via `off_unbuildable`.
+    # itself declined (F_ref-unbuildable or guard-declined) never appears in
+    # `off_points`/`off_values` (the engine probe skips it).  The caller maps
+    # one served error per yielded point onto the midpoint grid via
+    # `off_declined`.
     for (gp, rho, theta_mid), r_engine in zip(off_points, off_values):
         r_interp = chart.evaluate(w_grid, gp, rho, theta_mid)
         yield r_interp, r_engine
@@ -599,12 +722,16 @@ def main() -> None:
     print(f'#   w           in [{w_grid[0]:.4f}, {w_grid[-1]:.1f}] '
           f'(w^(2/3) in [{w23_grid[0]:.4f}, {w23_grid[-1]:.4f}])')
 
-    real, imag, n_refused, unbuildable_mask = _fill_coefficients(
+    fill = _fill_coefficients(
         gamma_prime_grid, rho_grid, theta_grid, w_grid)
-    if n_refused:
+    real = fill.real
+    imag = fill.imag
+    unbuildable_mask = fill.unbuildable_mask
+    guard_declined_mask = fill.guard_declined_mask
+    if fill.n_refused:
         raise SystemExit(
-            f'{n_refused} grid nodes refused the Schwinger engine; the grid '
-            f'is degenerate. Adjust the scale/seed (e.g. back off the '
+            f'{fill.n_refused} grid nodes refused the Schwinger engine; the '
+            f'grid is degenerate. Adjust the scale/seed (e.g. back off the '
             f'gamma-prime ceiling below {1.0 - DELTA_GAMMA_P}) and re-run.')
 
     # Probe chart at unit de-rate to measure the overshoot / interpolation
@@ -614,7 +741,7 @@ def main() -> None:
         theta_grid=theta_grid, w23_grid=w23_grid,
         real_coeffs=real, imag_coeffs=imag, derate=1.0)
 
-    off_points, off_values, off_unbuildable = _off_grid_engine(
+    off_points, off_values, off_declined = _off_grid_engine(
         gamma_prime_grid, rho_grid, theta_grid, w_grid)
     overshoots, rel_errs = _node_metrics(
         probe, gamma_prime_grid, rho_grid, theta_grid, w_grid, real, imag,
@@ -636,7 +763,7 @@ def main() -> None:
     served_errs = _served_errors(
         probe, gamma_prime_grid, rho_grid, theta_grid, w_grid, real, imag,
         off_points, off_values, derate)
-    grid_n = int(np.sum(~unbuildable_mask))
+    grid_n = int(np.sum(~(unbuildable_mask | guard_declined_mask)))
     full_stats = _margin_report('full-grid', ratios, rel_errs, served_errs)
     grid_stats = _margin_report('grid', ratios[:grid_n], rel_errs[:grid_n],
                                 served_errs[:grid_n])
@@ -652,12 +779,33 @@ def main() -> None:
     # never a hardcoded band.
     n_gp, n_rho, n_theta = (len(gamma_prime_grid), len(rho_grid),
                             len(theta_grid))
+
+    # Per-carrier served-error breakdown of the grid cells: the geometric
+    # carrier's resolved band must be covered by a decline/margin statistic
+    # (it is no longer a bare geometric sum invisible to the margin report).
+    # The grid-cell margin arrays are in the SAME order `_iter_points` yields
+    # grid cells (nested i_gp/i_rho/i_theta, skipping declined cells).
+    per_kind_stats = {}
+    for kind in ('airy_fold', 'pearcey_cusp', 'macro', 'geometric'):
+        kind_mask = np.asarray(
+            [fill.cell_kinds[i_gp, i_rho, i_theta] == kind
+             for i_gp in range(n_gp)
+             for i_rho in range(n_rho)
+             for i_theta in range(n_theta)
+             if not (unbuildable_mask[i_gp, i_rho, i_theta]
+                     or guard_declined_mask[i_gp, i_rho, i_theta])],
+            dtype=bool)
+        if np.any(kind_mask):
+            per_kind_stats[f'{kind}_margin'] = _margin_report(
+                kind, ratios[:grid_n][kind_mask], rel_errs[:grid_n][kind_mask],
+                served_errs[:grid_n][kind_mask])
+
     # Map the buildable off-grid served errors back onto the full
-    # (n_gp, n_rho, n_theta - 1) midpoint grid; an F_ref-unbuildable midpoint
-    # stays 0.0 (no error contribution -- its adjacent cells are declined via
-    # the F_ref-unbuildable grid-node mask instead).
+    # (n_gp, n_rho, n_theta - 1) midpoint grid; a declined midpoint
+    # (F_ref-unbuildable or guard-declined) stays 0.0 (no error contribution
+    # -- its adjacent cells are declined via the grid-node masks instead).
     off_served = np.zeros((n_gp, n_rho, n_theta - 1), dtype=float)
-    off_served[~off_unbuildable] = served_errs[grid_n:]
+    off_served[~off_declined] = served_errs[grid_n:]
     uniform_bias = 1.0 - derate
     declined_by_error = np.zeros((n_gp, n_rho, n_theta), dtype=bool)
     for i_theta in range(n_theta):
@@ -670,12 +818,15 @@ def main() -> None:
                                   off_served[:, :, i_theta])
         declined_by_error[:, :, i_theta] = (
             np.maximum(cell_err, uniform_bias) > CERTIFICATION_BAR)
-    declined_mask = unbuildable_mask | declined_by_error
+    declined_mask = (unbuildable_mask | guard_declined_mask
+                     | declined_by_error)
     n_unbuildable_cells = int(np.sum(unbuildable_mask))
+    n_guard_declined_cells = int(np.sum(guard_declined_mask))
     n_declined_by_error = int(np.sum(declined_by_error))
     n_declined = int(np.sum(declined_mask))
     print(f'# decline mask: {n_declined}/{n_gp * n_rho * n_theta} spatial '
           f'cells declined ({n_unbuildable_cells} F_ref-unbuildable, '
+          f'{n_guard_declined_cells} guard-declined, '
           f'{n_declined_by_error} by served error > {CERTIFICATION_BAR:.0e})')
 
     provenance = {
@@ -699,7 +850,11 @@ def main() -> None:
         'off_grid_margin': off_stats,
         'n_declined_cells': n_declined,
         'n_unbuildable_cells': n_unbuildable_cells,
+        'n_guard_declined_cells': n_guard_declined_cells,
         'n_declined_by_error': n_declined_by_error,
+        'carrier_populations': fill.carrier_populations,
+        'n_resolved_served_cells': fill.n_resolved_served_cells,
+        'per_carrier_margin': per_kind_stats,
         'declined_mask_shape': [n_gp, n_rho, n_theta],
     }
 

@@ -14,13 +14,23 @@ produced by ``scripts/train_low_w_diffractive_chart.py`` and consumed by the
 diffractive low-w serve in the likelihood (Rung P).
 
 Representation: the stored residual is the exact pure-shear engine value
-``f_pure = f_schwinger(w, y_eig, gamma')`` stripped of the NON-VANISHING
-uniform fold/cusp reference ``F_ref = fold_cusp_reference(w_grid, gamma',
-source)`` -- the Airy fold q=p Wronskian form ``|F_ref|^2 ~ w^{1/3} Ai^2 +
-w^{-1/3} Ai'^2`` (never vanishes) or, where the fold degenerates (``b3 -> 0``),
-the uniform Pearcey cusp form -- and scaled by ``sqrt(1 - gamma'^2)``::
+``f_pure = f_schwinger(w, y_eig, gamma')`` stripped of the RHO-PARTITIONED
+uniform reference ``F_ref = partitioned_reference(w_grid, gamma', rho,
+source)`` and scaled by ``sqrt(1 - gamma'^2)``::
 
     r_new = f_pure * sqrt(1 - gamma'^2) / F_ref .
+
+``partitioned_reference`` chooses the carrier by ``rho``: the caustic
+neighborhood (``RHO_LO <= rho <= RHO_HI``) uses the Airy fold q=p Wronskian
+form ``|F_ref|^2 ~ w^{1/3} Ai^2 + w^{-1/3} Ai'^2`` (never vanishes,
+magnitude-renormalized to the macro lead at low ``w``) or, only where the
+fold degenerates (``b3 -> 0``), the uniform Pearcey cusp form; the off-caustic
+bands (``rho < RHO_LO`` or ``rho > RHO_HI``, the deep interior and the
+far-exterior wall band) split the band at the resolution boundary
+``w_split = RHO_END / delta_tau``, using the macro lead carrier
+``sqrt(mu_macro) exp(1j w phi_geo)`` (`born_lead_carrier`) on the unresolved
+nodes and the two-image geometric-optics sum (the ``w -> inf`` asymptote) on
+the resolved nodes.
 
 ``F_ref`` replaces the exact point-mass prefactor ``C(w)`` ONLY; the
 ``sqrt(1 - gamma'^2)`` factor (the macro amplitude ``1 / sqrt(mu_pure)`` that
@@ -59,17 +69,26 @@ from scipy.interpolate import RegularGridInterpolator
 
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal._airy_fold import (
+    _B3_MIN,
     _fold_amplitudes,
     _merging_fold_pair,
     _soft_axis_cubic,
     airy_fold_value,
 )
+from cogwheel.lensing.chang_refsdal._born import born_lead_carrier
 from cogwheel.lensing.chang_refsdal._diffractive import (
     _DIFFRACTIVE_FIT_FENCE_DELTA,
     _DIFFRACTIVE_FIT_FENCE_RHO_LO,
 )
+from cogwheel.lensing.chang_refsdal._gauge import smootherstep
 from cogwheel.lensing.chang_refsdal._pearcey_cusp import (
     cusp_uniform_reference_grid,
+)
+from cogwheel.lensing.chang_refsdal.operator import (
+    RHO_END,
+    RHO_START,
+    _real_delay_min_separation,
+    geometric_amplification,
 )
 
 #: Shipped package-data artifact name (under ``cogwheel/data/``).
@@ -78,7 +97,7 @@ _DEFAULT_CHART_NAME = 'low_w_diffractive_chart.npz'
 #: Artifact schema tag.  The loader hard-refuses (``ValueError``) an
 #: artifact whose ``schema`` key is absent or does not match this value,
 #: so a stale/foreign npz can never be silently deserialized.
-_SCHEMA = 'low_w_diffractive_v2'
+_SCHEMA = 'low_w_diffractive_v3'
 
 #: Inner shell boundary ``RHO_LO`` -- single-sourced from the diffractive-fit
 #: fence (the same discriminator ``w_low_fit`` uses to decline the near-fold
@@ -95,14 +114,6 @@ RHO_HI = 1.0 + _DIFFRACTIVE_FIT_FENCE_DELTA
 #: (``gamma' > _WALL_GAMMA_PRIME``) is served by the chart, so a
 #: re-calibration that moves that ceiling must move this constant too.
 _WALL_GAMMA_PRIME = 0.5
-
-#: Non-vanishing guard floor on the built reference: the reference is
-#: declined (``None``) when ``min|F_ref| / max|F_ref|`` falls below this.
-#: Load-bearing only for the Pearcey cusp form (the Airy q=p Wronskian never
-#: vanishes); interior cusp cells can hit ``P ~ 0`` and would otherwise emit
-#: a residual pole.
-_NON_VANISHING_MIN_RATIO = 1e-3
-
 
 def _content_hash(*arrays: np.ndarray) -> str:
     """SHA1 over each float64-contiguous array (exact float64 bytes).
@@ -155,8 +166,38 @@ def reduced_source(gamma_prime: float, rho: float,
                      r_prime * math.sin(theta)], dtype=float)
 
 
+def _renormalize_macro_lead(f_ref: np.ndarray, w_grid: np.ndarray,
+                            gamma_prime: float, delta_tau: float
+                            ) -> np.ndarray:
+    """Magnitude-renormalize a uniform reference to the macro lead at low w.
+
+    The uniform fold/cusp forms have a non-macro low-``w`` magnitude (the
+    q=p fold form diverges like ``w^{-1/6}``), so the residual
+    ``r = f_pure * sqrt(1 - gamma'^2) / F_ref`` blows up or drifts at the
+    band bottom.  This real, positive, phase-preserving switch renormalizes
+    ``|F_ref|`` to the macro lead ``sqrt(mu_macro) = 1/sqrt(1 - gamma'^2)``
+    (the ``w -> 0`` limit of ``f_pure``) at low ``w`` and leaves the raw
+    form at resolved ``w``::
+
+        h = smootherstep(w * |delta_tau|, RHO_START, RHO_END)
+        f_ref *= h + (1 - h) * sqrt_mu / |f_ref|
+
+    At ``h ~ 0`` (low ``w``) ``|f_ref| -> sqrt_mu``, so the residual
+    ``r -> sqrt(1 - gamma'^2)`` is genuinely O(1) at the band bottom; at
+    ``h ~ 1`` (resolved ``w``) the raw form survives where it is already
+    adequate.  ``delta_tau`` is the delay scale of the transition -- the
+    merging-pair gap for the fold, the smallest pairwise real-image delay
+    separation (`_reduced_min_delay_separation`) for the cusp.  Both uniform
+    forms renormalize through this ONE helper so their low-``w`` magnitudes
+    asymptote to the SAME ``sqrt_mu`` (no step at the fold->cusp handoff).
+    """
+    sqrt_mu = 1.0 / math.sqrt(1.0 - gamma_prime * gamma_prime)
+    h = smootherstep(w_grid * abs(delta_tau), RHO_START, RHO_END)
+    return f_ref * (h + (1.0 - h) * (sqrt_mu / np.abs(f_ref)))
+
+
 def _airy_fold_form(w_grid: np.ndarray, gamma_prime: float,
-                    source: np.ndarray) -> np.ndarray | None:
+                    source: np.ndarray) -> tuple[np.ndarray | None, bool]:
     """Uniform Airy fold reference ``F_ref`` (q=p Wronskian form).
 
     Builds the q=p uniform Airy fold form (the Wronskian
@@ -169,10 +210,26 @@ def _airy_fold_form(w_grid: np.ndarray, gamma_prime: float,
     Deliberately does NOT call `fold_amplification`, whose q=0 +
     ``_ETA_MAX_FOLD`` certificate would wrongly refuse wall-band nodes.
 
-    Returns ``None`` on any refusal: a geometry ``LensDomainError`` from the
-    solve, no merging fold pair, a degenerate soft-axis cubic (``b3 -> 0``,
-    the fold->cusp transition), a degenerate fold amplitude, or a non-finite
-    value.
+    Returns ``(f_ref, cusp_transition)``.  ``f_ref`` is ``None`` on any
+    refusal: a geometry ``LensDomainError`` from the solve, no merging fold
+    pair, an image at the point mass (a non-finite soft-axis cubic), a
+    degenerate fold amplitude, or a non-finite value.
+    ``cusp_transition`` is ``True`` exactly when the refusal was the
+    degenerate-fold ``b3 -> 0`` transition (`_fold_amplitudes` refused the
+    ``abs(b3) <= _B3_MIN`` case) -- the caller's signal to fall back to the
+    Pearcey cusp form -- and ``False`` for every other refusal (a genuine
+    unbuildable).
+
+    When buildable, the built Airy form is magnitude-renormalized so that
+    its low-``w`` limit matches the macro lead ``sqrt(mu_macro) =
+    1/sqrt(1 - gamma'^2)`` instead of diverging like ``w^{-1/6}``: the real,
+    positive, phase-preserving switch
+    ``f_ref *= h + (1 - h) * sqrt_mu / |f_ref|`` with
+    ``h = smootherstep(w * |delta_tau|, RHO_START, RHO_END)``: at low ``w``
+    ``h ~ 0`` and ``|f_ref| -> sqrt_mu`` (so the residual ``r ->
+    sqrt(1 - gamma'^2)`` is genuinely O(1) at the band bottom, not
+    ``w^{-1/6}``-blown), while at resolved ``w`` ``h ~ 1`` and the raw fold
+    form survives where it is already adequate.
     """
     try:
         matrix = geometry.macro_matrix(gamma_prime, 0.0, 0.0)
@@ -180,20 +237,28 @@ def _airy_fold_form(w_grid: np.ndarray, gamma_prime: float,
         nearest = geometry.nearest_caustic_point(gamma_prime, 0.0, source,
                                                  kappa=0.0)
     except geometry.LensDomainError:
-        return None
+        return None, False
 
     pair = _merging_fold_pair(images, source, matrix)
     if pair is None:
-        return None
+        return None, False
     tau_plus, tau_minus = pair
 
     b3 = _soft_axis_cubic(nearest.image, nearest.soft_axis)
     if b3 is None:
-        return None
+        # Image at the point mass (``p <= 0``) or a non-finite cubic
+        # coefficient: a genuine unbuildable, NOT the fold->cusp transition.
+        return None, False
 
     amplitudes = _fold_amplitudes(nearest.hard_eigenvalue, b3)
     if amplitudes is None:
-        return None
+        # A fold-amplitude refusal.  Only the degenerate-fold ``b3 -> 0``
+        # (``abs(b3) <= _B3_MIN``) case is the genuine fold->cusp transition
+        # (fall back to the Pearcey cusp form); a vanished/non-finite hard
+        # eigenvalue or a non-finite amplitude is a genuine unbuildable.
+        if math.isfinite(b3) and abs(b3) <= _B3_MIN:
+            return None, True
+        return None, False
     p_amplitude, _, sigma = amplitudes
 
     tau_bar = 0.5 * (tau_plus + tau_minus)
@@ -206,15 +271,17 @@ def _airy_fold_form(w_grid: np.ndarray, gamma_prime: float,
                                        float(xi[index]), p_amplitude,
                                        p_amplitude, sigma)
     if not np.all(np.isfinite(f_ref)):
-        return None
-    return f_ref
+        return None, False
+
+    f_ref = _renormalize_macro_lead(f_ref, w_grid, gamma_prime, delta_tau)
+    return f_ref, False
 
 
 def _pearcey_cusp_reference(w_grid: np.ndarray, gamma_prime: float,
                             source: np.ndarray) -> np.ndarray | None:
     """Uniform Pearcey cusp reference ``F_ref``, geometry shared across w.
 
-    Fallback form for `fold_cusp_reference` when the Airy fold reference is
+    Fallback form for `partitioned_reference` when the Airy fold reference is
     unbuildable (``b3 -> 0``, the fold->cusp transition).  Builds the
     cluster-only uniform Pearcey form (live certified quadrature, no Pearcey
     table) via `cusp_uniform_reference_grid` with ``beta = 0.0`` and
@@ -223,35 +290,70 @@ def _pearcey_cusp_reference(w_grid: np.ndarray, gamma_prime: float,
     ABSOLUTE frame.  The w-independent geometry/controls are solved once per
     cell and reused across w nodes, mirroring `_airy_fold_form`.
 
+    The built form is magnitude-renormalized to the macro lead at low ``w``
+    by `_renormalize_macro_lead` (``delta_tau`` = the smallest pairwise
+    real-image delay separation, `_reduced_min_delay_separation`) -- the
+    SAME low-``w`` normalization `_airy_fold_form` applies, so the fold and
+    cusp references asymptote to the SAME ``sqrt(mu_macro)`` at the band
+    bottom and do not step at the ``b3 -> 0`` handoff.
+
     Returns ``None`` if ANY w-node is refused (``cusp_uniform_reference_grid``
     returns ``None``) or if the sampled array is non-finite.
     """
-    return cusp_uniform_reference_grid(
+    f_ref = cusp_uniform_reference_grid(
         np.asarray(w_grid, dtype=float), np.asarray(source, dtype=float),
         gamma_prime)
+    if f_ref is None:
+        return None
+    delta_tau = _reduced_min_delay_separation(gamma_prime, source)
+    return _renormalize_macro_lead(f_ref, np.asarray(w_grid, dtype=float),
+                                   gamma_prime, delta_tau)
 
 
-def fold_cusp_reference(w_grid: np.ndarray, gamma_prime: float,
-                        source: np.ndarray) -> np.ndarray | None:
-    """Non-vanishing uniform fold/cusp reference ``F_ref`` on ``w_grid``.
+def partitioned_reference(w_grid: np.ndarray, gamma_prime: float,
+                          rho: float, source: np.ndarray
+                          ) -> tuple[np.ndarray | None, str]:
+    """Rho-partitioned uniform reference ``F_ref`` on ``w_grid``.
 
-    ``F_ref`` is the uniform Airy fold q=p Wronskian form OR the uniform
-    Pearcey cusp form per cell -- the Airy fold path is primary, and when it
-    is unbuildable for ANY reason (notably ``b3 -> 0``, the fold->cusp
-    transition) the Pearcey cusp reference is built instead, mirroring the
-    serving ladder.  Both forms are in the ABSOLUTE frame -- no ``t_min``
-    subtraction and no ``exp(-1j w * critical_delay)`` re-referencing, since
-    ``f_pure`` is raw and the mean carrier cancels exactly.  The residual this
-    anchors is ``r = f_pure * sqrt(1 - gamma'^2) / F_ref``: ``F_ref`` replaces
+    The chart's single reference builder, cell-partitioned by ``rho`` (the
+    caustic-relative distance) and shared verbatim between the trainer and
+    the serve.  Returns ``(F_ref, kind)`` with ``kind`` naming the carrier
+    that built ``F_ref``: ``'airy_fold'`` (the q=p Wronskian fold form),
+    ``'pearcey_cusp'`` (the uniform Pearcey cusp form, only on the genuine
+    fold->cusp ``b3 -> 0`` transition), ``'macro'`` (the `born_lead_carrier`
+    macro lead ``sqrt(mu_macro) exp(1j w phi_geo)``), or ``'geometric'``
+    (an off-caustic cell whose band is split at ``w_split = RHO_END /
+    delta_tau``: the macro lead below the split, the two-image
+    geometric-optics sum above it).
+
+    Partition (single-sourced from the diffractive-fit fence constants
+    ``RHO_LO`` / ``RHO_HI``, no new literal):
+
+    * CAUSTIC NEIGHBORHOOD (``RHO_LO <= rho <= RHO_HI``): the Airy fold form
+      is primary.  A fold refusal on the ``b3 -> 0`` transition falls back
+      to the Pearcey cusp form; any OTHER fold refusal is a genuine
+      unbuildable (no Pearcey fallback).  ``kind`` is ``'airy_fold'``
+      (possibly with ``f_ref=None`` on a genuine unbuildable) or
+      ``'pearcey_cusp'``.
+    * OFF-CAUSTIC (``rho < RHO_LO`` or ``rho > RHO_HI``, including the deep
+      interior and the far-exterior wall band): the band is split at
+      ``w_split = RHO_END / delta_tau`` (``delta_tau`` the smallest pairwise
+      real-image delay separation, single-sourced from
+      `_reduced_min_delay_separation`).  Unresolved nodes (``w < w_split``)
+      carry the macro lead carrier; resolved nodes (``w >= w_split``) carry
+      the two-image geometric-optics sum -- the ``w -> inf`` asymptote, so
+      the residual against it is the smooth O(1) diffractive correction.
+      A cell with any resolved node returns ``kind == 'geometric'``; a cell
+      with none (``delta_tau == 0``, or the whole band below the split)
+      returns ``kind == 'macro'``.  The macro lead is always buildable; a
+      geometric census failure (``LensDomainError``) declines with
+      ``f_ref=None``.
+
+    ``F_ref`` is in the ABSOLUTE frame -- no ``t_min`` subtraction and no
+    ``exp(-1j w * critical_delay)`` re-referencing -- since ``f_pure`` is
+    raw and the mean carrier cancels exactly.  The residual this anchors is
+    ``r = f_pure * sqrt(1 - gamma'^2) / F_ref``: ``F_ref`` replaces
     ``prefactor_c`` ONLY, the ``sqrt(1 - gamma'^2)`` stays in the residual.
-
-    Declines (``None``) only when BOTH forms fail, or when the returned
-    reference is non-finite or fails the non-vanishing magnitude guard
-    ``min|F_ref| / max|F_ref| >= _NON_VANISHING_MIN_RATIO``.  The guard is
-    load-bearing only for the Pearcey form: exterior cusp cells have
-    ``P != 0`` (Pearcey zeros live on interior fold lines), but interior cusp
-    cells can hit ``P ~ 0``, and the guard declines those instead of emitting
-    a residual pole; the Airy Wronskian trivially satisfies it.
 
     Parameters
     ----------
@@ -259,25 +361,77 @@ def fold_cusp_reference(w_grid: np.ndarray, gamma_prime: float,
         1-D array of dimensionless frequencies (positive).
     gamma_prime : float
         Reduced shear.
+    rho : float
+        Caustic-relative distance ``|y'| / |y_c(theta)|`` (the fence
+        discriminator that selects the carrier partition).
     source : ndarray
         Shape ``(2,)`` reduced eigenframe source position.
 
     Returns
     -------
-    ndarray or None
-        Complex ``F_ref`` sampled on ``w_grid``, or ``None`` to decline.
+    tuple
+        ``(f_ref, kind)``: complex ``F_ref`` sampled on ``w_grid`` (or
+        ``None`` to decline), and the carrier kind string.
     """
     w_grid = np.asarray(w_grid, dtype=float)
-    f_ref = _airy_fold_form(w_grid, gamma_prime, source)
-    if f_ref is None:
-        f_ref = _pearcey_cusp_reference(w_grid, gamma_prime, source)
-    if f_ref is None:
-        return None
-    magnitude = np.abs(f_ref)
-    ratio = magnitude.min() / magnitude.max()
-    if not np.isfinite(ratio) or ratio < _NON_VANISHING_MIN_RATIO:
-        return None
-    return f_ref
+    if RHO_LO <= rho <= RHO_HI:
+        f_ref, cusp_transition = _airy_fold_form(w_grid, gamma_prime, source)
+        if f_ref is not None:
+            return f_ref, 'airy_fold'
+        if cusp_transition:
+            return (_pearcey_cusp_reference(w_grid, gamma_prime, source),
+                    'pearcey_cusp')
+        return None, 'airy_fold'
+
+    f_ref = np.array(
+        [born_lead_carrier(float(w_value), source[0], source[1], gamma_prime,
+                           beta=0.0, kappa=0.0) for w_value in w_grid],
+        dtype=complex)
+    delta_tau = _reduced_min_delay_separation(gamma_prime, source)
+    w_split = RHO_END / delta_tau if delta_tau > 0.0 else math.inf
+    resolved = w_grid >= w_split
+    if resolved.any():
+        # Resolved nodes: the two-image geometric-optics sum (the ``w -> inf``
+        # asymptote); unresolved nodes keep the macro lead.  The split
+        # ``w_split = RHO_END / delta_tau`` is the SAME single-sourced
+        # resolved/unresolved boundary the trainer and serve share.
+        try:
+            f_ref[resolved] = geometric_amplification(
+                w_grid[resolved], source, gamma_prime)
+        except geometry.LensDomainError:
+            return None, 'geometric'
+        return f_ref, 'geometric'
+    return f_ref, 'macro'
+
+
+def _reduced_min_delay_separation(gamma_prime: float,
+                                  source: np.ndarray) -> float:
+    """Smallest pairwise real-image delay gap in the reduced frame.
+
+    Wraps `operator._real_delay_min_separation` on the reduced-eigenframe
+    macro matrix ``macro_matrix(gamma_prime, 0, 0)`` -- the same ``kappa = 0``
+    convention the fold/cusp forms use -- returning the minimum pairwise
+    Fermat-delay separation among the REAL images in the ABSOLUTE frame.
+    Fewer than two real images means nothing is resolved, so ``0.0`` is
+    returned (the ``w * delta_min >= RHO_END`` resolution condition then
+    fails).  Single-sources the reduced-frame matrix construction so the
+    trainer and serve resolve/unresolve split on the same geometry.
+
+    Parameters
+    ----------
+    gamma_prime : float
+        Reduced shear.
+    source : ndarray
+        Shape ``(2,)`` reduced eigenframe source position.
+
+    Returns
+    -------
+    float
+        Minimum pairwise real-image delay separation, or ``0.0`` if fewer
+        than two real images exist.
+    """
+    matrix = geometry.macro_matrix(gamma_prime, 0.0, 0.0)
+    return _real_delay_min_separation(np.asarray(source, dtype=float), matrix)
 
 
 @dataclass(frozen=True)
@@ -492,7 +646,7 @@ class LowWDiffractiveChart:
         ------
         ValueError
             If the ``schema`` key is absent or does not match
-            ``low_w_diffractive_v2``, or if the recomputed content hash does
+            ``low_w_diffractive_v3``, or if the recomputed content hash does
             not match the stored one (corrupt / stale artifact).  The
             message names ``scripts/train_low_w_diffractive_chart.py`` as
             the regeneration script.

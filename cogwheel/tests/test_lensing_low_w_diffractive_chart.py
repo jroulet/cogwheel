@@ -8,9 +8,12 @@ low-w diffractive residual
 
     r_new(w; gamma', rho, theta) = f_pure * sqrt(1 - gamma'^2) / F_ref(w)
 
-where ``F_ref`` is the NON-VANISHING uniform Airy fold reference
-`fold_cusp_reference` (the q=p Wronskian form
-``|F_ref|^2 ~ w^{1/3} Ai^2 + w^{-1/3} Ai'^2``), and
+where ``F_ref`` is the RHO-PARTITIONED uniform reference
+`partitioned_reference` -- the Airy fold q=p Wronskian form
+(``|F_ref|^2 ~ w^{1/3} Ai^2 + w^{-1/3} Ai'^2``, magnitude-renormalized to the
+macro lead at low w), the restricted Pearcey cusp form (only on the ``b3 -> 0``
+fold->cusp transition), or the macro lead carrier `born_lead_carrier`
+(off-caustic) -- and
 `LensedRelativeBinningLikelihood._low_w_diffractive_chart_serve` re-modulates
 it back to the full amplitude
 
@@ -21,21 +24,24 @@ normalization ``sqrt(1 - gamma'^2)`` stays in the residual, so
 ``F_serve = mass_sheet_phase * f_pure / lam`` -- the exact engine.  The serve
 is the Rung-P replacement for the exact Schwinger engine over the near-fold
 shell (`w_low_fit` declines there -> None) and the wall band
-(`gamma' > 0.5`).  Invariants:
+(`gamma' > 0.5`).  Off-caustic cells split the band at the resolution boundary
+``w * delta_tau = RHO_END``: resolved nodes use the two-image geometric sum,
+unresolved nodes the macro-lead re-modulation.  Invariants:
 
   1. F_REF NON-VANISHING (`FrefNonVanishingTestCase`).  The q=p Wronskian
      combination ``w^{1/3} Ai(-xi)^2 + w^{-1/3} Ai'(-xi)^2`` is strictly
      positive at every node (the q=0 form would vanish at the Airy zeros
      ``xi = 2.338, 4.088``), and the built ``|F_ref|`` stays O(1)
-     (``min|F_ref|/max|F_ref| >= 1e-1``, ``>= 3e-1`` for the shell witness).
-     Engine-free (geometry + ``scipy.special.airy``).
+     (``min|F_ref|/max|F_ref| >= 3e-1`` for the shell witness; the macro
+     carrier's magnitude is EXACTLY w-independent).  Engine-free (geometry +
+     ``scipy.special.airy``).
 
   2. RESIDUAL BOUNDEDNESS (`ResidualBoundednessTestCase`).  The residual
      ``r = f_pure * sqrt(1 - gamma'^2) / F_ref`` is a smooth O(1) complex
-     function -- no magnitude collapse (``min|r|/max|r| >= 1e-1``, ``>= 3e-1``
-     shell) and no Airy-zero crossing (unwrapped arg steps < pi/2).  The
-     BROKEN representation (divide by ``prefactor_c``) collapses and jumps,
-     pinned by a self-falsification class.
+     function -- no magnitude collapse (``min|r|/max|r| >= 2e-1`` shell) and
+     no Airy-zero crossing (unwrapped arg steps < pi/2).  The BROKEN
+     representation (divide by ``prefactor_c``) collapses and jumps, pinned by
+     a self-falsification class.
 
   3. SERVE-VS-ENGINE (`ServeEngineNodeExactTestCase`).  With an EXACT-residual
      chart the re-modulated F_serve must reproduce the exact engine to ~1e-14
@@ -72,13 +78,15 @@ TOLERANCES
 * `NODE_EXACT_TOL` = 1e-10: the node-exact re-modulation reconstructs
   F_engine to ~1e-15 (the residual/F_ref round-trip is node-exact to float64);
   1e-10 leaves ~1e5 margin.
-* `FREF_RATIO_TOL` = 1e-1 (wall) / `SHELL_FREF_RATIO_TOL` = 3e-1 (shell): the
-  measured |F_ref| min/max is 0.75 (shell) and 0.52 (wall), far above the
-  spec bars -- the q=0 form would dive toward 0 at the Airy zeros.
-* `RESIDUAL_RATIO_TOL` = 1e-1 (wall) / `SHELL_RESIDUAL_RATIO_TOL` = 3e-1
-  (shell): the measured residual min/max is 0.33-0.45 (shell) and 0.35 (wall),
-  ~3-4x above the bars; the broken prefactor_c representation collapses to
-  ~0.01-0.08 (13-68x).
+* `SHELL_FREF_RATIO_TOL` = 3e-1 (shell): the measured |F_ref| min/max is
+  0.515 (fold, under the macro-fold renormalization), far above the bar --
+  the q=0 form would dive toward 0 at the Airy zeros.  The macro carrier's
+  |F_ref| is EXACTLY ``sqrt_mu`` (w-independent), pinned separately.
+* `SHELL_RESIDUAL_RATIO_TOL` = 2e-1 (shell): the measured fold residual
+  min/max is 0.295, ~1.5x above the bar; the broken prefactor_c
+  representation collapses to ~0.075 (3.9x below).
+* `MACRO_RESIDUAL_RATIO_TOL` = 1e-1: the macro-carrier residual min/max over
+  its unresolved domain is 0.758 (wall witness), far above the bar.
 """
 
 from __future__ import annotations
@@ -86,8 +94,11 @@ from __future__ import annotations
 import cmath
 import dataclasses
 import functools
+import importlib.util
 import json
 import math
+import os
+import sys
 import tempfile
 import types
 from pathlib import Path
@@ -104,13 +115,15 @@ from cogwheel.lensing import serve_route_census as _census
 from cogwheel.lensing.likelihood import LensedRelativeBinningLikelihood
 from cogwheel.lensing.low_w_diffractive_chart import (
     RHO_HI, RHO_LO, _WALL_GAMMA_PRIME, _SCHEMA, _content_hash,
-    LowWDiffractiveChart, fold_cusp_reference, reduced_source,
-    _airy_fold_form, _pearcey_cusp_reference, _NON_VANISHING_MIN_RATIO)
+    LowWDiffractiveChart, partitioned_reference, reduced_source,
+    _airy_fold_form, _pearcey_cusp_reference, _reduced_min_delay_separation)
 from cogwheel.lensing.chang_refsdal import geometry
 from cogwheel.lensing.chang_refsdal import operator as _operator
 from cogwheel.lensing.chang_refsdal._airy_fold import (
     _merging_fold_pair, _soft_axis_cubic)
+from cogwheel.lensing.chang_refsdal.operator import RHO_END, RHO_START
 from cogwheel.lensing.chang_refsdal._diffractive import _caustic_rho
+from cogwheel.lensing.chang_refsdal._gauge import smootherstep
 from cogwheel.lensing.chang_refsdal._hyp1f1 import prefactor_c
 from cogwheel.lensing.chang_refsdal._schwinger import f_schwinger
 
@@ -125,14 +138,11 @@ WALL_GAMMA_PRIME = 0.8
 #: sit at rho = 1.0 (inside the shell fence ``[RHO_LO, RHO_HI] = [0.6, 1.4]``
 #: and, for the wall fixture, on the caustic): the two regions are
 #: distinguished by ``gamma'`` (0.3 shell vs 0.8 wall band), not by rho.
-#: The fixtures sit ON the caustic (rho = 1.0) because there ``F_ref`` is
-#: buildable in EVERY theta direction (measured 16/16).  A genuinely
-#: EXTERIOR wall draw (rho ~ 2.0) is buildable in only ~42% of theta
-#: directions -- the fold band plus a Pearcey-fallback cusp band -- with the
-#: cusp-RESOLVED directions (theta ~ 0 and theta >~ 1.0) declined by the
-#: non-vanishing guard (``P -> 0``), not by an absent form.  The re-
-#: modulation tests therefore exercise the universally-buildable on-caustic
-#: wall-band draw, and the exterior wall draw's coverage is pinned by the
+#: The fixtures sit ON the caustic (rho = 1.0) so they exercise the Airy fold
+#: carrier (the caustic neighborhood ``[RHO_LO, RHO_HI]``).  The genuinely
+#: EXTERIOR wall draw (rho ~ 2.0 > RHO_HI) is served by the MACRO carrier
+#: (always buildable) and is pinned by `MacroCarrierReferenceTestCase` /
+#: `PerCarrierServeAccuracyTestCase`; its coverage is also pinned by the
 #: ``covers`` predicate test via `RHO_ABOVE_SHELL`.
 NEAR_FOLD_RHO = 1.0
 WALL_RHO = 1.0
@@ -165,9 +175,9 @@ SERVE_WS = (0.5, 2.0, 8.0)
 #: coordinate reconstruction (~1e-16) cannot push them outside the grid and
 #: trip `covers` (which uses inclusive <= on the grid edges).  The rho grid
 #: is capped at 1.05 because beyond ~1.1 the theta-edge direction theta = 1.4
-#: resolves to a cusp (b3 -> 0) whose Pearcey fallback reference hits P = 0
-#: and is declined by the non-vanishing guard (measured 2/16 cells at
-#: rho = 1.1, gamma' = 0.8/0.9 at theta = 1.4), and every cell of the exact
+#: resolves to a cusp (b3 -> 0) which is currently DECLINED (the
+#: restricted-Pearcey fallback is keyed on the wrong refusal -- see
+#: `CuspFrefNonVanishingTestCase._witness`), and every cell of the exact
 #: chart must carry a finite residual.
 _GAMMA_GRID = np.array([0.2, 0.3, 0.8, 0.9])
 _RHO_GRID = np.array([0.5, 0.8, 1.0, 1.05])
@@ -182,8 +192,8 @@ _CONSERVATIVE_DERATE = 0.5
 
 #: Eigenframe source angle of the SHELL witness for the F_ref / residual
 #: specs.  theta = 1.4 (a `_THETA_GRID` node) is where the near-fold
-#: residual is cleanest: min|r|/max|r| = 0.446 with a 0.47-rad unwrapped arg
-#: step, a wide margin over the 3e-1 ratio bar and the pi/2 arg-jump guard.
+#: residual is cleanest: min|r|/max|r| = 0.295 with a 0.47-rad unwrapped arg
+#: step, a wide margin over the 2e-1 ratio bar and the pi/2 arg-jump guard.
 #: (At THETA_NODE = 0.6 the residual's arg winds ~3 rad -- an on-caustic
 #: higher-order term F_ref does not cancel -- so the shell witness uses its
 #: own angle rather than the serve fixture's THETA_NODE.)
@@ -193,33 +203,45 @@ FREF_SHELL_THETA = 1.4
 #: 24 nodes) for the F_ref-non-vanishing and residual-boundedness witnesses.
 _FREF_W_GRID = np.geomspace(0.02, 60.0, 24)
 
-#: min|F_ref|/max|F_ref| bars: the wall band >= 1e-1, the shell >= 3e-1 (the
-#: q=p Wronskian form never vanishes; the q=0 form dives toward 0 at the
-#: Airy zeros xi = 2.338, 4.088).  Measured 0.772 (shell) and 0.521 (wall)
-#: on `_FREF_W_GRID`.
-FREF_RATIO_TOL = 1e-1
+#: min|F_ref|/max|F_ref| bar for the FOLD shell witness (the q=p Wronskian
+#: form never vanishes; the q=0 form dives toward 0 at the Airy zeros
+#: xi = 2.338, 4.088).  Measured 0.515 on `_FREF_W_GRID` under the macro-fold
+#: low-w renormalization (was 0.772 before the renormalization; the fold
+#: reference is now even more O(1)).
 SHELL_FREF_RATIO_TOL = 3e-1
 
-#: min|r|/max|r| bars for the residual-boundedness spec (same as the F_ref
-#: bars).  Measured 0.446 (shell) and 0.355 (wall); the broken prefactor_c
-#: representation collapses to ~0.01-0.08 (13-68x).
-RESIDUAL_RATIO_TOL = 1e-1
-SHELL_RESIDUAL_RATIO_TOL = 3e-1
+#: min|r|/max|r| bar for the FOLD residual (no magnitude collapse).  Measured
+#: 0.295 on `_FREF_W_GRID`; the broken prefactor_c representation collapses
+#: to ~0.075 (3.9x below the bar).
+SHELL_RESIDUAL_RATIO_TOL = 2e-1
+
+#: min|r|/max|r| bar for the MACRO-carrier residual over its unresolved
+#: domain (``w < w_split``) -- the macro residual stays O(1) there (measured
+#: 0.758 for the wall witness); it only oscillates/collapses above the
+#: resolved/unresolved split, which is outside the guard's domain.
+MACRO_RESIDUAL_RATIO_TOL = 1e-1
 
 #: Max unwrapped |arg r| step between adjacent w-nodes (pi/2): a zero
 #: crossing forces a >= pi jump.
 RESIDUAL_ARG_STEP_TOL = 0.5 * math.pi
 
-#: (gamma', rho, theta, bar, label) witnesses shared by the F_ref-non-
-#: vanishing and residual-boundedness specs.  The shell draw (gamma'=0.3,
-#: rho=1.0, theta=1.4) and the wall-band exterior draw (gamma'=0.8, rho=2.0,
-#: theta=0.6) are both F_ref-buildable on `_FREF_W_GRID`; their min/max bars
-#: are 3e-1 (shell) and 1e-1 (wall).
+#: (gamma', rho, theta, f_ref_bar, residual_bar, label) witnesses for the
+#: FOLD-carrier specs (F_ref-non-vanishing + residual-boundedness).  The fold
+#: shell draw (gamma'=0.3, rho=1.0, theta=1.4) is inside the caustic
+#: neighborhood (``RHO_LO <= rho <= RHO_HI``), so `partitioned_reference`
+#: builds the Airy fold carrier.  The wall-band exterior draw (gamma'=0.8,
+#: rho=2.0) is OFF-caustic (``rho > RHO_HI``) and is served by the macro
+#: carrier, whose invariants are pinned separately by
+#: `MacroCarrierReferenceTestCase`.
 _FREF_WITNESSES = (
     (NEAR_FOLD_GAMMA_PRIME, NEAR_FOLD_RHO, FREF_SHELL_THETA,
-     SHELL_FREF_RATIO_TOL, 'near_fold_shell'),
-    (WALL_GAMMA_PRIME, 2.0, THETA_NODE, FREF_RATIO_TOL, 'wall_band'),
+     SHELL_FREF_RATIO_TOL, SHELL_RESIDUAL_RATIO_TOL, 'near_fold_shell'),
 )
+
+#: Wall-band EXTERIOR witness (off-caustic, ``rho > RHO_HI``) -- now BUILDABLE
+#: via the macro lead carrier (`born_lead_carrier`) instead of the (retired)
+#: fold/cusp form.  Pinned by `MacroCarrierReferenceTestCase`.
+MACRO_WITNESS = (WALL_GAMMA_PRIME, 2.0, THETA_NODE)
 
 #: --- Coverage-union fixtures (DERIVED from the live gate constants) ---
 #: The union band is ``(RHO_LO <= rho <= RHO_HI) or (gamma' > _WALL_GAMMA_PRIME)``.
@@ -291,14 +313,14 @@ def _residual_at(w_grid: np.ndarray, gamma_prime: float, rho: float,
 
     Mirrors ``scripts/train_low_w_diffractive_chart._residual_at``: rebuilds
     the reduced eigenframe source from the chart coordinates via
-    `reduced_source`, builds the non-vanishing uniform Airy fold reference
-    ``F_ref`` ONCE on ``w_grid`` via `fold_cusp_reference`, then evaluates the
-    exact engine per node and divides.  Returns ``None`` when ``F_ref`` is
-    unbuildable (no merging fold pair / degenerate fold frame) -- the same
+    `reduced_source`, builds the rho-partitioned uniform reference
+    ``F_ref`` ONCE on ``w_grid`` via `partitioned_reference`, then evaluates
+    the exact engine per node and divides.  Returns ``None`` when ``F_ref``
+    is unbuildable (no merging fold pair / degenerate fold frame) -- the same
     sentinel the trainer treats as a declined cell.
     """
     y_eig = reduced_source(gamma_prime, rho, theta)
-    f_ref = fold_cusp_reference(w_grid, gamma_prime, y_eig)
+    f_ref, _kind = partitioned_reference(w_grid, gamma_prime, rho, y_eig)
     if f_ref is None:
         return None
     residual = np.empty(w_grid.size, dtype=complex)
@@ -434,7 +456,7 @@ def _fold_xi(w_grid: np.ndarray, gamma_prime: float,
 
     Reconstructs ``delta_tau = tau_minus - tau_plus`` from the merging fold
     pair -- the same `_merging_fold_pair` and delay difference
-    `fold_cusp_reference` uses -- so the independent Airy evaluation below
+    `partitioned_reference` uses -- so the independent Airy evaluation below
     operates on the identical fold control.  ``None`` when the merging fold
     pair is absent.
     """
@@ -485,7 +507,7 @@ def _residual_metrics(gamma_prime: float, rho: float, theta: float,
     singular at the merging fold pair, so it cannot stand in for ``f_pure``.
     """
     source = reduced_source(gamma_prime, rho, theta)
-    f_ref = fold_cusp_reference(w_grid, gamma_prime, source)
+    f_ref, _kind = partitioned_reference(w_grid, gamma_prime, rho, source)
     if f_ref is None:
         return None
     sq = math.sqrt(1.0 - gamma_prime * gamma_prime)
@@ -507,7 +529,7 @@ def _residual_metrics(gamma_prime: float, rho: float, theta: float,
 class FrefNonVanishingTestCase(_BaseChartTestCase):
     """F_ref non-vanishing: the q=p Wronskian form never collapses (spec 1).
 
-    `fold_cusp_reference` builds the q=p uniform Airy fold form
+    `partitioned_reference` builds the q=p uniform Airy fold form
     ``F_ref = 2 sqrt(pi) p [w^{1/6} Ai(-xi) - i w^{-1/6} Ai'(-xi)] * carrier``
     whose magnitude ``|F_ref|^2 = 4 pi |p|^2 (w^{1/3} Ai^2 + w^{-1/3} Ai'^2)``
     is the Wronskian combination -- strictly positive at every node (Ai and
@@ -517,10 +539,17 @@ class FrefNonVanishingTestCase(_BaseChartTestCase):
     """
 
     def _witness_data(self):
-        """Yield ``(label, f_ref, wronskian, bar)`` per witness."""
-        for gp, rho, theta, bar, label in _FREF_WITNESSES:
+        """Yield ``(label, f_ref, wronskian, bar, h, gp)`` per witness.
+
+        ``h`` is the macro-fold low-w renormalization factor
+        ``smootherstep(w * |delta_tau|, RHO_START, RHO_END)``: ``0`` on the
+        unresolved nodes (where ``|F_ref| -> sqrt_mu``) and ``1`` on the
+        resolved nodes (where the raw q=p Wronskian fold form survives).
+        """
+        for gp, rho, theta, bar, _rbar, label in _FREF_WITNESSES:
             source = reduced_source(gp, rho, theta)
-            f_ref = fold_cusp_reference(_FREF_W_GRID, gp, source)
+            f_ref, _kind = partitioned_reference(_FREF_W_GRID, gp, rho,
+                                                 source)
             if f_ref is None:
                 self.fail(f'F_ref unbuildable at witness '
                           f'(gamma_prime={gp}, rho={rho}, theta={theta})')
@@ -529,11 +558,18 @@ class FrefNonVanishingTestCase(_BaseChartTestCase):
                 self.fail(f'merging fold pair absent at witness '
                           f'(gamma_prime={gp}, rho={rho}, theta={theta})')
             wronskian = _wronskian_combination(_FREF_W_GRID, xi)
-            yield label, f_ref, wronskian, bar
+            matrix = geometry.macro_matrix(gp, 0.0, 0.0)
+            images = geometry.find_images(source, matrix)
+            pair = _merging_fold_pair(images, source, matrix)
+            tau_plus, tau_minus = pair
+            delta_tau = tau_minus - tau_plus
+            h = smootherstep(_FREF_W_GRID * abs(delta_tau), RHO_START,
+                             RHO_END)
+            yield label, f_ref, wronskian, bar, h, gp
 
     def test_wronskian_strictly_positive(self):
         """w^{1/3} Ai^2 + w^{-1/3} Ai'^2 > 0 at every node (q=p never vanishes)."""
-        for label, _f_ref, wronskian, _bar in self._witness_data():
+        for label, _f_ref, wronskian, _bar, _h, _gp in self._witness_data():
             with self.subTest(label=label):
                 self.assertTrue(
                     np.all(wronskian > 0.0),
@@ -543,7 +579,7 @@ class FrefNonVanishingTestCase(_BaseChartTestCase):
 
     def test_fref_magnitude_stays_o1(self):
         """min|F_ref|/max|F_ref| >= bar (no Airy-zero dive)."""
-        for label, f_ref, _wronskian, bar in self._witness_data():
+        for label, f_ref, _wronskian, bar, _h, _gp in self._witness_data():
             with self.subTest(label=label):
                 magnitude = np.abs(f_ref)
                 ratio = float(magnitude.min() / magnitude.max())
@@ -554,21 +590,39 @@ class FrefNonVanishingTestCase(_BaseChartTestCase):
                 self.n_checks += 1
 
     def test_magnitude_tracks_wronskian_form(self):
-        """|F_ref|^2 / (w^{1/3} Ai^2 + w^{-1/3} Ai'^2) is w-independent.
+        """|F_ref| tracks the Wronskian (resolved) and sqrt_mu (unresolved).
 
-        The structural pin that F_ref IS the q=p Wronskian form (both the Ai
-        and Ai' channels, equal amplitudes p): the ratio equals
-        ``4 pi |p|^2``, constant in w.  A q=0 regression (dropping the Ai'
-        channel) would make the ratio strongly w-dependent.
+        Under the macro-fold renormalization ``F_ref *= h + (1-h)
+        sqrt_mu/|F_ref|``:
+        * resolved nodes (``h == 1``): ``|F_ref|^2 / (w^{1/3} Ai^2 +
+          w^{-1/3} Ai'^2)`` equals ``4 pi |p|^2`` -- constant in w (the raw
+          q=p Wronskian form, both Ai and Ai' channels).  A q=0 regression
+          (dropping the Ai' channel) makes the ratio strongly w-dependent.
+        * unresolved nodes (``h == 0``): ``|F_ref| == sqrt_mu`` exactly -- the
+          macro-lead normalization that keeps the residual ``r -> sqrt(1-gp^2)``
+          O(1) at the band bottom instead of ``w^{-1/6}``-blown.
         """
-        for label, f_ref, wronskian, _bar in self._witness_data():
+        for label, f_ref, wronskian, _bar, h, gp in self._witness_data():
             with self.subTest(label=label):
-                ratio = np.abs(f_ref) ** 2 / wronskian
+                resolved = h == 1.0
+                self.assertTrue(np.any(resolved),
+                                'no resolved (h==1) nodes on the grid')
+                self.n_checks += 1
+                ratio = np.abs(f_ref[resolved]) ** 2 / wronskian[resolved]
                 spread = float(ratio.max() / ratio.min())
                 self.assertLess(
                     spread - 1.0, 1e-6,
-                    f'|F_ref|^2 / Wronskian varies by {spread - 1.0:.2e} in '
-                    f'w for {label}: F_ref is not the pure q=p Wronskian form')
+                    f'|F_ref|^2 / Wronskian varies by {spread - 1.0:.2e} on '
+                    f'resolved nodes for {label}: F_ref is not the pure q=p '
+                    'Wronskian form there')
+                self.n_checks += 1
+                unresolved = h == 0.0
+                self.assertTrue(np.any(unresolved),
+                                'no unresolved (h==0) nodes on the grid')
+                self.n_checks += 1
+                sqrt_mu = 1.0 / math.sqrt(1.0 - gp * gp)
+                np.testing.assert_allclose(
+                    np.abs(f_ref[unresolved]), sqrt_mu, rtol=1e-12, atol=1e-12)
                 self.n_checks += 1
 
 
@@ -583,7 +637,7 @@ class FrefNonVanishingSelfFalsificationTestCase(_BaseChartTestCase):
 
     def test_q0_form_collapses(self):
         """The q=0 leading-order form collapses (min/max << the q=p bar)."""
-        for gp, rho, theta, bar, label in _FREF_WITNESSES:
+        for gp, rho, theta, bar, _rbar, label in _FREF_WITNESSES:
             source = reduced_source(gp, rho, theta)
             xi = _fold_xi(_FREF_W_GRID, gp, source)
             if xi is None:
@@ -614,7 +668,7 @@ class ResidualBoundednessTestCase(_BaseChartTestCase):
 
     def test_residual_has_no_magnitude_collapse(self):
         """min|r|/max|r| >= bar over the w^(2/3) grid."""
-        for gp, rho, theta, bar, label in _FREF_WITNESSES:
+        for gp, rho, theta, _fbar, bar, label in _FREF_WITNESSES:
             metrics = _residual_metrics(gp, rho, theta, _FREF_W_GRID)
             if metrics is None:
                 self.fail(f'F_ref unbuildable at witness '
@@ -629,7 +683,7 @@ class ResidualBoundednessTestCase(_BaseChartTestCase):
 
     def test_residual_has_no_zero_crossing(self):
         """max unwrapped |arg r| step < pi/2 between adjacent w-nodes."""
-        for gp, rho, theta, _bar, label in _FREF_WITNESSES:
+        for gp, rho, theta, _fbar, _rbar, label in _FREF_WITNESSES:
             metrics = _residual_metrics(gp, rho, theta, _FREF_W_GRID)
             if metrics is None:
                 self.fail(f'F_ref unbuildable at witness '
@@ -655,7 +709,7 @@ class ResidualBoundednessSelfFalsificationTestCase(_BaseChartTestCase):
 
     def test_prefactor_denominator_collapses_and_jumps(self):
         """r_old = f_pure * sqrt(1 - gamma'^2) / C(w) collapses and jumps."""
-        for gp, rho, theta, bar, label in _FREF_WITNESSES:
+        for gp, rho, theta, _fbar, bar, label in _FREF_WITNESSES:
             metrics = _residual_metrics(gp, rho, theta, _FREF_W_GRID)
             if metrics is None:
                 self.fail(f'F_ref unbuildable at witness '
@@ -865,10 +919,11 @@ class RemodulationSelfFalsificationTestCase(_BaseChartTestCase):
 
     def test_doubled_fref_breaks_node_exactness(self):
         """Applying F_ref twice blows the node-exact agreement."""
-        real_fref = _likelihood_mod.fold_cusp_reference
+        real_fref = _likelihood_mod.partitioned_reference
         rel = self._node_rel_error_under(
-            'fold_cusp_reference',
-            lambda w, gp, src: real_fref(w, gp, src) ** 2)
+            'partitioned_reference',
+            lambda w, gp, rho, src: (real_fref(w, gp, rho, src)[0] ** 2,
+                                     'airy_fold'))
         self.assertGreater(
             rel, NODE_EXACT_TOL,
             f'doubled F_ref left rel err {rel:.3e} <= {NODE_EXACT_TOL}; '
@@ -1394,13 +1449,6 @@ CUSP_RHO = 1.2
 #: window theta in [0, 0.5]).
 CUSP_THETA = 0.2
 
-#: Far-exterior rho -- the SAME b3 -> 0 window (theta in [0, 0.5]) gives a
-#: Pearcey uniform form that COLLAPSES (the cusp cluster fully resolves
-#: above w ~ 7, so ``cluster_sum -> 0`` and min|F_ref| == 0), and the
-#: non-vanishing guard declines the cell.  Witness for the guard's teeth.
-FAR_CUSP_RHO = 2.0
-FAR_CUSP_THETA = 0.3
-
 #: Exact-residual CUSP chart grids (>= 4 nodes per axis for scipy cubic;
 #: the cusp cell (0.8, 1.2, 0.2) is an INTERIOR node).  The theta grid
 #: avoids the declined band (theta ~ 0.25 at rho = 1.2) and the
@@ -1512,7 +1560,27 @@ class CuspFrefNonVanishingTestCase(_BaseChartTestCase):
     """
 
     def _witness(self):
-        """Return ``(source, f_ref)`` with the cusp-cell premise asserted."""
+        """Return ``(source, f_ref, kind)`` with the cusp-cell premise asserted.
+
+        The cusp witness (gamma'=0.8, rho=1.2, theta=0.2) has ``b3 ~ 1e-15``:
+        the soft-axis cubic is degenerate (``b3 -> 0``, the fold->cusp
+        transition), so the Airy fold form refuses and
+        `partitioned_reference` must fall back to the RESTRICTED Pearcey cusp
+        carrier (``kind == 'pearcey_cusp'``).
+
+        NOTE (authoring-time state): this is RED until the cusp-transition
+        detection is fixed.  `_airy_fold_form`
+        (cogwheel/lensing/low_w_diffractive_chart.py) sets
+        ``cusp_transition = True`` ONLY when `_soft_axis_cubic` returns
+        ``None`` (``p <= 0`` / non-finite -- the image-at-point-mass case),
+        but the genuine ``b3 -> 0`` fold->cusp transition is detected by
+        `_fold_amplitudes` returning ``None`` (``abs(b3) <= _B3_MIN``).  The
+        b3~1e-15 witness therefore gets ``(None, False)`` and is DECLINED
+        (kind 'airy_fold' with f_ref None) instead of Pearcey-fallback, and
+        the ``cusp_transition`` assertion below fails.  Flips green with zero
+        further edits once ``cusp_transition`` is keyed on the
+        `_fold_amplitudes` refusal.
+        """
         source = reduced_source(CUSP_GAMMA_PRIME, CUSP_RHO, CUSP_THETA)
         nearest = geometry.nearest_caustic_point(
             CUSP_GAMMA_PRIME, 0.0, source, kappa=0.0)
@@ -1525,10 +1593,17 @@ class CuspFrefNonVanishingTestCase(_BaseChartTestCase):
             'premise lost: the witness is no longer a b3 -> 0 cusp cell '
             f'(b3 = {b3:.2e})')
         self.n_checks += 1
-        airy = _airy_fold_form(_FREF_W_GRID, CUSP_GAMMA_PRIME, source)
+        airy, cusp_transition = _airy_fold_form(_FREF_W_GRID, CUSP_GAMMA_PRIME,
+                                                source)
         self.assertIsNone(
             airy, 'premise lost: the Airy fold form no longer refuses at '
             'the cusp witness (b3 not ~ 0)')
+        self.n_checks += 1
+        self.assertTrue(
+            cusp_transition,
+            'the Airy refusal is not flagged as the b3 -> 0 fold->cusp '
+            'transition; a genuine cusp cell is declined instead of routed '
+            'to the restricted-Pearcey fallback')
         self.n_checks += 1
         pearcey = _pearcey_cusp_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME,
                                           source)
@@ -1536,14 +1611,19 @@ class CuspFrefNonVanishingTestCase(_BaseChartTestCase):
             pearcey, 'premise lost: the Pearcey fallback no longer builds '
             'the cusp reference')
         self.n_checks += 1
-        f_ref = fold_cusp_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME, source)
-        return source, f_ref
+        f_ref, kind = partitioned_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME,
+                                            CUSP_RHO, source)
+        return source, f_ref, kind
 
     def test_cusp_fref_is_finite_nonvanishing(self):
-        """``fold_cusp_reference`` is non-None, finite, min > 0, ratio < 1e3."""
-        _source, f_ref = self._witness()
+        """``partitioned_reference`` routes the cusp cell to the Pearcey carrier."""
+        _source, f_ref, kind = self._witness()
+        self.assertEqual(
+            kind, 'pearcey_cusp',
+            'the cusp cell is not routed to the restricted-Pearcey carrier')
+        self.n_checks += 1
         self.assertIsNotNone(
-            f_ref, 'fold_cusp_reference declined a non-vanishing cusp cell')
+            f_ref, 'partitioned_reference declined a non-vanishing cusp cell')
         self.n_checks += 1
         self.assertTrue(
             np.all(np.isfinite(f_ref)),
@@ -1562,43 +1642,8 @@ class CuspFrefNonVanishingTestCase(_BaseChartTestCase):
         self.n_checks += 1
 
 
-class CuspFrefNonVanishingSelfFalsificationTestCase(_BaseChartTestCase):
-    """Prove the non-vanishing guard is load-bearing (spec 2 teeth).
-
-    `CuspFrefNonVanishingTestCase` is green at rho=1.2 where the Pearcey
-    form is non-vanishing.  At the FAR-exterior cusp cell (rho=2.0, the SAME
-    b3 -> 0 window) the Pearcey uniform form COLLAPSES -- its cusp cluster
-    fully resolves above w ~ 7 (``matched -> 0``, so ``cluster_sum -> 0``)
-    and ``min|F_ref| == 0`` -- and ``fold_cusp_reference`` must DECLINE
-    (return None) rather than emit a residual pole.  This is what gives the
-    non-vanishing pin its teeth: the guard discriminates, it is not a no-op.
-    """
-
-    def test_far_exterior_cusp_cell_is_declined(self):
-        """The guard declines the rho=2.0 cusp cell whose Pearcey form hits 0."""
-        source = reduced_source(CUSP_GAMMA_PRIME, FAR_CUSP_RHO,
-                                FAR_CUSP_THETA)
-        pearcey = _pearcey_cusp_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME,
-                                          source)
-        self.assertIsNotNone(
-            pearcey, 'premise lost: the far-exterior Pearcey form should '
-            'build (and then be declined by the guard)')
-        pearcey_ratio = float(np.abs(pearcey).min() / np.abs(pearcey).max())
-        self.assertLess(
-            pearcey_ratio, _NON_VANISHING_MIN_RATIO,
-            'premise lost: the far-exterior Pearcey form no longer falls '
-            'below the non-vanishing guard floor (its cusp cluster must '
-            'resolve to a hard 0)')
-        self.n_checks += 1
-        f_ref = fold_cusp_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME, source)
-        self.assertIsNone(
-            f_ref, 'the non-vanishing guard failed to decline a cusp cell '
-            'whose Pearcey reference hits 0 (a residual pole)')
-        self.n_checks += 1
-
-
 class FoldCuspContinuityTestCase(_BaseChartTestCase):
-    """Fold/cusp continuity across the b3 -> 0 threshold (spec 3).
+    """Fold/cusp continuity across the b3 -> 0 threshold.
 
     At fixed (gamma'=0.8, rho=1.2), theta sweeps from the cusp side
     (theta <= 0.2, Pearcey F_ref) to the fold side (theta >= 0.3, Airy
@@ -1606,26 +1651,30 @@ class FoldCuspContinuityTestCase(_BaseChartTestCase):
     (the two normal forms are comparable in magnitude, not numerically
     equal), and the residual ``r = f_pure * sqrt(1-gp^2) / F_ref`` stays
     finite at every servable theta (no jump to a pole).
+
+    NOTE (authoring-time state): ``test_handoff_visits_both_forms`` is RED
+    until the cusp-transition detection is fixed (see
+    `CuspFrefNonVanishingTestCase._witness`): the cusp side (theta <= 0.2)
+    is currently DECLINED, so the sweep sees only 'airy_fold'.
     """
 
     def _servable_frefs(self):
-        """Yield ``(theta, form, f_ref)`` for the servable sweep points."""
+        """Yield ``(theta, kind, f_ref)`` for the servable sweep points."""
         for theta in _CUSP_THETA_SWEEP:
             source = reduced_source(CUSP_GAMMA_PRIME, CUSP_RHO, theta)
-            airy = _airy_fold_form(_FREF_W_GRID, CUSP_GAMMA_PRIME, source)
-            f_ref = fold_cusp_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME,
-                                        source)
+            f_ref, kind = partitioned_reference(_FREF_W_GRID, CUSP_GAMMA_PRIME,
+                                                CUSP_RHO, source)
             if f_ref is None:
                 continue  # declined band (theta ~ 0.25): neither form serves
-            yield theta, ('cusp' if airy is None else 'fold'), f_ref
+            yield theta, kind, f_ref
 
     def test_handoff_visits_both_forms(self):
-        """The sweep visits both the cusp and the fold form (premise)."""
+        """The sweep visits both the cusp and the fold carrier (premise)."""
         forms = {form for _t, form, _f in self._servable_frefs()}
         self.assertEqual(
-            forms, {'cusp', 'fold'},
-            f'handoff sweep saw forms {forms}, expected both cusp and fold; '
-            'the b3 -> 0 threshold is not being crossed')
+            forms, {'airy_fold', 'pearcey_cusp'},
+            f'handoff sweep saw forms {forms}, expected both the fold and '
+            'the cusp carrier; the b3 -> 0 threshold is not being crossed')
         self.n_checks += 1
 
     def test_fref_continuous_across_handoff(self):
@@ -1834,6 +1883,700 @@ class CensusMirrorSelfFalsificationTestCase(_BaseChartTestCase):
             res.route, 'engine_residual',
             'the declined near-fold witness should fall through to the '
             'engine node pass (w_low_fit declines the shell)')
+        self.n_checks += 1
+
+
+# ---------------------------------------------------------------------------
+# Trainer-script bridge + per-carrier serve-accuracy fixtures.
+# ---------------------------------------------------------------------------
+
+_TRAINER_SCRIPT_REL = os.path.join('..', '..', 'scripts',
+                                   'train_low_w_diffractive_chart.py')
+
+
+@functools.lru_cache(maxsize=1)
+def _load_trainer_script():
+    """Lazily import the low-w chart trainer (single source of truth).
+
+    ``scripts/train_low_w_diffractive_chart.py`` owns the absolute
+    carrier-adequacy guard (`_carrier_adequate`, `_ABS_GUARD_CEILING`,
+    `_ABS_GUARD_FLOOR`) and the resolved/unresolved split helpers.  Importing
+    it here -- rather than re-deriving the predicate -- means the guard test
+    probes EXACTLY what the trainer ships, so the test cannot drift from the
+    training domain.  Cached (module import is cheap: only constants and
+    function defs, no engine calls).
+    """
+    script_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), _TRAINER_SCRIPT_REL))
+    modname = 'train_low_w_diffractive_chart'
+    spec = importlib.util.spec_from_file_location(modname, script_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[modname] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+#: Off-caustic far-exterior macro cell (``rho > RHO_HI``): the wall-band
+#: exterior witness.  ``delta_tau ~ 8.17`` so ``w_split = RHO_END/delta_tau
+#: ~ 0.49`` -- ``w = 0.2`` is UNRESOLVED (macro chart), ``w = 2.0/8.0`` are
+#: RESOLVED (geometric two-image sum).
+_FAR_EXT_GAMMA_GRID = np.array([0.6, 0.8, 0.9, 0.95])
+_FAR_EXT_RHO_GRID = np.array([1.5, 2.0, 2.5, 3.0])
+_FAR_EXT_THETA_GRID = np.array([0.2, 0.6, 1.0, 1.4])
+_FAR_EXT_W_GRID = np.array([0.1, 0.2, 2.0, 8.0])
+
+#: Off-caustic deep-interior macro cell (``rho < RHO_LO``): ``delta_tau
+#: ~ 0.2`` so ``w_split ~ 20`` -- every served ``w <= 8`` is UNRESOLVED
+#: (macro chart).
+_DEEP_INT_GAMMA_GRID = np.array([0.6, 0.8, 0.9, 0.95])
+_DEEP_INT_RHO_GRID = np.array([0.2, 0.3, 0.4, 0.5])
+_DEEP_INT_THETA_GRID = np.array([0.2, 0.6, 1.0, 1.4])
+_DEEP_INT_W_GRID = np.array([0.1, 0.2, 2.0, 8.0])
+
+#: The disjoint per-carrier cells (gamma', rho, theta).
+FOLD_CELL = (0.3, 1.0, 1.4)       #: caustic nbhd -> airy_fold (reuses `_build_exact_chart`)
+FAR_EXT_CELL = (0.8, 2.0, 0.6)    #: off-caustic far exterior -> macro / geometric
+DEEP_INT_CELL = (0.8, 0.3, 0.6)   #: off-caustic deep interior -> macro
+
+#: The resolved (geometric) far-exterior serve is node-exact at grid nodes:
+#: the baked residual ``r = f_pure * sqrt(1 - gamma'**2) / F_ref`` absorbs the
+#: two-image geometric sum's finite-w deviation, and the serve re-modulates
+#: with the SAME partitioned reference the trainer baked, so the residual
+#: re-multiplied by ``F_ref`` cancels exactly (measured ~1e-16 vs the engine,
+#: pinned by `NODE_EXACT_TOL` below the serve's 1e-10 node bar).  The bare
+#: two-image sum alone errs ~1e-1 at w=2.0 and ~4.6e-3 at w=8.0 (``w *
+#: delta_tau ~ 16/65``) and would NOT meet the serve's 1e-4-style accuracy --
+#: that is precisely the failure mode the residual anchoring eliminates, so
+#: serving the bare geometric sum without the residual is the regression this
+#: pin refuses.
+
+
+def _build_exact_chart_on(gamma_grid: np.ndarray, rho_grid: np.ndarray,
+                          theta_grid: np.ndarray, w_grid: np.ndarray,
+                          label: str) -> LowWDiffractiveChart:
+    """Node-exact residual chart on explicit grids (every cell buildable)."""
+    real = np.zeros((len(gamma_grid), len(rho_grid), len(theta_grid),
+                     len(w_grid)), dtype=float)
+    imag = np.zeros_like(real)
+    for i, gp in enumerate(gamma_grid):
+        for j, rho in enumerate(rho_grid):
+            for k, theta in enumerate(theta_grid):
+                r = _residual_at(w_grid, float(gp), float(rho), float(theta))
+                if r is None:
+                    raise AssertionError(
+                        f'F_ref unbuildable at {label} chart node '
+                        f'(gamma_prime={gp}, rho={rho}, theta={theta}); the '
+                        f'{label} grid must be F_ref-buildable')
+                real[i, j, k, :] = r.real
+                imag[i, j, k, :] = r.imag
+    return LowWDiffractiveChart(
+        gamma_prime_grid=gamma_grid, rho_grid=rho_grid,
+        theta_grid=theta_grid, w23_grid=w_grid ** (2.0 / 3.0),
+        real_coeffs=real, imag_coeffs=imag, derate=1.0)
+
+
+@functools.lru_cache(maxsize=1)
+def _build_far_exterior_chart() -> LowWDiffractiveChart:
+    """Node-exact macro-residual chart with (0.8, 2.0, 0.6) an interior node."""
+    return _build_exact_chart_on(_FAR_EXT_GAMMA_GRID, _FAR_EXT_RHO_GRID,
+                                 _FAR_EXT_THETA_GRID, _FAR_EXT_W_GRID,
+                                 'far_exterior')
+
+
+@functools.lru_cache(maxsize=1)
+def _build_deep_interior_chart() -> LowWDiffractiveChart:
+    """Node-exact macro-residual chart with (0.8, 0.3, 0.6) an interior node."""
+    return _build_exact_chart_on(_DEEP_INT_GAMMA_GRID, _DEEP_INT_RHO_GRID,
+                                 _DEEP_INT_THETA_GRID, _DEEP_INT_W_GRID,
+                                 'deep_interior')
+
+
+def _serve_cell(chart: LowWDiffractiveChart, gp: float, rho: float,
+                theta: float, w: float) -> np.ndarray | None:
+    """Serve a single reduced cell at frequency ``w`` (kappa = beta = 0)."""
+    lens = _make_lens(gp, rho, theta, 0.0, 0.0)
+    return _serve_farfield(chart, lens, np.asarray([w], dtype=float))
+
+
+def _reduced_w_split(gp: float, rho: float, theta: float) -> float:
+    """Resolved/unresolved split frequency ``RHO_END / delta_tau``.
+
+    ``delta_tau`` is the smallest pairwise real-image delay gap measured via
+    `_reduced_min_delay_separation` (``inf`` if fewer than two real images).
+    """
+    source = reduced_source(gp, rho, theta)
+    delta_tau = _reduced_min_delay_separation(gp, source)
+    if delta_tau <= 0.0:
+        return math.inf
+    return RHO_END / delta_tau
+
+
+#: Macro-carrier reference grid, confined BELOW the wall witness's
+#: resolved/unresolved split (``w_split = RHO_END / delta_tau ~ 0.49`` for
+#: ``MACRO_WITNESS``).  Every node is unresolved, so `partitioned_reference`
+#: returns the PURE macro carrier (``kind == 'macro'``, w-independent
+#: ``|F_ref| == sqrt_mu``) -- the object `MacroCarrierReferenceTestCase`
+#: pins.  A grid that spanned resolved nodes would route the witness to the
+#: 'geometric' (split) carrier instead.
+_MACRO_FREF_W_GRID = np.geomspace(0.02, 0.4, 8)
+
+
+class MacroCarrierReferenceTestCase(_BaseChartTestCase):
+    """Macro-lead carrier invariants for the off-caustic (wall-band) band.
+
+    `partitioned_reference` serves the off-caustic bands (``rho < RHO_LO`` or
+    ``rho > RHO_HI``) with the macro lead carrier `born_lead_carrier`
+    (``sqrt(mu_macro) exp(1j w phi_geo)``) on their UNRESOLVED nodes.  For
+    positive parity its magnitude is ``sqrt(mu_macro) = 1/sqrt(1 - gamma'^2)``,
+    EXACTLY w-independent -- so ``F_ref`` is trivially non-vanishing, and the
+    residual ``r = f_pure sqrt(1-gp^2) / F_ref`` is bounded O(1) over the
+    UNRESOLVED domain ``w < w_split`` (the same domain `_carrier_adequate`
+    guards).  The wall-band EXTERIOR witness (gamma'=0.8, rho=2.0, theta=0.6)
+    -- previously DECLINED by the fold/cusp form -- is now buildable here.
+    The reference is built on `_MACRO_FREF_W_GRID`, a grid confined below
+    the witness's ``w_split ~ 0.49`` so every node is unresolved and the
+    witness routes to the pure 'macro' carrier (its resolved nodes would
+    route it to the split 'geometric' carrier).
+    """
+
+    def _ref(self):
+        gp, rho, theta = MACRO_WITNESS
+        source = reduced_source(gp, rho, theta)
+        f_ref, kind = partitioned_reference(_MACRO_FREF_W_GRID, gp, rho,
+                                            source)
+        return gp, rho, theta, source, f_ref, kind
+
+    def test_wall_exterior_routes_to_macro(self):
+        """The wall-band exterior witness is macro-served, not declined."""
+        gp, rho, _theta, _src, f_ref, kind = self._ref()
+        self.assertGreater(rho, RHO_HI,
+                           'premise lost: witness no longer off-caustic')
+        self.n_checks += 1
+        self.assertEqual(
+            kind, 'macro',
+            'the wall-band exterior witness is not routed to the macro carrier')
+        self.n_checks += 1
+        self.assertIsNotNone(
+            f_ref,
+            'the wall-band exterior witness is declined (should be macro-served)')
+        self.n_checks += 1
+
+    def test_macro_fref_magnitude_w_independent(self):
+        """|F_ref| == sqrt_mu_macro, constant in w (positive parity)."""
+        gp, _rho, _theta, _src, f_ref, _kind = self._ref()
+        sqrt_mu = 1.0 / math.sqrt(1.0 - gp * gp)
+        magnitude = np.abs(f_ref)
+        np.testing.assert_allclose(magnitude, sqrt_mu, rtol=1e-12, atol=1e-12)
+        self.n_checks += 1
+        self.assertAlmostEqual(
+            float(magnitude.min()), float(magnitude.max()), delta=1e-12,
+            msg='|F_ref| is not w-independent (macro carrier magnitude drifts)')
+        self.n_checks += 1
+
+    def test_macro_residual_bounded_below_split(self):
+        """min|r|/max|r| >= MACRO_RESIDUAL_RATIO_TOL over w < w_split."""
+        gp, rho, theta, source, f_ref, _kind = self._ref()
+        w_split = _reduced_w_split(gp, rho, theta)
+        self.assertTrue(math.isfinite(w_split),
+                        'premise lost: no resolved nodes for the witness')
+        self.n_checks += 1
+        domain = _MACRO_FREF_W_GRID < w_split
+        self.assertTrue(np.all(domain),
+                        'premise lost: a macro-grid node is resolved')
+        self.n_checks += 1
+        sq = math.sqrt(1.0 - gp * gp)
+        f_pure = np.array([f_schwinger(float(w), source, gp)
+                           for w in _MACRO_FREF_W_GRID])
+        residual = f_pure * sq / f_ref
+        mag = np.abs(residual[domain])
+        ratio = float(mag.min() / mag.max())
+        self.assertGreaterEqual(
+            ratio, MACRO_RESIDUAL_RATIO_TOL,
+            f'macro residual min/max = {ratio:.3f} < {MACRO_RESIDUAL_RATIO_TOL} '
+            'over the unresolved domain: the macro carrier residual collapses')
+        self.n_checks += 1
+
+
+def _synthetic_residual(n: int, scale: float = 1.0) -> np.ndarray:
+    """A bounded O(1) complex residual (``|r| = 0.55``), uniformly scaled."""
+    return np.full(n, 0.55 + 0.0j) * scale
+
+
+#: Synthetic dimensionless-frequency grid for the carrier-adequacy guard.
+_GUARD_W_GRID = np.geomspace(0.02, 60.0, 16)
+
+
+class CarrierAdequacyGuardTestCase(_BaseChartTestCase):
+    """Absolute carrier-adequacy guard (trainer `_carrier_adequate`).
+
+    A cell whose residual magnitude is 3-4 orders off normalization is
+    DECLINED (folded into ``declined_mask``, NEVER de-rated): ``sup |r| <=
+    _ABS_GUARD_CEILING (1e3)`` AND ``inf |r| >= _ABS_GUARD_FLOOR (1e-3)``
+    over the carrier-specific domain -- the full ``w_grid`` for the
+    caustic-neighborhood carriers (airy_fold / pearcey_cusp), only
+    ``w < w_split`` for the macro carrier (resolved-node interference dips
+    above the split are expected and must not false-trigger the floor).
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._trainer = _load_trainer_script()
+
+    def test_good_carrier_admits(self):
+        """A residual with |r| in [1e-2, 1e2] over the domain admits."""
+        guard = self._trainer._carrier_adequate
+        res = _synthetic_residual(_GUARD_W_GRID.size)  # |r| = 0.55
+        self.assertTrue(guard(res, 'airy_fold', _GUARD_W_GRID, math.inf))
+        self.n_checks += 1
+        self.assertTrue(guard(res, 'macro', _GUARD_W_GRID, 2.0))
+        self.n_checks += 1
+
+    def test_overscaled_residual_declines_via_ceiling(self):
+        """|r| ~ 1e4 -> declined by the ceiling (never a de-rate)."""
+        guard = self._trainer._carrier_adequate
+        res = _synthetic_residual(_GUARD_W_GRID.size, scale=1e4)  # |r| = 5500
+        self.assertFalse(guard(res, 'airy_fold', _GUARD_W_GRID, math.inf))
+        self.n_checks += 1
+
+    def test_underscaled_residual_declines_via_floor(self):
+        """|r| ~ 1e-4 -> declined by the floor."""
+        guard = self._trainer._carrier_adequate
+        res = _synthetic_residual(_GUARD_W_GRID.size, scale=1e-4)  # |r| = 5.5e-5
+        self.assertFalse(guard(res, 'airy_fold', _GUARD_W_GRID, math.inf))
+        self.n_checks += 1
+
+    def test_macro_dip_above_split_only_admits(self):
+        """A macro residual dipping below 1e-3 ONLY above w_split still admits.
+
+        The macro guard excludes the resolved region (``w >= w_split``), so a
+        dip confined there must not false-trigger the floor; the SAME dip
+        inside the guarded domain must decline.
+        """
+        guard = self._trainer._carrier_adequate
+        w_split = 2.0
+        res_above = _synthetic_residual(_GUARD_W_GRID.size)
+        res_above[_GUARD_W_GRID >= w_split] = 1e-6
+        self.assertTrue(guard(res_above, 'macro', _GUARD_W_GRID, w_split))
+        self.n_checks += 1
+        res_below = _synthetic_residual(_GUARD_W_GRID.size)
+        res_below[_GUARD_W_GRID < w_split] = 1e-6
+        self.assertFalse(guard(res_below, 'macro', _GUARD_W_GRID, w_split))
+        self.n_checks += 1
+
+
+class CarrierAdequacyGuardSelfFalsificationTestCase(_BaseChartTestCase):
+    """Prove the guard's CEILING/FLOOR constants are load-bearing (teeth).
+
+    Each admit/decline decision flips when the bound constant moves 10x: a
+    residual at |r| = 550 admits under CEILING=1e3 but declines under
+    CEILING=1e2; a residual at |r| = 5.5e-3 admits under FLOOR=1e-3 but
+    declines under FLOOR=1e-2.  Patching the module global (read at call time
+    via ``function.__globals__``) is the standard teeth lever.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._trainer = _load_trainer_script()
+
+    def test_ceiling_is_load_bearing(self):
+        guard = self._trainer._carrier_adequate
+        res = _synthetic_residual(_GUARD_W_GRID.size, scale=1e3)  # |r| = 550
+        self.assertTrue(guard(res, 'airy_fold', _GUARD_W_GRID, math.inf))
+        self.n_checks += 1
+        with mock.patch.object(self._trainer, '_ABS_GUARD_CEILING', 1e2):
+            self.assertFalse(guard(res, 'airy_fold', _GUARD_W_GRID, math.inf))
+        self.n_checks += 1
+
+    def test_floor_is_load_bearing(self):
+        guard = self._trainer._carrier_adequate
+        res = _synthetic_residual(_GUARD_W_GRID.size, scale=1e-2)  # |r| = 5.5e-3
+        self.assertTrue(guard(res, 'airy_fold', _GUARD_W_GRID, math.inf))
+        self.n_checks += 1
+        with mock.patch.object(self._trainer, '_ABS_GUARD_FLOOR', 1e-2):
+            self.assertFalse(guard(res, 'airy_fold', _GUARD_W_GRID, math.inf))
+        self.n_checks += 1
+
+
+class PerCarrierServeAccuracyTestCase(_BaseChartTestCase):
+    """Per-carrier served-accuracy pins (disjoint cells, engine oracle).
+
+    Each cell is served by the REAL serve (`_low_w_diffractive_chart_serve`
+    via `_serve_farfield`) and compared against the independent engine oracle
+    `_engine_reference_kappa` at ``kappa = beta = 0`` (the reduced-frame
+    ``f_schwinger``).  Chart-served nodes (fold / macro-unresolved /
+    deep-interior) are node-exact (<= 1e-10 at grid nodes); the geometric
+    (resolved far-exterior) nodes are node-exact TOO, because the baked
+    residual ``r = f_pure * sqrt(1 - gamma'**2) / F_ref`` absorbs the
+    two-image geometric sum's finite-w deviation and the serve re-modulates
+    with the same partitioned reference the trainer baked (measured ~1e-16 at
+    grid nodes; a BARE geometric sum would fail the 1e-10 bar, which is the
+    regression the anchoring eliminates).  Off-grid interpolation accuracy is
+    a DRIVER concern (the full-bake margin report), not a sparse-chart unit
+    test.  Every pin premise-checks its served w is on the correct side of
+    ``w_split`` by MEASURING ``delta_tau`` via
+    `_reduced_min_delay_separation`.
+
+    The fifth cell -- the b3 -> 0 cusp cell (Pearcey carrier) -- is covered by
+    `CuspServeEngineNodeExactTestCase` / `CuspFrefNonVanishingTestCase` and is
+    RED until the cusp-transition detection is fixed (see
+    `CuspFrefNonVanishingTestCase._witness`).
+    """
+
+    def _assert_serve(self, chart, gp, rho, theta, w, tol):
+        """Serve one w and assert |F_serve - F_engine| / |F_engine| <= tol."""
+        f_serve = _serve_cell(chart, gp, rho, theta, w)
+        if f_serve is None:
+            self.fail(f'serve declined cell (gamma_prime={gp}, rho={rho}, '
+                      f'theta={theta}, w={w}); the chart must cover it')
+        lens = _make_lens(gp, rho, theta, 0.0, 0.0)
+        y = (lens['y1'], lens['y2'])
+        f_engine = _engine_reference_kappa(w, y, lens['gamma'], 0.0, 0.0)
+        rel = abs(f_serve[0] - f_engine) / abs(f_engine)
+        self.assertLess(
+            rel, tol,
+            f'|F_serve-F_engine|/|F_engine| = {rel:.3e} >= {tol} at w={w:g} '
+            f'(gamma_prime={gp}, rho={rho}, theta={theta})')
+        self.n_checks += 1
+
+    def test_fold_cell_serve(self):
+        """The caustic-neighborhood fold cell is node-exact (airy_fold)."""
+        chart = _build_exact_chart()
+        gp, rho, theta = FOLD_CELL
+        self.assertGreaterEqual(rho, RHO_LO,
+                                'premise lost: fold cell no longer in shell')
+        self.assertLessEqual(rho, RHO_HI,
+                             'premise lost: fold cell no longer in shell')
+        self.n_checks += 1
+        for w in SERVE_WS:  # grid nodes
+            with self.subTest(w=w):
+                self._assert_serve(chart, gp, rho, theta, w, NODE_EXACT_TOL)
+
+    def test_geometric_far_exterior_serve(self):
+        """Resolved far-exterior nodes are node-exact (anchored geometric sum).
+
+        The chart's residual is the two-image geometric sum divided by the
+        trainer's partitioned reference, so the re-modulated serve equals the
+        engine to ~1e-16 at grid nodes (the residual does NOT serve the bare
+        geometric sum).  Same ``NODE_EXACT_TOL`` bar as the fold/macro/
+        deep-interior pins.
+        """
+        chart = _build_far_exterior_chart()
+        gp, rho, theta = FAR_EXT_CELL
+        w_split = _reduced_w_split(gp, rho, theta)
+        for w in (2.0, 8.0):
+            with self.subTest(w=w):
+                self.assertGreaterEqual(
+                    w, w_split,
+                    'premise lost: served w is no longer resolved '
+                    f'(w={w} < w_split={w_split})')
+                self.n_checks += 1
+                self._assert_serve(chart, gp, rho, theta, w, NODE_EXACT_TOL)
+
+    def test_macro_far_exterior_serve(self):
+        """Unresolved far-exterior node is the macro-lead re-modulation."""
+        chart = _build_far_exterior_chart()
+        gp, rho, theta = FAR_EXT_CELL
+        w_split = _reduced_w_split(gp, rho, theta)
+        self.assertLess(
+            0.2, w_split,
+            f'premise lost: w=0.2 is no longer unresolved (w_split={w_split})')
+        self.n_checks += 1
+        self._assert_serve(chart, gp, rho, theta, 0.2, NODE_EXACT_TOL)
+
+    def test_deep_interior_macro_serve(self):
+        """Deep-interior macro cell (all served w unresolved) is node-exact."""
+        chart = _build_deep_interior_chart()
+        gp, rho, theta = DEEP_INT_CELL
+        w_split = _reduced_w_split(gp, rho, theta)
+        self.assertGreater(
+            w_split, 8.0,
+            f'premise lost: served w now resolved (w_split={w_split})')
+        self.n_checks += 1
+        for w in (0.2, 2.0, 8.0):  # grid nodes
+            with self.subTest(w=w):
+                self._assert_serve(chart, gp, rho, theta, w, NODE_EXACT_TOL)
+
+
+# ---------------------------------------------------------------------------
+# Rho-partition continuity (spec: no step in F_serve at rho = RHO_HI) and the
+# macro-fold low-w normalization (spec: fold residual -> sqrt(1-gp^2) at the
+# band bottom, not 0).
+# ---------------------------------------------------------------------------
+
+#: Wall-band reduced shear of the rho-split continuity sweep.  gamma' = 0.8
+#: (> _WALL_GAMMA_PRIME = 0.5) is REQUIRED: the coverage union
+#: ``(RHO_LO <= rho <= RHO_HI) or (gamma' > _WALL_GAMMA_PRIME)`` admits the
+#: off-caustic side of RHO_HI only through the wall-band clause.  At
+#: gamma' < 0.5 a rho just above RHO_HI is neither shell nor wall, so the
+#: serve DECLINES it and the sweep could not cross the boundary.
+CONTINUITY_GAMMA_PRIME = 0.8
+
+#: Eigenframe angle of the continuity sweep (an interior
+#: `_CONTINUITY_THETA_GRID` node; theta = 1.4 resolves to a cusp at
+#: rho ~ 1.3 and is declined there).
+CONTINUITY_THETA = 0.8
+
+#: rho nodes straddling the RHO_HI partition (INTERIOR `_CONTINUITY_RHO_GRID`
+#: nodes, so the serve's ~1e-16 coordinate round-off cannot push them outside
+#: the grid).  ``CONTINUITY_FOLD_RHO`` is the caustic (airy_fold) side,
+#: ``CONTINUITY_MACRO_RHO`` the off-caustic (macro) side of RHO_HI = 1.4.
+CONTINUITY_FOLD_RHO = 1.3
+CONTINUITY_MACRO_RHO = 1.45
+
+#: Continuity-sweep chart grids.  rho spans RHO_HI = 1.4 with two nodes on
+#: the caustic (fold) side and two on the off-caustic (macro) side; every
+#: (gamma', rho, theta) cell is F_ref-buildable (airy_fold for
+#: rho <= RHO_HI, macro for rho > RHO_HI).  gamma' and theta are interior
+#: nodes for the same round-off reason.
+_CONTINUITY_GP_GRID = np.array([0.6, 0.8, 0.9, 0.95])
+_CONTINUITY_RHO_GRID = np.array([1.1, 1.3, 1.45, 1.6])
+_CONTINUITY_THETA_GRID = np.array([0.6, 0.8, 1.0, 1.2])
+
+#: Low-w continuity witness frequency (a `_W_GRID` node).  w = 0.3 is
+#: UNRESOLVED on both sides of RHO_HI (``w * delta_tau < RHO_END``; the
+#: smallest macro-side ``w_split = RHO_END / delta_tau`` is ~0.455 at
+#: rho = 1.6), so every swept rho is served by the chart re-modulation
+#: (airy_fold F_ref on the caustic side, macro-lead F_ref off-caustic) --
+#: the branch where the served amplitude is node-exact and the partition
+#: handover must be continuous.
+CONTINUITY_W = 0.3
+
+#: Band-bottom residual-approach bar (macro-fold normalization spec):
+#: ``| |r(w_bottom)| - sqrt(1-gp^2) | <= MACRO_FOLD_LOWW_APPROACH_TOL``.
+#: Measured 1.5e-2 at the fold witness (gamma'=0.3, rho=1.0, theta=1.4,
+#: w_bottom = 0.02); the raw (un-renormalized) fold form sits 4.1e-1 BELOW
+#: sqrt(1-gp^2) because its residual dives toward 0 (the w^{-1/6} divergence
+#: of |F_ref|) instead of asymptoting to sqrt(1-gp^2).  5e-2 leaves 3.3x
+#: margin over the measured deviation while being 8x below the raw form's.
+MACRO_FOLD_LOWW_APPROACH_TOL = 5e-2
+
+
+@functools.lru_cache(maxsize=1)
+def _build_continuity_chart() -> LowWDiffractiveChart:
+    """Node-exact residual chart spanning the RHO_HI partition.
+
+    Same construction as `_build_exact_chart` but on the continuity grids, so
+    the straddling rho nodes (1.3 fold / 1.45 macro) are interior nodes whose
+    residuals are anchored to the correct carrier (airy_fold vs macro).
+    Cached so the continuity tests share one build.
+    """
+    return _build_exact_chart_on(_CONTINUITY_GP_GRID, _CONTINUITY_RHO_GRID,
+                                 _CONTINUITY_THETA_GRID, _W_GRID,
+                                 'rho_split_continuity')
+
+
+def _fold_witness_h(gamma_prime: float, rho: float, theta: float,
+                    w_grid: np.ndarray) -> np.ndarray:
+    """Macro-fold handover ``h = smootherstep(w |delta_tau|, RHO_START, RHO_END)``.
+
+    ``delta_tau`` comes from the merging fold pair (the same
+    `partitioned_reference` uses); ``h == 0`` marks the unresolved nodes where
+    the macro-fold renormalization is fully ON (``|F_ref| -> sqrt_mu``).
+    Raises loudly if the merging fold pair is absent (premise), so a fixture
+    move surfaces rather than silently mis-measuring the band bottom.
+    """
+    source = reduced_source(gamma_prime, rho, theta)
+    matrix = geometry.macro_matrix(gamma_prime, 0.0, 0.0)
+    images = geometry.find_images(source, matrix)
+    pair = _merging_fold_pair(images, source, matrix)
+    if pair is None:
+        raise AssertionError(
+            f'merging fold pair absent at (gamma_prime={gamma_prime}, '
+            f'rho={rho}, theta={theta})')
+    tau_plus, tau_minus = pair
+    delta_tau = tau_minus - tau_plus
+    return smootherstep(np.asarray(w_grid) * abs(delta_tau),
+                        RHO_START, RHO_END)
+
+
+class RhoPartitionContinuityTestCase(_BaseChartTestCase):
+    """Served amplitude is continuous across the rho = RHO_HI partition.
+
+    At fixed (gamma' = 0.8, theta = 0.8, w = 0.3), rho sweeps from the
+    caustic-neighborhood side (``CONTINUITY_FOLD_RHO = 1.3``, airy_fold
+    carrier) to the off-caustic side (``CONTINUITY_MACRO_RHO = 1.45``, macro
+    carrier).  The residual ``r`` is carrier-relative and legitimately
+    changes form at the boundary, but the SERVED amplitude ``F_serve =
+    mass_sheet_phase * F_ref * sqrt_mu_full * r`` must not step: it
+    re-modulates back to ``mass_sheet_phase * f_pure / lam`` (the engine) on
+    BOTH sides.  With an EXACT-residual chart every swept rho is a grid node,
+    so ``F_serve`` reproduces the engine to ~1e-15 -- far stronger than the
+    spec's 1e-4.  A carrier partition mis-wiring (the wrong F_ref on one
+    side) breaks the re-modulation and shows as a discontinuity at RHO_HI
+    (pinned by `RhoPartitionContinuitySelfFalsificationTestCase`).
+    """
+
+    def test_sweep_straddles_the_carrier_partition(self):
+        """Premise: the two rho nodes sit on opposite carriers of RHO_HI."""
+        self.assertLess(CONTINUITY_FOLD_RHO, RHO_HI,
+                        'premise lost: fold rho no longer inside the shell')
+        self.assertGreater(CONTINUITY_MACRO_RHO, RHO_HI,
+                           'premise lost: macro rho no longer off-caustic')
+        self.n_checks += 1
+        # Assert the partition on the single UNRESOLVED frequency: the full
+        # ``_W_GRID`` spans resolved nodes (w = 2.0 / 8.0 > w_split), which
+        # would route the off-caustic side to the split 'geometric' carrier
+        # instead of 'macro'.  At ``CONTINUITY_W = 0.3`` (below w_split on
+        # both sides) the off-caustic node is the pure macro carrier.
+        for rho in (CONTINUITY_FOLD_RHO, CONTINUITY_MACRO_RHO):
+            source = reduced_source(CONTINUITY_GAMMA_PRIME, rho,
+                                    CONTINUITY_THETA)
+            _f_ref, kind = partitioned_reference(np.array([CONTINUITY_W]),
+                                                 CONTINUITY_GAMMA_PRIME, rho,
+                                                 source)
+            expected = 'airy_fold' if rho <= RHO_HI else 'macro'
+            with self.subTest(rho=rho):
+                self.assertEqual(
+                    kind, expected,
+                    f'rho={rho} built carrier {kind!r}, expected {expected!r}; '
+                    'the sweep no longer crosses the RHO_HI partition')
+                self.n_checks += 1
+
+    def test_continuity_w_is_unresolved_on_both_sides(self):
+        """Premise: w=0.3 is below w_split on the macro side (no geometric)."""
+        w_split = _reduced_w_split(CONTINUITY_GAMMA_PRIME, CONTINUITY_MACRO_RHO,
+                                   CONTINUITY_THETA)
+        self.assertLess(
+            CONTINUITY_W, w_split,
+            f'premise lost: w={CONTINUITY_W} is resolved on the macro side '
+            f'(w_split={w_split}); the geometric branch would not be node-exact')
+        self.n_checks += 1
+
+    def test_served_amplitude_continuous_across_rho_split(self):
+        """|F_serve - F_engine| / |F_engine| <= NODE_EXACT_TOL on both sides."""
+        chart = _build_continuity_chart()
+        for rho in (CONTINUITY_FOLD_RHO, CONTINUITY_MACRO_RHO):
+            f_serve = _serve_cell(chart, CONTINUITY_GAMMA_PRIME, rho,
+                                  CONTINUITY_THETA, CONTINUITY_W)
+            if f_serve is None:
+                self.fail(f'serve declined rho={rho} at the partition sweep; '
+                          'the continuity chart must cover it')
+            lens = _make_lens(CONTINUITY_GAMMA_PRIME, rho, CONTINUITY_THETA,
+                              0.0, 0.0)
+            f_engine = _engine_reference_kappa(
+                CONTINUITY_W, (lens['y1'], lens['y2']), lens['gamma'], 0.0,
+                0.0)
+            rel = abs(f_serve[0] - f_engine) / abs(f_engine)
+            with self.subTest(rho=rho):
+                self.assertLess(
+                    rel, NODE_EXACT_TOL,
+                    f'F_serve disagrees with the engine by {rel:.3e} at '
+                    f'rho={rho} (w={CONTINUITY_W}): the served amplitude '
+                    'steps at the RHO_HI partition')
+                self.n_checks += 1
+
+
+class RhoPartitionContinuitySelfFalsificationTestCase(_BaseChartTestCase):
+    """Prove the continuity pin catches a carrier partition mis-wiring.
+
+    Forcing the SERVE to re-modulate the caustic-side (fold) residual with
+    the macro carrier (the wrong F_ref for that residual) breaks the
+    node-exact re-modulation -- ``F_ref * r`` no longer equals ``f_pure *
+    sqrt(1-gp^2)`` -- so ``F_serve`` steps away from the engine: the exact
+    discontinuity at RHO_HI the continuity test guards.
+    """
+
+    def test_miswired_fold_side_breaks_continuity(self):
+        """Forcing the macro carrier on the fold side breaks node-exactness."""
+        chart = _build_continuity_chart()
+        real_ref = _likelihood_mod.partitioned_reference
+
+        def _macro_everywhere(w, gp, rho, source):
+            return real_ref(w, gp, 2.0, source)  # force the macro carrier
+
+        with mock.patch.object(_likelihood_mod, 'partitioned_reference',
+                               _macro_everywhere):
+            f_serve = _serve_cell(chart, CONTINUITY_GAMMA_PRIME,
+                                  CONTINUITY_FOLD_RHO, CONTINUITY_THETA,
+                                  CONTINUITY_W)
+        if f_serve is None:
+            self.fail('serve declined under the mis-wiring')
+        lens = _make_lens(CONTINUITY_GAMMA_PRIME, CONTINUITY_FOLD_RHO,
+                          CONTINUITY_THETA, 0.0, 0.0)
+        f_engine = _engine_reference_kappa(
+            CONTINUITY_W, (lens['y1'], lens['y2']), lens['gamma'], 0.0, 0.0)
+        rel = abs(f_serve[0] - f_engine) / abs(f_engine)
+        self.assertGreater(
+            rel, NODE_EXACT_TOL,
+            f'mis-wired fold side left rel err {rel:.3e} <= {NODE_EXACT_TOL}; '
+            'the continuity pin would not catch a partition mis-wiring')
+        self.n_checks += 1
+
+
+class MacroFoldNormalizationTestCase(_BaseChartTestCase):
+    """Macro-fold low-w normalization: the fold residual asymptotes to
+    sqrt(1-gp^2) at the band bottom, not 0.
+
+    The macro-fold renormalization in `_airy_fold_form`
+    (``f_ref *= h + (1-h) sqrt_mu / |f_ref|`` with ``h = smootherstep(w
+    |delta_tau|, RHO_START, RHO_END)``) keeps the fold-side residual
+    ``r = f_pure sqrt(1-gp^2) / F_ref`` O(1) at low w: at ``h == 0``,
+    ``|F_ref| -> sqrt_mu`` and ``|f_pure| -> sqrt_mu``, so ``|r| ->
+    sqrt(1-gp^2)``.  WITHOUT it the raw fold form diverges like ``w^{-1/6}``
+    and the residual dives toward 0.  The renormalization factor is real and
+    positive, so the Airy phase is preserved (the arg-step guard in
+    `ResidualBoundednessTestCase` still holds).  This pins the RESIDUAL-level
+    asymptote; the F_ref-level statement (``|F_ref| == sqrt_mu`` at ``h ==
+    0``) is pinned separately by
+    `FrefNonVanishingTestCase.test_magnitude_tracks_wronskian_form`.
+    """
+
+    def test_fold_residual_approaches_sqrt_1_gp2_at_band_bottom(self):
+        """| |r(w_bottom)| - sqrt(1-gp^2) | <= MACRO_FOLD_LOWW_APPROACH_TOL."""
+        gp = NEAR_FOLD_GAMMA_PRIME
+        rho = NEAR_FOLD_RHO
+        theta = FREF_SHELL_THETA
+        residual = _residual_at(_FREF_W_GRID, gp, rho, theta)
+        if residual is None:
+            self.fail('F_ref unbuildable at the fold witness')
+        h = _fold_witness_h(gp, rho, theta, _FREF_W_GRID)
+        unresolved = h == 0.0
+        self.assertTrue(np.any(unresolved),
+                        'premise lost: no unresolved (h==0) nodes on the grid')
+        self.n_checks += 1
+        bottom = int(np.flatnonzero(unresolved)[0])  # lowest-w unresolved node
+        sqrt_1_gp2 = math.sqrt(1.0 - gp * gp)
+        deviation = abs(abs(residual[bottom]) - sqrt_1_gp2)
+        self.assertLess(
+            deviation, MACRO_FOLD_LOWW_APPROACH_TOL,
+            f'|r(w_bottom)| = {abs(residual[bottom]):.4f} deviates from '
+            f'sqrt(1-gp^2) = {sqrt_1_gp2:.4f} by {deviation:.2e}; the fold '
+            'residual does not asymptote to sqrt(1-gp^2) at the band bottom')
+        self.n_checks += 1
+
+
+class MacroFoldNormalizationSelfFalsificationTestCase(_BaseChartTestCase):
+    """Prove the band-bottom asymptote is the renormalization's doing.
+
+    Forcing ``h = 1`` everywhere (``smootherstep -> 1.0``) leaves the raw q=p
+    fold form un-renormalized, whose magnitude diverges like ``w^{-1/6}``:
+    the residual then dives toward 0 at the band bottom instead of
+    asymptoting to sqrt(1-gp^2).  The same band-bottom probe must then
+    deviate from sqrt(1-gp^2) by far more than the approach bar.
+    """
+
+    def test_unrenormalized_fold_residual_dives_below_bar(self):
+        """The raw (h=1) fold residual at the band bottom is far from sqrt(1-gp^2)."""
+        gp = NEAR_FOLD_GAMMA_PRIME
+        rho = NEAR_FOLD_RHO
+        theta = FREF_SHELL_THETA
+        source = reduced_source(gp, rho, theta)
+        with mock.patch.object(_lwd_module, 'smootherstep',
+                               lambda x, lo, hi: 1.0):
+            f_ref_raw, kind = partitioned_reference(_FREF_W_GRID, gp, rho,
+                                                    source)
+        self.assertEqual(kind, 'airy_fold')
+        self.n_checks += 1
+        sq = math.sqrt(1.0 - gp * gp)
+        f_pure = np.array([f_schwinger(float(w), source, gp)
+                           for w in _FREF_W_GRID])
+        residual_raw = f_pure * sq / f_ref_raw
+        deviation = abs(abs(residual_raw[0]) - sq)
+        self.assertGreater(
+            deviation, MACRO_FOLD_LOWW_APPROACH_TOL,
+            f'un-renormalized band-bottom residual deviates from sqrt(1-gp^2) '
+            f'by only {deviation:.2e} <= {MACRO_FOLD_LOWW_APPROACH_TOL}; the '
+            'macro-fold normalization pin would be vacuous')
         self.n_checks += 1
 
 

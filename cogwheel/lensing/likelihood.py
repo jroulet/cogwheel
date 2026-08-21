@@ -117,7 +117,7 @@ from cogwheel.lensing.ppgo_map import (ASTROID_WALL, SADDLE_WALL, UNKNOWN,
                                        get_certified_ppgo_map)
 from cogwheel.lensing.born_residual_chart import BornResidualChart
 from cogwheel.lensing.low_w_diffractive_chart import (
-    LowWDiffractiveChart, reduced_source, fold_cusp_reference)
+    LowWDiffractiveChart, reduced_source, partitioned_reference)
 
 __all__ = ['LensedRelativeBinningLikelihood', 'LensedBinningError']
 
@@ -1983,10 +1983,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         replacement for the two-rung serve over the band it covers.
 
         The residual ``r_pure`` interpolated by the chart is the reduced
-        point-mass kernel in units of the uniform fold/cusp reference
-        ``F_ref`` (the WP1 `fold_cusp_reference`, rebuilt at serve time from
-        the merging fold pair -- or the Pearcey cusp form -- in the reduced
-        eigenframe): the full amplitude
+        point-mass kernel in units of the rho-partitioned uniform reference
+        ``F_ref`` (`partitioned_reference`, rebuilt at serve time from the
+        merging fold pair, the Pearcey cusp form, the macro lead, or the
+        geometric-optics sum -- the carrier chosen by ``rho`` -- in the
+        reduced eigenframe): the full
+        amplitude
         reconstructs as
         ``F = mass_sheet_phase * F_ref(w) * sqrt_mu_full * r_pure``,
         with ``mass_sheet_phase = exp(0.5j*w*(log(lam) - kappa*s))`` and
@@ -1996,7 +1998,16 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
         ``sqrt_mu_full``.  ``F_ref`` replaces `prefactor_c` ONLY: the macro
         normalization (``sqrt(1 - gamma'^2)`` in the residual,
         ``sqrt_mu_full`` here) is preserved, so ``F_serve =
-        mass_sheet_phase * f_pure / lam``.  `_schwinger.f_schwinger` is
+        mass_sheet_phase * f_pure / lam``.  ``F_ref`` is already
+        band-split for off-caustic cells (``rho < RHO_LO`` or
+        ``rho > RHO_HI``): `partitioned_reference` anchors the residual on
+        the macro lead below the resolution boundary ``w * delta_tau =
+        RHO_END`` and on the two-image geometric-optics sum above it (the
+        ``w -> inf`` asymptote, not exact at finite ``w`` -- the residual
+        against it is the smooth O(1) diffractive correction), so a single
+        ``farfield = mass_sheet_phase * F_ref * sqrt_mu_full * r_pure``
+        re-modulation serves every cell with the SAME carrier the trainer
+        baked.  `_schwinger.f_schwinger` is
         NEVER called on this path: the chart is the sole serve-time source
         for the band it owns, and ``F_ref`` is built engine-free once per
         draw from the reduced-frame geometry re-solve (quartic
@@ -2050,12 +2061,12 @@ class LensedRelativeBinningLikelihood(BaseLinearFree):
 
         rho = _caustic_rho(abs(gamma_prime), s, theta)
 
-        # Rebuild the reduced eigenframe source and its non-vanishing
-        # uniform fold/cusp reference ``F_ref`` engine-free at serve time.
-        # A draw whose ``F_ref`` is unbuildable (``None``) falls through to
-        # the exact engine, mirroring `_tube_f_ref`'s ``None`` handling.
+        # Rebuild the reduced eigenframe source and its rho-partitioned
+        # uniform reference ``F_ref`` engine-free at serve time.  A draw
+        # whose ``F_ref`` is unbuildable (``None``) falls through to the
+        # exact engine, mirroring `_tube_f_ref`'s ``None`` handling.
         source = reduced_source(gamma_prime, rho, theta)
-        fref = fold_cusp_reference(dense_w, gamma_prime, source)
+        fref, _kind = partitioned_reference(dense_w, gamma_prime, rho, source)
         if fref is None:
             return None
 
