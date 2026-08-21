@@ -355,13 +355,20 @@ def _fill_coefficients(gamma_prime_grid: np.ndarray, rho_grid: np.ndarray,
                                             float(theta))
                 except (SchwingerCertificationError, ValueError):
                     n_refused += 1
-                    real[i_gp, i_rho, i_theta] = np.nan
-                    imag[i_gp, i_rho, i_theta] = np.nan
+                    # Finite sentinel, NOT NaN: the cubic spline must stay
+                    # finite.  The cell is declined (never served), so the
+                    # fill value is irrelevant to served values -- it only
+                    # keeps the metric probe's interpolator from NaNing on
+                    # a neighbor.
+                    real[i_gp, i_rho, i_theta] = 1.0
+                    imag[i_gp, i_rho, i_theta] = 0.0
                     continue
                 if residual is None:
                     unbuildable[i_gp, i_rho, i_theta] = True
-                    real[i_gp, i_rho, i_theta] = np.nan
-                    imag[i_gp, i_rho, i_theta] = np.nan
+                    # Finite sentinel (see above): the cell is declined, the
+                    # fill never served, but the spline must be finite.
+                    real[i_gp, i_rho, i_theta] = 1.0
+                    imag[i_gp, i_rho, i_theta] = 0.0
                     continue
                 real[i_gp, i_rho, i_theta] = residual.real
                 imag[i_gp, i_rho, i_theta] = residual.imag
@@ -416,26 +423,39 @@ def _iter_points(chart: LowWDiffractiveChart, gamma_prime_grid: np.ndarray,
                  off_values: list[np.ndarray]):
     """Yield ``(r_interp, r_engine)`` complex arrays per calibration point.
 
-    On-grid points (the stored coefficients) first, then the off-grid
-    theta-midpoint held-out witnesses, in the SAME order as
-    `_off_grid_engine` so callers can map the off-grid tail back onto the
-    midpoint grid via `_off_grid_engine`'s ``off_unbuildable`` mask.  On-grid
-    cells whose coefficients are non-finite (an ``F_ref``-unbuildable cell,
-    whose residual is undefined) are SKIPPED -- they contribute no
-    interpolation-error witness and are declined via the unbuildable mask
-    instead.  ``chart.evaluate`` is cubic interpolation only -- never an
-    engine call.
+    Only non-declined points are yielded: on-grid cells whose coefficients
+    are the finite sentinel (an ``F_ref``-unbuildable or engine-refused cell)
+    and off-grid midpoints in a declined neighborhood are SKIPPED -- they
+    contribute no interpolation-error witness.  ``chart.evaluate`` is cubic
+    interpolation only -- never an engine call.
     """
+    unbuildable = ~np.all(np.isfinite(real), axis=-1)
+    # A cell whose coefficients are the 1.0+0j sentinel is declined; the
+    # sentinel is finite, so detect it by the unbuildable mask OR'd with a
+    # value check (the sentinel is never a genuine residual).
+    sentinel = np.all(np.isclose(real, 1.0, atol=1e-12)
+                      & np.isclose(imag, 0.0, atol=1e-12), axis=-1)
+    declined = unbuildable | sentinel  # (n_gp, n_rho, n_theta)
+
+    n_gp, n_rho, n_theta = real.shape[:3]
+    midpoints = 0.5 * (theta_grid[:-1] + theta_grid[1:])
+
     for i_gp, gp in enumerate(gamma_prime_grid):
         for i_rho, rho in enumerate(rho_grid):
             for i_theta, theta in enumerate(theta_grid):
+                if declined[i_gp, i_rho, i_theta]:
+                    continue
                 r_engine = (real[i_gp, i_rho, i_theta]
                             + 1j * imag[i_gp, i_rho, i_theta])
-                if not np.all(np.isfinite(r_engine)):
-                    continue
                 r_interp = chart.evaluate(w_grid, float(gp), float(rho),
                                           float(theta))
                 yield r_interp, r_engine
+    # Off-grid midpoints: evaluate ALL buildable ones.  The finite sentinel
+    # for declined cells keeps the cubic spline finite everywhere, so an
+    # off-grid midpoint's spline support never NaNs; a midpoint that is
+    # itself unbuildable never appears in `off_points`/`off_values` (the
+    # engine probe skips it).  The caller maps one served error per yielded
+    # point onto the midpoint grid via `off_unbuildable`.
     for (gp, rho, theta_mid), r_engine in zip(off_points, off_values):
         r_interp = chart.evaluate(w_grid, gp, rho, theta_mid)
         yield r_interp, r_engine
