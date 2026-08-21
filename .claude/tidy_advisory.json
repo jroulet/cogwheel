@@ -1,7 +1,7 @@
 {
   "trigger": "post-commit",
-  "commit": "b1601043299da2a3e6e17fdc13d75287dadc8613",
-  "timestamp": "2026-08-21T23:05:22Z",
+  "commit": "508ffd3ad3ec1647932f89ea131c152192e8d7ec",
+  "timestamp": "2026-08-21T23:12:21Z",
   "touched_files": [
     "cogwheel/lensing/chang_refsdal/_born.py",
     "cogwheel/lensing/chang_refsdal/_diffractive.py",
