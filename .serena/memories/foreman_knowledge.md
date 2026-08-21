@@ -188,3 +188,10 @@
 - Doc-only fix verify recipe: ast.parse (pyflakes absent in cogwheel-newlal)
   + live import + read-back of both edited regions; no pytest run needed —
   zero code behavior changed.
+
+## 2026-08-21 (INS-2-001/002, dead-field + dead-accessor removal in _pearcey_cusp.py)
+
+- DEAD-ACCESSOR REMOVAL VARIANT of the dead-field recipe: an unused public scalar that is an exact duplicate of an existing grid-form entry (cusp_uniform_reference([w])[0]) can be DROPPED (Inspector-sanctioned) instead of pin-tested — verify via dataclasses.fields() list + hasattr-absent + __all__ membership + ast.parse + live import (diff isolation is unusable in a file carrying parallel uncommitted work: git diff shows the whole refactor block as `+`).
+- When removing a dataclass STORAGE field, keep the LOCALLY-COMPUTED values that feed derived fields (branch/vertex/phi_ssr feed vertex/curvature/c4) — only the storage is dead; removing the local computations breaks the derived fields.
+- Mid-file function deletion via regex `\ndef NAME\(.*?<last-body-line>\n` with an EMPTY repl leaves the correct two-blank-line spacing; a single-newline repl leaves THREE blank lines (needs a cleanup pass).
+- SPEC-staleness scan after dropping a symbol: grep the SYMBOL name — SPEC goes stale only if the QUANTITY itself disappears; a quantity still computed locally (phi_ssr in the F074 serving-ladder formula) leaves no staleness.

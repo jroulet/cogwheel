@@ -1099,3 +1099,11 @@
   [min(RHO_LO, 0.8*lo), max(RHO_HI, 1.1*hi)] from MEASURED wall-band
   2-image spread (measured [0.0775, 7.6115], seed 42) — never a literal;
   theta 16 full nodes (8 = harmonic Nyquist); log w [log 0.02, log 60].
+
+## 2026-08-20/21 (low_w_diffractive_chart F_ref implementation + cusp-fallback WPs)
+
+- ORDER-PRESERVING EXTRACTION IN A PERFORMANCE-CRITICAL DISPATCH (INS-1-001): extracting a shared bundle out of cusp_amplification must preserve the gate/early-return ORDER — an extraction that ran `_consult_pearcey` + cluster/far split BEFORE the ppGO fast rung + F074 error gate caused ~1000x slowdown AND a silent refusal (a primitive None short-circuits before the fast rung ever runs). Shipped structure: `_cusp_uniform_geometry` -> `_cusp_controls` (pure scalar, no quadrature) -> ppGO fast rung (early return) -> F074 error gate -> DEFERRED `_cusp_uniform_at_w` -> calibration -> total. The SPEC claim "returns before any table or quadrature lookup" is load-bearing prose; verify the CURRENT body before trusting it.
+- ONE DATACLASS PER PIPELINE STAGE: `_CuspUniformForm` shrank to the 4 fields cusp_amplification actually consumes (uniform, far_sum, stationary_values, matched_delays); geometry and controls each live in their own dataclass (`_CuspUniformGeometry`, `_CuspControls`) so the bundle stays small.
+- F_ref SINGLE-SOURCE AT SERVE: `_low_w_diffractive_chart_serve` rebuilds F_ref at serve via `reduced_source(gamma_prime,rho,theta)` + fold_cusp_reference(dense_w, ...), placed AFTER the rho computation but BEFORE chart.covers; None falls through to w_low_fit/engine. reduced_source needs no try/except when its caustic_point call is byte-identical to one already evaluated just above for the same args.
+- covers() returns np.bool_ (not Python bool) in the w-given branch (grid elements are np.float64) — tests must not use `is False`.
+- Trainer mechanics: `_fill_coefficients` returns (real, imag, n_refused, unbuildable_mask); off_served filled by BOOLEAN-INDEX assignment (off_served[~off_unbuildable] = served_errs[grid_n:]), never reshape; `_w_grid` uniform in w**(2/3): linspace(W_LO**(2/3), W_CEILING_SCHWINGER**(2/3), n)**(3/2); _SMOKE_N_W 5->8, _FULL_N_W 14->16.

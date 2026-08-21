@@ -932,3 +932,11 @@
   `caustic_rho` FIELD stays in the SCALAR gauge while `covers` receives the
   DIRECTIONAL value; assert the spy arg and the field separately, don't
   rely on the numeric coincidence.
+
+## 2026-08-21 (low_w_chart cusp-fallback test suite)
+
+- VERIFY-ELSEWHERE BEFORE AUTHORING: run the suite + grep before assuming an assigned spec needs new tests — assigned specs can already be implemented by an earlier shard; the only real remaining work may be stale fixture-constraint COMMENTS.
+- CUSP-CELL PEARCEY FALLBACK IS RHO-LIMITED: the fold->cusp b3->0 transition (gp=0.8) is cusp-REFERENCE-BUILDABLE only near the caustic — rho=1.2, theta in [0.15,0.2] is NON-vanishing (min/max ~0.25); rho>=1.5 the SAME window gives matched->0 above w~7 (cusp cluster fully resolves, cluster_sum->0) so min|F_ref|==0 exactly and the guard DECLINES. A "cusp cell" fixture must be chosen where the Pearcey form actually holds, NOT at the build-brief's b3-measurement point (rho=2.0 is DECLINED, not non-vanishing — pin it as the guard's self-falsification/teeth). Cusp analogue of the fold grid cap at rho=1.05.
+- FULL-W-GRID SWEEP BEFORE CHOOSING A CONTINUITY BAR: the fold/cusp handoff |F_ref| ratio peaks 3.12x (w~0.65), NOT the naive ~2.3x from a few sampled w — sweep the ENTIRE w-grid before setting the bar (set 5.0).
+- PRODUCTION FLAG (open, -> next code-touching build): `fold_cusp_reference` emits RuntimeWarning "invalid value encountered in scalar divide" when the Pearcey reference is ALL-ZEROS (cusp cluster fully resolves -> uniform==0 for every node) because ratio = magnitude.min()/magnitude.max() is 0/0 before the isfinite guard catches it — guard magnitude.max()==0 first (the guard still declines correctly, just noisy).
+- TOOLING (same family as the insert_at_line gotcha): serena insert_before_symbol on a module constant can land MID-BLOCK — it split the `_CENSUS_W_GRID` `#:` doc-comment from its variable when the target constant's own comment block preceded it; verify surrounding structure after every such insert.

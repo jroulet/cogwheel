@@ -644,3 +644,9 @@
 - ADVISORY (driver): shipped `cogwheel/data/low_w_diffractive_chart.npz`
   still absent — full bake is a DRIVER post-build step; the content hash now
   covers declined_mask, so bake AFTER the hash-fix commit.
+
+## 2026-08-21 (low_w_chart_cusp_fallback RE-REVIEW, pass 3 FINAL)
+
+- RE-VERIFY RESOLVED FINDINGS IN CODE + GREP, not from memory: on a re-review pass, re-check each previously-open finding against the live code (INS-2-001 dead fields gone — only the 9 live fields remain; INS-2-002 scalar accessor dropped — only `cusp_uniform_reference_grid` remains, consumed by `_pearcey_cusp_reference` -> `fold_cusp_reference`), re-run the full changed-file suites, and re-derive the key identity by hand.
+- GRID-DEPENDENT GUARD RATIO NOTE (non-finding): the non-vanishing guard min|F_ref|/max|F_ref| is computed over the bake w_grid at train time and over the likelihood dense_w at serve — so a serve/bake decline ASYMMETRY is possible, but the failure mode is a SAFE decline (-> exact engine); per-node F_ref values are grid-independent. If a future census shows unexpected Pearcey-cell declines at serve, this asymmetry is the first explanation to check.
+- `cusp_uniform_reference_grid` solves geometry ONCE per cell, loops only w, calls `_cusp_uniform_at_w` per node WITHOUT the ppGO rung / F074 gate / calibration certificate; `_consult_pearcey(x,y,None)` -> live quadrature. The non-vanishing guard catches cluster_sum->0 collapses; max==0 -> nan -> the isfinite guard declines.

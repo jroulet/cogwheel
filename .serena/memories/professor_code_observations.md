@@ -856,3 +856,11 @@ order, data layouts, numerical gotchas). Personal to this checkout — soft-blac
   (no coverage loss, only ~6% performance cost). Implement as the fitted
   ceiling + a calibration-domain fence, NEVER a hard gamma constant or
   hard-coded 60.
+
+## 2026-08-21 (low_w chart cusp-fallback review, verdict PASS)
+
+- Pearcey `uniform = cluster_sum * P/P_asymp` collapse is cluster-CLASSIFICATION, NOT a Pearcey P=0 zero: `_matches_stationary` (tol = _CALIBRATION_TOL*spread + 1.0) stops matching the single exterior image once scaled_delay = w*(tau-tau_c) grows past the finite stationary values at w ~ 8 -> n_match 0 -> cluster_sum 0 -> uniform == 0; |P| itself stays O(1) (|P/Pasym| -> 1.0). This is the far-exterior (rho=2.0) decline the non-vanishing guard catches; the interior P~0 mechanism never fires here.
+- MEASURED: NO interior cusp cells (rho<1 with b3->0) at gamma'=0.8 — full theta sweep at rho=0.5/0.7/0.9 gives b3 ~ 2 (all FOLD); b3->0 happens only on/outside the caustic (rho>=1). So the fold_cusp_reference docstring's "interior cusp cells can hit P ~ 0" describes a case that never fires here (interior cells use the primary Airy path) — minor doc inaccuracy, not a physics error (already flagged to the code side).
+- Non-vanishing cusp witness (gamma'=0.8, rho=1.2, theta=0.2), b3=1.42e-15; Pearcey |F_ref| min/max ~0.25 (band ~3.9x << 1e3); Airy form correctly None there. Fold/cusp |F_ref| continuity ~3.12x across the theta 0.2(cusp)->0.3(fold) handoff (tol 5.0), both forms genuinely visited. Node-exact cusp re-modulation consistent between train (fold_cusp_reference) and serve (likelihood.py rebuilds the same F_ref) to NODE_EXACT_TOL=1e-10.
+- cusp_amplification refactor (geometry -> _cusp_uniform_geometry, controls -> _cusp_controls) is DRY behavior-preserving.
+- BRIEF-DRIFT LESSON: brief specs written on pre-measurement expectation (spec 1's non-vanishing witness rho=2.0 is actually DECLINED; spec 4's "interior decline cell" does not exist) — the implementation is the measured-corrected version; write such fixture specs only after the measurement, not before.

@@ -487,3 +487,11 @@
   completed.d `2026-08-20_low_w_near_fold_chart_serve.md`; changelog entry
   added. WALL-BAND RULING REVERSAL recorded (050d4cf reverted the
   gamma-domain fence: chart covers the UNION shell OR wall).
+
+## 2026-08-21 (low_w_diffractive fold/cusp reference doc sync, INS-1-004/2-003/3-001)
+
+- WHOLE-SENTENCE STALENESS AUDIT: when a finding names one stale clause in a long description, audit the WHOLE sentence AND the artifact's schema/fields against the code — a representation change spanning TWO builds (point-mass prefactor_c -> Airy fold reference -> Pearcey cusp fallback, PLUS the log-w -> w**(2/3) re-grid and schema v1->v2) can leave the axis/schema clauses stale in the SAME sentence the finding flagged only the F_ref bit.
+- IN-BUILD TRANSIENT-STATUS VERIFICATION: when Coder change reports record that a SPEC-cited ordering ("returns before any table or quadrature lookup") was TRANSIENTLY broken and RESTORED in the same build, cross-check the ACTUAL current function body before trusting the SPEC claim — the working-tree code is the source of truth.
+- BUILD-PIPELINE sync_issues.json: a BUILD-pipeline librarian (no commit) must NOT delete `.claude/sync_issues.json` (the post-commit hook owns it) — absorb its deferred doc findings into the in-DAG run and let the next post-commit run find them resolved.
+- NEW FRAGILE CROSS-REF CLUSTER: SPEC.md + DATA_CONTRACTS.yaml now cite `fold_cusp_reference` + its `_NON_VANISHING_MIN_RATIO` guard — if the Airy-primary/Pearcey-fallback pairing or the guard is ever dropped, BOTH surfaces go stale together (same family as `_PPGO_BAR_DIVISOR`). `cusp_uniform_reference_grid` (the Pearcey leg's engine: cluster-only uniform, live quadrature, no serving gates) is not named in SPEC — add only if the cusp paragraph is next touched.
+- CODE-DOCSTRING FINDINGS ARE NOT LIBRARIAN-FIXABLE: a code docstring finding (fold_cusp_reference's guard rationale naming only the P~0 mechanism, missing the far-exterior cluster_sum->0 decline) is read-only for the librarian — flag it for the next code-touching build rather than editing code.

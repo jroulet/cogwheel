@@ -951,3 +951,20 @@
   theta D2-fold [0,pi/2]; w in [w_lo,60]. Simplifier: separate class (no
   N-D base yet), share covers() predicate serve+census, no new ROUTE_KIND
   (draw-level route w/ empty kinds), don't write a 3rd _content_hash.
+
+## 2026-08-20 (low_w_chart_airy_representation build)
+
+- F_ref (q=p, ABSOLUTE-frame Airy reference, airy_fold_value) replaces prefactor_c(w) ONLY; the residual keeps sqrt(1-gamma'^2): r = f_pure*sqrt(1-gamma'^2)/F_ref; serve F = mass_sheet_phase * F_ref * sqrt_mu_full * (derate*r) = mass_sheet_phase * f_pure/lam. The brief's literal "r=f_pure/F_ref" is WRONG (drops sqrt(1-gamma'^2)).
+- Global w**(2/3) frequency axis (smoke 8 / full 16 nodes over [0.0737,15.33]); delta_tau lives ONLY inside F_ref. Schema v1->v2; rename log_w_grid -> w23_grid.
+- Per-cell F_ref-unbuildable decline folded into declined_mask; census mirrors covers()+declined() engine-free (reads the mask, never rebuilds F_ref) -> auto-correct.
+- Builder lives in low_w_diffractive_chart.py (consumer placement), imports geometry, never calls fold_amplification. F075 does NOT apply (F_ref is a demod carrier, not a serve value).
+- Tolerances: node-exact 1e-10 (pre-derate); residual min/max >=1e-1 (shell >=3e-1); F_ref min/max >=1e-1; w->0 anchor +/-1e-2.
+
+## 2026-08-21 (low_w_chart_cusp_fallback build)
+
+- RULING (scope widening): "do not touch _pearcey_cusp internals" is UNREACHABLE — the pure cusp `uniform` form is private (F074 controls + matched-asymptotic A/sigma_c inline in cusp_amplification); calling cusp_amplification as the reference is UNSOUND (F074 gate 0.35/sqrt(w) needs envelope_bar >= ~2.5 at low w; a raised bar opens the ppGO rung, which returns fold_ppgo_correction/raw-ppGO for w in [8,60] = a hard F_ref discontinuity; calibration cert len-mismatches at low w). Fix = ONE additive public accessor `cusp_uniform_reference` returning CLUSTER-ONLY `uniform = cluster_sum*(P/P_asymp)` with the 3 serving gates bypassed.
+- Reference = `uniform` (cluster-only, NO far_sum) — mirrors Airy F_ref's merging-pair-only convention; total=uniform+far_sum adds destructive zero-crossings and far_sum is a poor low-w carrier.
+- Simplifier: Option B (extract a shared `_cusp_uniform_form` helper, refactor cusp_amplification onto it byte-identically, add the accessor) NOT Option A (duplicate ~50 lines of the F074 control map — the one piece that silently broke pre-F074). Rename airy_fold_reference -> fold_cusp_reference (3 production files + 12 test refs).
+- Non-vanishing guard: min|F_ref|/max|F_ref| < 1e-3 -> decline (the guard also catches the far-exterior cluster_sum->0 collapse; see professor_code_observations for the mechanism).
+- Low-w scaling: F_cusp ~ A w^{1/2} P -> 0 at w->0 so residual r ~ w^{-1/2} (bounded, ~55x dynamic range), unlike the Airy Wronskian (r -> w^{1/6} -> 0).
+- Serve re-modulates via the SAME fold_cusp_reference (single-source) — serve needs NO logic change, only the rename; census mirror unchanged.
