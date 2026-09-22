@@ -11,8 +11,7 @@ import numpy as np
 from scipy import special, stats
 import matplotlib.pyplot as plt
 
-from cogwheel import utils
-from cogwheel import waveform
+from cogwheel import utils, waveform
 
 
 def hole_edges(mask):

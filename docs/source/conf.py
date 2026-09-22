@@ -5,11 +5,12 @@
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
+import importlib
 
 project = 'cogwheel'
 copyright = '2024, Javier Roulet'
 author = 'Javier Roulet'
-release = '1.5.0'
+release = importlib.metadata.version("cogwheel-pe")
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
