@@ -773,7 +773,7 @@ def download_timeseries(eventname, outdir=None, tgps=None,
         try:
             timeseries = _fetch_open_data(detector_name, tgps, interval,
                                           **kwargs)
-        except ValueError:  # That detector has no data
+        except* ValueError:  # That detector has no data
             pass
         else:
             if not np.isnan(timeseries[np.searchsorted(timeseries.times.value,
@@ -818,7 +818,7 @@ def _fetch_open_data(detector_name, tgps, interval, **kwargs):
     try:
         timeseries = gwpy.timeseries.TimeSeries.fetch_open_data(
             ifo, start, end, **kwargs)
-    except ValueError:
+    except* ValueError:
         # This detector has no data for the whole range.
         # Attempt downloading only the file that contains ``tgps``.
         # Assume file boundaries ocurr at multiples of 4096 s GPS time.
