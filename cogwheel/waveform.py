@@ -1,5 +1,6 @@
 """Generate strain waveforms and project them onto detectors."""
 import itertools
+import importlib
 from collections import defaultdict, namedtuple
 import numpy as np
 
@@ -157,12 +158,29 @@ def compute_hplus_hcross_by_mode(f, par_dic, approximant: str,
             for mode in harmonic_modes}
 
 
+CUSTOM_APPROXIMANTS = {'IMRPhenomXODE': 'cogwheel.waveform_models.xode'}
+
+
+class _Approximants(dict):
+    """
+    Import the defining module on first lookup of a custom approximant.
+    """
+    def __getitem__(self, key):
+        if not dict.__contains__(self, key) and key in CUSTOM_APPROXIMANTS:
+            importlib.import_module(CUSTOM_APPROXIMANTS[key])  # Register `key`
+        return dict.__getitem__(self, key)
+
+    def __contains__(self, key):
+        return dict.__contains__(self, key) or key in CUSTOM_APPROXIMANTS
+
+
 Approximant = namedtuple(
     'Approximant',
     ('harmonic_modes', 'aligned_spins', 'tides', 'hplus_hcross_by_mode_func'),
     defaults=([(2, 2)], True, False, compute_hplus_hcross_by_mode))
 
-APPROXIMANTS = {
+
+APPROXIMANTS = _Approximants({
     'IMRPhenomD_NRTidalv2': Approximant(tides=True),
     'IMRPhenomD': Approximant(),
     'IMRPhenomXP': Approximant(aligned_spins=False),
@@ -170,7 +188,7 @@ APPROXIMANTS = {
                                                  (3, 2), (4, 4)],
                                  aligned_spins=False),
     'IMRPhenomXAS': Approximant(),
-    }
+    })
 
 
 def inplane_spins_xy_n_to_xy(par_dic):
@@ -297,9 +315,6 @@ class WaveformGenerator(utils.JSONMixin):
                  harmonic_modes=None, disable_precession=False,
                  n_cached_waveforms=1, lalsimulation_commands=()):
         super().__init__()
-
-        if approximant == 'IMRPhenomXODE':
-            from cogwheel.waveform_models import xode as _  # TODO more elegant
 
         self.detector_names = tuple(detector_names)
         self.tgps = tgps
