@@ -11,9 +11,7 @@ import numpy as np
 from scipy.optimize import differential_evolution, minimize, minimize_scalar
 from scipy.stats import qmc
 
-from cogwheel import data
-from cogwheel import gw_utils
-from cogwheel import waveform
+from cogwheel import data, gw_utils, waveform
 from cogwheel.gw_prior.extrinsic import UniformTimePrior
 from cogwheel.skyloc_angles import SkyLocAngles
 from .likelihood import check_bounds
@@ -479,7 +477,6 @@ class ReferenceWaveformFinder(RelativeBinningLikelihood):
         Find phase and distance that optimize coherent likelihood.
         Update 'phi_ref', 'd_luminosity' entries of `self.par_dic_0`
         in-place.
-        Return log likelihood.
         """
         max_lnl, amp_bf, phase_bf = self.lnlike_max_amp_phase(
             self.par_dic_0, ret_amp_phase_bf=True)
