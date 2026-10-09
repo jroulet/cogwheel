@@ -999,6 +999,7 @@ def fill_holes_bruteforce(data, qmask, wt_filter_fd):
 
     # First, run the square of the whitening filter on the data
     bluing_filter = np.abs(wt_filter_fd) ** 2
+    bluing_filter += 1e-10 * bluing_filter.max()  # Regularize
     c_inv_td = np.fft.irfft(bluing_filter, n=len(data))
     c_inv_dat = np.fft.irfft(
         np.fft.rfft(filleddata) * bluing_filter, n=len(data))
@@ -1047,6 +1048,7 @@ def fill_hole_consecutive(data, leftind, rightind, wt_filter_fd):
 
     # Run the square of the whitening filter on the data
     bluing_filter = np.abs(wt_filter_fd) ** 2
+    bluing_filter += 1e-10 * bluing_filter.max()  # Regularize
     c_inv_td = np.fft.irfft(bluing_filter, n=len(data))
     c_inv_dat = np.fft.irfft(
         np.fft.rfft(filleddata) * bluing_filter, n=len(data))
