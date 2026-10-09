@@ -589,25 +589,13 @@ class EventData(utils.JSONMixin):
         EventData.suggest_inpaint_times
         """
         filled_strain = self.strain.copy()
-        times = self.times - self.tcoarse
-
         for detector_name, inpaint_times in inpaint_times_by_det.items():
             i_det = self.detector_names.index(detector_name)
-            band = self.wht_filter[i_det] != 0
-            strain_td = np.fft.irfft(self.strain[i_det] * band, n=len(times))
-
-            if len(inpaint_times) == 1:
-                leftind, rightind = np.searchsorted(times, inpaint_times[0])
-                data_filled = fill_hole_consecutive(
-                    strain_td, leftind, rightind, self.wht_filter[i_det])
-            else:
-                mask = np.full(len(self.times), True)
-                for t_start, t_end in inpaint_times:
-                    mask[(times > t_start) & (times < t_end)] = False
-                data_filled = fill_holes_bruteforce(
-                    strain_td, mask, self.wht_filter[i_det])
-
-            filled_strain[i_det, band] = np.fft.rfft(data_filled)[band]
+            filled_strain[i_det] = inpaint(
+                self.strain[i_det], self.wht_filter[i_det],
+                [(t_start + self.tcoarse, t_end + self.tcoarse)
+                 for t_start, t_end in inpaint_times],
+                self.df)
 
         return self.reinstantiate(strain=filled_strain)
 
@@ -795,10 +783,9 @@ def _get_f_strain_whtfilter_from_timeseries(
     data_fd_down /= 2 * fmax
 
     if hole:
-        scale = 2 * (i_max - 1) / len(segment)
-        data_fd_down = _inpaint_band(
-            data_fd_down, int(hole[0] * scale),
-            int(np.ceil(hole[1] * scale)), wht_filter)
+        dt = segment.dt.value
+        data_fd_down = inpaint(data_fd_down, wht_filter,
+                               [(hole[0] * dt, hole[1] * dt)], rfftfreq[1])
 
     return rfftfreq[:i_max], data_fd_down, wht_filter, tcoarse
 
@@ -860,20 +847,6 @@ def _taper_edges(segment, t_taper, t_gap_taper):
         return ()
     return (last_valid_ind + 1 - n_after if gap_after else 0,
             first_valid_ind + n_before if gap_before else 0)
-
-
-def _inpaint_band(strain_fd, leftind, rightind, wht_filter):
-    """
-    Inpaint the time-domain samples from `leftind` to `rightind`
-    (wrapping around if `leftind > rightind`), using only the
-    frequencies where `wht_filter` has support. Others are unchanged.
-    """
-    band = wht_filter != 0
-    filled = fill_hole_consecutive(np.fft.irfft(strain_fd * band),
-                                   leftind, rightind, wht_filter)
-    strain_fd = strain_fd.copy()
-    strain_fd[band] = np.fft.rfft(filled)[band]
-    return strain_fd
 
 
 def highpass_filter(frequencies, fmin=15., df_taper=1.):
@@ -1022,6 +995,61 @@ def _fetch_open_data(detector_name, tgps, interval, **kwargs):
             ifo, start, end, **kwargs)
 
     return timeseries
+
+
+def inpaint(strain, wht_filter, hole_times, df):
+    """
+    Inpaint single-detector frequency-domain strain.
+
+    Parameters
+    ----------
+    strain : 1d complex array
+        Frequency-domain strain on an rfft grid starting at 0, with
+        spacing `df`.
+
+    wht_filter : 1d float array
+        Whitening filter on the same grid. Only frequencies where it is
+        nonzero are modified.
+
+    hole_times : sequence of (t_start, t_end) pairs
+        Times (s) to inpaint, relative to the first time-domain sample.
+        Holes are expanded outward to whole samples. If
+        t_start > t_end, the hole wraps around the periodic segment.
+
+    df : float
+        Frequency resolution (Hz).
+
+    Returns
+    -------
+    1d complex array, inpainted strain.
+
+    See Also
+    --------
+    fill_hole_consecutive
+    fill_holes_bruteforce
+    """
+    if not hole_times:
+        return strain.copy()
+
+    nfft = 2 * (len(strain) - 1)
+    dt = 1 / (nfft * df)
+    holes = [(int(np.floor(t_start / dt + 1e-6)) % nfft,
+              int(np.ceil(t_end / dt - 1e-6)) % nfft)
+             for t_start, t_end in hole_times]
+
+    band = wht_filter != 0
+    strain_td = np.fft.irfft(strain * band, n=nfft)
+    if len(holes) == 1:
+        filled = fill_hole_consecutive(strain_td, *holes[0], wht_filter)
+    else:
+        mask = np.full(nfft, True)
+        for leftind, rightind in holes:
+            mask[(leftind + np.arange((rightind - leftind) % nfft)) % nfft] = False
+        filled = fill_holes_bruteforce(strain_td, mask, wht_filter)
+
+    inpainted = strain.copy()
+    inpainted[band] = np.fft.rfft(filled)[band]
+    return inpainted
 
 
 def fill_holes_bruteforce(data, qmask, wt_filter_fd):
