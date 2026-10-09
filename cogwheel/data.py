@@ -224,11 +224,12 @@ class EventData(utils.JSONMixin):
         asd = np.array([asd_func(frequencies) for asd_func in asd_funcs])
 
         real, imag = np.random.default_rng(seed).normal(
-            scale=np.sqrt(duration) / 2 * asd, size=(2,) + asd.shape)
+            scale=np.sqrt(duration) / 2 * asd, size=(2, *asd.shape))
         strain = real + 1j * imag
         strain[:, [0, -1]] = strain[:, [0, -1]].real  # Real at f = 0 & Nyquist
 
         wht_filter = highpass_filter(frequencies, fmin, df_taper) / asd
+        strain[:, wht_filter == 0] = 0j
         return cls(eventname, frequencies, strain, wht_filter, detector_names,
                    tgps, tcoarse)
 
@@ -692,7 +693,8 @@ class EventData(utils.JSONMixin):
 
         for detector_name, inpaint_times in inpaint_times_by_det.items():
             i_det = self.detector_names.index(detector_name)
-            strain_td = np.fft.irfft(self.strain[i_det], n=len(times))
+            band = self.wht_filter[i_det] != 0
+            strain_td = np.fft.irfft(self.strain[i_det] * band, n=len(times))
 
             if len(inpaint_times) == 1:
                 leftind, rightind = np.searchsorted(times, inpaint_times[0])
@@ -705,7 +707,7 @@ class EventData(utils.JSONMixin):
                 data_filled = fill_holes_bruteforce(
                     strain_td, mask, self.wht_filter[i_det])
 
-            filled_strain[i_det] = np.fft.rfft(data_filled)
+            filled_strain[i_det, band] = np.fft.rfft(data_filled)[band]
 
         return self.reinstantiate(strain=filled_strain)
 
