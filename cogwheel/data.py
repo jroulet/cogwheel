@@ -134,7 +134,7 @@ class EventData(utils.JSONMixin):
         for filename, fmin_ in zip(*np.broadcast_arrays(filenames, fmin)):
             timeseries = cls._read_timeseries(filename, tgps, **kwargs)
             f_strain_whtfilter_tcoarses.append(
-                cls._get_f_strain_whtfilter_from_timeseries(
+                _get_f_strain_whtfilter_from_timeseries(
                     timeseries, tgps, t_before, t_after, wht_filter_duration,
                     fmin_, df_taper, fmax))
         (frequencies, *f_copies), strain, wht_filter, (tcoarse, *t_copies) = (
@@ -355,103 +355,6 @@ class EventData(utils.JSONMixin):
         timeseries = timeseries.crop(t_start, t_end)
         assert not any(np.isnan(timeseries))
         return timeseries
-
-    @staticmethod
-    def _get_f_strain_whtfilter_from_timeseries(
-            timeseries: gwpy.timeseries.TimeSeries, tgps: float,
-            t_before, t_after, wht_filter_duration, fmin, df_taper,
-            fmax):
-        """
-        Parameters
-        ----------
-        timeseries : `gwpy.timeseries.TimeSeries`
-            Object containing single-detector data. Needs to be long
-            enough to measure the PSD with the Welch method.
-
-        tgps : float
-            GPS time of event.
-
-        t_before, t_after : float
-            Number of seconds of valid data (i.e. without edge effects)
-            to keep before/after `tgps`. The total segment of data will
-            have extra duration of ``wht_filter_duration / 2`` seconds
-            to either side.
-
-        wht_filter_duration : float
-            Desired impulse response length of the whitening filter (s).
-            Note: the whitening filter will only be approximately FIR.
-            This is also the duration of each chunk in which the
-            individual PSDs are measured for Welch, and the extent of
-            the tapering in time-domain (s).
-
-        fmin : float
-            Minimum frequency at which the whitening filter will have
-            support (Hz). It is important for performance.
-
-        df_taper : float
-            Whitening filter is highpassed. See ``highpass_filter``.
-
-        fmax : float
-            Desired Nyquist frequency (Hz), half the sampling frequency.
-        """
-        if (wht_filter_duration / timeseries.dt.value) % 2 != 0:
-            raise NotImplementedError(
-                'Make `wht_filter_duration` an even multiple of `dt`.')
-
-        timeseries = timeseries.detrend()
-
-        segment_duration = wht_filter_duration + t_before + t_after
-        tcoarse = wht_filter_duration / 2 + t_before
-        t_start = tgps - tcoarse
-        segment = timeseries.pad(int(segment_duration / timeseries.dt.value)
-                                ).crop(t_start, t_start + segment_duration)
-
-        rfftfreq = np.fft.rfftfreq(len(segment), timeseries.dt.value)
-        i_max = np.searchsorted(rfftfreq, fmax) + 1
-        rfftfreq_down = rfftfreq[:i_max]
-
-        # Construct whitening filter
-        measured_asd = timeseries.asd(wht_filter_duration,
-                                      overlap=wht_filter_duration/2,
-                                      method='median', window='hann')
-        asd = measured_asd.interpolate(1 / segment_duration).value[:i_max]
-
-        highpass = highpass_filter(rfftfreq_down, fmin, df_taper)
-        raw_wht_filter_td = np.fft.irfft(highpass / asd)
-
-        window_fir = signal.windows.tukey(
-            int(wht_filter_duration * 2 * fmax), .1)
-        window_fir_padded_shifted = np.fft.fftshift(
-            np.pad(window_fir, (len(raw_wht_filter_td)-len(window_fir)) // 2))
-
-        # Whitening filter will be exactly 0 below fmin,
-        # approximately FIR, exactly zero phase:
-        wht_filter = highpass * np.fft.rfft(
-            window_fir_padded_shifted * raw_wht_filter_td).real
-
-        # Taper and downsample data
-        ntaper = int(wht_filter_duration / 2 / segment.dt.value)
-        taper = np.sin(np.linspace(0, np.pi/2, ntaper))**2
-        first_valid_ind, last_valid_ind = np.where(segment.value)[0][[0, -1]]
-        i_event = np.searchsorted(segment.times.value, tgps)
-        if (first_valid_ind + ntaper > i_event
-                or last_valid_ind - ntaper < i_event):
-            raise DataError('Event too close to the edge of valid data. '
-                            'Consider reducing `wht_filter_duration`')
-
-        segment[first_valid_ind : first_valid_ind+ntaper] *= taper
-        segment[last_valid_ind-ntaper+1 : last_valid_ind+1] *= taper[::-1]
-
-        data_fd = np.fft.rfft(segment.value)
-
-        data_fd_down = data_fd[:i_max] * rfftfreq_down[-1] / rfftfreq[-1]
-        data_fd_down[-1] = data_fd_down[-1].real
-
-        # Multiply by dt because the rest of the code uses the
-        # convention of the continuous Fourier transform:
-        data_fd_down /= 2 * fmax
-
-        return rfftfreq_down, data_fd_down, wht_filter, tcoarse
 
     def inject_signal(self, par_dic, approximant):
         """
@@ -817,6 +720,160 @@ class EventData(utils.JSONMixin):
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.eventname})'
+
+
+def _get_f_strain_whtfilter_from_timeseries(
+        timeseries: gwpy.timeseries.TimeSeries, tgps: float,
+        t_before=16., t_after=16., wht_filter_duration=32.,
+        fmin=15., df_taper=1., fmax=1024., t_gap_taper=1.):
+    """
+    Parameters
+    ----------
+    timeseries : `gwpy.timeseries.TimeSeries`
+        Object containing single-detector data. Needs to be long enough
+        to measure the PSD with the Welch method.
+
+    tgps : float
+        GPS time of event.
+
+    t_before, t_after : float
+        Number of seconds of correctly blued data to keep before/after
+        `tgps`. The segment has an extra ``1.5 * wht_filter_duration``
+        seconds to either side: the outer ``wht_filter_duration / 2`` is
+        tapered, and the next ``wht_filter_duration`` is the reach of
+        the bluing filter. Missing data that is too close to the event
+        is inpainted.
+
+    wht_filter_duration : float
+        Desired impulse response length of the whitening filter (s),
+        will be ``wht_filter_duration / 2`` seconds to either side.
+        Note: the whitening filter will only be approximately FIR.
+        This is also the duration of each chunk in which the individual
+        PSDs are measured for Welch, and twice the extent of the
+        tapering in time-domain (s).
+
+    fmin : float
+        Minimum frequency at which the whitening filter will have
+        support (Hz). It is important for performance.
+
+    df_taper : float
+        Whitening filter is highpassed. See ``highpass_filter``.
+
+    fmax : float
+        Desired Nyquist frequency (Hz), half the sampling frequency.
+
+    t_gap_taper : float
+        If valid data starts or ends inside the segment, leaving less
+        than this (s) of the tapering region, the edge of valid data
+        gets a taper of this duration and everything beyond it is
+        inpainted after downsampling.
+    """
+    if (wht_filter_duration / timeseries.dt.value) % 2 != 0:
+        raise NotImplementedError(
+            'Make `wht_filter_duration` an even multiple of `dt`.')
+
+    timeseries = timeseries.detrend()
+
+    segment_duration = t_before + t_after + 3 * wht_filter_duration
+    tcoarse = t_before + 1.5 * wht_filter_duration
+    t_start = tgps - tcoarse
+    segment = timeseries.pad(int(segment_duration / timeseries.dt.value)
+                            ).crop(t_start, t_start + segment_duration)
+
+    rfftfreq = np.fft.rfftfreq(len(segment), timeseries.dt.value)
+    i_max = np.searchsorted(rfftfreq, fmax) + 1
+
+    wht_filter = _whitening_filter(
+        timeseries, rfftfreq[:i_max], wht_filter_duration, fmin, df_taper)
+    hole = _taper_edges(segment, wht_filter_duration / 2, t_gap_taper)
+
+    # Downsample. Multiply by dt because the rest of the code uses
+    # the convention of the continuous Fourier transform:
+    data_fd = np.fft.rfft(segment.value)
+    data_fd_down = data_fd[:i_max] * rfftfreq[i_max-1] / rfftfreq[-1]
+    data_fd_down[-1] = data_fd_down[-1].real
+    data_fd_down /= 2 * fmax
+
+    if hole:
+        scale = 2 * (i_max - 1) / len(segment)
+        data_fd_down = _inpaint_band(
+            data_fd_down, int(hole[0] * scale),
+            int(np.ceil(hole[1] * scale)), wht_filter)
+
+    return rfftfreq[:i_max], data_fd_down, wht_filter, tcoarse
+
+def _whitening_filter(timeseries, frequencies, wht_filter_duration,
+                      fmin, df_taper):
+    """
+    Whitening filter on `frequencies` (an rfft grid up to fmax), from
+    the Welch ASD of `timeseries`. It is exactly 0 below `fmin`,
+    approximately FIR, exactly zero phase.
+    """
+    measured_asd = timeseries.asd(wht_filter_duration,
+                                  overlap=wht_filter_duration/2,
+                                  method='median', window='hann')
+    asd = measured_asd.interpolate(frequencies[1]).value[:len(frequencies)]
+
+    highpass = highpass_filter(frequencies, fmin, df_taper)
+    raw_wht_filter_td = np.fft.irfft(highpass / asd)
+
+    window_fir = signal.windows.tukey(
+        int(wht_filter_duration * 2 * frequencies[-1]), .1)
+    window_fir_padded_shifted = np.fft.fftshift(
+        np.pad(window_fir, (len(raw_wht_filter_td)-len(window_fir)) // 2))
+
+    return highpass * np.fft.rfft(
+        window_fir_padded_shifted * raw_wht_filter_td).real
+
+
+def _taper_edges(segment, t_taper, t_gap_taper):
+    """
+    Taper `segment` in place, at its outer `t_taper` or at the part of
+    it with valid data. If too little of it has data, use a taper of
+    `t_gap_taper` at the edge of valid data instead.
+
+    Returns
+    -------
+    () if no inpainting is needed, otherwise (start, end) indices of
+    the hole to inpaint, with start > end if it wraps around.
+    """
+    nseg = len(segment)
+    ntaper = int(t_taper / segment.dt.value)
+    ngap = int(t_gap_taper / segment.dt.value)
+    first_valid_ind, last_valid_ind = np.where(segment.value)[0][[0, -1]]
+
+    n_before = ntaper - first_valid_ind
+    n_after = last_valid_ind + 1 - (nseg - ntaper)
+    gap_before = n_before < ngap
+    gap_after = n_after < ngap
+    if gap_before:
+        n_before = ngap
+    if gap_after:
+        n_after = ngap
+
+    segment[first_valid_ind : first_valid_ind+n_before] *= np.sin(
+        np.linspace(0, np.pi/2, n_before))**2
+    segment[last_valid_ind+1-n_after : last_valid_ind+1] *= np.sin(
+        np.linspace(0, np.pi/2, n_after))[::-1]**2
+
+    if not (gap_before or gap_after):
+        return ()
+    return (last_valid_ind + 1 - n_after if gap_after else 0,
+            first_valid_ind + n_before if gap_before else 0)
+
+
+def _inpaint_band(strain_fd, leftind, rightind, wht_filter):
+    """
+    Inpaint the time-domain samples from `leftind` to `rightind`
+    (wrapping around if `leftind > rightind`), using only the
+    frequencies where `wht_filter` has support. Others are unchanged.
+    """
+    band = wht_filter != 0
+    filled = fill_hole_consecutive(np.fft.irfft(strain_fd * band),
+                                   leftind, rightind, wht_filter)
+    strain_fd = strain_fd.copy()
+    strain_fd[band] = np.fft.rfft(filled)[band]
+    return strain_fd
 
 
 def highpass_filter(frequencies, fmin=15., df_taper=1.):
