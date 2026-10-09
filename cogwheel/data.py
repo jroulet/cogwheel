@@ -673,7 +673,9 @@ class EventData(utils.JSONMixin):
             {'H': [(t_start_0, t_end_0), (t_start_1, t_end_1)]}
             Times are expressed in seconds from ``.tgps``.
             See ``EventData.suggest_inpaint_times`` to generate
-            automatically.
+            automatically. If t_start > t_end, the hole wraps around,
+            useful to inpaint both edges with a single hole, which is
+            more efficient.
 
         Returns
         -------
@@ -683,11 +685,6 @@ class EventData(utils.JSONMixin):
         --------
         EventData.suggest_inpaint_times
         """
-        for pairs in inpaint_times_by_det.values():
-            for left, right in pairs:
-                if left >= right:
-                    raise ValueError('Provide sorted pairs')
-
         filled_strain = self.strain.copy()
         times = self.times - self.tcoarse
 
@@ -1029,7 +1026,8 @@ def fill_hole_consecutive(data, leftind, rightind, wt_filter_fd):
         Time-domain strain data.
 
     leftind, rightind : int
-        Left and right index of hole.
+        Left and right index of hole. If leftind > rightind, the hole
+        wraps around. Similarly, negative indices wrap around.
 
     wt_filter_fd : float array
         Frequency domain whitening filter. Lives in the space of
@@ -1045,18 +1043,20 @@ def fill_hole_consecutive(data, leftind, rightind, wt_filter_fd):
     """
     # Copy the data and zero inside the hole
     filleddata = data.copy()
-    hole = slice(leftind, rightind)
+
+    n = len(data)
+    hole_rel = np.arange((rightind - leftind) % n)
+    hole = (leftind + hole_rel) % n
     filleddata[hole] = 0
 
     # Run the square of the whitening filter on the data
     bluing_filter = np.abs(wt_filter_fd) ** 2
     bluing_filter += 1e-10 * bluing_filter.max()  # Regularize
-    c_inv_td = np.fft.irfft(bluing_filter, n=len(data))
-    c_inv_dat = np.fft.irfft(
-        np.fft.rfft(filleddata) * bluing_filter, n=len(data))
+    c_inv_td = np.fft.irfft(bluing_filter, n=n)
+    c_inv_dat = np.fft.irfft(np.fft.rfft(filleddata) * bluing_filter, n=n)
 
     # Shuffle the data inside the hole
     filleddata[hole] = -linalg.solve_toeplitz(
-        c_inv_td[: rightind-leftind], c_inv_dat[hole])
+        c_inv_td[hole_rel], c_inv_dat[hole])
 
     return filleddata
