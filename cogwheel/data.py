@@ -298,6 +298,9 @@ class EventData(utils.JSONMixin):
                 injection[key] = np.asarray(injection[key])
         self.injection = injection
 
+    def __repr__(self):
+        return f'{self.__class__.__name__}({self.eventname})'
+
     def _set_strain(self, strain):
         self.strain = strain
         self.blued_strain = self.wht_filter**2 * self.strain
@@ -706,8 +709,94 @@ class EventData(utils.JSONMixin):
 
         return inpaint_times_by_det, event_data
 
-    def __repr__(self):
-        return f'{self.__class__.__name__}({self.eventname})'
+    def notch(self, notch_freqs_by_det: dict, df_taper=.5):
+        """
+        Set the whitening filter to 0 in frequency bands, useful to
+        mitigate lines that the whitening filter does not suppress.
+
+        Parameters
+        ----------
+        notch_freqs_by_det : dict
+            Dictionary with frequency bands to notch by detector. Keys
+            are detector names, values are lists of (f_low, f_high)
+            pairs (Hz), e.g. {'V': [(249., 251.), (299., 301.)]}.
+            See ``EventData.suggest_notch_frequencies``.
+
+        df_taper : float
+            Width (Hz) of the sin^2 edges of each notch.
+
+        Returns
+        -------
+        EventData : Instance with the notched whitening filter.
+        """
+        wht_filter = self.wht_filter.copy()
+        for detector_name, bands in notch_freqs_by_det.items():
+            i_det = self.detector_names.index(detector_name)
+            wht_filter[i_det] *= notch_filter(self.frequencies, bands,
+                                              df_taper)
+        return self.reinstantiate(wht_filter=wht_filter)
+
+    def suggest_notch_frequencies(self, t_chunk=2., threshold=3.,
+                                  df_pad=.5):
+        """
+        Identify frequency bands to notch in each detector.
+
+        Bands are identified where the median over time chunks of the
+        power of whitened data exceeds `threshold` times its
+        expectation. The median makes this insensitive to glitches and
+        to the signal, which are short.
+
+        Parameters
+        ----------
+        t_chunk : float
+            Duration (s) of the chunks, sets the frequency resolution.
+
+        threshold : float
+            Excess median power that triggers a notch.
+
+        df_pad : float
+            Each band is widened by this (Hz) on either side.
+
+        Returns
+        -------
+        notch_freqs_by_det : dict
+            Can be passed to ``EventData.notch``.
+        """
+        f_sampling = 2 * self.frequencies[-1]
+        wht_data_td = self.get_whitened_td()
+        notch_freqs_by_det = {}
+        for i, detector_name in enumerate(self.detector_names):
+            frequencies, _, spectrogram = signal.spectrogram(
+                wht_data_td[i], f_sampling, window='hann',
+                nperseg=int(t_chunk * f_sampling),
+                noverlap=int(t_chunk * f_sampling) // 2, scaling='density')
+
+            # Each bin is ~exponential with mean 1, median ln 2:
+            excess = (np.median(spectrogram * f_sampling / 2, axis=1)
+                      / np.log(2))
+            supported = np.interp(frequencies, self.frequencies,
+                                  self.wht_filter[i]) > 0
+            flagged = np.where((excess > threshold) & supported)[0]
+            runs = np.split(flagged, np.where(np.diff(flagged) > 2)[0] + 1)
+            notch_freqs_by_det[detector_name] = [
+                (frequencies[run[0]] - df_pad, frequencies[run[-1]] + df_pad)
+                for run in runs if len(run)]
+        return notch_freqs_by_det
+
+    def suggest_corrections(self, plot=True, **inpaint_kwargs):
+        """
+        Suggest notches for lines, then inpaint times for glitches in
+        the notched data.
+
+        Returns
+        -------
+        notch_freqs_by_det, inpaint_times_by_det, event_data
+        """
+        notch_freqs_by_det = self.suggest_notch_frequencies()
+        inpaint_times_by_det, event_data = self.notch(
+            notch_freqs_by_det).suggest_inpaint_times(plot=plot,
+                                                      **inpaint_kwargs)
+        return notch_freqs_by_det, inpaint_times_by_det, event_data
 
 
 def _get_f_strain_whtfilter_from_timeseries(
@@ -1145,3 +1234,26 @@ def fill_hole_consecutive(data, leftind, rightind, wt_filter_fd):
         c_inv_td[hole_rel], c_inv_dat[hole])
 
     return filleddata
+
+
+def notch_filter(frequencies, bands, df_taper=.5):
+    """
+    Frequency domain filter that is 0 inside `bands` and 1 outside,
+    with sin^2 edges of width `df_taper`.
+
+    Parameters
+    ----------
+    frequencies : float 1d array
+        Frequencies (Hz).
+
+    bands : sequence of (f_low, f_high) pairs
+        Frequency bands to notch (Hz).
+
+    df_taper : float
+        Width of the frequency band over which the filter goes to 1.
+    """
+    fd_filter = np.ones(len(frequencies))
+    for f_low, f_high in bands:
+        distance = np.maximum(f_low - frequencies, frequencies - f_high)
+        fd_filter *= np.sin(np.pi / 2 * np.clip(distance / df_taper, 0, 1))**2
+    return fd_filter
