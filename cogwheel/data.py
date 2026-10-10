@@ -229,7 +229,7 @@ class EventData(utils.JSONMixin):
         strain[:, [0, -1]] = strain[:, [0, -1]].real  # Real at f = 0 & Nyquist
 
         wht_filter = highpass_filter(frequencies, fmin, df_taper) / asd
-        strain[:, wht_filter == 0] = 0j
+        strain[wht_filter == 0] = 0j
         return cls(eventname, frequencies, strain, wht_filter, detector_names,
                    tgps, tcoarse)
 
