@@ -4,7 +4,7 @@ import collections
 import json
 import logging
 import pathlib
-from scipy import signal, interpolate, linalg
+from scipy import interpolate, linalg, ndimage, signal
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -885,13 +885,16 @@ def _whitening_filter(timeseries, frequencies, wht_filter_duration,
     the Welch ASD of `timeseries`. It is exactly 0 below `fmin`,
     approximately FIR, exactly zero phase.
     """
-    measured_asd = timeseries.asd(wht_filter_duration,
+    measured_psd = timeseries.psd(wht_filter_duration,
                                   overlap=wht_filter_duration/2,
                                   method='median', window='hann')
-    asd = measured_asd.interpolate(frequencies[1]).value[:len(frequencies)]
+    n_chunks = int(timeseries.duration.value / (wht_filter_duration / 2)) - 1
+    smooth_psd = _smooth_continuum(measured_psd.value, n_chunks,
+                                   n_smooth=2*int(wht_filter_duration/4) + 1)
+    psd = np.interp(frequencies, measured_psd.frequencies.value, smooth_psd)
 
     highpass = highpass_filter(frequencies, fmin, df_taper)
-    raw_wht_filter_td = np.fft.irfft(highpass / asd)
+    raw_wht_filter_td = np.fft.irfft(highpass / np.sqrt(psd))
 
     window_fir = signal.windows.tukey(
         int(wht_filter_duration * 2 * frequencies[-1]), .1)
@@ -900,6 +903,27 @@ def _whitening_filter(timeseries, frequencies, wht_filter_duration,
 
     return highpass * np.fft.rfft(
         window_fir_padded_shifted * raw_wht_filter_td).real
+
+
+def _smooth_continuum(psd, n_chunks, n_smooth, n_sigma=5.):
+    """
+    Replace `psd` by a running mean over `n_smooth` bins, except at
+    lines (bins more than `n_sigma` standard deviations above the
+    running median).
+    """
+    # std of a median of an exponential rescaled to unit mean
+    sigma = 1 / (np.log(2) * np.sqrt(n_chunks))
+    reference = ndimage.median_filter(psd, n_smooth, mode='nearest')
+    ratio = psd / reference  # O(1), so running sums are accurate
+    lines = ndimage.binary_dilation(ratio > 1 + n_sigma * sigma, iterations=2)
+    weights = (~lines).astype(float)
+    numerator = ndimage.uniform_filter1d(ratio * weights, n_smooth,
+                                         mode='nearest')
+    denominator = ndimage.uniform_filter1d(weights, n_smooth, mode='nearest')
+    continuum = reference * np.divide(numerator, denominator,
+                                      out=np.ones_like(psd),
+                                      where=denominator > 0)
+    return np.where(lines, psd, continuum)
 
 
 def _taper_edges(segment, t_taper, t_gap_taper):
@@ -1076,7 +1100,7 @@ def _fetch_open_data(detector_name, tgps, interval, **kwargs):
     except* ValueError:
         # This detector has no data for the whole range.
         # Attempt downloading only the file that contains ``tgps``.
-        # Assume file boundaries ocurr at multiples of 4096 s GPS time.
+        # Assume file boundaries occur at multiples of 4096 s GPS time.
         t_lower = int(tgps) // 4096 * 4096
         t_upper = t_lower + 4096
         start, end = np.clip((start, end), t_lower, t_upper)
