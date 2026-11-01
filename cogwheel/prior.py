@@ -441,27 +441,30 @@ class Prior(ABC, utils.JSONMixin):
 
         def fold(*sampled_par_values, **sampled_par_dic):
             """
-            Apply folding to a point in the space of sampled parameters.
+            Apply folding to points in the space of sampled parameters.
 
             Parameters
             ----------
             *sampled_par_values, **sampled_par_dic
-                Sampled parameters per `.sampled_params`.
+                Sampled parameters per `.sampled_params`. May be scalar
+                or array, they are broadcasted against each other.
 
             Returns
             -------
-            (n_sampled_params,) float array
+            (..., n_sampled_params) float array
                 Folded parameter values. Only the entries corresponding
-                to ``.folded_params`` may differ from those in
-                `sampled_par_values`.
+                to ``.folded_params`` may differ from the inputs.
             """
-            out = np.array(self.signature.bind(*sampled_par_values,
-                                               **sampled_par_dic).args)
-            values = out[self._folded_inds]
-            normalized = normalize(values)
-            norm_folded = np.r_[reflect(normalized[:n_reflect]),
-                                shift(normalized[n_reflect:])]
-            out[self._folded_inds] = unnormalize(norm_folded)
+            args = self.signature.bind(*sampled_par_values,
+                                       **sampled_par_dic).args
+            out = np.stack(np.broadcast_arrays(*args), axis=-1).astype(float)
+
+            normalized = normalize(out[..., self._folded_inds])
+            norm_folded = np.concatenate(
+                [reflect(normalized[..., :n_reflect]),
+                 shift(normalized[..., n_reflect:])],
+                axis=-1)
+            out[..., self._folded_inds] = unnormalize(norm_folded)
 
             return out
 
