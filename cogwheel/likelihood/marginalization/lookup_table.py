@@ -109,7 +109,6 @@ class LookupTable(utils.JSONMixin):
     REFERENCE_DISTANCE = 1.  # Luminosity distance at which h is defined (Mpc).
     _Z0 = 10.  # Typical SNR of events.
     _SIGMAS = 10.  # How far out the tail of the distribution to tabulate.
-    _rng = np.random.default_rng()
 
     def __init__(self, d_luminosity_prior_name: str = 'euclidean',
                  d_luminosity_max=D_LUMINOSITY_MAX, shape=(256, 128)):
@@ -131,6 +130,7 @@ class LookupTable(utils.JSONMixin):
         shape : (int, int)
             Number of interpolating points in x and y.
         """
+        self._rng = np.random.default_rng()  # Per instance, not shared
         self.d_luminosity_prior_name = d_luminosity_prior_name
         self.d_luminosity_prior = d_luminosity_priors[d_luminosity_prior_name]
         self.d_luminosity_max = d_luminosity_max
@@ -226,7 +226,8 @@ class LookupTable(utils.JSONMixin):
         """
         return self(d_h, h_h) + d_h**2 / h_h / 2
 
-    def sample_distance(self, d_h, h_h, num=None, resolution=256):
+    def sample_distance(self, d_h, h_h, num=None, resolution=256,
+                        rng=None):
         """
         Return samples from the luminosity distance distribution given
         the inner products (d|h), (h|h) of a waveform at distance
@@ -249,7 +250,11 @@ class LookupTable(utils.JSONMixin):
         resolution : int
             How finely to interpolate the distance distribution when
             generating samples.
+
+        rng : numpy.random.Generator, optional
+            Random number generator, defaults to ``self._rng``.
         """
+        rng = self._rng if rng is None else rng
         u_bounds = 1 / self._get_distance_bounds(d_h, h_h, sigmas=10.)
         focused_grid = 1 / np.linspace(*u_bounds, resolution)
         focused_grid = focused_grid[(focused_grid > 0)
@@ -259,10 +264,11 @@ class LookupTable(utils.JSONMixin):
         posterior = self._function_integrand(distances, d_h, h_h)
         cumulative = InterpolatedUnivariateSpline(
             distances, posterior, k=1).antiderivative()(distances)[()]
-        return np.interp(self._rng.uniform(0, cumulative[-1], num),
+        return np.interp(rng.uniform(0, cumulative[-1], num),
                          cumulative, distances)
 
-    def sample_distances(self, d_h, h_h, resolution=256, chunk_size=4096):
+    def sample_distances(self, d_h, h_h, resolution=256, chunk_size=4096,
+                         rng=None):
         """
         Vectorized version of ``sample_distance``: return one sample
         from the luminosity distance distribution for each element of
@@ -288,10 +294,14 @@ class LookupTable(utils.JSONMixin):
             Number of samples processed at a time, bounds the memory
             usage to ``~ 2 * resolution * chunk_size`` floats.
 
+        rng : numpy.random.Generator, optional
+            Random number generator, defaults to ``self._rng``.
+
         Return
         ------
         float or array of the broadcast shape of ``d_h``, ``h_h``.
         """
+        rng = self._rng if rng is None else rng
         d_h, h_h = np.broadcast_arrays(np.asarray(d_h, float),
                                        np.asarray(h_h, float))
         shape = d_h.shape
@@ -329,7 +339,7 @@ class LookupTable(utils.JSONMixin):
                       * np.diff(grid, axis=1), axis=1, out=cumulative[:, 1:])
 
             # Inverse CDF by linear interpolation, as ``np.interp``
-            target = self._rng.uniform(0, cumulative[:, -1])
+            target = rng.uniform(0, cumulative[:, -1])
             ind = np.clip((cumulative < target[:, np.newaxis]).sum(axis=1),
                           1, grid.shape[1] - 1)
             rows = np.arange(n_chunk)
@@ -437,7 +447,8 @@ class LookupTableMarginalizedPhase22(LookupTable):
         super().__init__(*args, **kwargs)
 
         self.sample_phase = utils.handle_scalars(
-            np.vectorize(self._sample_phase, otypes=[float]))
+            np.vectorize(self._sample_phase, otypes=[float],
+                         excluded={'num', 'rng'}))
 
     def _function_integrand(self, d_luminosity, d_h, h_h):
         """
@@ -450,7 +461,7 @@ class LookupTableMarginalizedPhase22(LookupTable):
                 * scipy.special.i0e(d_h * self.REFERENCE_DISTANCE
                                     / d_luminosity))
 
-    def _sample_phase(self, d_luminosity, d_h, num=None):
+    def _sample_phase(self, d_luminosity, d_h, num=None, rng=None):
         """
         Return a random value for the orbital phase according to the
         posterior conditioned on all other parameters.
@@ -466,13 +477,17 @@ class LookupTableMarginalizedPhase22(LookupTable):
 
         num : int, optional
             How many samples to return, defaults to one.
+
+        rng : numpy.random.Generator, optional
+            Random number generator, defaults to ``self._rng``.
         """
+        rng = self._rng if rng is None else rng
         if np.isrealobj(d_h):
             raise ValueError('`d_h` expects the complex inner product.')
 
-        waveform_phase = self._rng.vonmises(
+        waveform_phase = rng.vonmises(
             np.angle(d_h),
             np.abs(d_h) * self.REFERENCE_DISTANCE / d_luminosity,
             size=num)
-        phi_ref = waveform_phase / 2 + self._rng.choice((0, np.pi), size=num)
+        phi_ref = waveform_phase / 2 + rng.choice((0, np.pi), size=num)
         return phi_ref % (2*np.pi)

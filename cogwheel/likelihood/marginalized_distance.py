@@ -115,12 +115,18 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         samples : pandas.Dataframe
             Sampled params.
         """
-        @np.vectorize
-        def sample_distance(**par_dic):
-            dh_hh = self._get_dh_hh_no_asd_drift(
-                par_dic
-                | {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE})
+        samples['d_luminosity'] = self._sample_distances(
+            samples[self.params])
 
-            d_h, h_h = np.matmul(dh_hh, self.asd_drift**-2)
-            return self.lookup_table.sample_distance(d_h, h_h)
-        samples['d_luminosity'] = sample_distance(**samples[self.params])
+    def _sample_distances(self, samples):
+        """
+        Return one luminosity distance draw per row of ``samples``
+        (a DataFrame with columns for ``self.params`` other than
+        ``'d_luminosity'``). The inner products are computed per
+        sample, the distances are drawn all at once.
+        """
+        reference = {'d_luminosity': self.lookup_table.REFERENCE_DISTANCE}
+        dh_hh = np.array([self._get_dh_hh_no_asd_drift(par_dic | reference)
+                          for par_dic in samples.to_dict('records')])
+        d_h, h_h = np.matmul(dh_hh, self.asd_drift**-2).reshape(-1, 2).T
+        return self.lookup_table.sample_distances(d_h, h_h)

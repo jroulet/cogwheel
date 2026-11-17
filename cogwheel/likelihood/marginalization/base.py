@@ -301,7 +301,14 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         self._qmc_ind_chunks = self._create_qmc_ind_chunks()
 
-        self._sample_distance = self.lookup_table.sample_distances
+
+    def _sample_distance(self, d_h, h_h):
+        """
+        Draw one luminosity distance per element of ``d_h``, ``h_h``
+        with ``self._rng``, so that the draws are reproducible given
+        ``seed``.
+        """
+        return self.lookup_table.sample_distances(d_h, h_h, rng=self._rng)
 
     @staticmethod
     @property

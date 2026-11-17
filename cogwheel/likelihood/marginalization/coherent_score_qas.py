@@ -234,7 +234,8 @@ class CoherentScoreQAS(ProposingCoherentScore):
         h_h = marg_info.h_h[random_ids]
 
         d_luminosity = self._sample_distance(np.abs(d_h), h_h)
-        phi_ref = self.lookup_table.sample_phase(d_luminosity, d_h)
+        phi_ref = self.lookup_table.sample_phase(d_luminosity, d_h,
+                                                 rng=self._rng)
         real_dh = np.real(d_h * np.exp(-2j*phi_ref))
         distance_ratio = d_luminosity / self.lookup_table.REFERENCE_DISTANCE
         cosiota = self._qmc_sequence['cosiota'][q_ids]
