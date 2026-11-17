@@ -262,6 +262,88 @@ class LookupTable(utils.JSONMixin):
         return np.interp(self._rng.uniform(0, cumulative[-1], num),
                          cumulative, distances)
 
+    def sample_distances(self, d_h, h_h, resolution=256, chunk_size=4096):
+        """
+        Vectorized version of ``sample_distance``: return one sample
+        from the luminosity distance distribution for each element of
+        the broadcast inner products ``d_h``, ``h_h``.
+
+        Uses the same grids, integrand and inverse-CDF interpolation as
+        ``sample_distance``, evaluated for all samples at once instead
+        of in a Python loop (``np.vectorize``). For identical random
+        draws it reproduces ``sample_distance`` to round-off.
+
+        Parameters
+        ----------
+        d_h, h_h : float or array_like
+            Inner products (summed over detectors) between data and
+            waveform, and of waveform with itself, at
+            ``self.REFERENCE_DISTANCE``.
+
+        resolution : int
+            Number of points in each of the broad and focused distance
+            grids, as in ``sample_distance``.
+
+        chunk_size : int
+            Number of samples processed at a time, bounds the memory
+            usage to ``~ 2 * resolution * chunk_size`` floats.
+
+        Return
+        ------
+        float or array of the broadcast shape of ``d_h``, ``h_h``.
+        """
+        d_h, h_h = np.broadcast_arrays(np.asarray(d_h, float),
+                                       np.asarray(h_h, float))
+        shape = d_h.shape
+        d_h = d_h.ravel()
+        h_h = h_h.ravel()
+        distances = np.empty(d_h.size)
+
+        broad_grid = np.linspace(0, self.d_luminosity_max, resolution)[1:]
+        linspace = np.linspace(0, 1, resolution)
+        for start in range(0, d_h.size, chunk_size):
+            dh_chunk = d_h[start : start + chunk_size, np.newaxis]
+            hh_chunk = h_h[start : start + chunk_size, np.newaxis]
+            n_chunk = len(dh_chunk)
+
+            # Focused grid uniform in u = 1 / d_luminosity, as in
+            # ``sample_distance``. Points outside (0, d_luminosity_max)
+            # are moved onto d_luminosity_max (a node of the broad grid)
+            # instead of being dropped, which keeps a rectangular array
+            # and only adds zero-width intervals to the integral.
+            u_min, u_max = 1 / self._get_distance_bounds(dh_chunk, hh_chunk,
+                                                         sigmas=10.)
+            focused_grid = 1 / (u_min + (u_max - u_min) * linspace)
+            focused_grid = np.where(
+                (focused_grid > 0) & (focused_grid < self.d_luminosity_max),
+                focused_grid, self.d_luminosity_max)
+
+            grid = np.sort(np.concatenate(
+                [np.broadcast_to(broad_grid, (n_chunk, len(broad_grid))),
+                 focused_grid], axis=1), axis=1)
+            posterior = self._function_integrand(grid, dh_chunk, hh_chunk)
+
+            # Trapezoidal cumulative = antiderivative of a k=1 spline
+            cumulative = np.zeros_like(grid)
+            np.cumsum((posterior[:, 1:] + posterior[:, :-1]) / 2
+                      * np.diff(grid, axis=1), axis=1, out=cumulative[:, 1:])
+
+            # Inverse CDF by linear interpolation, as ``np.interp``
+            target = self._rng.uniform(0, cumulative[:, -1])
+            ind = np.clip((cumulative < target[:, np.newaxis]).sum(axis=1),
+                          1, grid.shape[1] - 1)
+            rows = np.arange(n_chunk)
+            cum_left = cumulative[rows, ind - 1]
+            cum_right = cumulative[rows, ind]
+            delta = cum_right - cum_left
+            fraction = np.divide(target - cum_left, delta,
+                                 out=np.zeros(n_chunk), where=delta > 0)
+            distances[start : start + chunk_size] = (
+                grid[rows, ind - 1]
+                + fraction * (grid[rows, ind] - grid[rows, ind - 1]))
+
+        return distances.reshape(shape)[()]
+
     def _function(self, d_h, h_h):
         """
         Function to interpolate with the aid of a lookup table.

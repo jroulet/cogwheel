@@ -301,8 +301,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         self._qmc_ind_chunks = self._create_qmc_ind_chunks()
 
-        self._sample_distance = utils.handle_scalars(
-            np.vectorize(self.lookup_table.sample_distance, otypes=[float]))
+        self._sample_distance = self.lookup_table.sample_distances
 
     @staticmethod
     @property
