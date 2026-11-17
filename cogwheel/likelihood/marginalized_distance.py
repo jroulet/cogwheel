@@ -129,4 +129,4 @@ class MarginalizedDistanceLikelihood(RelativeBinningLikelihood):
         dh_hh = np.array([self._get_dh_hh_no_asd_drift(par_dic | reference)
                           for par_dic in samples.to_dict('records')])
         d_h, h_h = np.matmul(dh_hh, self.asd_drift**-2).reshape(-1, 2).T
-        return self.lookup_table.sample_distances(d_h, h_h)
+        return self.lookup_table.sample_distance(d_h, h_h)

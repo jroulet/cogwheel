@@ -12,8 +12,7 @@ import numpy as np
 import scipy.special
 import scipy.stats
 from scipy.integrate import quad
-from scipy.interpolate import (RectBivariateSpline,
-                               InterpolatedUnivariateSpline)
+from scipy.interpolate import RectBivariateSpline
 
 from cogwheel import utils
 from cogwheel import cosmology
@@ -227,7 +226,7 @@ class LookupTable(utils.JSONMixin):
         return self(d_h, h_h) + d_h**2 / h_h / 2
 
     def sample_distance(self, d_h, h_h, num=None, resolution=256,
-                        rng=None):
+                        rng=None, chunk_size=4096):
         """
         Return samples from the luminosity distance distribution given
         the inner products (d|h), (h|h) of a waveform at distance
@@ -235,17 +234,19 @@ class LookupTable(utils.JSONMixin):
 
         Parameters
         ----------
-        d_h : float
+        d_h : float or array_like
             Inner product (summed over detectors) between data and
             waveform at ``self.REFERENCE_DISTANCE``.
 
-        h_h : float
+        h_h : float or array_like
             Inner product (summed over detectors) of waveform at
-            ``self.REFERENCE_DISTANCE`` with itself.
+            ``self.REFERENCE_DISTANCE`` with itself. Must broadcast
+            with ``d_h``.
 
         num : int or None
-            How many samples to generate. ``None`` (default) generates a
-            single (scalar) sample.
+            How many samples to generate per element of ``d_h``,
+            ``h_h``. ``None`` (default) generates a single sample per
+            element.
 
         resolution : int
             How finely to interpolate the distance distribution when
@@ -253,53 +254,16 @@ class LookupTable(utils.JSONMixin):
 
         rng : numpy.random.Generator, optional
             Random number generator, defaults to ``self._rng``.
-        """
-        rng = self._rng if rng is None else rng
-        u_bounds = 1 / self._get_distance_bounds(d_h, h_h, sigmas=10.)
-        focused_grid = 1 / np.linspace(*u_bounds, resolution)
-        focused_grid = focused_grid[(focused_grid > 0)
-                                    & (focused_grid < self.d_luminosity_max)]
-        broad_grid = np.linspace(0, self.d_luminosity_max, resolution)[1:]
-        distances = np.sort(np.concatenate([broad_grid, focused_grid]))
-        posterior = self._function_integrand(distances, d_h, h_h)
-        cumulative = InterpolatedUnivariateSpline(
-            distances, posterior, k=1).antiderivative()(distances)[()]
-        return np.interp(rng.uniform(0, cumulative[-1], num),
-                         cumulative, distances)
-
-    def sample_distances(self, d_h, h_h, resolution=256, chunk_size=4096,
-                         rng=None):
-        """
-        Vectorized version of ``sample_distance``: return one sample
-        from the luminosity distance distribution for each element of
-        the broadcast inner products ``d_h``, ``h_h``.
-
-        Uses the same grids, integrand and inverse-CDF interpolation as
-        ``sample_distance``, evaluated for all samples at once instead
-        of in a Python loop (``np.vectorize``). For identical random
-        draws it reproduces ``sample_distance`` to round-off.
-
-        Parameters
-        ----------
-        d_h, h_h : float or array_like
-            Inner products (summed over detectors) between data and
-            waveform, and of waveform with itself, at
-            ``self.REFERENCE_DISTANCE``.
-
-        resolution : int
-            Number of points in each of the broad and focused distance
-            grids, as in ``sample_distance``.
 
         chunk_size : int
-            Number of samples processed at a time, bounds the memory
-            usage to ``~ 2 * resolution * chunk_size`` floats.
-
-        rng : numpy.random.Generator, optional
-            Random number generator, defaults to ``self._rng``.
+            Number of elements of ``d_h``, ``h_h`` processed at a time,
+            bounds the memory usage.
 
         Return
         ------
-        float or array of the broadcast shape of ``d_h``, ``h_h``.
+        float or array of the broadcast shape of ``d_h``, ``h_h``,
+        with an extra trailing axis of length ``num`` if ``num`` is
+        not ``None``.
         """
         rng = self._rng if rng is None else rng
         d_h, h_h = np.broadcast_arrays(np.asarray(d_h, float),
@@ -307,7 +271,8 @@ class LookupTable(utils.JSONMixin):
         shape = d_h.shape
         d_h = d_h.ravel()
         h_h = h_h.ravel()
-        distances = np.empty(d_h.size)
+        n_draws = 1 if num is None else num
+        distances = np.empty((d_h.size, n_draws))
 
         broad_grid = np.linspace(0, self.d_luminosity_max, resolution)[1:]
         linspace = np.linspace(0, 1, resolution)
@@ -316,11 +281,11 @@ class LookupTable(utils.JSONMixin):
             hh_chunk = h_h[start : start + chunk_size, np.newaxis]
             n_chunk = len(dh_chunk)
 
-            # Focused grid uniform in u = 1 / d_luminosity, as in
-            # ``sample_distance``. Points outside (0, d_luminosity_max)
-            # are moved onto d_luminosity_max (a node of the broad grid)
-            # instead of being dropped, which keeps a rectangular array
-            # and only adds zero-width intervals to the integral.
+            # Focused grid uniform in u = 1 / d_luminosity. Points
+            # outside (0, d_luminosity_max) are moved onto
+            # d_luminosity_max (a node of the broad grid) instead of
+            # being dropped, which keeps a rectangular array and only
+            # adds zero-width intervals to the integral.
             u_min, u_max = 1 / self._get_distance_bounds(dh_chunk, hh_chunk,
                                                          sigmas=10.)
             focused_grid = 1 / (u_min + (u_max - u_min) * linspace)
@@ -339,19 +304,23 @@ class LookupTable(utils.JSONMixin):
                       * np.diff(grid, axis=1), axis=1, out=cumulative[:, 1:])
 
             # Inverse CDF by linear interpolation, as ``np.interp``
-            target = rng.uniform(0, cumulative[:, -1])
-            ind = np.clip((cumulative < target[:, np.newaxis]).sum(axis=1),
-                          1, grid.shape[1] - 1)
-            rows = np.arange(n_chunk)
+            target = rng.uniform(0, cumulative[:, -1:], (n_chunk, n_draws))
+            ind = np.clip(
+                (cumulative[:, np.newaxis] < target[..., np.newaxis]
+                 ).sum(axis=-1),
+                1, grid.shape[1] - 1)
+            rows = np.arange(n_chunk)[:, np.newaxis]
             cum_left = cumulative[rows, ind - 1]
             cum_right = cumulative[rows, ind]
             delta = cum_right - cum_left
             fraction = np.divide(target - cum_left, delta,
-                                 out=np.zeros(n_chunk), where=delta > 0)
+                                 out=np.zeros_like(target), where=delta > 0)
             distances[start : start + chunk_size] = (
                 grid[rows, ind - 1]
                 + fraction * (grid[rows, ind] - grid[rows, ind - 1]))
 
+        if num is not None:
+            shape += (num,)
         return distances.reshape(shape)[()]
 
     def _function(self, d_h, h_h):

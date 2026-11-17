@@ -329,7 +329,7 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
         with ``self._rng``, so that the draws are reproducible given
         ``seed``.
         """
-        return self.lookup_table.sample_distances(d_h, h_h, rng=self._rng)
+        return self.lookup_table.sample_distance(d_h, h_h, rng=self._rng)
 
     @staticmethod
     @property
