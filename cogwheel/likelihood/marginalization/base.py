@@ -127,10 +127,30 @@ class MarginalizationInfo:
     n_qmc: int = field(init=False)
     n_effective: float = field(init=False)
     lnl_marginalized: float = field(init=False)
+    # Importance-sampling denominators of the samples (sum over
+    # proposals), kept so that ``update`` only adds the new terms:
+    _denominators: np.ndarray = field(init=False, default=None, repr=False)
+
+    @staticmethod
+    def _proposals_density(proposals_n_qmc, proposals, tdet_inds):
+        """
+        Return ``sum_j n_qmc_j * prod_det proposal_j(tdet_inds)``, of
+        length ``tdet_inds.shape[1]``.
+        """
+        density = np.zeros(tdet_inds.shape[1])
+        for n_qmc, proposal in zip(proposals_n_qmc, proposals):
+            density += n_qmc * np.prod(
+                np.take_along_axis(proposal, tdet_inds, axis=1),
+                axis=0)  # q
+        return density
 
     def __post_init__(self):
         """Set derived attributes."""
         self.n_qmc = sum(self.proposals_n_qmc)
+
+        if self._denominators is None:
+            self._denominators = self._proposals_density(
+                self.proposals_n_qmc, self.proposals, self.tdet_inds)
 
         if self.q_inds.size == 0:
             self.weights_q = np.array([])
@@ -139,13 +159,7 @@ class MarginalizationInfo:
             self.lnl_marginalized = -np.inf
             return
 
-        denominators = np.zeros(len(self.q_inds))
-        for n_qmc, proposal in zip(self.proposals_n_qmc, self.proposals):
-            denominators += n_qmc * np.prod(
-                np.take_along_axis(proposal, self.tdet_inds, axis=1),
-                axis=0)  # q
-
-        ln_weights = self.ln_numerators - np.log(denominators)
+        ln_weights = self.ln_numerators - np.log(self._denominators)
         self.weights = utils.exp_normalize(ln_weights)
 
         weights_q = sparse.coo_array(
@@ -169,6 +183,14 @@ class MarginalizationInfo:
         """
         if self.qmc_sequence_id != other.qmc_sequence_id:
             raise ValueError('Cannot use different QMC sequences.')
+
+        # Multiple importance sampling: every sample's denominator sums
+        # over all proposals. Add the missing cross terms only.
+        self._denominators = np.concatenate([
+            self._denominators + self._proposals_density(
+                other.proposals_n_qmc, other.proposals, self.tdet_inds),
+            other._denominators + self._proposals_density(
+                self.proposals_n_qmc, self.proposals, other.tdet_inds)])
 
         self.proposals_n_qmc += other.proposals_n_qmc
         self.proposals += other.proposals
@@ -301,8 +323,13 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         self._qmc_ind_chunks = self._create_qmc_ind_chunks()
 
-        self._sample_distance = utils.handle_scalars(
-            np.vectorize(self.lookup_table.sample_distance, otypes=[float]))
+    def _sample_distance(self, d_h, h_h):
+        """
+        Draw one luminosity distance per element of ``d_h``, ``h_h``
+        with ``self._rng``, so that the draws are reproducible given
+        ``seed``.
+        """
+        return self.lookup_table.sample_distance(d_h, h_h, rng=self._rng)
 
     @staticmethod
     @property
@@ -371,13 +398,26 @@ class BaseCoherentScore(utils.JSONMixin, ABC):
 
         silverman_factor = (3/4 * marginalization_info.n_effective) ** -.2
         dt = times[1] - times[0]
-        bins = np.concatenate([[-np.inf], times[:-1] + dt/2, [np.inf]])
+
+        # Weighted histogram with bins centered on the (uniform) ``times``
+        # and the outer bins extending to +/- infinity. Same result as
+        # ``np.histogram`` with those bins, but O(n): the bin index is
+        # computed arithmetically and then corrected by one comparison
+        # to the edges on each side, so that samples exactly on an edge
+        # (common, since sample times are grid times plus discrete
+        # delays) follow np.histogram's left-closed convention.
+        edges = times[:-1] + dt/2
+        n_times = len(times)
 
         prob = []
         for t_samples in t_det:  # Loop over detectors
-            hist = np.histogram(t_samples,
-                                weights=marginalization_info.weights,
-                                bins=bins)[0]
+            inds = np.clip(np.floor((t_samples - times[0]) / dt + .5),
+                           0, n_times - 1).astype(int)
+            inds -= (inds > 0) & (t_samples < edges[np.maximum(inds-1, 0)])
+            inds += ((inds < n_times - 1)
+                     & (t_samples >= edges[np.minimum(inds, n_times - 2)]))
+            hist = np.bincount(inds, weights=marginalization_info.weights,
+                               minlength=n_times)
             std = utils.weighted_avg_and_std(t_samples,
                                              marginalization_info.weights)[1]
             scale = max(dt, silverman_factor * std)

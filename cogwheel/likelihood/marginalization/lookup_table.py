@@ -12,8 +12,7 @@ import numpy as np
 import scipy.special
 import scipy.stats
 from scipy.integrate import quad
-from scipy.interpolate import (RectBivariateSpline,
-                               InterpolatedUnivariateSpline)
+from scipy.interpolate import RectBivariateSpline
 
 from cogwheel import utils
 from cogwheel import cosmology
@@ -109,7 +108,6 @@ class LookupTable(utils.JSONMixin):
     REFERENCE_DISTANCE = 1.  # Luminosity distance at which h is defined (Mpc).
     _Z0 = 10.  # Typical SNR of events.
     _SIGMAS = 10.  # How far out the tail of the distribution to tabulate.
-    _rng = np.random.default_rng()
 
     def __init__(self, d_luminosity_prior_name: str = 'euclidean',
                  d_luminosity_max=D_LUMINOSITY_MAX, shape=(256, 128)):
@@ -131,6 +129,7 @@ class LookupTable(utils.JSONMixin):
         shape : (int, int)
             Number of interpolating points in x and y.
         """
+        self._rng = np.random.default_rng()  # Per instance, not shared
         self.d_luminosity_prior_name = d_luminosity_prior_name
         self.d_luminosity_prior = d_luminosity_priors[d_luminosity_prior_name]
         self.d_luminosity_max = d_luminosity_max
@@ -226,7 +225,8 @@ class LookupTable(utils.JSONMixin):
         """
         return self(d_h, h_h) + d_h**2 / h_h / 2
 
-    def sample_distance(self, d_h, h_h, num=None, resolution=256):
+    def sample_distance(self, d_h, h_h, num=None, resolution=256,
+                        rng=None, chunk_size=4096):
         """
         Return samples from the luminosity distance distribution given
         the inner products (d|h), (h|h) of a waveform at distance
@@ -234,33 +234,94 @@ class LookupTable(utils.JSONMixin):
 
         Parameters
         ----------
-        d_h : float
+        d_h : float or array_like
             Inner product (summed over detectors) between data and
             waveform at ``self.REFERENCE_DISTANCE``.
 
-        h_h : float
+        h_h : float or array_like
             Inner product (summed over detectors) of waveform at
-            ``self.REFERENCE_DISTANCE`` with itself.
+            ``self.REFERENCE_DISTANCE`` with itself. Must broadcast
+            with ``d_h``.
 
         num : int or None
-            How many samples to generate. ``None`` (default) generates a
-            single (scalar) sample.
+            How many samples to generate per element of ``d_h``,
+            ``h_h``. ``None`` (default) generates a single sample per
+            element.
 
         resolution : int
             How finely to interpolate the distance distribution when
             generating samples.
+
+        rng : numpy.random.Generator, optional
+            Random number generator, defaults to ``self._rng``.
+
+        chunk_size : int
+            Number of elements of ``d_h``, ``h_h`` processed at a time,
+            bounds the memory usage.
+
+        Return
+        ------
+        float or array of the broadcast shape of ``d_h``, ``h_h``,
+        with an extra trailing axis of length ``num`` if ``num`` is
+        not ``None``.
         """
-        u_bounds = 1 / self._get_distance_bounds(d_h, h_h, sigmas=10.)
-        focused_grid = 1 / np.linspace(*u_bounds, resolution)
-        focused_grid = focused_grid[(focused_grid > 0)
-                                    & (focused_grid < self.d_luminosity_max)]
+        rng = self._rng if rng is None else rng
+        d_h, h_h = np.broadcast_arrays(np.asarray(d_h, float),
+                                       np.asarray(h_h, float))
+        shape = d_h.shape
+        d_h = d_h.ravel()
+        h_h = h_h.ravel()
+        n_draws = 1 if num is None else num
+        distances = np.empty((d_h.size, n_draws))
+
         broad_grid = np.linspace(0, self.d_luminosity_max, resolution)[1:]
-        distances = np.sort(np.concatenate([broad_grid, focused_grid]))
-        posterior = self._function_integrand(distances, d_h, h_h)
-        cumulative = InterpolatedUnivariateSpline(
-            distances, posterior, k=1).antiderivative()(distances)[()]
-        return np.interp(self._rng.uniform(0, cumulative[-1], num),
-                         cumulative, distances)
+        linspace = np.linspace(0, 1, resolution)
+        for start in range(0, d_h.size, chunk_size):
+            dh_chunk = d_h[start : start + chunk_size, np.newaxis]
+            hh_chunk = h_h[start : start + chunk_size, np.newaxis]
+            n_chunk = len(dh_chunk)
+
+            # Focused grid uniform in u = 1 / d_luminosity. Points
+            # outside (0, d_luminosity_max) are moved onto
+            # d_luminosity_max (a node of the broad grid) instead of
+            # being dropped, which keeps a rectangular array and only
+            # adds zero-width intervals to the integral.
+            u_min, u_max = 1 / self._get_distance_bounds(dh_chunk, hh_chunk,
+                                                         sigmas=10.)
+            focused_grid = 1 / (u_min + (u_max - u_min) * linspace)
+            focused_grid = np.where(
+                (focused_grid > 0) & (focused_grid < self.d_luminosity_max),
+                focused_grid, self.d_luminosity_max)
+
+            grid = np.sort(np.concatenate(
+                [np.broadcast_to(broad_grid, (n_chunk, len(broad_grid))),
+                 focused_grid], axis=1), axis=1)
+            posterior = self._function_integrand(grid, dh_chunk, hh_chunk)
+
+            # Trapezoidal cumulative = antiderivative of a k=1 spline
+            cumulative = np.zeros_like(grid)
+            np.cumsum((posterior[:, 1:] + posterior[:, :-1]) / 2
+                      * np.diff(grid, axis=1), axis=1, out=cumulative[:, 1:])
+
+            # Inverse CDF by linear interpolation, as ``np.interp``
+            target = rng.uniform(0, cumulative[:, -1:], (n_chunk, n_draws))
+            ind = np.clip(
+                (cumulative[:, np.newaxis] < target[..., np.newaxis]
+                 ).sum(axis=-1),
+                1, grid.shape[1] - 1)
+            rows = np.arange(n_chunk)[:, np.newaxis]
+            cum_left = cumulative[rows, ind - 1]
+            cum_right = cumulative[rows, ind]
+            delta = cum_right - cum_left
+            fraction = np.divide(target - cum_left, delta,
+                                 out=np.zeros_like(target), where=delta > 0)
+            distances[start : start + chunk_size] = (
+                grid[rows, ind - 1]
+                + fraction * (grid[rows, ind] - grid[rows, ind - 1]))
+
+        if num is not None:
+            shape += (num,)
+        return distances.reshape(shape)[()]
 
     def _function(self, d_h, h_h):
         """
@@ -355,7 +416,8 @@ class LookupTableMarginalizedPhase22(LookupTable):
         super().__init__(*args, **kwargs)
 
         self.sample_phase = utils.handle_scalars(
-            np.vectorize(self._sample_phase, otypes=[float]))
+            np.vectorize(self._sample_phase, otypes=[float],
+                         excluded={'num', 'rng'}))
 
     def _function_integrand(self, d_luminosity, d_h, h_h):
         """
@@ -368,7 +430,7 @@ class LookupTableMarginalizedPhase22(LookupTable):
                 * scipy.special.i0e(d_h * self.REFERENCE_DISTANCE
                                     / d_luminosity))
 
-    def _sample_phase(self, d_luminosity, d_h, num=None):
+    def _sample_phase(self, d_luminosity, d_h, num=None, rng=None):
         """
         Return a random value for the orbital phase according to the
         posterior conditioned on all other parameters.
@@ -384,13 +446,17 @@ class LookupTableMarginalizedPhase22(LookupTable):
 
         num : int, optional
             How many samples to return, defaults to one.
+
+        rng : numpy.random.Generator, optional
+            Random number generator, defaults to ``self._rng``.
         """
+        rng = self._rng if rng is None else rng
         if np.isrealobj(d_h):
             raise ValueError('`d_h` expects the complex inner product.')
 
-        waveform_phase = self._rng.vonmises(
+        waveform_phase = rng.vonmises(
             np.angle(d_h),
             np.abs(d_h) * self.REFERENCE_DISTANCE / d_luminosity,
             size=num)
-        phi_ref = waveform_phase / 2 + self._rng.choice((0, np.pi), size=num)
+        phi_ref = waveform_phase / 2 + rng.choice((0, np.pi), size=num)
         return phi_ref % (2*np.pi)
